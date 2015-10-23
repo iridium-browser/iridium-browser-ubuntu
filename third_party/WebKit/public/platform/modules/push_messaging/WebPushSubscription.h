@@ -5,19 +5,22 @@
 #ifndef WebPushSubscription_h
 #define WebPushSubscription_h
 
-#include "public/platform/WebString.h"
+#include "public/platform/WebCommon.h"
+#include "public/platform/WebURL.h"
+#include "public/platform/WebVector.h"
 
 namespace blink {
 
 struct WebPushSubscription {
-    WebPushSubscription(const WebString& endpoint, const WebString& subscriptionId)
+    // The |endpoint| and |curve25519dh| must both be unique for each subscription.
+    WebPushSubscription(const WebURL& endpoint, const WebVector<unsigned char>& curve25519dh)
         : endpoint(endpoint)
-        , subscriptionId(subscriptionId)
+        , curve25519dh(curve25519dh)
     {
     }
 
-    WebString endpoint;
-    WebString subscriptionId;
+    WebURL endpoint;
+    WebVector<unsigned char> curve25519dh;
 };
 
 } // namespace blink

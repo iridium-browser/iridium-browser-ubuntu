@@ -5,8 +5,10 @@
 #include "content/renderer/pepper/pepper_graphics_2d_host.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/resources/shared_bitmap.h"
 #include "cc/resources/texture_mailbox.h"
@@ -227,8 +229,8 @@ int32_t PepperGraphics2DHost::OnResourceMessageReceived(
                                       OnHostMsgScroll)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_Graphics2D_ReplaceContents,
                                       OnHostMsgReplaceContents)
-    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_Graphics2D_Flush,
-                                      OnHostMsgFlush)
+    PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(PpapiHostMsg_Graphics2D_Flush,
+                                        OnHostMsgFlush)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_Graphics2D_SetScale,
                                       OnHostMsgSetScale)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_Graphics2D_ReadImageData,
@@ -282,7 +284,7 @@ bool PepperGraphics2DHost::ReadImageData(PP_Resource image,
     SkPaint paint;
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
     dest_canvas->drawBitmapRect(
-        *image_data_->GetMappedBitmap(), &src_irect, dest_rect, &paint);
+        *image_data_->GetMappedBitmap(), src_irect, dest_rect, &paint);
   }
   return true;
 }
@@ -502,14 +504,10 @@ int32_t PepperGraphics2DHost::OnHostMsgReplaceContents(
 }
 
 int32_t PepperGraphics2DHost::OnHostMsgFlush(
-    ppapi::host::HostMessageContext* context,
-    const std::vector<ui::LatencyInfo>& latency_info) {
+    ppapi::host::HostMessageContext* context) {
   // Don't allow more than one pending flush at a time.
   if (HasPendingFlush())
     return PP_ERROR_INPROGRESS;
-
-  if (bound_instance_)
-    bound_instance_->AddLatencyInfo(latency_info);
 
   PP_Resource old_image_data = 0;
   flush_reply_context_ = context->MakeReplyMessageContext();
@@ -729,7 +727,7 @@ void PepperGraphics2DHost::ExecutePaintImageData(PPB_ImageData_Impl* image,
     SkPaint paint;
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
     backing_canvas->drawBitmapRect(
-        *image->GetMappedBitmap(), &src_irect, dest_rect, &paint);
+        *image->GetMappedBitmap(), src_irect, dest_rect, &paint);
   }
 }
 
@@ -783,7 +781,7 @@ void PepperGraphics2DHost::SendOffscreenFlushAck() {
 
 void PepperGraphics2DHost::ScheduleOffscreenFlushAck() {
   offscreen_flush_pending_ = true;
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&PepperGraphics2DHost::SendOffscreenFlushAck, AsWeakPtr()),
       base::TimeDelta::FromMilliseconds(kOffscreenCallbackDelayMs));

@@ -313,6 +313,12 @@ void VerifyVoiceReceiverInfoReport(
   EXPECT_TRUE(GetValue(
       report, StatsReport::kStatsValueNameSpeechExpandRate, &value_in_report));
   EXPECT_EQ(rtc::ToString<float>(info.speech_expand_rate), value_in_report);
+  EXPECT_TRUE(GetValue(report, StatsReport::kStatsValueNameAccelerateRate,
+                       &value_in_report));
+  EXPECT_EQ(rtc::ToString<float>(info.accelerate_rate), value_in_report);
+  EXPECT_TRUE(GetValue(report, StatsReport::kStatsValueNamePreemptiveExpandRate,
+                       &value_in_report));
+  EXPECT_EQ(rtc::ToString<float>(info.preemptive_expand_rate), value_in_report);
   EXPECT_TRUE(GetValue(report, StatsReport::kStatsValueNameSecondaryDecodedRate,
                        &value_in_report));
   EXPECT_EQ(rtc::ToString<float>(info.secondary_decoded_rate), value_in_report);
@@ -451,6 +457,8 @@ void InitVoiceReceiverInfo(cricket::VoiceReceiverInfo* voice_receiver_info) {
   voice_receiver_info->expand_rate = 121;
   voice_receiver_info->speech_expand_rate = 122;
   voice_receiver_info->secondary_decoded_rate = 123;
+  voice_receiver_info->accelerate_rate = 124;
+  voice_receiver_info->preemptive_expand_rate = 125;
 }
 
 class StatsCollectorForTest : public webrtc::StatsCollector {
@@ -589,6 +597,7 @@ class StatsCollectorTest : public testing::Test {
     const StatsReport* report = FindNthReportByType(
         *reports, StatsReport::kStatsReportTypeSsrc, 1);
     EXPECT_FALSE(report == NULL);
+    EXPECT_EQ(stats->GetTimeNow(), report->timestamp());
     std::string track_id = ExtractSsrcStatsValue(
         *reports, StatsReport::kStatsValueNameTrackId);
     EXPECT_EQ(audio_track->id(), track_id);
@@ -611,6 +620,7 @@ class StatsCollectorTest : public testing::Test {
     const StatsReport* track_report = FindNthReportByType(
         track_reports, StatsReport::kStatsReportTypeSsrc, 1);
     EXPECT_TRUE(track_report);
+    EXPECT_EQ(stats->GetTimeNow(), track_report->timestamp());
     track_id = ExtractSsrcStatsValue(track_reports,
                                      StatsReport::kStatsValueNameTrackId);
     EXPECT_EQ(audio_track->id(), track_id);
@@ -790,7 +800,7 @@ TEST_F(StatsCollectorTest, BytesCounterHandles64Bits) {
 
   MockVideoMediaChannel* media_channel = new MockVideoMediaChannel();
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, kVideoChannelName, false);
+      media_channel, NULL, kVideoChannelName, false);
   StatsReports reports;  // returned values.
   cricket::VideoSenderInfo video_sender_info;
   cricket::VideoMediaInfo stats_read;
@@ -833,7 +843,7 @@ TEST_F(StatsCollectorTest, BandwidthEstimationInfoIsReported) {
 
   MockVideoMediaChannel* media_channel = new MockVideoMediaChannel();
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, kVideoChannelName, false);
+      media_channel, NULL, kVideoChannelName, false);
 
   StatsReports reports;  // returned values.
   cricket::VideoSenderInfo video_sender_info;
@@ -912,7 +922,7 @@ TEST_F(StatsCollectorTest, TrackObjectExistsWithoutUpdateStats) {
 
   MockVideoMediaChannel* media_channel = new MockVideoMediaChannel();
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, "video", false);
+      media_channel, NULL, "video", false);
   AddOutgoingVideoTrackStats();
   stats.AddStream(stream_);
 
@@ -921,6 +931,7 @@ TEST_F(StatsCollectorTest, TrackObjectExistsWithoutUpdateStats) {
   stats.GetStats(NULL, &reports);
   EXPECT_EQ((size_t)1, reports.size());
   EXPECT_EQ(StatsReport::kStatsReportTypeTrack, reports[0]->type());
+  EXPECT_EQ(0, reports[0]->timestamp());
 
   std::string trackValue =
       ExtractStatsValue(StatsReport::kStatsReportTypeTrack,
@@ -944,7 +955,7 @@ TEST_F(StatsCollectorTest, TrackAndSsrcObjectExistAfterUpdateSsrcStats) {
 
   MockVideoMediaChannel* media_channel = new MockVideoMediaChannel();
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, kVideoChannelName, false);
+      media_channel, NULL, kVideoChannelName, false);
   AddOutgoingVideoTrackStats();
   stats.AddStream(stream_);
 
@@ -983,6 +994,7 @@ TEST_F(StatsCollectorTest, TrackAndSsrcObjectExistAfterUpdateSsrcStats) {
   track_report = FindNthReportByType(
       reports, StatsReport::kStatsReportTypeTrack, 1);
   EXPECT_TRUE(track_report);
+  EXPECT_EQ(stats.GetTimeNow(), track_report->timestamp());
 
   std::string ssrc_id = ExtractSsrcStatsValue(
       reports, StatsReport::kStatsValueNameSsrc);
@@ -1005,7 +1017,7 @@ TEST_F(StatsCollectorTest, TransportObjectLinkedFromSsrcObject) {
   // The content_name known by the video channel.
   const std::string kVcName("vcname");
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, kVcName, false);
+      media_channel, NULL, kVcName, false);
   AddOutgoingVideoTrackStats();
   stats.AddStream(stream_);
 
@@ -1063,7 +1075,7 @@ TEST_F(StatsCollectorTest, RemoteSsrcInfoIsAbsent) {
   // The content_name known by the video channel.
   const std::string kVcName("vcname");
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, kVcName, false);
+      media_channel, NULL, kVcName, false);
   AddOutgoingVideoTrackStats();
   stats.AddStream(stream_);
 
@@ -1090,7 +1102,7 @@ TEST_F(StatsCollectorTest, RemoteSsrcInfoIsPresent) {
   // The content_name known by the video channel.
   const std::string kVcName("vcname");
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, kVcName, false);
+      media_channel, NULL, kVcName, false);
   AddOutgoingVideoTrackStats();
   stats.AddStream(stream_);
 
@@ -1142,7 +1154,7 @@ TEST_F(StatsCollectorTest, ReportsFromRemoteTrack) {
 
   MockVideoMediaChannel* media_channel = new MockVideoMediaChannel();
   cricket::VideoChannel video_channel(rtc::Thread::Current(),
-      media_engine_, media_channel, NULL, kVideoChannelName, false);
+      media_channel, NULL, kVideoChannelName, false);
   AddIncomingVideoTrackStats();
   stats.AddStream(stream_);
 
@@ -1171,6 +1183,7 @@ TEST_F(StatsCollectorTest, ReportsFromRemoteTrack) {
   const StatsReport* track_report = FindNthReportByType(
       reports, StatsReport::kStatsReportTypeTrack, 1);
   EXPECT_TRUE(track_report);
+  EXPECT_EQ(stats.GetTimeNow(), track_report->timestamp());
 
   std::string ssrc_id = ExtractSsrcStatsValue(
       reports, StatsReport::kStatsValueNameSsrc);
@@ -1545,6 +1558,7 @@ TEST_F(StatsCollectorTest, GetStatsAfterRemoveAudioStream) {
   const StatsReport* report = FindNthReportByType(
       reports, StatsReport::kStatsReportTypeSsrc, 1);
   EXPECT_FALSE(report == NULL);
+  EXPECT_EQ(stats.GetTimeNow(), report->timestamp());
   std::string track_id = ExtractSsrcStatsValue(
       reports, StatsReport::kStatsValueNameTrackId);
   EXPECT_EQ(kLocalTrackId, track_id);
@@ -1622,6 +1636,7 @@ TEST_F(StatsCollectorTest, LocalAndRemoteTracksWithSameSsrc) {
   const StatsReport* track_report = FindNthReportByType(
       reports, StatsReport::kStatsReportTypeSsrc, 1);
   EXPECT_TRUE(track_report);
+  EXPECT_EQ(stats.GetTimeNow(), track_report->timestamp());
   std::string track_id = ExtractSsrcStatsValue(
       reports, StatsReport::kStatsValueNameTrackId);
   EXPECT_EQ(kLocalTrackId, track_id);
@@ -1633,6 +1648,7 @@ TEST_F(StatsCollectorTest, LocalAndRemoteTracksWithSameSsrc) {
   track_report = FindNthReportByType(reports,
                                      StatsReport::kStatsReportTypeSsrc, 1);
   EXPECT_TRUE(track_report);
+  EXPECT_EQ(stats.GetTimeNow(), track_report->timestamp());
   track_id = ExtractSsrcStatsValue(reports,
                                    StatsReport::kStatsValueNameTrackId);
   EXPECT_EQ(kRemoteTrackId, track_id);

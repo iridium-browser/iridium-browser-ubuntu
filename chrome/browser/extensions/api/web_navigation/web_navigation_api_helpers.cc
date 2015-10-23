@@ -39,6 +39,7 @@ double MilliSecondsFromTime(const base::Time& time) {
 
 // Dispatches events to the extension message service.
 void DispatchEvent(content::BrowserContext* browser_context,
+                   events::HistogramValue histogram_value,
                    const std::string& event_name,
                    scoped_ptr<base::ListValue> args,
                    const GURL& url) {
@@ -48,7 +49,8 @@ void DispatchEvent(content::BrowserContext* browser_context,
   Profile* profile = Profile::FromBrowserContext(browser_context);
   EventRouter* event_router = EventRouter::Get(profile);
   if (profile && event_router) {
-    scoped_ptr<Event> event(new Event(event_name, args.Pass()));
+    scoped_ptr<Event> event(
+        new Event(histogram_value, event_name, args.Pass()));
     event->restrict_to_browser_context = profile;
     event->filter_info = info;
     event_router->BroadcastEvent(event.Pass());
@@ -82,14 +84,15 @@ void DispatchOnBeforeNavigate(content::WebContents* web_contents,
   args->Append(dict);
 
   DispatchEvent(web_contents->GetBrowserContext(),
-                web_navigation::OnBeforeNavigate::kEventName,
-                args.Pass(),
+                events::WEB_NAVIGATION_ON_BEFORE_NAVIGATE,
+                web_navigation::OnBeforeNavigate::kEventName, args.Pass(),
                 validated_url);
 }
 
 // Constructs and dispatches an onCommitted or onReferenceFragmentUpdated
 // event.
-void DispatchOnCommitted(const std::string& event_name,
+void DispatchOnCommitted(events::HistogramValue histogram_value,
+                         const std::string& event_name,
                          content::WebContents* web_contents,
                          content::RenderFrameHost* frame_host,
                          const GURL& url,
@@ -121,8 +124,8 @@ void DispatchOnCommitted(const std::string& event_name,
   dict->SetDouble(keys::kTimeStampKey, MilliSecondsFromTime(base::Time::Now()));
   args->Append(dict);
 
-  DispatchEvent(web_contents->GetBrowserContext(), event_name, args.Pass(),
-                url);
+  DispatchEvent(web_contents->GetBrowserContext(), histogram_value, event_name,
+                args.Pass(), url);
 }
 
 // Constructs and dispatches an onDOMContentLoaded event.
@@ -140,8 +143,8 @@ void DispatchOnDOMContentLoaded(content::WebContents* web_contents,
   args->Append(dict);
 
   DispatchEvent(web_contents->GetBrowserContext(),
-                web_navigation::OnDOMContentLoaded::kEventName,
-                args.Pass(),
+                events::WEB_NAVIGATION_ON_DOM_CONTENT_LOADED,
+                web_navigation::OnDOMContentLoaded::kEventName, args.Pass(),
                 url);
 }
 
@@ -160,8 +163,8 @@ void DispatchOnCompleted(content::WebContents* web_contents,
   args->Append(dict);
 
   DispatchEvent(web_contents->GetBrowserContext(),
-                web_navigation::OnCompleted::kEventName,
-                args.Pass(), url);
+                events::WEB_NAVIGATION_ON_COMPLETED,
+                web_navigation::OnCompleted::kEventName, args.Pass(), url);
 }
 
 // Constructs and dispatches an onCreatedNavigationTarget event.
@@ -192,9 +195,9 @@ void DispatchOnCreatedNavigationTarget(
   args->Append(dict);
 
   DispatchEvent(browser_context,
+                events::WEB_NAVIGATION_ON_CREATED_NAVIGATION_TARGET,
                 web_navigation::OnCreatedNavigationTarget::kEventName,
-                args.Pass(),
-                target_url);
+                args.Pass(), target_url);
 }
 
 // Constructs and dispatches an onErrorOccurred event.
@@ -214,8 +217,8 @@ void DispatchOnErrorOccurred(content::WebContents* web_contents,
   args->Append(dict);
 
   DispatchEvent(web_contents->GetBrowserContext(),
-                web_navigation::OnErrorOccurred::kEventName,
-                args.Pass(), url);
+                events::WEB_NAVIGATION_ON_ERROR_OCCURRED,
+                web_navigation::OnErrorOccurred::kEventName, args.Pass(), url);
 }
 
 // Constructs and dispatches an onTabReplaced event.
@@ -233,10 +236,8 @@ void DispatchOnTabReplaced(
   dict->SetDouble(keys::kTimeStampKey, MilliSecondsFromTime(base::Time::Now()));
   args->Append(dict);
 
-  DispatchEvent(browser_context,
-                web_navigation::OnTabReplaced::kEventName,
-                args.Pass(),
-                GURL());
+  DispatchEvent(browser_context, events::WEB_NAVIGATION_ON_TAB_REPLACED,
+                web_navigation::OnTabReplaced::kEventName, args.Pass(), GURL());
 }
 
 }  // namespace web_navigation_api_helpers

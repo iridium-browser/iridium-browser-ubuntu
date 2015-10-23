@@ -12,6 +12,7 @@
 #include "base/prefs/testing_pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "components/history/core/browser/history_client.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
@@ -32,7 +33,6 @@ namespace history {
 namespace {
 
 // Key for URL blacklist.
-const char kBlacklistURLKey[] = "test.blacklist.url";
 const char kAcceptLanguages[] = "en-US,en";
 
 const char kApplicationScheme[] = "application";
@@ -136,7 +136,7 @@ class TopSitesImplTest : public HistoryUnitTestBase {
   void SetUp() override {
     ASSERT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
     pref_service_.reset(new TestingPrefServiceSimple);
-    pref_service_->registry()->RegisterDictionaryPref(kBlacklistURLKey);
+    TopSitesImpl::RegisterPrefs(pref_service_->registry());
     history_service_.reset(
         new HistoryService(nullptr, scoped_ptr<VisitDelegate>()));
     ASSERT_TRUE(history_service_->Init(
@@ -310,7 +310,7 @@ class TopSitesImplTest : public HistoryUnitTestBase {
     prepopulated_pages.push_back(PrepopulatedPage(GURL(kPrepopulatedPageURL),
                                                   base::string16(), -1, -1, 0));
     top_sites_impl_ = new TopSitesImpl(
-        pref_service_.get(), history_service_.get(), kBlacklistURLKey,
+        pref_service_.get(), history_service_.get(),
         prepopulated_pages, base::Bind(MockCanAddURLToHistory));
     top_sites_impl_->Init(scoped_temp_dir_.path().Append(kTopSitesFilename),
                           message_loop_.task_runner());

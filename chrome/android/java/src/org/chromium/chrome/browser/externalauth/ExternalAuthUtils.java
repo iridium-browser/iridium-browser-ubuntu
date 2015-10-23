@@ -4,17 +4,25 @@
 
 package org.chromium.chrome.browser.externalauth;
 
+import android.app.Activity;
+import android.app.Dialog;
 import android.content.Context;
+import android.content.DialogInterface.OnCancelListener;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Binder;
 import android.text.TextUtils;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GooglePlayServicesUtil;
+
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.ChromiumApplication;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.chrome.browser.ChromeApplication;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -26,7 +34,9 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ExternalAuthUtils {
     public static final int FLAG_SHOULD_BE_GOOGLE_SIGNED = 1 << 0;
     public static final int FLAG_SHOULD_BE_SYSTEM = 1 << 1;
-    private static final String TAG = "ExternalAuthUtils";
+    private static final String TAG = "cr.ExternalAuthUtils";
+    private static final String CONNECTION_RESULT_HISTOGRAM_NAME =
+            "GooglePlayServices.ConnectionResult";
 
     // Use an AtomicReference since getInstance() can be called from multiple threads.
     private static AtomicReference<ExternalAuthUtils> sInstance =
@@ -37,8 +47,8 @@ public class ExternalAuthUtils {
      */
     public static ExternalAuthUtils getInstance() {
         if (sInstance.get() == null) {
-            ChromiumApplication application =
-                    (ChromiumApplication) ApplicationStatus.getApplicationContext();
+            ChromeApplication application =
+                    (ChromeApplication) ApplicationStatus.getApplicationContext();
             sInstance.compareAndSet(null, application.createExternalAuthUtils());
         }
         return sInstance.get();
@@ -148,5 +158,123 @@ public class ExternalAuthUtils {
      */
     public boolean isCallerValid(Context context, int authRequirements) {
         return isCallerValid(context, authRequirements, "");
+    }
+
+    /**
+     * Checks whether Google Play Services can be used, applying the specified error-handling
+     * policy if a user-recoverable error occurs. This method is threadsafe. If the specified
+     * error-handling policy requires UI interaction, it will be run on the UI thread.
+     * Subclasses should generally not override this method; instead, they should override the
+     * helper methods {@link #checkGooglePlayServicesAvailable(Context)},
+     * {@link #isSuccess(int)}, {@link #describeError(int)}, and
+     * {@link #isUserRecoverableError(int)} instead, which are called in that order (as
+     * necessary) by this method.
+     * @param context The current context.
+     * @param errorHandler How to handle user-recoverable errors; must be non-null.
+     * @return true if and only if Google Play Services can be used
+     */
+    public boolean canUseGooglePlayServices(
+            final Context context, final UserRecoverableErrorHandler errorHandler) {
+        final int resultCode = checkGooglePlayServicesAvailable(context);
+        recordConnectionResult(resultCode);
+        if (isSuccess(resultCode)) {
+            return true; // Hooray!
+        }
+        // resultCode is some kind of error.
+        Log.v(TAG, "Unable to use Google Play Services: %s", describeError(resultCode));
+        if (isUserRecoverableError(resultCode)) {
+            Runnable errorHandlerTask = new Runnable() {
+                @Override
+                public void run() {
+                    errorHandler.handleError(context, resultCode);
+                }
+            };
+            ThreadUtils.runOnUiThread(errorHandlerTask);
+        }
+        return false;
+    }
+
+    /**
+     * Record the result of a connection attempt. The default implementation records via a UMA
+     * histogram.
+     * @param resultCode the result from {@link #checkGooglePlayServicesAvailable(Context)}
+     */
+    protected void recordConnectionResult(final int resultCode) {
+        // Doing it this way avoids a hard dependency on RecordHistogram, which allows the code to
+        // be tested with simple mocks and junit instead of having an instrumentation test.
+        RecordHistogram.recordSparseSlowlyHistogram(
+                CONNECTION_RESULT_HISTOGRAM_NAME, resultCode);
+    }
+
+    /**
+     * Invokes whatever external code is necessary to check if Google Play Services is available
+     * and returns the code produced by the attempt. Subclasses can override to force the behavior
+     * one way or another, or to change the way that the check is performed.
+     * @param context The current context.
+     * @return The code produced by calling the external code
+     */
+    protected int checkGooglePlayServicesAvailable(final Context context) {
+        return GooglePlayServicesUtil.isGooglePlayServicesAvailable(context);
+    }
+
+    /**
+     * Invokes whatever external code is necessary to check if the specified result code from
+     * {@link #checkGooglePlayServicesAvailable(Context)} represents success.
+     * @param resultCode The code to check
+     * @return true If the result code represents success.
+     */
+    protected boolean isSuccess(final int resultCode) {
+        return resultCode == ConnectionResult.SUCCESS;
+    }
+
+    /**
+     * Invokes whatever external code is necessary to check if the specified error code produced
+     * by {@link #checkGooglePlayServicesAvailable(Context)} represents a user-recoverable error.
+     * Subclasses can override to filter error codes as desired.
+     * @param errorCode The code to check
+     * @return true If the code represents a user-recoverable error
+     */
+    protected boolean isUserRecoverableError(final int errorCode) {
+        return GooglePlayServicesUtil.isUserRecoverableError(errorCode);
+    }
+
+    /**
+     * Invokes whatever external code is necessary to obtain a textual description of an error
+     * code produced by {@link #checkGooglePlayServicesAvailable(Context)}.
+     * @param errorCode The code to check
+     * @return a textual description of the error code
+     */
+    protected String describeError(final int errorCode) {
+        return GooglePlayServicesUtil.getErrorString(errorCode);
+    }
+
+    /**
+     * Invokes an external mechanism to display an error notification for the specified error code
+     * and context. Must be called on the UI thread.
+     * @param errorCode The error code
+     * @param context The current context
+     */
+    public void showErrorNotification(final int errorCode, final Context context) {
+        GooglePlayServicesUtil.showErrorNotification(errorCode, context);
+    }
+
+    /**
+     * Invokes an external mechanism to display a modal error dialog for the specified error code,
+     * using the specified activity to receive the response (if desired) and/or notifying the
+     * specified listener of cancellation.
+     * the parameters
+     * @param errorCode The error code
+     * @param activity see {@link UserRecoverableErrorHandler.ModalDialog#ModalDialog(Activity)}
+     * @param requestCode see {@link UserRecoverableErrorHandler.ModalDialog#getRequestCode()}
+     * @param onCancelListener see
+     *        {@link UserRecoverableErrorHandler.ModalDialog#getOnCancelListener()}
+     */
+    public void showErrorDialog(final int errorCode, final Activity activity, final int requestCode,
+            final OnCancelListener onCancelListener) {
+        final Dialog dialog = GooglePlayServicesUtil.getErrorDialog(
+                errorCode, activity, requestCode, onCancelListener);
+        if (dialog != null) {
+            dialog.show();
+        }
     }
 }

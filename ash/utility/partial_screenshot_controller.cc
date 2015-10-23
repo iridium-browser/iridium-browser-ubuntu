@@ -6,11 +6,13 @@
 
 #include <cmath>
 
+#include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "base/stl_util.h"
 #include "ui/compositor/paint_recorder.h"
+#include "ui/events/event.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/canvas.h"
 #include "ui/wm/core/cursor_manager.h"
@@ -23,6 +25,13 @@ namespace {
 // should be slightly bigger than the actual region because the region indicator
 // rectangles are drawn outside of the selected region.
 const int kInvalidateRegionAdditionalSize = 3;
+
+// This will prevent the user from taking a screenshot across multiple
+// monitors. it will stop the mouse at the any edge of the screen. must
+// swtich back on when the screenshot is complete.
+void EnableMouseWarp(bool enable) {
+  Shell::GetInstance()->mouse_cursor_filter()->set_mouse_warp_enabled(enable);
+}
 
 }  // namespace
 
@@ -64,8 +73,8 @@ class PartialScreenshotController::PartialScreenshotLayer
     // Screenshot area representation: black rectangle with white
     // rectangle inside.  To avoid capturing these rectangles when mouse
     // release, they should be outside of the actual capturing area.
-    ui::PaintRecorder recorder(context);
     gfx::Rect rect(region_);
+    ui::PaintRecorder recorder(context, layer()->size());
     rect.Inset(-1, -1);
     recorder.canvas()->DrawRect(rect, SK_ColorWHITE);
     rect.Inset(-1, -1);
@@ -143,6 +152,8 @@ void PartialScreenshotController::StartPartialScreenshotSession(
 
   cursor_setter_.reset(new ScopedCursorSetter(
       Shell::GetInstance()->cursor_manager(), ui::kCursorCross));
+
+  EnableMouseWarp(false);
 }
 
 void PartialScreenshotController::MaybeStart(const ui::LocatedEvent& event) {
@@ -177,6 +188,7 @@ void PartialScreenshotController::Cancel() {
   Shell::GetScreen()->RemoveObserver(this);
   STLDeleteValues(&layers_);
   cursor_setter_.reset();
+  EnableMouseWarp(true);
 }
 
 void PartialScreenshotController::Update(const ui::LocatedEvent& event) {

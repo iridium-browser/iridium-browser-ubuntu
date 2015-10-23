@@ -17,7 +17,7 @@
 #include "content/public/browser/content_browser_client.h"
 
 class ChromeAppCacheService;
-class DevToolsNetworkController;
+class DevToolsNetworkControllerHandle;
 class ExtensionSpecialStoragePolicy;
 class HostContentSettingsMap;
 class PrefProxyConfigTracker;
@@ -178,11 +178,11 @@ class Profile : public content::BrowserContext {
 
   // Returns whether the profile is supervised (either a legacy supervised
   // user or a child account; see SupervisedUserService).
-  virtual bool IsSupervised() = 0;
+  virtual bool IsSupervised() const = 0;
   // Returns whether the profile is associated with a child account.
-  virtual bool IsChild() = 0;
+  virtual bool IsChild() const = 0;
   // Returns whether the profile is a legacy supervised user profile.
-  virtual bool IsLegacySupervised() = 0;
+  virtual bool IsLegacySupervised() const = 0;
 
   // Accessor. The instance is created upon first access.
   virtual ExtensionSpecialStoragePolicy*
@@ -287,8 +287,9 @@ class Profile : public content::BrowserContext {
   // Returns the Predictor object used for dns prefetch.
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() = 0;
 
-  // Returns the DevToolsNetworkController for this profile.
-  virtual DevToolsNetworkController* GetDevToolsNetworkController() = 0;
+  // Returns the DevToolsNetworkControllerHandle for this profile.
+  virtual DevToolsNetworkControllerHandle*
+  GetDevToolsNetworkControllerHandle() = 0;
 
   // Deletes all network related data since |time|. It deletes transport
   // security state since |time| and it also deletes HttpServerProperties data.
@@ -356,8 +357,8 @@ class Profile : public content::BrowserContext {
   bool IsNewProfile();
 
   // Checks whether sync is configurable by the user. Returns false if sync is
-  // disabled or controlled by configuration management.
-  bool IsSyncAccessible();
+  // disallowed by the command line or controlled by configuration management.
+  bool IsSyncAllowed();
 
   // Send NOTIFICATION_PROFILE_DESTROYED for this Profile, if it has not
   // already been sent. It is necessary because most Profiles are destroyed by

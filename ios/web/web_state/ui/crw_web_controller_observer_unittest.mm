@@ -8,7 +8,6 @@
 
 #include "base/json/json_writer.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/memory/scoped_vector.h"
 #include "base/values.h"
 #import "ios/testing/ocmock_complex_type_helper.h"
 #include "ios/web/public/test/web_test_util.h"
@@ -44,11 +43,11 @@ class CRWWebControllerObserverTest : public WebTestT {
 };
 
 // Concrete test fixture to test UIWebView-based web controller observing.
-typedef CRWWebControllerObserverTest<web::UIWebViewWebTest>
+typedef CRWWebControllerObserverTest<web::WebTestWithUIWebViewWebController>
     CRWUIWebViewWebControllerObserverTest;
 
 // Concrete test fixture to test WKWebView-based web controller observing.
-typedef CRWWebControllerObserverTest<web::WKWebViewWebTest>
+typedef CRWWebControllerObserverTest<web::WebTestWithWKWebViewWebController>
     CRWWKWebViewWebControllerObserverTest;
 
 WEB_TEST_F(CRWUIWebViewWebControllerObserverTest,
@@ -68,7 +67,7 @@ WEB_TEST_F(CRWUIWebViewWebControllerObserverTest,
   base::DictionaryValue command;
   command.SetString("command", "test.testMessage");
   std::string message;
-  base::JSONWriter::Write(&command, &message);
+  base::JSONWriter::Write(command, &message);
   this->RunJavaScript([NSString
       stringWithFormat:@"__gCrWeb.message.invokeOnHost(%s)", message.c_str()]);
   this->WaitForBackgroundTasks();
@@ -91,7 +90,7 @@ WEB_TEST_F(CRWUIWebViewWebControllerObserverTest,
   command.SetString("target", "target");
   command.SetString("referrerPolicy", "referrerPolicy");
   std::string message;
-  base::JSONWriter::Write(&command, &message);
+  base::JSONWriter::Write(command, &message);
   this->RunJavaScript(
       [NSString stringWithFormat:@"__gCrWeb.message.invokeOnHostImmediate(%s)",
                                  message.c_str()]);
@@ -112,7 +111,7 @@ WEB_TEST_F(CRWUIWebViewWebControllerObserverTest,
   for (int count = 0; count <= kNumberMessages; count++) {
     std::string message;
     command.SetInteger("number", count);
-    base::JSONWriter::Write(&command, &message);
+    base::JSONWriter::Write(command, &message);
     ASSERT_EQ(0U,
               [this->fake_web_controller_observer_ commandsReceived].size());
     this->RunJavaScript(

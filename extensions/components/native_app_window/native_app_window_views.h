@@ -150,7 +150,6 @@ class NativeAppWindowViews : public extensions::NativeAppWindow,
   gfx::Insets GetFrameInsets() const override;
   void HideWithApp() override;
   void ShowWithApp() override;
-  void UpdateShelfMenu() override;
   gfx::Size GetContentMinimumSize() const override;
   gfx::Size GetContentMaximumSize() const override;
   void SetContentSizeConstraints(const gfx::Size& min_size,
@@ -181,7 +180,7 @@ class NativeAppWindowViews : public extensions::NativeAppWindow,
 
   views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
 
-  ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
+  base::ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeAppWindowViews);
 };

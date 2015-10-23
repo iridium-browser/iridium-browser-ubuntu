@@ -7,9 +7,6 @@
 #     Controls whether we build the Chromium or Google Chrome version of
 #     FFmpeg.  The Google Chrome version contains additional codecs.
 #     Typical values are Chromium, Chrome, ChromiumOS, and ChromeOS.
-#   build_ffmpegsumo
-#     When set to zero, will not include ffmpegsumo as a library to be built as
-#     part of the larger chrome binary. Default value is 1.
 #   ffmpeg_component
 #     Set true to build ffmpeg as a shared library. NOTE: this means we should
 #     always consult the value of 'ffmpeg_component' instead of 'component' for
@@ -60,7 +57,7 @@
       }, {
         'ffmpeg_config%': '<(target_arch)',
       }],
-      ['OS == "mac" or OS == "win" or OS == "openbsd"', {
+      ['OS == "mac" or OS == "win" or OS == "openbsd" or OS == "android"', {
         'os_config%': '<(OS)',
       }, {  # all other Unix OS's use the linux config
         'conditions': [
@@ -79,7 +76,6 @@
       }],
     ],
 
-    'build_ffmpegsumo%': 1,
     'ffmpeg_component%': '<(component)',
 
     # Locations for generated artifacts.
@@ -174,7 +170,9 @@
       'platform_config_root': 'chromium/config/<(ffmpeg_branding)/<(os_config)/<(ffmpeg_config)',
     },
     'conditions': [
-      ['build_ffmpegsumo == 1',
+      # This looks crazy, but it seems to be the only way to make this work. Without this
+      # conditions block, platform_config_root will be undefined when expanded below.
+      ['1 == 1',
         {
           'direct_dependent_settings': {
             'include_dirs': [
@@ -223,8 +221,17 @@
               # matroskadec.c has a "failed:" label that's only used if some
               # CONFIG_ flags we don't set are set.
               '-Wno-unused-label',
+              # ffmpeg has a lot of unused variables.
+              '-Wno-unused-variable',
               # This fires on `av_assert0(!"valid element size")` in utils.c
               '-Wno-string-conversion',
+              # This fires on `pos_min` and `pos_max` in
+              # autorename_libavformat_utils.c
+              '-Wno-sometimes-uninitialized',
+              # ffmpeg contains static functions in header files, which lead
+              # to unused function warnings. There are a few legit unused
+              # functions too.
+              '-Wno-unused-function',
             ],
           },
           'cflags': [
@@ -261,31 +268,11 @@
               ],
             }],  # target_arch == "ia32"
             ['target_arch == "arm"', {
-              # TODO(ihf): See the long comment in build_ffmpeg.sh
-              # We want to be consistent with CrOS and have configured
-              # ffmpeg for thumb. Protect yourself from -marm.
-              'cflags!': [
-                '-marm',
-              ],
-              'cflags': [
-                '-mthumb',
-                '-march=armv7-a',
-                '-mtune=cortex-a8',
-              ],
               # On arm we use gcc to compile the assembly.
               'sources': [
                 '<@(asm_sources)',
               ],
               'conditions': [
-                ['arm_neon == 0', {
-                  'cflags': [
-                    '-mfpu=vfpv3-d16',
-                  ],
-                }, {
-                  'cflags': [
-                    '-mfpu=neon',
-                  ],
-                }],
                 ['arm_float_abi == "hard"', {
                   'cflags': [
                     '-DHAVE_VFP_ARGS=1'
@@ -297,12 +284,6 @@
                 }],
               ],
             }],
-            ['target_arch == "mipsel"', {
-              'cflags': [
-                '-mips32',
-                '-EL -Wl,-EL',
-              ],
-            }],  # target_arch == "mipsel"
             ['os_posix == 1 and OS != "mac"', {
               'defines': [
                 '_ISOC99_SOURCE',
@@ -325,11 +306,17 @@
               'link_settings': {
                 'libraries': [
                   '-lm',
-                  '-lrt',
                   '-lz',
                 ],
               },
               'conditions': [
+                ['OS != "android"', {
+                  'link_settings': {
+                    'libraries': [
+                      '-lrt',
+                    ],
+                  },
+                }],
                 ['ffmpeg_component == "shared_library"', {
                   # Export all symbols when building as component.
                   'cflags!': [
@@ -450,6 +437,16 @@
                   },
                   'sources': [
                     '<(shared_generated_dir)/ffmpeg.def',
+                  ],
+                  'conditions': [
+                    ['OS=="win" and win_use_allocator_shim==1', {
+                      'dependencies': [
+                        '../../base/allocator/allocator.gyp:allocator',
+                      ],
+                      'sources': [
+                        'chromium/dllmain.cc',
+                      ],
+                    }],
                   ],
                   'actions': [
                     {

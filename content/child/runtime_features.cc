@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_split.h"
-#include "components/scheduler/common/scheduler_switches.h"
 #include "content/common/content_switches_internal.h"
 #include "content/public/common/content_switches.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
@@ -59,18 +58,17 @@ static void SetRuntimeFeatureDefaultsForPlatform() {
   WebRuntimeFeatures::enableOrientationEvent(true);
   WebRuntimeFeatures::enableFastMobileScrolling(true);
   WebRuntimeFeatures::enableMediaCapture(true);
-  WebRuntimeFeatures::enableCompositedSelectionUpdate(true);
-  // If navigation transitions gets activated via field trial, enable it in
-  // blink. We don't set this to false in case the user has manually enabled
-  // the feature via experimental web platform features.
-  if (base::FieldTrialList::FindFullName("NavigationTransitions") == "Enabled")
-    WebRuntimeFeatures::enableNavigationTransitions(true);
   // Android won't be able to reliably support non-persistent notifications, the
   // intended behavior for which is in flux by itself.
   WebRuntimeFeatures::enableNotificationConstructor(false);
+  WebRuntimeFeatures::enableNewMediaPlaybackUi(true);
 #else
   WebRuntimeFeatures::enableNavigatorContentUtils(true);
 #endif  // defined(OS_ANDROID)
+
+#if defined(OS_ANDROID) || defined(USE_AURA)
+  WebRuntimeFeatures::enableCompositedSelectionUpdate(true);
+#endif
 
 #if !(defined OS_ANDROID || defined OS_CHROMEOS || defined OS_IOS)
     // Only Android, ChromeOS, and IOS support NetInfo right now.
@@ -92,13 +90,13 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures))
     WebRuntimeFeatures::enableExperimentalFeatures(true);
 
+  if (command_line.HasSwitch(switches::kEnableWebBluetooth))
+    WebRuntimeFeatures::enableWebBluetooth(true);
+
   SetRuntimeFeatureDefaultsForPlatform();
 
   if (command_line.HasSwitch(switches::kDisableDatabases))
     WebRuntimeFeatures::enableDatabase(false);
-
-  if (command_line.HasSwitch(scheduler::switches::kDisableBlinkScheduler))
-    WebRuntimeFeatures::enableBlinkScheduler(false);
 
   if (command_line.HasSwitch(switches::kDisableMediaSource))
     WebRuntimeFeatures::enableMediaSource(false);
@@ -157,8 +155,12 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableWebGLImageChromium))
     WebRuntimeFeatures::enableWebGLImageChromium(true);
 
-  if (command_line.HasSwitch(switches::kEnableOverlayFullscreenVideo))
-    WebRuntimeFeatures::enableOverlayFullscreenVideo(true);
+  // TODO(watk): Remove EnableOverlayFullscreenVideo once blink is updated to
+  // use ForceOverlayFullscreenVideo instead. http://crbug.com/511376
+  if (command_line.HasSwitch(switches::kEnableOverlayFullscreenVideo) ||
+      command_line.HasSwitch(switches::kForceOverlayFullscreenVideo)) {
+    WebRuntimeFeatures::forceOverlayFullscreenVideo(true);
+  }
 
   if (ui::IsOverlayScrollbarEnabled())
     WebRuntimeFeatures::enableOverlayScrollbars(true);
@@ -191,12 +193,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kDisablePermissionsAPI))
     WebRuntimeFeatures::enablePermissionsAPI(false);
 
-  // Delete "StaleWhileRevalidate" line from chrome_browser_field_trials.cc
-  // when this experiment is done.
-  if (base::FieldTrialList::FindFullName("StaleWhileRevalidate") == "Enabled" ||
-      command_line.HasSwitch(switches::kEnableStaleWhileRevalidate))
-    WebRuntimeFeatures::enableStaleWhileRevalidateCacheControl(true);
-
   if (command_line.HasSwitch(switches::kDisableV8IdleTasks))
     WebRuntimeFeatures::enableV8IdleTasks(false);
   else
@@ -205,27 +201,30 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableUnsafeES3APIs))
     WebRuntimeFeatures::enableUnsafeES3APIs(true);
 
+  if (command_line.HasSwitch(switches::kEnableWebVR)) {
+    WebRuntimeFeatures::enableWebVR(true);
+    WebRuntimeFeatures::enableFeatureFromString(
+        std::string("GeometryInterfaces"), true);
+  }
+
+  if (command_line.HasSwitch(switches::kDisablePresentationAPI))
+    WebRuntimeFeatures::enablePresentationAPI(false);
+
   // Enable explicitly enabled features, and then disable explicitly disabled
   // ones.
   if (command_line.HasSwitch(switches::kEnableBlinkFeatures)) {
-    std::vector<std::string> enabled_features;
-    base::SplitString(
-        command_line.GetSwitchValueASCII(switches::kEnableBlinkFeatures), ',',
-        &enabled_features);
-    for (const std::string& feature : enabled_features) {
-      WebRuntimeFeatures::enableFeatureFromString(
-          blink::WebString::fromLatin1(feature), true);
-    }
+    std::vector<std::string> enabled_features = base::SplitString(
+        command_line.GetSwitchValueASCII(switches::kEnableBlinkFeatures),
+        ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    for (const std::string& feature : enabled_features)
+      WebRuntimeFeatures::enableFeatureFromString(feature, true);
   }
   if (command_line.HasSwitch(switches::kDisableBlinkFeatures)) {
-    std::vector<std::string> disabled_features;
-    base::SplitString(
-        command_line.GetSwitchValueASCII(switches::kDisableBlinkFeatures), ',',
-        &disabled_features);
-    for (const std::string& feature : disabled_features) {
-      WebRuntimeFeatures::enableFeatureFromString(
-          blink::WebString::fromLatin1(feature), false);
-    }
+    std::vector<std::string> disabled_features = base::SplitString(
+        command_line.GetSwitchValueASCII(switches::kDisableBlinkFeatures),
+        ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    for (const std::string& feature : disabled_features)
+      WebRuntimeFeatures::enableFeatureFromString(feature, false);
   }
 }
 

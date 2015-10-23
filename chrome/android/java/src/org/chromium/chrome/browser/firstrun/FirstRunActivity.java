@@ -19,7 +19,8 @@ import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromiumApplication;
+import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.EmbedContentViewActivity;
 import org.chromium.chrome.browser.profiles.Profile;
 
 import java.lang.ref.WeakReference;
@@ -179,7 +180,7 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        mProfileDataCache.onDestroy();
+        mProfileDataCache.destroy();
     }
 
     @Override
@@ -339,7 +340,7 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
     }
 
     protected void flushPersistentData() {
-        if (mNativeSideIsInitialized) ChromiumApplication.flushPersistentData();
+        if (mNativeSideIsInitialized) ChromeApplication.flushPersistentData();
     }
 
     private static void finishAllFREActivities(int result, Intent data) {
@@ -396,7 +397,7 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
         // This should happen before super.onCreate() because it might recreate a fragment,
         // and a fragment might depend on the native library.
         try {
-            ((ChromiumApplication) getApplication())
+            ((ChromeApplication) getApplication())
                     .startBrowserProcessesAndLoadLibrariesSync(true);
             mNativeSideIsInitialized = true;
         } catch (ProcessInitException e) {
@@ -423,6 +424,6 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
 
     @Override
     public void showEmbedContentViewActivity(int title, int url) {
-        // TODO(aurimas): implement this once EmbededContentViewActivity is upstreamed.
+        EmbedContentViewActivity.show(this, title, url);
     }
 }

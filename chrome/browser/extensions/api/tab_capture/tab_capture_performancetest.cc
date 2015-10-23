@@ -13,7 +13,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/tracing.h"
@@ -198,17 +197,25 @@ class TabCapturePerformanceTest
     bool gpu_frames = PrintResults(
         analyzer.get(),
         test_name,
-        "RenderWidget::didCommitAndDrawCompositorFrame",
+        "RenderWidget::DidCommitAndDrawCompositorFrame",
         "ms");
     EXPECT_TRUE(gpu_frames);
 
     // This prints out the average time between capture events.
     // As the capture frame rate is capped at 30fps, this score
     // cannot get any better than (lower) 33.33 ms.
+    // TODO(ericrk): Remove the "Capture" result once we are confident that
+    // "CaptureSucceeded" is giving the coverage we want. crbug.com/489817
     EXPECT_TRUE(PrintResults(analyzer.get(),
                              test_name,
                              "Capture",
                              "ms"));
+
+    // Also track the CaptureSucceeded event. Capture only indicates that a
+    // capture was requested, but this capture may later be aborted without
+    // running. CaptureSucceeded tracks successful frame captures.
+    EXPECT_TRUE(
+        PrintResults(analyzer.get(), test_name, "CaptureSucceeded", "ms"));
   }
 };
 

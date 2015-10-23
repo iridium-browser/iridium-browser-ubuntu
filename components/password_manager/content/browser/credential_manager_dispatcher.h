@@ -10,6 +10,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_member.h"
+#include "components/password_manager/core/browser/credential_manager_password_form_manager.h"
+#include "components/password_manager/core/browser/credential_manager_pending_request_task.h"
+#include "components/password_manager/core/browser/credential_manager_pending_require_user_mediation_task.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "content/public/browser/web_contents_observer.h"
 
@@ -30,27 +33,23 @@ class PasswordManagerDriver;
 class PasswordStore;
 struct CredentialInfo;
 
-class CredentialManagerDispatcher : public content::WebContentsObserver {
+class CredentialManagerDispatcher
+    : public content::WebContentsObserver,
+      public CredentialManagerPasswordFormManagerDelegate,
+      public CredentialManagerPendingRequestTaskDelegate,
+      public CredentialManagerPendingRequireUserMediationTaskDelegate {
  public:
   CredentialManagerDispatcher(content::WebContents* web_contents,
                               PasswordManagerClient* client);
   ~CredentialManagerDispatcher() override;
 
-  void OnProvisionalSaveComplete();
+  // Called in response to an IPC from the renderer, triggered by a page's call
+  // to 'navigator.credentials.store'.
+  virtual void OnStore(int request_id, const password_manager::CredentialInfo&);
 
   // Called in response to an IPC from the renderer, triggered by a page's call
-  // to 'navigator.credentials.notifyFailedSignIn'.
-  virtual void OnNotifyFailedSignIn(int request_id,
-                                    const password_manager::CredentialInfo&);
-
-  // Called in response to an IPC from the renderer, triggered by a page's call
-  // to 'navigator.credentials.notifySignedIn'.
-  virtual void OnNotifySignedIn(int request_id,
-                                const password_manager::CredentialInfo&);
-
-  // Called in response to an IPC from the renderer, triggered by a page's call
-  // to 'navigator.credentials.notifySignedOut'.
-  virtual void OnNotifySignedOut(int request_id);
+  // to 'navigator.credentials.requireUserMediation'.
+  virtual void OnRequireUserMediation(int request_id);
 
   // Called in response to an IPC from the renderer, triggered by a page's call
   // to 'navigator.credentials.request'.
@@ -67,22 +66,23 @@ class CredentialManagerDispatcher : public content::WebContentsObserver {
   using CredentialCallback =
       base::Callback<void(const autofill::PasswordForm&)>;
 
-  PasswordManagerClient* client() const { return client_; }
+  // CredentialManagerPendingRequestTaskDelegate:
+  bool IsZeroClickAllowed() const override;
+  GURL GetOrigin() const override;
+  void SendCredential(int request_id, const CredentialInfo& info) override;
+  PasswordManagerClient* client() const override;
+
+  // CredentialManagerPendingSignedOutTaskDelegate:
+  PasswordStore* GetPasswordStore() override;
+  void DoneRequiringUserMediation() override;
+
+  // CredentialManagerPasswordFormManagerDelegate:
+  void OnProvisionalSaveComplete() override;
 
  private:
-  class PendingRequestTask;
-  class PendingSignedOutTask;
-
-  PasswordStore* GetPasswordStore();
-
-  bool IsZeroClickAllowed() const;
-
   // Returns the driver for the current main frame.
   // Virtual for testing.
   virtual base::WeakPtr<PasswordManagerDriver> GetDriver();
-
-  void SendCredential(int request_id, const CredentialInfo& info);
-  void DoneSigningOut();
 
   PasswordManagerClient* client_;
   scoped_ptr<CredentialManagerPasswordFormManager> form_manager_;
@@ -94,8 +94,9 @@ class CredentialManagerDispatcher : public content::WebContentsObserver {
   // PasswordStore; we push enough data into Pending*Task objects so that
   // they can properly respond to the request once the PasswordStore gives
   // us data.
-  scoped_ptr<PendingRequestTask> pending_request_;
-  scoped_ptr<PendingSignedOutTask> pending_sign_out_;
+  scoped_ptr<CredentialManagerPendingRequestTask> pending_request_;
+  scoped_ptr<CredentialManagerPendingRequireUserMediationTask>
+      pending_require_user_mediation_;
 
   DISALLOW_COPY_AND_ASSIGN(CredentialManagerDispatcher);
 };

@@ -87,9 +87,7 @@ DEFINE_TRACE(IDBRequest)
     visitor->trace(m_source);
     visitor->trace(m_result);
     visitor->trace(m_error);
-#if ENABLE(OILPAN)
     visitor->trace(m_enqueuedEvents);
-#endif
     visitor->trace(m_pendingCursor);
     visitor->trace(m_cursorKey);
     visitor->trace(m_cursorPrimaryKey);
@@ -186,12 +184,12 @@ void IDBRequest::setPendingCursor(IDBCursor* cursor)
 IDBCursor* IDBRequest::getResultCursor() const
 {
     if (!m_result)
-        return 0;
+        return nullptr;
     if (m_result->type() == IDBAny::IDBCursorType)
         return m_result->idbCursor();
     if (m_result->type() == IDBAny::IDBCursorWithValueType)
         return m_result->idbCursorWithValue();
-    return 0;
+    return nullptr;
 }
 
 void IDBRequest::setResultCursor(IDBCursor* cursor, IDBKey* key, IDBKey* primaryKey, PassRefPtr<IDBValue> value)
@@ -250,7 +248,7 @@ void IDBRequest::onSuccess(const Vector<String>& stringList)
     if (!shouldEnqueueEvent())
         return;
 
-    RefPtrWillBeRawPtr<DOMStringList> domStringList = DOMStringList::create();
+    RefPtrWillBeRawPtr<DOMStringList> domStringList = DOMStringList::create(DOMStringList::IndexedDB);
     for (size_t i = 0; i < stringList.size(); ++i)
         domStringList->append(stringList[i]);
     onSuccessInternal(IDBAny::create(domStringList.release()));
@@ -308,7 +306,7 @@ static IDBObjectStore* effectiveObjectStore(IDBAny* source)
         return source->idbIndex()->objectStore();
 
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 #endif
 
@@ -421,7 +419,7 @@ ExecutionContext* IDBRequest::executionContext() const
     return ActiveDOMObject::executionContext();
 }
 
-bool IDBRequest::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
+bool IDBRequest::dispatchEventInternal(PassRefPtrWillBeRawPtr<Event> event)
 {
     IDB_TRACE("IDBRequest::dispatchEvent");
     if (m_contextStopped || !executionContext())

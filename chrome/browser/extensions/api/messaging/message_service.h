@@ -73,8 +73,10 @@ class MessageService : public BrowserContextKeyedAPI,
                                    const std::string& channel_name,
                                    scoped_ptr<base::DictionaryValue> source_tab,
                                    int source_frame_id,
+                                   int target_tab_id,
                                    int target_frame_id,
                                    int guest_process_id,
+                                   int guest_render_frame_routing_id,
                                    const std::string& source_extension_id,
                                    const std::string& target_extension_id,
                                    const GURL& source_url,
@@ -141,10 +143,12 @@ class MessageService : public BrowserContextKeyedAPI,
   // Same as above, but opens a channel to the tab with the given ID.  Messages
   // are restricted to that tab, so if there are multiple tabs in that process,
   // only the targeted tab will receive messages.
-  void OpenChannelToTab(
-      int source_process_id, int source_routing_id, int receiver_port_id,
-      int tab_id, int frame_id, const std::string& extension_id,
-      const std::string& channel_name);
+  void OpenChannelToTab(int source_process_id,
+                        int receiver_port_id,
+                        int tab_id,
+                        int frame_id,
+                        const std::string& extension_id,
+                        const std::string& channel_name);
 
   void OpenChannelToNativeApp(
       int source_process_id,
@@ -183,8 +187,17 @@ class MessageService : public BrowserContextKeyedAPI,
   typedef std::map<int, PendingLazyBackgroundPageChannel>
       PendingLazyBackgroundPageChannelMap;
 
-  // Common among OpenChannel* variants.
-  void OpenChannelImpl(scoped_ptr<OpenChannelParams> params);
+  // Common implementation for opening a channel configured by |params|.
+  //
+  // |target_extension| will be non-null if |params->target_extension_id| is
+  // non-empty, that is, if the target is an extension, it must exist.
+  //
+  // |did_enqueue| will be true if the channel opening was delayed while
+  // waiting for an event page to start, false otherwise.
+  void OpenChannelImpl(content::BrowserContext* browser_context,
+                       scoped_ptr<OpenChannelParams> params,
+                       const Extension* target_extension,
+                       bool did_enqueue);
 
   void CloseChannelImpl(MessageChannelMap::iterator channel_iter,
                         int port_id,

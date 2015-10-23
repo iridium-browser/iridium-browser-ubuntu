@@ -10,11 +10,13 @@ source_set("remote_bitrate_estimator") {
   sources = [
     "include/bwe_defines.h",
     "include/remote_bitrate_estimator.h",
+    "include/send_time_history.h",
     "rate_statistics.cc",
     "rate_statistics.h",
+    "send_time_history.cc",
   ]
 
-  configs += [ "../../:common_inherited_config"]
+  configs += [ "../../:common_inherited_config" ]
 
   deps = [
     ":rbe_components",
@@ -29,21 +31,19 @@ source_set("rbe_components") {
     "aimd_rate_control.h",
     "inter_arrival.cc",
     "inter_arrival.h",
-    "mimd_rate_control.cc",
-    "mimd_rate_control.h",
     "overuse_detector.cc",
     "overuse_detector.h",
     "overuse_estimator.cc",
     "overuse_estimator.h",
     "remote_bitrate_estimator_abs_send_time.cc",
     "remote_bitrate_estimator_single_stream.cc",
-    "remote_rate_control.cc",
-    "remote_rate_control.h",
   ]
 
   configs += [ "../..:common_config" ]
   public_configs = [ "../..:common_inherited_config" ]
-  deps = [ "../..:webrtc_common" ]
+  deps = [
+    "../..:webrtc_common",
+  ]
 
   if (is_clang) {
     # Suppress warnings from Chrome's Clang plugins.

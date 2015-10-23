@@ -139,7 +139,7 @@ IdentityAPI::IdentityAPI(content::BrowserContext* context)
               Profile::FromBrowserContext(context)),
           ProfileOAuth2TokenServiceFactory::GetForProfile(
               Profile::FromBrowserContext(context)),
-          LoginUIServiceFactory::GetForProfile(
+          LoginUIServiceFactory::GetShowLoginPopupCallbackForProfile(
               Profile::FromBrowserContext(context))),
       account_tracker_(&profile_identity_provider_,
                        g_browser_process->system_request_context()) {
@@ -232,9 +232,9 @@ void IdentityAPI::OnAccountSignInChanged(const gaia::AccountIds& ids,
 
   scoped_ptr<base::ListValue> args =
       api::identity::OnSignInChanged::Create(account_info, is_signed_in);
-  scoped_ptr<Event> event(new Event(api::identity::OnSignInChanged::kEventName,
-                                    args.Pass(),
-                                    browser_context_));
+  scoped_ptr<Event> event(new Event(events::IDENTITY_ON_SIGN_IN_CHANGED,
+                                    api::identity::OnSignInChanged::kEventName,
+                                    args.Pass(), browser_context_));
 
   EventRouter::Get(browser_context_)->BroadcastEvent(event.Pass());
 }

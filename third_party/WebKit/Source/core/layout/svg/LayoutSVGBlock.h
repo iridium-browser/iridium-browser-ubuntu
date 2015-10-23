@@ -30,39 +30,32 @@ class LayoutSVGBlock : public LayoutBlockFlow {
 public:
     explicit LayoutSVGBlock(SVGElement*);
 
-    virtual LayoutRect visualOverflowRect() const override final;
+    LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* = nullptr) const final;
 
-    virtual LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const override final;
+    void mapLocalToContainer(const LayoutBoxModelObject* paintInvalidationContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = nullptr, const PaintInvalidationState* = nullptr) const final;
+    const LayoutObject* pushMappingToContainer(const LayoutBoxModelObject* ancestorToStopAt, LayoutGeometryMap&) const final;
 
-    virtual void mapLocalToContainer(const LayoutBoxModelObject* paintInvalidationContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0, const PaintInvalidationState* = 0) const override final;
-    virtual const LayoutObject* pushMappingToContainer(const LayoutBoxModelObject* ancestorToStopAt, LayoutGeometryMap&) const override final;
+    AffineTransform localTransform() const final { return m_localTransform; }
 
-    virtual AffineTransform localTransform() const override final { return m_localTransform; }
+    DeprecatedPaintLayerType layerTypeRequired() const final { return NoDeprecatedPaintLayer; }
 
-    virtual DeprecatedPaintLayerType layerTypeRequired() const override final { return NoDeprecatedPaintLayer; }
-
-    virtual void invalidateTreeIfNeeded(PaintInvalidationState&) override;
-
-    // Transitioning out of SVG painters requires updating the PaintInfo rect which is only used by non-SVG painters.
-    void updatePaintInfoRect(IntRect&);
+    void invalidateTreeIfNeeded(PaintInvalidationState&) override;
 
 protected:
-    virtual void willBeDestroyed() override;
-    virtual void mapRectToPaintInvalidationBacking(const LayoutBoxModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override final;
+    void willBeDestroyed() override;
+    void mapRectToPaintInvalidationBacking(const LayoutBoxModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const final;
 
     AffineTransform m_localTransform;
 
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVG || LayoutBlockFlow::isOfType(type); }
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVG || LayoutBlockFlow::isOfType(type); }
 private:
-    virtual void updateFromStyle() override final;
+    void updateFromStyle() final;
 
-    virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const override final;
+    void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const final;
 
-    virtual void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override final;
+    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) final;
 
-    virtual bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
-
-    AffineTransform m_cachedPaintInvalidationTransform;
+    bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
 };
 
 }

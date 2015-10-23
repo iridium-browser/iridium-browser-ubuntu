@@ -88,7 +88,6 @@ SyncManagerImpl::SyncManagerImpl(const std::string& name)
       change_delegate_(NULL),
       initialized_(false),
       observing_network_connectivity_changes_(false),
-      report_unrecoverable_error_function_(NULL),
       weak_ptr_factory_(this) {
   // Pre-fill |notification_info_map_|.
   for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
@@ -243,17 +242,14 @@ void SyncManagerImpl::Init(InitArgs* args) {
 
   database_path_ = args->database_location.Append(
       syncable::Directory::kSyncDatabaseFilename);
-  unrecoverable_error_handler_ = args->unrecoverable_error_handler.Pass();
   report_unrecoverable_error_function_ =
       args->report_unrecoverable_error_function;
 
   allstatus_.SetHasKeystoreKey(
       !args->restored_keystore_key_for_bootstrapping.empty());
   sync_encryption_handler_.reset(new SyncEncryptionHandlerImpl(
-      &share_,
-      args->encryptor,
-      args->restored_key_for_bootstrapping,
-      args->restored_keystore_key_for_bootstrapping));
+      &share_, args->encryptor, args->restored_key_for_bootstrapping,
+      args->restored_keystore_key_for_bootstrapping, args->clear_data_option));
   sync_encryption_handler_->AddObserver(this);
   sync_encryption_handler_->AddObserver(&debug_info_event_listener_);
   sync_encryption_handler_->AddObserver(&js_sync_encryption_handler_observer_);
@@ -270,7 +266,7 @@ void SyncManagerImpl::Init(InitArgs* args) {
   share_.directory.reset(
       new syncable::Directory(
           backing_store.release(),
-          unrecoverable_error_handler_.get(),
+          args->unrecoverable_error_handler,
           report_unrecoverable_error_function_,
           sync_encryption_handler_.get(),
           sync_encryption_handler_->GetCryptographerUnsafe()));
@@ -286,6 +282,13 @@ void SyncManagerImpl::Init(InitArgs* args) {
     NotifyInitializationFailure();
     LOG(ERROR) << "Sync manager initialization failed!";
     return;
+  }
+
+  // Now that we have opened the Directory we can restore any previously saved
+  // nigori specifics.
+  if (args->saved_nigori_state) {
+    sync_encryption_handler_->RestoreNigori(*args->saved_nigori_state);
+    args->saved_nigori_state.reset();
   }
 
   connection_manager_.reset(new SyncAPIServerConnectionManager(
@@ -309,11 +312,12 @@ void SyncManagerImpl::Init(InitArgs* args) {
 
   // Bind the SyncContext WeakPtr to this thread.  This helps us crash earlier
   // if the pointer is misused in debug mode.
-  base::WeakPtr<SyncContext> weak_core = model_type_registry_->AsWeakPtr();
+  base::WeakPtr<syncer_v2::SyncContext> weak_core =
+      model_type_registry_->AsWeakPtr();
   weak_core.get();
 
-  sync_context_proxy_.reset(
-      new SyncContextProxyImpl(base::ThreadTaskRunnerHandle::Get(), weak_core));
+  sync_context_proxy_.reset(new syncer_v2::SyncContextProxyImpl(
+      base::ThreadTaskRunnerHandle::Get(), weak_core));
 
   // Build a SyncSessionContext and store the worker in it.
   DVLOG(1) << "Sync is bringing up SyncSessionContext.";
@@ -403,6 +407,10 @@ void SyncManagerImpl::OnPassphraseTypeChanged(
   allstatus_.SetPassphraseType(type);
   allstatus_.SetKeystoreMigrationTime(
       sync_encryption_handler_->migration_time());
+}
+
+void SyncManagerImpl::OnLocalSetPassphraseEncryption(
+    const SyncEncryptionHandler::NigoriState& nigori_state) {
 }
 
 void SyncManagerImpl::StartSyncingNormally(
@@ -932,7 +940,7 @@ UserShare* SyncManagerImpl::GetUserShare() {
   return &share_;
 }
 
-syncer::SyncContextProxy* SyncManagerImpl::GetSyncContextProxy() {
+syncer_v2::SyncContextProxy* SyncManagerImpl::GetSyncContextProxy() {
   DCHECK(initialized_);
   return sync_context_proxy_.get();
 }
@@ -1029,6 +1037,13 @@ bool SyncManagerImpl::HasDirectoryTypeDebugInfoObserver(
 
 void SyncManagerImpl::RequestEmitDebugInfo() {
   model_type_registry_->RequestEmitDebugInfo();
+}
+
+void SyncManagerImpl::ClearServerData(const ClearServerDataCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  scheduler_->Start(SyncScheduler::CLEAR_SERVER_DATA_MODE, base::Time());
+  ClearParams params(callback);
+  scheduler_->ScheduleClearServerData(params);
 }
 
 }  // namespace syncer

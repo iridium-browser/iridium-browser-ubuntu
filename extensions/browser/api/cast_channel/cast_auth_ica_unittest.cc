@@ -11,7 +11,7 @@
 
 namespace extensions {
 
-namespace core_api {
+namespace api {
 
 namespace cast_channel {
 
@@ -61,7 +61,8 @@ void CastChannelAuthorityKeysTest::ExpectKeysLoaded() {
 }
 
 TEST_F(CastChannelAuthorityKeysTest, TestDefaultKeys) {
-  ExpectKeysLoaded();
+  base::StringPiece key = authority_keys_store_.GetDefaultICAPublicKey();
+  EXPECT_TRUE(key.empty());
 }
 
 TEST_F(CastChannelAuthorityKeysTest, TestInvalidProtobuf) {
@@ -145,6 +146,6 @@ TEST_F(CastChannelAuthorityKeysTest, TestSetTrustedCertificateAuthorities) {
 
 }  // namespace cast_channel
 
-}  // namespace core_api
+}  // namespace api
 
 }  // namespace extensions

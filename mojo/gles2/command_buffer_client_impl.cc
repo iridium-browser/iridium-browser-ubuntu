@@ -8,8 +8,11 @@
 
 #include "base/logging.h"
 #include "base/process/process_handle.h"
-#include "components/gles2/command_buffer_type_conversions.h"
-#include "components/gles2/mojo_buffer_backing.h"
+#include "components/view_manager/gles2/command_buffer_type_conversions.h"
+#include "components/view_manager/gles2/mojo_buffer_backing.h"
+#include "components/view_manager/gles2/mojo_gpu_memory_buffer.h"
+#include "gpu/command_buffer/service/image_factory.h"
+#include "mojo/platform_handle/platform_handle_functions.h"
 
 namespace gles2 {
 
@@ -64,7 +67,9 @@ class CommandBufferClientImpl::SyncClientImpl
   }
 
   gpu::Capabilities GetCapabilities() {
-    return capabilities_.To<gpu::Capabilities>();
+    if (capabilities_)
+      return capabilities_.To<gpu::Capabilities>();
+    return gpu::Capabilities();
   }
 
  private:
@@ -120,11 +125,13 @@ CommandBufferClientImpl::CommandBufferClientImpl(
       shared_state_(NULL),
       last_put_offset_(-1),
       next_transfer_buffer_id_(0),
+      next_image_id_(0),
       async_waiter_(async_waiter) {
   command_buffer_.Bind(mojo::InterfacePtrInfo<mojo::CommandBuffer>(
                            command_buffer_handle.Pass(), 0u),
                        async_waiter);
-  command_buffer_.set_error_handler(this);
+  command_buffer_.set_connection_error_handler(
+      [this]() { DidLoseContext(gpu::error::kUnknown); });
 }
 
 CommandBufferClientImpl::~CommandBufferClientImpl() {}
@@ -219,8 +226,11 @@ scoped_refptr<gpu::Buffer> CommandBufferClientImpl::CreateTransferBuffer(
   void* memory = NULL;
   mojo::ScopedSharedBufferHandle handle;
   mojo::ScopedSharedBufferHandle duped;
-  if (!CreateMapAndDupSharedBuffer(size, &memory, &handle, &duped))
+  if (!CreateMapAndDupSharedBuffer(size, &memory, &handle, &duped)) {
+    if (last_state_.error == gpu::error::kNoError)
+      last_state_.error = gpu::error::kLostContext;
     return NULL;
+  }
 
   *id = ++next_transfer_buffer_id_;
 
@@ -245,14 +255,56 @@ int32_t CommandBufferClientImpl::CreateImage(ClientBuffer buffer,
                                              size_t width,
                                              size_t height,
                                              unsigned internalformat) {
-  // TODO(piman)
-  NOTIMPLEMENTED();
-  return -1;
+  int32 new_id = ++next_image_id_;
+
+  mojo::SizePtr size = mojo::Size::New();
+  size->width = static_cast<int32_t>(width);
+  size->height = static_cast<int32_t>(height);
+
+  MojoGpuMemoryBufferImpl* gpu_memory_buffer =
+      MojoGpuMemoryBufferImpl::FromClientBuffer(buffer);
+  gfx::GpuMemoryBufferHandle handle = gpu_memory_buffer->GetHandle();
+
+  bool requires_sync_point = false;
+  base::SharedMemoryHandle dupd_handle =
+      base::SharedMemory::DuplicateHandle(handle.handle);
+#if defined(OS_WIN)
+  HANDLE platform_handle = dupd_handle;
+#else
+  int platform_handle = dupd_handle.fd;
+#endif
+
+  if (handle.type != gfx::SHARED_MEMORY_BUFFER) {
+    requires_sync_point = true;
+    NOTIMPLEMENTED();
+    return -1;
+  }
+
+  MojoHandle mojo_handle = MOJO_HANDLE_INVALID;
+  MojoResult create_result = MojoCreatePlatformHandleWrapper(
+      platform_handle, &mojo_handle);
+  if (create_result != MOJO_RESULT_OK) {
+    NOTIMPLEMENTED();
+    return -1;
+  }
+  mojo::ScopedHandle scoped_handle;
+  scoped_handle.reset(mojo::Handle(mojo_handle));
+  command_buffer_->CreateImage(
+      new_id, scoped_handle.Pass(), handle.type, size.Pass(),
+      static_cast<int32_t>(gpu_memory_buffer->GetFormat()), internalformat);
+  if (requires_sync_point) {
+    NOTIMPLEMENTED();
+    // TODO(jam): need to support this if we support types other than
+    // SHARED_MEMORY_BUFFER.
+    //gpu_memory_buffer_manager->SetDestructionSyncPoint(gpu_memory_buffer,
+    //                                                   InsertSyncPoint());
+  }
+
+  return new_id;
 }
 
 void CommandBufferClientImpl::DestroyImage(int32 id) {
-  // TODO(piman)
-  NOTIMPLEMENTED();
+  command_buffer_->DestroyImage(id);
 }
 
 int32_t CommandBufferClientImpl::CreateGpuMemoryBufferImage(
@@ -260,9 +312,14 @@ int32_t CommandBufferClientImpl::CreateGpuMemoryBufferImage(
     size_t height,
     unsigned internalformat,
     unsigned usage) {
-  // TODO(piman)
-  NOTIMPLEMENTED();
-  return -1;
+  scoped_ptr<gfx::GpuMemoryBuffer> buffer(MojoGpuMemoryBufferImpl::Create(
+      gfx::Size(static_cast<int>(width), static_cast<int>(height)),
+      gpu::ImageFactory::DefaultBufferFormatForImageFormat(internalformat),
+      gpu::ImageFactory::ImageUsageToGpuMemoryBufferUsage(usage)));
+  if (!buffer)
+    return -1;
+
+  return CreateImage(buffer->AsClientBuffer(), width, height, internalformat);
 }
 
 uint32_t CommandBufferClientImpl::InsertSyncPoint() {
@@ -308,10 +365,6 @@ void CommandBufferClientImpl::DidLoseContext(int32_t lost_reason) {
   delegate_->ContextLost();
 }
 
-void CommandBufferClientImpl::OnConnectionError() {
-  DidLoseContext(gpu::error::kUnknown);
-}
-
 void CommandBufferClientImpl::TryUpdateState() {
   if (last_state_.error == gpu::error::kNoError)
     shared_state()->Read(&last_state_);
@@ -333,6 +386,11 @@ void CommandBufferClientImpl::MakeProgressAndUpdateState() {
 }
 
 void CommandBufferClientImpl::SetLock(base::Lock* lock) {
+}
+
+bool CommandBufferClientImpl::IsGpuChannelLost() {
+  // This is only possible for out-of-process command buffers.
+  return false;
 }
 
 }  // namespace gles2

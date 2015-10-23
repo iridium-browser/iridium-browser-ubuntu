@@ -97,16 +97,16 @@ base::string16 GetAvatarButtonTextForProfile(Profile* profile) {
                              kMaxCharactersToDisplay,
                              gfx::CHARACTER_BREAK);
   if (profile->IsLegacySupervised()) {
-    name = l10n_util::GetStringFUTF16(IDS_SUPERVISED_USER_NEW_AVATAR_LABEL,
-                                      name);
+    name = l10n_util::GetStringFUTF16(
+        IDS_LEGACY_SUPERVISED_USER_NEW_AVATAR_LABEL, name);
   }
   return name;
 }
 
 base::string16 GetProfileSwitcherTextForItem(const AvatarMenu::Item& item) {
   if (item.legacy_supervised) {
-    return l10n_util::GetStringFUTF16(IDS_SUPERVISED_USER_NEW_AVATAR_LABEL,
-                                      item.name);
+    return l10n_util::GetStringFUTF16(
+        IDS_LEGACY_SUPERVISED_USER_NEW_AVATAR_LABEL, item.name);
   }
   if (item.child_account)
     return l10n_util::GetStringFUTF16(IDS_CHILD_AVATAR_LABEL, item.name);
@@ -157,10 +157,10 @@ bool IsRegularOrGuestSession(Browser* browser) {
   return profile->IsGuestSession() || !profile->IsOffTheRecord();
 }
 
-bool IsProfileLocked(Profile* profile) {
+bool IsProfileLocked(const base::FilePath& path) {
   const ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
-  size_t profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  size_t profile_index = cache.GetIndexOfProfileWithPath(path);
 
   if (profile_index == std::string::npos)
     return false;
@@ -233,7 +233,7 @@ void RemoveBrowsingDataForProfile(const base::FilePath& profile_path) {
     profile = profile->GetOffTheRecordProfile();
 
   BrowsingDataRemover::CreateForUnboundedRange(profile)->Remove(
-      BrowsingDataRemover::REMOVE_ALL, BrowsingDataHelper::ALL);
+      BrowsingDataRemover::REMOVE_WIPE_PROFILE, BrowsingDataHelper::ALL);
   // BrowsingDataRemover deletes itself.
 }
 

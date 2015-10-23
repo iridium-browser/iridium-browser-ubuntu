@@ -180,11 +180,6 @@ void WebUILoginDisplay::ShowErrorScreen(LoginDisplay::SigninError error_id) {
   webui_handler_->ShowErrorScreen(error_id);
 }
 
-void WebUILoginDisplay::ShowGaiaPasswordChanged(const std::string& username) {
-  if (webui_handler_)
-    webui_handler_->ShowGaiaPasswordChanged(username);
-}
-
 void WebUILoginDisplay::ShowPasswordChangedDialog(bool show_password_error,
                                                   const std::string& email) {
   if (webui_handler_)
@@ -340,5 +335,11 @@ void WebUILoginDisplay::OnUserActivity(const ui::Event* event) {
     delegate_->ResetPublicSessionAutoLoginTimer();
 }
 
+bool WebUILoginDisplay::IsUserWhitelisted(const std::string& user_id) {
+  DCHECK(delegate_);
+  if (delegate_)
+    return delegate_->IsUserWhitelisted(user_id);
+  return true;
+}
 
 }  // namespace chromeos

@@ -87,7 +87,6 @@ class CoreOobeHandler : public BaseScreenHandler,
   void ClearErrors() override;
   void ReloadContent(const base::DictionaryValue& dictionary) override;
   void ShowControlBar(bool show) override;
-  void SetKeyboardState(bool shown, const gfx::Rect& bounds) override;
   void SetClientAreaSize(int width, int height) override;
   void ShowDeviceResetScreen() override;
   void ShowEnableDebuggingScreen() override;
@@ -111,7 +110,6 @@ class CoreOobeHandler : public BaseScreenHandler,
   void HandleToggleResetScreen();
   void HandleEnableDebuggingScreen();
   void HandleHeaderBarVisible();
-  void HandleSwitchToNewOobe();
 
   // Updates a11y menu state based on the current a11y features state(on/off).
   void UpdateA11yState();

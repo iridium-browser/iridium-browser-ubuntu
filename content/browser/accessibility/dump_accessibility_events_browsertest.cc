@@ -89,7 +89,7 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
       shell(), AccessibilityModeComplete, ui::AX_EVENT_NONE));
 
 
-  web_contents->GetMainFrame()->ExecuteJavaScript(
+  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
       base::ASCIIToUTF16("go()"));
 
   // Wait for at least one accessibility event generated in response to
@@ -209,8 +209,16 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("listbox-focus.html"));
 }
 
+// Flaky on Windows: http://crbug.com/486861
+#if defined(OS_WIN)
+#define MAYBE_AccessibilityEventsListboxNext \
+  DISABLED_AccessibilityEventsListboxNext
+#else
+#define MAYBE_AccessibilityEventsListboxNext AccessibilityEventsListboxNext
+#endif
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       AccessibilityEventsListboxNext) {
+                       MAYBE_AccessibilityEventsListboxNext) {
   RunEventTest(FILE_PATH_LITERAL("listbox-next.html"));
 }
 
@@ -222,6 +230,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsMenuListNext) {
   RunEventTest(FILE_PATH_LITERAL("menulist-next.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsMenuListPopup) {
+  RunEventTest(FILE_PATH_LITERAL("menulist-popup.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
@@ -251,7 +264,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       AccessibilityEventsTextChanged) {
+                       DISABLED_AccessibilityEventsTextChanged) {
   RunEventTest(FILE_PATH_LITERAL("text-changed.html"));
 }
 

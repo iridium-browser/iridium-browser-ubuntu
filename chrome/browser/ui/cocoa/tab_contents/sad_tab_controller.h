@@ -13,6 +13,7 @@
 #import <Cocoa/Cocoa.h>
 
 @class SadTabController;
+@class SadTabView;
 
 namespace chrome {
 
@@ -40,14 +41,11 @@ class SadTabCocoa : public SadTab {
 @interface SadTabController : NSViewController {
  @private
   content::WebContents* webContents_;  // Weak reference.
+  base::scoped_nsobject<SadTabView> sadTabView_;
 }
 
 // Designated initializer.
 - (id)initWithWebContents:(content::WebContents*)webContents;
-
-// This action just calls the NSApp sendAction to get it into the standard
-// Cocoa action processing.
-- (IBAction)openLearnMoreAboutCrashLink:(id)sender;
 
 // Returns a weak reference to the WebContents whose WebContentsView created
 // this SadTabController.

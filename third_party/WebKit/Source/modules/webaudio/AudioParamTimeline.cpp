@@ -31,8 +31,13 @@
 #include "core/dom/ExceptionCode.h"
 #include "platform/FloatConversion.h"
 #include "platform/audio/AudioUtilities.h"
+#include "wtf/CPU.h"
 #include "wtf/MathExtras.h"
 #include <algorithm>
+
+#if CPU(X86) || CPU(X86_64)
+#include <emmintrin.h>
+#endif
 
 namespace blink {
 
@@ -78,6 +83,41 @@ static bool isPositiveAudioParamTime(double time, ExceptionState& exceptionState
     return false;
 }
 
+String AudioParamTimeline::eventToString(const ParamEvent& event)
+{
+    // The default arguments for most automation methods is the value and the time.
+    String args = String::number(event.value()) + ", " + String::number(event.time());
+
+    // Get a nice printable name for the event and update the args if necessary.
+    String s;
+    switch (event.type()) {
+    case ParamEvent::SetValue:
+        s = "setValueAtTime";
+        break;
+    case ParamEvent::LinearRampToValue:
+        s = "linearRampToValueAtTime";
+        break;
+    case ParamEvent::ExponentialRampToValue:
+        s = "exponentialRampToValue";
+        break;
+    case ParamEvent::SetTarget:
+        s = "setTargetAtTime";
+        // This has an extra time constant arg
+        args = args + ", " + String::number(event.timeConstant());
+        break;
+    case ParamEvent::SetValueCurve:
+        s = "setValueCurveAtTime";
+        // Replace the default arg, using "..." to denote the curve argument.
+        args = "..., " + String::number(event.time()) + ", " + String::number(event.duration());
+        break;
+    case ParamEvent::LastType:
+        ASSERT_NOT_REACHED();
+        break;
+    };
+
+    return s + "(" + args + ")";
+}
+
 void AudioParamTimeline::setValueAtTime(float value, double time, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
@@ -85,7 +125,7 @@ void AudioParamTimeline::setValueAtTime(float value, double time, ExceptionState
     if (!isNonNegativeAudioParamTime(time, exceptionState))
         return;
 
-    insertEvent(ParamEvent(ParamEvent::SetValue, value, time, 0, 0, nullptr));
+    insertEvent(ParamEvent(ParamEvent::SetValue, value, time, 0, 0, nullptr), exceptionState);
 }
 
 void AudioParamTimeline::linearRampToValueAtTime(float value, double time, ExceptionState& exceptionState)
@@ -95,7 +135,7 @@ void AudioParamTimeline::linearRampToValueAtTime(float value, double time, Excep
     if (!isNonNegativeAudioParamTime(time, exceptionState))
         return;
 
-    insertEvent(ParamEvent(ParamEvent::LinearRampToValue, value, time, 0, 0, nullptr));
+    insertEvent(ParamEvent(ParamEvent::LinearRampToValue, value, time, 0, 0, nullptr), exceptionState);
 }
 
 void AudioParamTimeline::exponentialRampToValueAtTime(float value, double time, ExceptionState& exceptionState)
@@ -106,7 +146,7 @@ void AudioParamTimeline::exponentialRampToValueAtTime(float value, double time, 
         || !isNonNegativeAudioParamTime(time, exceptionState))
         return;
 
-    insertEvent(ParamEvent(ParamEvent::ExponentialRampToValue, value, time, 0, 0, nullptr));
+    insertEvent(ParamEvent(ParamEvent::ExponentialRampToValue, value, time, 0, 0, nullptr), exceptionState);
 }
 
 void AudioParamTimeline::setTargetAtTime(float target, double time, double timeConstant, ExceptionState& exceptionState)
@@ -117,7 +157,7 @@ void AudioParamTimeline::setTargetAtTime(float target, double time, double timeC
         || !isNonNegativeAudioParamTime(timeConstant, exceptionState, "Time constant"))
         return;
 
-    insertEvent(ParamEvent(ParamEvent::SetTarget, target, time, timeConstant, 0, nullptr));
+    insertEvent(ParamEvent(ParamEvent::SetTarget, target, time, timeConstant, 0, nullptr), exceptionState);
 }
 
 void AudioParamTimeline::setValueCurveAtTime(DOMFloat32Array* curve, double time, double duration, ExceptionState& exceptionState)
@@ -128,10 +168,10 @@ void AudioParamTimeline::setValueCurveAtTime(DOMFloat32Array* curve, double time
         || !isPositiveAudioParamTime(duration, exceptionState, "Duration"))
         return;
 
-    insertEvent(ParamEvent(ParamEvent::SetValueCurve, 0, time, 0, duration, curve));
+    insertEvent(ParamEvent(ParamEvent::SetValueCurve, 0, time, 0, duration, curve), exceptionState);
 }
 
-void AudioParamTimeline::insertEvent(const ParamEvent& event)
+void AudioParamTimeline::insertEvent(const ParamEvent& event, ExceptionState& exceptionState)
 {
     // Sanity check the event. Be super careful we're not getting infected with NaN or Inf. These
     // should have been handled by the caller.
@@ -150,7 +190,30 @@ void AudioParamTimeline::insertEvent(const ParamEvent& event)
 
     unsigned i = 0;
     double insertTime = event.time();
+
     for (i = 0; i < m_events.size(); ++i) {
+        if (event.type() == ParamEvent::SetValueCurve) {
+            // If this event is a SetValueCurve, make sure it doesn't overlap any existing event.
+            double endTime = event.time() + event.duration();
+            if (m_events[i].time() >= event.time() && m_events[i].time() < endTime) {
+                exceptionState.throwDOMException(
+                    NotSupportedError,
+                    eventToString(event) + " overlaps " + eventToString(m_events[i]));
+                return;
+            }
+        } else {
+            // Otherwise, make sure this event doesn't overlap any existing SetValueCurve event.
+            if (m_events[i].type() == ParamEvent::SetValueCurve) {
+                double endTime = m_events[i].time() + m_events[i].duration();
+                if (event.time() >= m_events[i].time() && event.time() < endTime) {
+                    exceptionState.throwDOMException(
+                        NotSupportedError,
+                        eventToString(event) + " overlaps " + eventToString(m_events[i]));
+                    return;
+                }
+            }
+        }
+
         // Overwrite same event type and time.
         if (m_events[i].time() == insertTime && m_events[i].type() == event.type()) {
             m_events[i] = event;
@@ -179,7 +242,7 @@ void AudioParamTimeline::cancelScheduledValues(double startTime, ExceptionState&
     }
 }
 
-float AudioParamTimeline::valueForContextTime(AudioContext* context, float defaultValue, bool& hasValue)
+float AudioParamTimeline::valueForContextTime(AbstractAudioContext* context, float defaultValue, bool& hasValue)
 {
     ASSERT(context);
 
@@ -349,6 +412,38 @@ float AudioParamTimeline::valuesForTimeRangeImpl(
                     float timeConstant = event.timeConstant();
                     float discreteTimeConstant = static_cast<float>(AudioUtilities::discreteTimeConstantForSampleRate(timeConstant, controlRate));
 
+#if CPU(X86) || CPU(X86_64)
+                    // Resolve recursion by expanding constants to achieve a 4-step loop unrolling.
+                    // v1 = v0 + (t - v0) * c
+                    // v2 = v1 + (t - v1) * c
+                    // v2 = v0 + (t - v0) * c + (t - (v0 + (t - v0) * c)) * c
+                    // v2 = v0 + (t - v0) * c + (t - v0) * c - (t - v0) * c * c
+                    // v2 = v0 + (t - v0) * c * (2 - c)
+                    // Thus c0 = c, c1 = c*(2-c). The same logic applies to c2 and c3.
+                    const float c0 = discreteTimeConstant;
+                    const float c1 = c0 * (2 - c0);
+                    const float c2 = c0 * ((c0 - 3) * c0 + 3);
+                    const float c3 = c0 * (c0 * ((4 - c0) * c0 - 6) + 4);
+
+                    float delta;
+                    __m128 vC = _mm_set_ps(c2, c1, c0, 0);
+                    __m128 vDelta, vValue, vResult;
+
+                    // Process 4 loop steps.
+                    unsigned fillToFrameTrunc = writeIndex + ((fillToFrame - writeIndex) / 4) * 4;
+                    for (; writeIndex < fillToFrameTrunc; writeIndex += 4) {
+                        delta = target - value;
+                        vDelta = _mm_set_ps1(delta);
+                        vValue = _mm_set_ps1(value);
+
+                        vResult = _mm_add_ps(vValue, _mm_mul_ps(vDelta, vC));
+                        _mm_storeu_ps(values + writeIndex, vResult);
+
+                        // Update value for next iteration.
+                        value += delta * c3;
+                    }
+#endif
+                    // Serially process remaining values
                     for (; writeIndex < fillToFrame; ++writeIndex) {
                         values[writeIndex] = value;
                         value += (target - value) * discreteTimeConstant;
@@ -364,9 +459,22 @@ float AudioParamTimeline::valuesForTimeRangeImpl(
                     unsigned numberOfCurvePoints = curve ? curve->length() : 0;
 
                     // Curve events have duration, so don't just use next event time.
-                    float duration = event.duration();
-                    float durationFrames = duration * sampleRate;
-                    float curvePointsPerFrame = static_cast<float>(numberOfCurvePoints) / durationFrames;
+                    double duration = event.duration();
+                    double durationFrames = duration * sampleRate;
+                    // How much to step the curve index for each frame.  We want the curve index to
+                    // be exactly equal to the last index (numberOfCurvePoints - 1) after
+                    // durationFrames - 1 frames.  In this way, the last output value will equal the
+                    // last value in the curve array.
+                    double curvePointsPerFrame;
+
+                    // If the duration is less than a frame, we want to just output the last curve
+                    // value.  Do this by setting curvePointsPerFrame to be more than number of
+                    // points in the curve.  Then the curveVirtualIndex will always exceed the last
+                    // curve index, so that the last curve value will be used.
+                    if (durationFrames > 1)
+                        curvePointsPerFrame = (numberOfCurvePoints - 1) / (durationFrames - 1);
+                    else
+                        curvePointsPerFrame = numberOfCurvePoints + 1;
 
                     if (!curve || !curveData || !numberOfCurvePoints || duration <= 0 || sampleRate <= 0) {
                         // Error condition - simply propagate previous value.
@@ -379,33 +487,55 @@ float AudioParamTimeline::valuesForTimeRangeImpl(
                     // Save old values and recalculate information based on the curve's duration
                     // instead of the next event time.
                     unsigned nextEventFillToFrame = fillToFrame;
-                    float nextEventFillToTime = fillToTime;
+                    double nextEventFillToTime = fillToTime;
                     fillToTime = std::min(endTime, time1 + duration);
-                    fillToFrame = AudioUtilities::timeToSampleFrame(fillToTime - startTime, sampleRate);
+                    // |fillToTime| can be less than |startTime| when the end of the
+                    // setValueCurve automation has been reached, but the next automation has not
+                    // yet started. In this case, |fillToTime| is clipped to |time1|+|duration|
+                    // above, but |startTime| will keep increasing (because the current time is
+                    // increasing).
+                    fillToFrame = AudioUtilities::timeToSampleFrame(std::max(0.0, fillToTime - startTime), sampleRate);
                     fillToFrame = std::min(fillToFrame, numberOfValues);
 
                     // Index into the curve data using a floating-point value.
                     // We're scaling the number of curve points by the duration (see curvePointsPerFrame).
-                    float curveVirtualIndex = 0;
+                    double curveVirtualIndex = 0;
                     if (time1 < currentTime) {
                         // Index somewhere in the middle of the curve data.
                         // Don't use timeToSampleFrame() since we want the exact floating-point frame.
-                        float frameOffset = (currentTime - time1) * sampleRate;
+                        double frameOffset = (currentTime - time1) * sampleRate;
                         curveVirtualIndex = curvePointsPerFrame * frameOffset;
                     }
 
-                    // Render the stretched curve data using nearest neighbor sampling.
-                    // Oversampled curve data can be provided if smoothness is desired.
-                    for (; writeIndex < fillToFrame; ++writeIndex) {
-                        // Ideally we'd use round() from MathExtras, but we're in a tight loop here
-                        // and we're trading off precision for extra speed.
-                        unsigned curveIndex = static_cast<unsigned>(0.5 + curveVirtualIndex);
+                    // Set the default value in case fillToFrame is 0.
+                    value = curveData[numberOfCurvePoints - 1];
 
-                        curveVirtualIndex += curvePointsPerFrame;
+                    // Render the stretched curve data using linear interpolation.  Oversampled
+                    // curve data can be provided if sharp discontinuities are desired.
+                    for (unsigned k = 0; writeIndex < fillToFrame; ++writeIndex, ++k) {
+                        // Compute current index this way to minimize round-off that would have
+                        // occurred by incrementing the index by curvePointsPerFrame.
+                        double currentVirtualIndex = curveVirtualIndex + k * curvePointsPerFrame;
+                        unsigned curveIndex0;
 
-                        // Bounds check.
-                        if (curveIndex < numberOfCurvePoints)
-                            value = curveData[curveIndex];
+                        // Clamp index to the last element of the array.
+                        if (currentVirtualIndex < numberOfCurvePoints) {
+                            curveIndex0 = static_cast<unsigned>(currentVirtualIndex);
+                        } else {
+                            curveIndex0 = numberOfCurvePoints - 1;
+                        }
+
+                        unsigned curveIndex1 = std::min(curveIndex0 + 1, numberOfCurvePoints - 1);
+
+                        // Linearly interpolate between the two nearest curve points.  |delta| is
+                        // clamped to 1 because currentVirtualIndex can exceed curveIndex0 by more
+                        // than one.  This can happen when we reached the end of the curve but still
+                        // need values to fill out the current rendering quantum.
+                        float c0 = curveData[curveIndex0];
+                        float c1 = curveData[curveIndex1];
+                        double delta = std::min(currentVirtualIndex - curveIndex0, 1.0);
+
+                        value = c0 + (c1 - c0) * delta;
 
                         values[writeIndex] = value;
                     }
@@ -420,6 +550,9 @@ float AudioParamTimeline::valuesForTimeRangeImpl(
 
                     break;
                 }
+            case ParamEvent::LastType:
+                ASSERT_NOT_REACHED();
+                break;
             }
         }
     }

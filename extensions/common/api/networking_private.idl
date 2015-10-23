@@ -6,9 +6,9 @@
 // network connections (Cellular, Ethernet, VPN, WiFi or WiMAX). This private
 // API is only valid if called from a browser or app associated with the
 // primary user. See the Open Network Configuration (ONC) documentation for
-// descriptions of properties: 
+// descriptions of properties:
 // <a href="https://code.google.com/p/chromium/codesearch#chromium/src/components/onc/docs/onc_spec.html">
-// src/components/onc/docs/onc_spec.html</a>, or the 
+// src/components/onc/docs/onc_spec.html</a>, or the
 // <a href="http://www.chromium.org/chromium-os/chromiumos-design-docs/open-network-configuration">
 // Open Network Configuration</a> page at chromium.org.
 // <br><br>
@@ -19,9 +19,9 @@
 // $(ref:networkingPrivate.getState) and $(ref:networkingPrivate.getNetworks).
 // <br><br>
 // "Config" properties describe just the ONC properties that can be configured
-// through this API. NOTE: Not all configuration properties are exposed at this 
+// through this API. NOTE: Not all configuration properties are exposed at this
 // time, only those currently required by the Chrome Settings UI.
-// TODO(stevenjb): Provide all configuration properties and types, 
+// TODO(stevenjb): Provide all configuration properties and types,
 // crbug.com/380937.
 // <br><br>
 // TODO(stevenjb/pneubeck): Merge the ONC documentation with this document and
@@ -42,9 +42,9 @@ namespace networkingPrivate {
 
   enum DeviceStateType {
     // Device is available but not initialized.
-    Uninitialized, 
+    Uninitialized,
     // Device is intialized but not enabled.
-    Disabled, 
+    Disabled,
     // Enabled state has been requested but has not completed.
     Enabling,
     // Device is enabled.
@@ -59,8 +59,12 @@ namespace networkingPrivate {
     All, Cellular, Ethernet, VPN, Wireless, WiFi, WiMAX
   };
 
+  enum ProxySettingsType {
+    Direct, Manual, PAC, WPAD
+  };
+
   dictionary APNProperties {
-    DOMString? AccessPointName;
+    DOMString AccessPointName;
     DOMString? Language;
     DOMString? LocalizedName;
     DOMString? Name;
@@ -76,6 +80,17 @@ namespace networkingPrivate {
     // multiple carriers. May be set with $(ref:setProperties), but will be
     // ignored by $(ref:createConfiguration).
     DOMString? Carrier;
+  };
+
+  dictionary CellularSimState {
+    // Whether or not a PIN should be required.
+    boolean requirePin;
+
+    // The current PIN (required for any change, even when the SIM is unlocked).
+    DOMString currentPin;
+
+    // If provided, change the PIN to |newPin|. |requirePin| must be true.
+    DOMString? newPin;
   };
 
   dictionary CellularStateProperties {
@@ -115,13 +130,40 @@ namespace networkingPrivate {
     DOMString AuthenticationType;
   };
 
+  dictionary ProxyLocation {
+    DOMString Host;
+    long Port;
+  };
+
+  dictionary ManualProxySettings {
+    ProxyLocation? HTTPProxy;
+    ProxyLocation? SecureHTTPProxy;
+    ProxyLocation? FTPProxy;
+    ProxyLocation? SOCKS;
+  };
+
+  dictionary ProxySettings {
+    ProxySettingsType Type;
+    ManualProxySettings? Manual;
+    DOMString[]? ExcludeDomains;
+    DOMString? PAC;
+  };
+
+  dictionary OpenVPNProperties {
+    DOMString? OTP;
+    DOMString? Password;
+    DOMString? UserAuthenticationType;
+    DOMString? Username;
+  };
+
   dictionary ThirdPartyVPNProperties {
     DOMString ExtensionID;
   };
-    
+
   dictionary VPNConfigProperties {
     boolean? AutoConnect;
     DOMString? Host;
+    OpenVPNProperties? OpenVPN;
     ThirdPartyVPNProperties? ThirdPartyVPN;
     DOMString? Type;
   };
@@ -161,6 +203,7 @@ namespace networkingPrivate {
     DOMString? Name;
     IPConfigType? NameServersConfigType;
     long? Priority;
+    ProxySettings? ProxySettings;
     IPConfigProperties? StaticIPConfig;
     NetworkType? Type;
     VPNConfigProperties? VPN;
@@ -231,7 +274,7 @@ namespace networkingPrivate {
     // If true, only include configured (saved) networks. Defaults to 'false'.
     boolean? configured;
 
-    // Maximum number of networks to return. Defaults to 1000 if unspecified. 
+    // Maximum number of networks to return. Defaults to 1000 if unspecified.
     // Use 0 for no limit.
     long? limit;
   };
@@ -314,7 +357,7 @@ namespace networkingPrivate {
     // are ordered by the system based on their priority, with connected or
     // connecting networks listed first.
     // |filter|: Describes which networks to return.
-    // |callback|: Called with a dictionary of networks and their state 
+    // |callback|: Called with a dictionary of networks and their state
     //     properties when received.
     static void getNetworks(NetworkFilter filter,
                             GetNetworksCallback callback);
@@ -356,7 +399,7 @@ namespace networkingPrivate {
     //     to be notified when a network state changes.
     static void startConnect(DOMString networkGuid,
                              optional VoidCallback callback);
-    
+
     // Starts a disconnect from the network with networkGuid.
     // |networkGuid|: The GUID of the network to disconnect from.
     // |callback|: Called when the disconnect request has been sent. See note
@@ -364,7 +407,10 @@ namespace networkingPrivate {
     static void startDisconnect(DOMString networkGuid,
                                 optional VoidCallback callback);
 
-    // Starts activation of the Cellular network with networkGuid.
+    // Starts activation of the Cellular network with networkGuid. If called
+    // for a network that is already activated, or for a network with a carrier
+    // that can not be directly activated, this will show the account details
+    // page for the carrier if possible.
     // |networkGuid|: The GUID of the Cellular network to activate.
     // |carrier|: Optional name of carrier to activate.
     // |callback|: Called when the activation request has been sent. See note
@@ -400,7 +446,7 @@ namespace networkingPrivate {
     // |callback|: A callback function that receives base64-encoded encrypted
     //     data to send to a trusted device.
     static void verifyAndEncryptData(VerificationProperties properties,
-                                     DOMString data, 
+                                     DOMString data,
                                      StringCallback callback);
 
     // Enables TDLS for WiFi traffic with a specified peer if available.
@@ -430,6 +476,35 @@ namespace networkingPrivate {
     //     network captive portal status.
     static void getCaptivePortalStatus(DOMString networkGuid,
                                        CaptivePortalStatusCallback callback);
+
+    // Unlocks a Cellular SIM card.
+    // * If the SIM is PIN locked, |pin| will be used to unlock the SIM and
+    //   the |puk| argument will be ignored if provided.
+    // * If the SIM is PUK locked, |puk| and |pin| must be provided. If the
+    //   operation succeds (|puk| is valid), the PIN will be set to |pin|.
+    //   (If |pin| is empty or invalid the operation will fail).
+    // |networkGuid|: The GUID of the cellular network to unlock.
+    // |pin|: The current SIM PIN, or the new PIN if PUK is provided.
+    // |puk|: The operator provided PUK for unblocking a blocked SIM.
+    // |callback|: Called when the operation has completed.
+    static void unlockCellularSim(DOMString networkGuid,
+                                  DOMString pin,
+                                  optional DOMString puk,
+                                  optional VoidCallback callback);
+
+    // Sets whether or not SIM locking is enabled (i.e a PIN will be required
+    // when the device is powered) and changes the PIN if a new PIN is
+    // specified. If the new PIN is provided but not valid (e.g. too short)
+    // the operation will fail. This will not lock the SIM; that is handled
+    // automatically by the device. NOTE: If the SIM is locked, it must first be
+    // unlocked with unlockCellularSim() before this can be called (otherwise it
+    // will fail and chrome.runtime.lastError will be set to Error.SimLocked).
+    // |networkGuid|: The GUID of the cellular network to set the SIM state of.
+    // |simState|: The SIM state to set.
+    // |callback|: Called when the operation has completed.
+    static void setCellularSimState(DOMString networkGuid,
+                                    CellularSimState simState,
+                                    optional VoidCallback callback);
   };
 
   interface Events {

@@ -18,14 +18,14 @@
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
-#include "core/page/Chrome.h"
+#include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
 #include "public/platform/WebScreenInfo.h"
 
 namespace blink {
 
-PassRefPtr<MediaValues> MediaValues::createDynamicIfFrameExists(LocalFrame* frame)
+PassRefPtrWillBeRawPtr<MediaValues> MediaValues::createDynamicIfFrameExists(LocalFrame* frame)
 {
     if (frame)
         return MediaValuesDynamic::create(frame);
@@ -49,7 +49,7 @@ int MediaValues::calculateViewportHeight(LocalFrame* frame) const
 int MediaValues::calculateDeviceWidth(LocalFrame* frame) const
 {
     ASSERT(frame && frame->view() && frame->settings() && frame->host());
-    int deviceWidth = frame->host()->chrome().screenInfo().rect.width;
+    int deviceWidth = frame->host()->chromeClient().screenInfo().rect.width;
     if (frame->settings()->reportScreenSizeInPhysicalPixelsQuirk())
         deviceWidth = lroundf(deviceWidth * frame->host()->deviceScaleFactor());
     return deviceWidth;
@@ -58,7 +58,7 @@ int MediaValues::calculateDeviceWidth(LocalFrame* frame) const
 int MediaValues::calculateDeviceHeight(LocalFrame* frame) const
 {
     ASSERT(frame && frame->view() && frame->settings() && frame->host());
-    int deviceHeight = frame->host()->chrome().screenInfo().rect.height;
+    int deviceHeight = frame->host()->chromeClient().screenInfo().rect.height;
     if (frame->settings()->reportScreenSizeInPhysicalPixelsQuirk())
         deviceHeight = lroundf(deviceHeight * frame->host()->deviceScaleFactor());
     return deviceHeight;
@@ -79,18 +79,18 @@ int MediaValues::calculateColorBitsPerComponent(LocalFrame* frame) const
 {
     ASSERT(frame && frame->page() && frame->page()->mainFrame());
     if (!frame->page()->mainFrame()->isLocalFrame()
-        || frame->host()->chrome().screenInfo().isMonochrome)
+        || frame->host()->chromeClient().screenInfo().isMonochrome)
         return 0;
-    return frame->host()->chrome().screenInfo().depthPerComponent;
+    return frame->host()->chromeClient().screenInfo().depthPerComponent;
 }
 
 int MediaValues::calculateMonochromeBitsPerComponent(LocalFrame* frame) const
 {
     ASSERT(frame && frame->page() && frame->page()->mainFrame());
     if (!frame->page()->mainFrame()->isLocalFrame()
-        || !frame->host()->chrome().screenInfo().isMonochrome)
+        || !frame->host()->chromeClient().screenInfo().isMonochrome)
         return 0;
-    return frame->host()->chrome().screenInfo().depthPerComponent;
+    return frame->host()->chromeClient().screenInfo().depthPerComponent;
 }
 
 int MediaValues::calculateDefaultFontSize(LocalFrame* frame) const
@@ -162,49 +162,49 @@ bool MediaValues::computeLengthImpl(double value, CSSPrimitiveValue::UnitType ty
     // FIXME - Unite the logic here with CSSPrimitiveValue in a performant way.
     double factor = 0;
     switch (type) {
-    case CSSPrimitiveValue::CSS_EMS:
-    case CSSPrimitiveValue::CSS_REMS:
+    case CSSPrimitiveValue::UnitType::Ems:
+    case CSSPrimitiveValue::UnitType::Rems:
         factor = defaultFontSize;
         break;
-    case CSSPrimitiveValue::CSS_PX:
+    case CSSPrimitiveValue::UnitType::Pixels:
         factor = 1;
         break;
-    case CSSPrimitiveValue::CSS_EXS:
+    case CSSPrimitiveValue::UnitType::Exs:
         // FIXME: We have a bug right now where the zoom will be applied twice to EX units.
         // FIXME: We don't seem to be able to cache fontMetrics related values.
         // Trying to access them is triggering some sort of microtask. Serving the spec's default instead.
         factor = defaultFontSize / 2.0;
         break;
-    case CSSPrimitiveValue::CSS_CHS:
+    case CSSPrimitiveValue::UnitType::Chs:
         // FIXME: We don't seem to be able to cache fontMetrics related values.
         // Trying to access them is triggering some sort of microtask. Serving the (future) spec default instead.
         factor = defaultFontSize / 2.0;
         break;
-    case CSSPrimitiveValue::CSS_VW:
+    case CSSPrimitiveValue::UnitType::ViewportWidth:
         factor = viewportWidth / 100.0;
         break;
-    case CSSPrimitiveValue::CSS_VH:
+    case CSSPrimitiveValue::UnitType::ViewportHeight:
         factor = viewportHeight / 100.0;
         break;
-    case CSSPrimitiveValue::CSS_VMIN:
+    case CSSPrimitiveValue::UnitType::ViewportMin:
         factor = std::min(viewportWidth, viewportHeight) / 100.0;
         break;
-    case CSSPrimitiveValue::CSS_VMAX:
+    case CSSPrimitiveValue::UnitType::ViewportMax:
         factor = std::max(viewportWidth, viewportHeight) / 100.0;
         break;
-    case CSSPrimitiveValue::CSS_CM:
+    case CSSPrimitiveValue::UnitType::Centimeters:
         factor = cssPixelsPerCentimeter;
         break;
-    case CSSPrimitiveValue::CSS_MM:
+    case CSSPrimitiveValue::UnitType::Millimeters:
         factor = cssPixelsPerMillimeter;
         break;
-    case CSSPrimitiveValue::CSS_IN:
+    case CSSPrimitiveValue::UnitType::Inches:
         factor = cssPixelsPerInch;
         break;
-    case CSSPrimitiveValue::CSS_PT:
+    case CSSPrimitiveValue::UnitType::Points:
         factor = cssPixelsPerPoint;
         break;
-    case CSSPrimitiveValue::CSS_PC:
+    case CSSPrimitiveValue::UnitType::Picas:
         factor = cssPixelsPerPica;
         break;
     default:

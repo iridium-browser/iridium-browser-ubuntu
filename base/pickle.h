@@ -15,6 +15,8 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 
+namespace base {
+
 class Pickle;
 
 // PickleIterator reads data from a Pickle. The Pickle object must remain valid
@@ -41,10 +43,10 @@ class BASE_EXPORT PickleIterator {
   bool ReadDouble(double* result) WARN_UNUSED_RESULT;
   bool ReadString(std::string* result) WARN_UNUSED_RESULT;
   // The StringPiece data will only be valid for the lifetime of the message.
-  bool ReadStringPiece(base::StringPiece* result) WARN_UNUSED_RESULT;
-  bool ReadString16(base::string16* result) WARN_UNUSED_RESULT;
+  bool ReadStringPiece(StringPiece* result) WARN_UNUSED_RESULT;
+  bool ReadString16(string16* result) WARN_UNUSED_RESULT;
   // The StringPiece16 data will only be valid for the lifetime of the message.
-  bool ReadStringPiece16(base::StringPiece16* result) WARN_UNUSED_RESULT;
+  bool ReadStringPiece16(StringPiece16* result) WARN_UNUSED_RESULT;
 
   // A pointer to the data will be placed in |*data|, and the length will be
   // placed in |*length|. The pointer placed into |*data| points into the
@@ -72,11 +74,6 @@ class BASE_EXPORT PickleIterator {
   }
 
  private:
-  // Aligns 'i' by rounding it up to the next multiple of 'alignment'.
-  static size_t AlignInt(size_t i, int alignment) {
-    return i + (alignment - (i % alignment)) % alignment;
-  }
-
   // Read Type from Pickle.
   template <typename Type>
   bool ReadBuiltinType(Type* result);
@@ -151,11 +148,17 @@ class BASE_EXPORT Pickle {
   // Performs a deep copy.
   Pickle& operator=(const Pickle& other);
 
-  // Returns the size of the Pickle's data.
+  // Returns the number of bytes written in the Pickle, including the header.
   size_t size() const { return header_size_ + header_->payload_size; }
 
   // Returns the data for this Pickle.
   const void* data() const { return header_; }
+
+  // Returns the effective memory capacity of this Pickle, that is, the total
+  // number of bytes currently dynamically allocated or 0 in the case of a
+  // read-only Pickle. This should be used only for diagnostic / profiling
+  // purposes.
+  size_t GetTotalAllocatedSize() const;
 
   // Methods for adding to the payload of the Pickle.  These values are
   // appended to the end of the Pickle's payload.  When reading values from a
@@ -199,8 +202,8 @@ class BASE_EXPORT Pickle {
   bool WriteDouble(double value) {
     return WritePOD(value);
   }
-  bool WriteString(const base::StringPiece& value);
-  bool WriteString16(const base::StringPiece16& value);
+  bool WriteString(const StringPiece& value);
+  bool WriteString16(const StringPiece16& value);
   // "Data" is a blob with a length. When you read it out you will be given the
   // length. See also WriteBytes.
   bool WriteData(const char* data, int length);
@@ -262,11 +265,6 @@ class BASE_EXPORT Pickle {
   // of the header.
   void Resize(size_t new_capacity);
 
-  // Aligns 'i' by rounding it up to the next multiple of 'alignment'
-  static size_t AlignInt(size_t i, int alignment) {
-    return i + (alignment - (i % alignment)) % alignment;
-  }
-
   // Find the end of the pickled data that starts at range_start.  Returns NULL
   // if the entire Pickle is not found in the given data range.
   static const char* FindNext(size_t header_size,
@@ -303,5 +301,7 @@ class BASE_EXPORT Pickle {
   FRIEND_TEST_ALL_PREFIXES(PickleTest, FindNextWithIncompleteHeader);
   FRIEND_TEST_ALL_PREFIXES(PickleTest, FindNextOverflow);
 };
+
+}  // namespace base
 
 #endif  // BASE_PICKLE_H_

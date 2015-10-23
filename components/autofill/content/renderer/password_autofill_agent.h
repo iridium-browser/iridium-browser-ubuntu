@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill/core/common/form_data_predictions.h"
+#include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view_observer.h"
@@ -36,8 +37,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // be used for any other autofill activity.
   bool TextFieldDidEndEditing(const blink::WebInputElement& element);
   bool TextDidChangeInTextField(const blink::WebInputElement& element);
-  bool TextFieldHandlingKeyDown(const blink::WebInputElement& element,
-                                const blink::WebKeyboardEvent& event);
 
   // Function that should be called whenever the value of |element| changes due
   // to user input. This is separate from TextDidChangeInTextField() as that
@@ -76,9 +75,9 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // Called when new form controls are inserted.
   void OnDynamicFormsSeen();
 
-  // Called when an XHR has succesfully completed. Used to determine if
-  // a form has been submitted by XHR without navigation.
-  void XHRSucceeded();
+  // Called when an AJAX has succesfully completed. Used to determine if
+  // a form has been submitted by AJAX without navigation.
+  void AJAXSucceeded();
 
   // Called when the user first interacts with the page after a load. This is a
   // signal to make autofilled values of password input elements accessible to
@@ -90,15 +89,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
       const blink::WebSecurityOrigin& origin);
 
  private:
-  enum OtherPossibleUsernamesUsage {
-    NOTHING_TO_AUTOFILL,
-    OTHER_POSSIBLE_USERNAMES_ABSENT,
-    OTHER_POSSIBLE_USERNAMES_PRESENT,
-    OTHER_POSSIBLE_USERNAME_SHOWN,
-    OTHER_POSSIBLE_USERNAME_SELECTED,
-    OTHER_POSSIBLE_USERNAMES_MAX
-  };
-
   // Ways to restrict which passwords are saved in ProvisionallySavePassword.
   enum ProvisionallySaveRestriction {
     RESTRICTION_NONE,
@@ -108,7 +98,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   struct PasswordInfo {
     blink::WebInputElement password_field;
     PasswordFormFillData fill_data;
-    bool backspace_pressed_last;
     // The user manually edited the password more recently than the username was
     // changed.
     bool password_was_edited_last;
@@ -120,8 +109,8 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   typedef std::map<blink::WebElement, int> LoginToPasswordInfoKeyMap;
   typedef std::map<blink::WebInputElement, blink::WebInputElement>
       PasswordToLoginMap;
-  using FormDataFieldDataMap =
-      std::map<autofill::FormData, autofill::FormFieldData>;
+  using FormsPredictionsMap =
+      std::map<autofill::FormData, autofill::PasswordFormFieldPredictionMap>;
 
   // This class keeps track of autofilled password input elements and makes sure
   // the autofilled password value is not accessible to JavaScript code until
@@ -193,7 +182,9 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // RenderView IPC handlers:
   void OnFillPasswordForm(int key, const PasswordFormFillData& form_data);
   void OnSetLoggingState(bool active);
-  void OnAutofillUsernameDataReceived(const FormDataFieldDataMap& predictions);
+  void OnAutofillUsernameAndPasswordDataReceived(
+      const FormsPredictionsMap& predictions);
+  void OnFindFocusedPasswordForm();
 
   // Scans the given frame for password forms and sends them up to the browser.
   // If |only_visible| is true, only forms visible in the layout are sent.
@@ -222,13 +213,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
       const blink::WebInputElement** username_element,
       PasswordInfo** password_info);
 
-  // Fills |login_input| and |password| with the most relevant suggestion from
-  // |fill_data| and shows a popup with other suggestions.
-  void PerformInlineAutocomplete(
-      const blink::WebInputElement& username,
-      const blink::WebInputElement& password,
-      const PasswordFormFillData& fill_data);
-
   // Invoked when the frame is closing.
   void FrameClosing();
 
@@ -242,6 +226,10 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   void ClearPreview(blink::WebInputElement* username,
                     blink::WebInputElement* password);
 
+  // Helper function to create a PasswordForm for a given |form|.
+  scoped_ptr<PasswordForm> CreateSubmittedPasswordForm(
+      const blink::WebFormElement& form);
+
   // Extracts a PasswordForm from |form| and saves it as
   // |provisionally_saved_form_|, as long as it satisfies |restriction|.
   void ProvisionallySavePassword(const blink::WebFormElement& form,
@@ -250,6 +238,9 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // Returns true if |provisionally_saved_form_| has enough information that
   // it is likely filled out.
   bool ProvisionallySavedPasswordIsValid();
+
+  // Helper function called when in-page navigation completed
+  void OnSamePageNavigationCompleted();
 
   // Passes through |RenderViewObserver| method to |this|.
   LegacyPasswordAutofillAgent legacy_;
@@ -260,9 +251,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   LoginToPasswordInfoKeyMap login_to_password_info_key_;
   // A (sort-of) reverse map to |login_to_password_info_|.
   PasswordToLoginMap password_to_username_;
-
-  // Used for UMA stats.
-  OtherPossibleUsernamesUsage usernames_usage_;
 
   // Set if the user might be submitting a password form on the current page,
   // but the submit may still fail (i.e. doesn't pass JavaScript validation).
@@ -284,20 +272,15 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // True indicates that the password field was autofilled, false otherwise.
   bool was_password_autofilled_;
 
-  // Records original starting point of username element's selection range
-  // before preview.
-  int username_selection_start_;
+  // Records the username typed before suggestions preview.
+  base::string16 username_query_prefix_;
 
   // True indicates that all frames in a page have been rendered.
   bool did_stop_loading_;
 
-  // True indicates that there is a command line flag to enable showing of
-  // save password prompt on in-page navigations.
-  bool save_password_on_in_page_navigation_;
-
-  // Contains server predictions for which field is the username field for forms
-  // on the page.
-  FormDataFieldDataMap form_predictions_;
+  // Contains server predictions for username, password and/or new password
+  // fields for individual forms.
+  FormsPredictionsMap form_predictions_;
 
   base::WeakPtrFactory<PasswordAutofillAgent> weak_ptr_factory_;
 

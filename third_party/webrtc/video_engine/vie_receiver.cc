@@ -21,7 +21,6 @@
 #include "webrtc/modules/rtp_rtcp/interface/rtp_payload_registry.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_receiver.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
-#include "webrtc/modules/utility/interface/rtp_dump.h"
 #include "webrtc/modules/video_coding/main/interface/video_coding.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
@@ -55,34 +54,30 @@ ViEReceiver::ViEReceiver(const int32_t channel_id,
       vcm_(module_vcm),
       remote_bitrate_estimator_(remote_bitrate_estimator),
       ntp_estimator_(new RemoteNtpTimeEstimator(clock_)),
-      rtp_dump_(NULL),
       receiving_(false),
       restored_packet_in_use_(false),
       receiving_ast_enabled_(false),
       receiving_cvo_enabled_(false),
+      receiving_tsn_enabled_(false),
       last_packet_log_ms_(-1) {
   assert(remote_bitrate_estimator);
 }
 
 ViEReceiver::~ViEReceiver() {
   UpdateHistograms();
-  if (rtp_dump_) {
-    rtp_dump_->Stop();
-    RtpDump::DestroyRtpDump(rtp_dump_);
-    rtp_dump_ = NULL;
-  }
 }
 
 void ViEReceiver::UpdateHistograms() {
   FecPacketCounter counter = fec_receiver_->GetPacketCounter();
   if (counter.num_packets > 0) {
-    RTC_HISTOGRAM_PERCENTAGE("WebRTC.Video.ReceivedFecPacketsInPercent",
-        counter.num_fec_packets * 100 / counter.num_packets);
+    RTC_HISTOGRAM_PERCENTAGE(
+        "WebRTC.Video.ReceivedFecPacketsInPercent",
+        static_cast<int>(counter.num_fec_packets * 100 / counter.num_packets));
   }
   if (counter.num_fec_packets > 0) {
-    RTC_HISTOGRAM_PERCENTAGE(
-        "WebRTC.Video.RecoveredMediaPacketsInPercentOfFec",
-            counter.num_recovered_packets * 100 / counter.num_fec_packets);
+    RTC_HISTOGRAM_PERCENTAGE("WebRTC.Video.RecoveredMediaPacketsInPercentOfFec",
+                             static_cast<int>(counter.num_recovered_packets *
+                                              100 / counter.num_fec_packets));
   }
 }
 
@@ -153,16 +148,14 @@ RtpReceiver* ViEReceiver::GetRtpReceiver() const {
   return rtp_receiver_.get();
 }
 
-void ViEReceiver::RegisterSimulcastRtpRtcpModules(
-    const std::list<RtpRtcp*>& rtp_modules) {
+void ViEReceiver::RegisterRtpRtcpModules(
+    const std::vector<RtpRtcp*>& rtp_modules) {
   CriticalSectionScoped cs(receive_cs_.get());
-  rtp_rtcp_simulcast_.clear();
-
-  if (!rtp_modules.empty()) {
-    rtp_rtcp_simulcast_.insert(rtp_rtcp_simulcast_.begin(),
-                               rtp_modules.begin(),
-                               rtp_modules.end());
-  }
+  // Only change the "simulcast" modules, the base module can be accessed
+  // without a lock whereas the simulcast modules require locking as they can be
+  // changed in runtime.
+  rtp_rtcp_simulcast_ =
+      std::vector<RtpRtcp*>(rtp_modules.begin() + 1, rtp_modules.end());
 }
 
 bool ViEReceiver::SetReceiveTimestampOffsetStatus(bool enable, int id) {
@@ -204,6 +197,22 @@ bool ViEReceiver::SetReceiveVideoRotationStatus(bool enable, int id) {
     receiving_cvo_enabled_ = false;
     return rtp_header_parser_->DeregisterRtpHeaderExtension(
         kRtpExtensionVideoRotation);
+  }
+}
+
+bool ViEReceiver::SetReceiveTransportSequenceNumber(bool enable, int id) {
+  if (enable) {
+    if (rtp_header_parser_->RegisterRtpHeaderExtension(
+            kRtpExtensionTransportSequenceNumber, id)) {
+      receiving_tsn_enabled_ = true;
+      return true;
+    } else {
+      return false;
+    }
+  } else {
+    receiving_tsn_enabled_ = false;
+    return rtp_header_parser_->DeregisterRtpHeaderExtension(
+        kRtpExtensionTransportSequenceNumber);
   }
 }
 
@@ -254,9 +263,6 @@ int ViEReceiver::InsertRTPPacket(const uint8_t* rtp_packet,
     if (!receiving_) {
       return -1;
     }
-    if (rtp_dump_) {
-      rtp_dump_->DumpPacket(rtp_packet, rtp_packet_length);
-    }
   }
 
   RTPHeader header;
@@ -290,8 +296,8 @@ int ViEReceiver::InsertRTPPacket(const uint8_t* rtp_packet,
     }
   }
 
-  remote_bitrate_estimator_->IncomingPacket(arrival_time_ms,
-                                            payload_length, header);
+  remote_bitrate_estimator_->IncomingPacket(arrival_time_ms, payload_length,
+                                            header, true);
   header.payload_type_frequency = kVideoPayloadTypeFrequency;
 
   bool in_order = IsPacketInOrder(header);
@@ -407,15 +413,8 @@ int ViEReceiver::InsertRTCPPacket(const uint8_t* rtcp_packet,
       return -1;
     }
 
-    if (rtp_dump_) {
-      rtp_dump_->DumpPacket(rtcp_packet, rtcp_packet_length);
-    }
-
-    std::list<RtpRtcp*>::iterator it = rtp_rtcp_simulcast_.begin();
-    while (it != rtp_rtcp_simulcast_.end()) {
-      RtpRtcp* rtp_rtcp = *it++;
+    for (RtpRtcp* rtp_rtcp : rtp_rtcp_simulcast_)
       rtp_rtcp->IncomingRtcpPacket(rtcp_packet, rtcp_packet_length);
-    }
   }
   assert(rtp_rtcp_);  // Should be set by owner at construction time.
   int ret = rtp_rtcp_->IncomingRtcpPacket(rtcp_packet, rtcp_packet_length);
@@ -450,39 +449,6 @@ void ViEReceiver::StartReceive() {
 void ViEReceiver::StopReceive() {
   CriticalSectionScoped cs(receive_cs_.get());
   receiving_ = false;
-}
-
-int ViEReceiver::StartRTPDump(const char file_nameUTF8[1024]) {
-  CriticalSectionScoped cs(receive_cs_.get());
-  if (rtp_dump_) {
-    // Restart it if it already exists and is started
-    rtp_dump_->Stop();
-  } else {
-    rtp_dump_ = RtpDump::CreateRtpDump();
-    if (rtp_dump_ == NULL) {
-      return -1;
-    }
-  }
-  if (rtp_dump_->Start(file_nameUTF8) != 0) {
-    RtpDump::DestroyRtpDump(rtp_dump_);
-    rtp_dump_ = NULL;
-    return -1;
-  }
-  return 0;
-}
-
-int ViEReceiver::StopRTPDump() {
-  CriticalSectionScoped cs(receive_cs_.get());
-  if (rtp_dump_) {
-    if (rtp_dump_->IsActive()) {
-      rtp_dump_->Stop();
-    }
-    RtpDump::DestroyRtpDump(rtp_dump_);
-    rtp_dump_ = NULL;
-  } else {
-    return -1;
-  }
-  return 0;
 }
 
 ReceiveStatistics* ViEReceiver::GetReceiveStatistics() const {

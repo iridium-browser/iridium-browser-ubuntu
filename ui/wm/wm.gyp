@@ -56,8 +56,6 @@
         'core/focus_rules.h',
         'core/image_grid.cc',
         'core/image_grid.h',
-        'core/input_method_event_filter.cc',
-        'core/input_method_event_filter.h',
         'core/masked_window_targeter.cc',
         'core/masked_window_targeter.h',
         'core/native_cursor_manager.h',
@@ -100,6 +98,15 @@
         ['use_x11==1', {
           'dependencies': [
             '../../build/linux/system.gyp:x11',
+          ],
+        }],
+        ['OS=="android"', {
+          'sources!': [
+            'core/nested_accelerator_controller.cc',
+            'core/nested_accelerator_controller.h',
+            'core/nested_accelerator_delegate.h',
+            'core/nested_accelerator_dispatcher.cc',
+            'core/nested_accelerator_dispatcher.h',
           ],
         }],
       ],
@@ -147,7 +154,6 @@
         'core/cursor_manager_unittest.cc',
         'core/focus_controller_unittest.cc',
         'core/image_grid_unittest.cc',
-        'core/input_method_event_filter_unittest.cc',
         'core/nested_accelerator_controller_unittest.cc',
         'core/shadow_controller_unittest.cc',
         'core/shadow_unittest.cc',
@@ -159,5 +165,24 @@
         'test/run_all_unittests.cc',
       ],
     },
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'wm_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'wm_unittests',
+          ],
+          'includes': [
+            '../../build/isolate.gypi',
+          ],
+          'sources': [
+            'wm_unittests.isolate',
+          ],
+        },
+      ],
+    }],
   ],
 }

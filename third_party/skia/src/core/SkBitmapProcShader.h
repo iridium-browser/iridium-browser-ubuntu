@@ -11,8 +11,9 @@
 #define SkBitmapProcShader_DEFINED
 
 #include "SkShader.h"
-#include "SkBitmapProcState.h"
 #include "SkSmallAllocator.h"
+
+struct SkBitmapProcState;
 
 class SkBitmapProcShader : public SkShader {
 public:
@@ -25,21 +26,20 @@ public:
 
     size_t contextSize() const override;
 
-    static bool CanDo(const SkBitmap&, TileMode tx, TileMode ty);
-
     SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkBitmapProcShader)
 
 
     bool asFragmentProcessor(GrContext*, const SkPaint&, const SkMatrix& viewM, const SkMatrix*,
-                             GrColor*, GrFragmentProcessor**) const override;
+                             GrColor*, GrProcessorDataManager*,
+                             GrFragmentProcessor**) const override;
 
     class BitmapProcShaderContext : public SkShader::Context {
     public:
         // The context takes ownership of the state. It will call its destructor
         // but will NOT free the memory.
         BitmapProcShaderContext(const SkBitmapProcShader&, const ContextRec&, SkBitmapProcState*);
-        virtual ~BitmapProcShaderContext();
+        ~BitmapProcShaderContext() override;
 
         void shadeSpan(int x, int y, SkPMColor dstC[], int count) override;
         ShadeProc asAShadeProc(void** ctx) override;
@@ -70,7 +70,7 @@ private:
 // an Sk3DBlitter in SkDraw.cpp
 // Note that some contexts may contain other contexts (e.g. for compose shaders), but we've not
 // yet found a situation where the size below isn't big enough.
-typedef SkSmallAllocator<3, 1024> SkTBlitterAllocator;
+typedef SkSmallAllocator<3, 1152> SkTBlitterAllocator;
 
 // If alloc is non-NULL, it will be used to allocate the returned SkShader, and MUST outlive
 // the SkShader.

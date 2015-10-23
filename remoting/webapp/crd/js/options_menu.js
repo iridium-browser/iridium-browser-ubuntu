@@ -15,6 +15,7 @@ var remoting = remoting || {};
 /**
  * @param {Element} sendCtrlAltDel
  * @param {Element} sendPrtScrn
+ * @param {Element} mapRightCtrl
  * @param {Element} resizeToClient
  * @param {Element} shrinkToFit
  * @param {Element} newConnection
@@ -23,12 +24,13 @@ var remoting = remoting || {};
  * @param {Element?} startStopRecording
  * @constructor
  */
-remoting.OptionsMenu = function(sendCtrlAltDel, sendPrtScrn,
+remoting.OptionsMenu = function(sendCtrlAltDel, sendPrtScrn, mapRightCtrl,
                                 resizeToClient, shrinkToFit,
                                 newConnection, fullscreen, toggleStats,
                                 startStopRecording) {
   this.sendCtrlAltDel_ = sendCtrlAltDel;
   this.sendPrtScrn_ = sendPrtScrn;
+  this.mapRightCtrl_ = mapRightCtrl;
   this.resizeToClient_ = resizeToClient;
   this.shrinkToFit_ = shrinkToFit;
   this.newConnection_ = newConnection;
@@ -43,6 +45,8 @@ remoting.OptionsMenu = function(sendCtrlAltDel, sendPrtScrn,
       'click', this.onSendCtrlAltDel_.bind(this), false);
   this.sendPrtScrn_.addEventListener(
       'click', this.onSendPrtScrn_.bind(this), false);
+  this.mapRightCtrl_.addEventListener(
+      'click', this.onMapRightCtrl_.bind(this), false);
   this.resizeToClient_.addEventListener(
       'click', this.onResizeToClient_.bind(this), false);
   this.shrinkToFit_.addEventListener(
@@ -74,9 +78,14 @@ remoting.OptionsMenu.prototype.setDesktopConnectedView = function(
 
 remoting.OptionsMenu.prototype.onShow = function() {
   if (this.desktopConnectedView_) {
-    base.debug.assert(remoting.app instanceof remoting.DesktopRemoting);
+    console.assert(remoting.app instanceof remoting.DesktopRemoting,
+                  '|remoting.app| is not an instance of DesktopRemoting.');
     var drApp = /** @type {remoting.DesktopRemoting} */ (remoting.app);
     var mode = drApp.getConnectionMode();
+
+    this.mapRightCtrl_.hidden = !remoting.platformIsChromeOS();
+    remoting.MenuButton.select(
+        this.mapRightCtrl_, this.desktopConnectedView_.getMapRightCtrl());
 
     this.resizeToClient_.hidden = mode === remoting.DesktopRemoting.Mode.IT2ME;
     remoting.MenuButton.select(
@@ -118,6 +127,13 @@ remoting.OptionsMenu.prototype.onSendPrtScrn_ = function() {
   }
 };
 
+remoting.OptionsMenu.prototype.onMapRightCtrl_ = function() {
+  if (this.desktopConnectedView_) {
+    this.desktopConnectedView_.setMapRightCtrl(
+        !this.desktopConnectedView_.getMapRightCtrl());
+  }
+};
+
 remoting.OptionsMenu.prototype.onResizeToClient_ = function() {
   if (this.desktopConnectedView_) {
     this.desktopConnectedView_.setScreenMode(
@@ -135,11 +151,7 @@ remoting.OptionsMenu.prototype.onShrinkToFit_ = function() {
 };
 
 remoting.OptionsMenu.prototype.onNewConnection_ = function() {
-  chrome.app.window.create('main.html', {
-    'width': 800,
-    'height': 600,
-    'frame': 'none'
-  });
+  base.Ipc.invoke('remoting.ActivationHandler.launch');
 };
 
 remoting.OptionsMenu.prototype.onFullscreen_ = function() {

@@ -33,6 +33,7 @@
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/FloatSize.h"
 #include "third_party/skia/include/core/SkRRect.h"
+#include <iosfwd>
 
 namespace blink {
 
@@ -94,6 +95,7 @@ public:
         FloatSize m_bottomRight;
     };
 
+    FloatRoundedRect() { }
     explicit FloatRoundedRect(const FloatRect&, const Radii& = Radii());
     FloatRoundedRect(float x, float y, float width, float height);
     FloatRoundedRect(const FloatRect&, const FloatSize& topLeft, const FloatSize& topRight, const FloatSize& bottomLeft, const FloatSize& bottomRight);
@@ -201,6 +203,11 @@ inline bool operator==(const FloatRoundedRect& a, const FloatRoundedRect& b)
 {
     return a.rect() == b.rect() && a.radii() == b.radii();
 }
+
+// Redeclared here to avoid ODR issues.
+// See platform/testing/GeometryPrinters.h.
+void PrintTo(const FloatRoundedRect&, std::ostream*);
+void PrintTo(const FloatRoundedRect::Radii&, std::ostream*);
 
 } // namespace blink
 

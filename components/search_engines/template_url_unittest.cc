@@ -424,8 +424,9 @@ TEST_F(TemplateURLTest, ReplaceSearchTerms) {
     EXPECT_TRUE(url.url_ref().IsValid(search_terms_data_));
     ASSERT_TRUE(url.url_ref().SupportsReplacement(search_terms_data_));
     std::string expected_result = test_data[i].expected_result;
-    ReplaceSubstringsAfterOffset(&expected_result, 0, "{language}",
-                                 search_terms_data_.GetApplicationLocale());
+    base::ReplaceSubstringsAfterOffset(
+        &expected_result, 0, "{language}",
+        search_terms_data_.GetApplicationLocale());
     GURL result(url.url_ref().ReplaceSearchTerms(
         TemplateURLRef::SearchTermsArgs(ASCIIToUTF16("X")),
         search_terms_data_));
@@ -797,6 +798,10 @@ TEST_F(TemplateURLTest, SearchTermKeyLocation) {
       "/", std::string::npos },
     { "http://blah/?foo=bar#x={searchTerms}&b=x", url::Parsed::REF,
       "/", std::string::npos },
+    // searchTerms is a key, not a value, so this should result in an empty
+    // value.
+    { "http://blah/?foo=bar#x=012345678901234&a=b&{searchTerms}=x",
+      url::Parsed::QUERY, std::string(), std::string::npos },
 
     // Multiple search terms should result in empty values.
     { "http://blah/{searchTerms}?q={searchTerms}", url::Parsed::QUERY,
@@ -1626,7 +1631,7 @@ TEST_F(TemplateURLTest, ReflectsBookmarkBarPinned) {
   EXPECT_EQ("http://www.google.com/?bmbp=1&q=foo", result);
 }
 
-TEST_F(TemplateURLTest, AnswersHasVersion) {
+TEST_F(TemplateURLTest, SearchboxVersionIncludedForAnswers) {
   TemplateURLData data;
   search_terms_data_.set_google_base_url("http://bar/");
   data.SetURL("http://bar/search?q={searchTerms}&{google:searchVersion}xssi=t");
@@ -1635,12 +1640,6 @@ TEST_F(TemplateURLTest, AnswersHasVersion) {
   TemplateURLRef::SearchTermsArgs search_terms_args(ASCIIToUTF16("foo"));
   std::string result = url.url_ref().ReplaceSearchTerms(search_terms_args,
                                                         search_terms_data_);
-  EXPECT_EQ("http://bar/search?q=foo&xssi=t", result);
-
-  search_terms_data_.set_enable_answers_in_suggest(true);
-  TemplateURL url2(data);
-  result = url2.url_ref().ReplaceSearchTerms(search_terms_args,
-                                             search_terms_data_);
   EXPECT_EQ("http://bar/search?q=foo&gs_rn=42&xssi=t", result);
 }
 
@@ -1695,17 +1694,21 @@ TEST_F(TemplateURLTest, ContextualSearchParameters) {
 }
 
 TEST_F(TemplateURLTest, GenerateKeyword) {
+  std::string accept_languages = "en,ru";
   ASSERT_EQ(ASCIIToUTF16("foo"),
-            TemplateURL::GenerateKeyword(GURL("http://foo")));
+            TemplateURL::GenerateKeyword(GURL("http://foo"), accept_languages));
   // www. should be stripped.
-  ASSERT_EQ(ASCIIToUTF16("foo"),
-            TemplateURL::GenerateKeyword(GURL("http://www.foo")));
+  ASSERT_EQ(ASCIIToUTF16("foo"), TemplateURL::GenerateKeyword(
+                                     GURL("http://www.foo"), accept_languages));
   // Make sure we don't get a trailing '/'.
-  ASSERT_EQ(ASCIIToUTF16("blah"),
-            TemplateURL::GenerateKeyword(GURL("http://blah/")));
+  ASSERT_EQ(ASCIIToUTF16("blah"), TemplateURL::GenerateKeyword(
+                                      GURL("http://blah/"), accept_languages));
   // Don't generate the empty string.
-  ASSERT_EQ(ASCIIToUTF16("www"),
-            TemplateURL::GenerateKeyword(GURL("http://www.")));
+  ASSERT_EQ(ASCIIToUTF16("www"), TemplateURL::GenerateKeyword(
+                                     GURL("http://www."), accept_languages));
+  ASSERT_EQ(
+      base::UTF8ToUTF16("\xd0\xb0\xd0\xb1\xd0\xb2"),
+      TemplateURL::GenerateKeyword(GURL("http://xn--80acd"), accept_languages));
 }
 
 TEST_F(TemplateURLTest, GenerateSearchURL) {

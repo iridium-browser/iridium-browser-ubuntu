@@ -23,12 +23,15 @@
 #include "third_party/WebKit/public/platform/WebImage.h"
 #include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
+#include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "url/gurl.h"
 
 using blink::WebDataSource;
 using blink::WebElement;
@@ -94,6 +97,8 @@ bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
     return false;
 
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderFrameObserver, message)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_RequestReloadImageForContextNode,
+                        OnRequestReloadImageForContextNode)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_RequestThumbnailForContextNode,
                         OnRequestThumbnailForContextNode)
     IPC_MESSAGE_HANDLER(PrintMsg_PrintNodeUnderContextMenu,
@@ -120,6 +125,14 @@ void ChromeRenderFrameObserver::OnSetIsPrerendering(bool is_prerendering) {
     // The PrerenderHelper will destroy itself either after recording histograms
     // or on destruction of the RenderView.
     new prerender::PrerenderHelper(render_frame());
+  }
+}
+
+void ChromeRenderFrameObserver::OnRequestReloadImageForContextNode() {
+  WebNode context_node = render_frame()->GetContextMenuNode();
+  if (!context_node.isNull() && context_node.isElementNode() &&
+      render_frame()->GetWebFrame()) {
+    render_frame()->GetWebFrame()->reloadImage(context_node);
   }
 }
 
@@ -197,18 +210,27 @@ void ChromeRenderFrameObserver::DidFinishDocumentLoad() {
 }
 
 void ChromeRenderFrameObserver::OnAppBannerPromptRequest(
-    int request_id, const std::string& platform) {
+    int request_id,
+    const std::string& platform) {
   // App banner prompt requests are handled in the general chrome render frame
   // observer, not the AppBannerClient, as the AppBannerClient is created lazily
   // by blink and may not exist when the request is sent.
   blink::WebAppBannerPromptReply reply = blink::WebAppBannerPromptReply::None;
   blink::WebString web_platform(base::UTF8ToUTF16(platform));
   blink::WebVector<blink::WebString> web_platforms(&web_platform, 1);
-  render_frame()->GetWebFrame()->willShowInstallBannerPrompt(
-      request_id, web_platforms, &reply);
+
+  blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
+  frame->willShowInstallBannerPrompt(request_id, web_platforms, &reply);
+
+  // Extract the referrer header for this site according to its referrer policy.
+  // Pass in an empty URL as the destination so that it is always treated
+  // as a cross-origin request.
+  std::string referrer = blink::WebSecurityPolicy::generateReferrerHeader(
+      frame->document().referrerPolicy(), GURL(),
+      frame->document().outgoingReferrer()).utf8();
 
   Send(new ChromeViewHostMsg_AppBannerPromptReply(
-      routing_id(), request_id, reply));
+      routing_id(), request_id, reply, referrer));
 }
 
 void ChromeRenderFrameObserver::OnAppBannerDebugMessageRequest(

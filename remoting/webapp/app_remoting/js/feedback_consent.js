@@ -5,6 +5,11 @@
 'use strict';
 
 /**
+ * @type {string} The app id (from the webstore) for this application.
+ */
+var appId = '';
+
+/**
  * @type {string} The host id corresponding to the user's VM. The @pending
  *     place-holder instructs the Orchestrator to abandon any pending host,
  *     and is used if no host id is provided by the main window.
@@ -16,6 +21,11 @@ var hostId = '@pending';
  *     was shown.
  */
 var connectionStats = '';
+
+/**
+ * @type {string} JSON representation of recent console error messages.
+ */
+var consoleErrors = '';
 
 /**
  * @type {string} The most recent id for the session (unless the session is
@@ -121,13 +131,15 @@ function generateId() {
 }
 
 /**
- * @param {string} token
+ * @param {string=} token
  */
 function onToken(token) {
   var getUserInfo = function() {
+    console.assert(Boolean(token), 'token is undefined.');
     var oauth2Api = new remoting.OAuth2ApiImpl();
     oauth2Api.getUserInfo(
-        onUserInfo, onUserInfo.bind(null, 'unknown', 'unknown'), token);
+        onUserInfo, onUserInfo.bind(null, 'unknown', 'unknown'),
+        /** @type {string} */(token));
   };
   if (!token) {
     onUserInfo('unknown', 'unknown');
@@ -138,7 +150,7 @@ function onToken(token) {
         'crashServiceReportId': crashServiceReportId
       };
       var uri = remoting.settings.APP_REMOTING_API_BASE_URL +
-          '/applications/' + remoting.settings.getAppRemotingApplicationId() +
+          '/applications/' + appId +
           '/hosts/'  + hostId +
           '/reportIssue';
       var onDone = function(/** !remoting.Xhr.Response */ response) {
@@ -211,7 +223,9 @@ function onLearnMore(event) {
 function onCategorySelect() {
   var feedbackCategory = /** @type {HTMLSelectElement} */
       (document.getElementById('feedback-category'));
-  base.debug.assert(feedbackCategory.selectedOptions.length == 1);
+  console.assert(feedbackCategory.selectedOptions.length == 1,
+                'Expected exactly one selection; got ' +
+                feedbackCategory.selectedOptions.length + '.');
   var selectedOption = /** @type {HTMLElement} */
       (feedbackCategory.selectedOptions[0]);
   selectedCategory = selectedOption.getAttribute('i18n-content');
@@ -248,7 +262,9 @@ function onWindowMessage(event) {
     if (event.data['hostId']) {
       hostId = /** @type {string} */ (event.data['hostId']);
     }
+    appId = /** @type {string} */ (event.data['appId']);
     connectionStats = /** @type {string} */ (event.data['connectionStats']);
+    consoleErrors =  /** @type {string} */ (event.data['consoleErrors']);
     sessionId = /** @type {string} */ (event.data['sessionId']);
   }
 };

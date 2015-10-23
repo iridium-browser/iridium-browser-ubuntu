@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+  // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,14 @@
 #include "skia/ext/refptr.h"
 #include "third_party/libyuv/include/libyuv.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkImageGenerator.h"
 #include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrPaint.h"
+#include "third_party/skia/include/gpu/GrTexture.h"
 #include "third_party/skia/include/gpu/GrTextureProvider.h"
-#include "third_party/skia/include/gpu/SkGrPixelRef.h"
-#include "ui/gfx/skbitmap_operations.h"
+#include "third_party/skia/include/gpu/SkGr.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 // Skia internal format depends on a platform. On Android it is ABGR, on others
 // it is ARGB.
@@ -36,120 +39,15 @@ namespace media {
 
 namespace {
 
-// This class keeps two temporary resources; software bitmap, hardware bitmap.
-// If both bitmap are created and then only software bitmap is updated every
-// frame, hardware bitmap outlives until the media player dies. So we delete
-// a temporary resource if it is not used for 3 sec.
+// This class keeps the last image drawn.
+// We delete the temporary resource if it is not used for 3 seconds.
 const int kTemporaryResourceDeletionDelay = 3;  // Seconds;
 
-bool IsYUV(media::VideoFrame::Format format) {
-  switch (format) {
-    case VideoFrame::YV12:
-    case VideoFrame::YV16:
-    case VideoFrame::I420:
-    case VideoFrame::YV12A:
-    case VideoFrame::YV12J:
-    case VideoFrame::YV12HD:
-    case VideoFrame::YV24:
-    case VideoFrame::NV12:
-      return true;
-    case VideoFrame::UNKNOWN:
-    case VideoFrame::NATIVE_TEXTURE:
-#if defined(VIDEO_HOLE)
-    case VideoFrame::HOLE:
-#endif  // defined(VIDEO_HOLE)
-    case VideoFrame::ARGB:
-      return false;
-  }
-  NOTREACHED() << "Invalid videoframe format provided: " << format;
-  return false;
-}
-
-bool IsJPEGColorSpace(media::VideoFrame::Format format) {
-  switch (format) {
-    case VideoFrame::YV12J:
-      return true;
-    case VideoFrame::YV12:
-    case VideoFrame::YV12HD:
-    case VideoFrame::YV16:
-    case VideoFrame::I420:
-    case VideoFrame::YV12A:
-    case VideoFrame::YV24:
-    case VideoFrame::NV12:
-    case VideoFrame::UNKNOWN:
-    case VideoFrame::NATIVE_TEXTURE:
-#if defined(VIDEO_HOLE)
-    case VideoFrame::HOLE:
-#endif  // defined(VIDEO_HOLE)
-    case VideoFrame::ARGB:
-      return false;
-  }
-  NOTREACHED() << "Invalid videoframe format provided: " << format;
-  return false;
-}
-
-bool IsYUVOrNative(media::VideoFrame::Format format) {
-  return IsYUV(format) || format == media::VideoFrame::NATIVE_TEXTURE;
-}
-
-bool IsSkBitmapProperlySizedTexture(const SkBitmap* bitmap,
-                                    const gfx::Size& size) {
-  return bitmap->getTexture() && bitmap->width() == size.width() &&
-         bitmap->height() == size.height();
-}
-
-bool AllocateSkBitmapTexture(GrContext* gr,
-                             SkBitmap* bitmap,
-                             const gfx::Size& size) {
-  DCHECK(gr);
-  GrTextureDesc desc;
-  // Use kRGBA_8888_GrPixelConfig, not kSkia8888_GrPixelConfig, to avoid
-  // RGBA to BGRA conversion.
-  desc.fConfig = kRGBA_8888_GrPixelConfig;
-  desc.fFlags = kRenderTarget_GrSurfaceFlag;
-  desc.fSampleCnt = 0;
-  desc.fOrigin = kTopLeft_GrSurfaceOrigin;
-  desc.fWidth = size.width();
-  desc.fHeight = size.height();
-  skia::RefPtr<GrTexture> texture = skia::AdoptRef(
-      gr->textureProvider()->refScratchTexture(
-          desc, GrTextureProvider::kExact_ScratchTexMatch));
-  if (!texture.get())
-    return false;
-
-  SkImageInfo info = SkImageInfo::MakeN32Premul(desc.fWidth, desc.fHeight);
-  SkGrPixelRef* pixel_ref = SkNEW_ARGS(SkGrPixelRef, (info, texture.get()));
-  if (!pixel_ref)
-    return false;
-  bitmap->setInfo(info);
-  bitmap->setPixelRef(pixel_ref)->unref();
-  return true;
-}
-
-bool CopyVideoFrameTextureToSkBitmapTexture(VideoFrame* video_frame,
-                                            SkBitmap* bitmap,
-                                            const Context3D& context_3d) {
-  // Check if we could reuse existing texture based bitmap.
-  // Otherwise, release existing texture based bitmap and allocate
-  // a new one based on video size.
-  if (!IsSkBitmapProperlySizedTexture(bitmap,
-                                      video_frame->visible_rect().size())) {
-    if (!AllocateSkBitmapTexture(context_3d.gr_context, bitmap,
-                                 video_frame->visible_rect().size())) {
-      return false;
-    }
-  }
-
-  unsigned texture_id =
-      static_cast<unsigned>((bitmap->getTexture())->getTextureHandle());
-  // If CopyVideoFrameTextureToGLTexture() changes the state of the
-  // |texture_id|, it's needed to invalidate the state cached in skia,
-  // but currently the state isn't changed.
-  SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
-      context_3d.gl, video_frame, texture_id, GL_RGBA, GL_UNSIGNED_BYTE, true,
-      false);
-  bitmap->notifyPixelsChanged();
-  return true;
+bool CheckColorSpace(const VideoFrame* video_frame, ColorSpace color_space) {
+  int result;
+  return video_frame->metadata()->GetInteger(
+             VideoFrameMetadata::COLOR_SPACE, &result) &&
+         result == color_space;
 }
 
 class SyncPointClientImpl : public VideoFrame::SyncPointClient {
@@ -167,6 +65,111 @@ class SyncPointClientImpl : public VideoFrame::SyncPointClient {
   DISALLOW_IMPLICIT_CONSTRUCTORS(SyncPointClientImpl);
 };
 
+skia::RefPtr<SkImage> NewSkImageFromVideoFrameYUVTextures(
+    const VideoFrame* video_frame,
+    const Context3D& context_3d) {
+  // Support only TEXTURE_YUV_420.
+  DCHECK(video_frame->HasTextures());
+  DCHECK_EQ(media::PIXEL_FORMAT_I420, video_frame->format());
+  DCHECK_EQ(3u, media::VideoFrame::NumPlanes(video_frame->format()));
+
+  gpu::gles2::GLES2Interface* gl = context_3d.gl;
+  DCHECK(gl);
+  gfx::Size ya_tex_size = video_frame->coded_size();
+  gfx::Size uv_tex_size((ya_tex_size.width() + 1) / 2,
+                        (ya_tex_size.height() + 1) / 2);
+
+  unsigned source_textures[3] = {0};
+  for (size_t i = 0; i < media::VideoFrame::NumPlanes(video_frame->format());
+       ++i) {
+    // Get the texture from the mailbox and wrap it in a GrTexture.
+    const gpu::MailboxHolder& mailbox_holder = video_frame->mailbox_holder(i);
+    DCHECK(mailbox_holder.texture_target == GL_TEXTURE_2D ||
+           mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES ||
+           mailbox_holder.texture_target == GL_TEXTURE_RECTANGLE_ARB);
+    gl->WaitSyncPointCHROMIUM(mailbox_holder.sync_point);
+    source_textures[i] = gl->CreateAndConsumeTextureCHROMIUM(
+        mailbox_holder.texture_target, mailbox_holder.mailbox.name);
+
+    // TODO(dcastagna): avoid this copy once Skia supports native textures
+    // with a texture target different than TEXTURE_2D.
+    // crbug.com/505026
+    if (mailbox_holder.texture_target != GL_TEXTURE_2D) {
+      unsigned texture_copy = 0;
+      gl->GenTextures(1, &texture_copy);
+      DCHECK(texture_copy);
+      gl->BindTexture(GL_TEXTURE_2D, texture_copy);
+      gl->CopyTextureCHROMIUM(GL_TEXTURE_2D, source_textures[i], texture_copy,
+                              GL_RGB, GL_UNSIGNED_BYTE, false, true, false);
+
+      gl->DeleteTextures(1, &source_textures[i]);
+      source_textures[i] = texture_copy;
+    }
+  }
+  GrBackendObject handles[3] = {
+      source_textures[0], source_textures[1], source_textures[2]};
+
+  SkISize yuvSizes[] = {
+      {ya_tex_size.width(), ya_tex_size.height()},
+      {uv_tex_size.width(), uv_tex_size.height()},
+      {uv_tex_size.width(), uv_tex_size.height()},
+  };
+
+  SkYUVColorSpace color_space = kRec601_SkYUVColorSpace;
+  if (CheckColorSpace(video_frame, media::COLOR_SPACE_JPEG))
+    color_space = kJPEG_SkYUVColorSpace;
+  else if (CheckColorSpace(video_frame, media::COLOR_SPACE_HD_REC709))
+    color_space = kRec709_SkYUVColorSpace;
+
+  SkImage* img = SkImage::NewFromYUVTexturesCopy(context_3d.gr_context,
+                                                 color_space, handles, yuvSizes,
+                                                 kTopLeft_GrSurfaceOrigin);
+  gl->DeleteTextures(3, source_textures);
+  return skia::AdoptRef(img);
+}
+
+// Creates a SkImage from a |video_frame| backed by native resources.
+// The SkImage will take ownership of the underlying resource.
+skia::RefPtr<SkImage> NewSkImageFromVideoFrameNative(
+    VideoFrame* video_frame,
+    const Context3D& context_3d) {
+  DCHECK(PIXEL_FORMAT_ARGB == video_frame->format() ||
+         PIXEL_FORMAT_UYVY == video_frame->format());
+
+  const gpu::MailboxHolder& mailbox_holder = video_frame->mailbox_holder(0);
+  DCHECK(mailbox_holder.texture_target == GL_TEXTURE_2D ||
+         mailbox_holder.texture_target == GL_TEXTURE_RECTANGLE_ARB ||
+         mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES)
+      << mailbox_holder.texture_target;
+
+  gpu::gles2::GLES2Interface* gl = context_3d.gl;
+  unsigned source_texture = 0;
+  if (mailbox_holder.texture_target != GL_TEXTURE_2D) {
+    // TODO(dcastagna): At the moment Skia doesn't support targets different
+    // than GL_TEXTURE_2D.  Avoid this copy once
+    // https://code.google.com/p/skia/issues/detail?id=3868 is addressed.
+    gl->GenTextures(1, &source_texture);
+    DCHECK(source_texture);
+    gl->BindTexture(GL_TEXTURE_2D, source_texture);
+    SkCanvasVideoRenderer::CopyVideoFrameSingleTextureToGLTexture(
+        gl, video_frame, source_texture, GL_RGBA, GL_UNSIGNED_BYTE, true,
+        false);
+  } else {
+    gl->WaitSyncPointCHROMIUM(mailbox_holder.sync_point);
+    source_texture = gl->CreateAndConsumeTextureCHROMIUM(
+        mailbox_holder.texture_target, mailbox_holder.mailbox.name);
+  }
+  GrBackendTextureDesc desc;
+  desc.fFlags = kRenderTarget_GrBackendTextureFlag;
+  desc.fOrigin = kTopLeft_GrSurfaceOrigin;
+  desc.fWidth = video_frame->coded_size().width();
+  desc.fHeight = video_frame->coded_size().height();
+  desc.fConfig = kRGBA_8888_GrPixelConfig;
+  desc.fTextureHandle = source_texture;
+  return skia::AdoptRef(
+      SkImage::NewFromAdoptedTexture(context_3d.gr_context, desc));
+}
+
 }  // anonymous namespace
 
 // Generates an RGB image from a VideoFrame. Convert YUV to RGB plain on GPU.
@@ -175,44 +178,41 @@ class VideoImageGenerator : public SkImageGenerator {
   VideoImageGenerator(const scoped_refptr<VideoFrame>& frame)
       : SkImageGenerator(
             SkImageInfo::MakeN32Premul(frame->visible_rect().width(),
-                                       frame->visible_rect().height()))
-      , frame_(frame) {
-    DCHECK(frame_.get());
+                                       frame->visible_rect().height())),
+        frame_(frame) {
+    DCHECK(!frame_->HasTextures());
   }
   ~VideoImageGenerator() override {}
 
-  void set_frame(const scoped_refptr<VideoFrame>& frame) { frame_ = frame; }
-
  protected:
-  Result onGetPixels(const SkImageInfo& info,
-                     void* pixels,
-                     size_t row_bytes,
-                     SkPMColor ctable[],
-                     int* ctable_count) override {
-    if (!frame_.get())
-      return kInvalidInput;
+  bool onGetPixels(const SkImageInfo& info,
+                   void* pixels,
+                   size_t row_bytes,
+                   SkPMColor ctable[],
+                   int* ctable_count) override {
     // If skia couldn't do the YUV conversion on GPU, we will on CPU.
-    SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
-        frame_, pixels, row_bytes);
-    return kSuccess;
+    SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(frame_.get(), pixels,
+                                                        row_bytes);
+    return true;
   }
 
   bool onGetYUV8Planes(SkISize sizes[3],
                        void* planes[3],
                        size_t row_bytes[3],
                        SkYUVColorSpace* color_space) override {
-    if (!frame_.get() || !IsYUV(frame_->format()) ||
-        // TODO(rileya): Skia currently doesn't support Rec709 YUV conversion,
-        // or YUVA conversion. Remove this case once it does. As-is we will
-        // fall back on the pure-software path in this case.
-        frame_->format() == VideoFrame::YV12HD ||
-        frame_->format() == VideoFrame::YV12A) {
+    if (!media::IsYuvPlanar(frame_->format()) ||
+        // TODO(rileya): Skia currently doesn't support YUVA conversion. Remove
+        // this case once it does. As-is we will fall back on the pure-software
+        // path in this case.
+        frame_->format() == PIXEL_FORMAT_YV12A) {
       return false;
     }
 
     if (color_space) {
-      if (IsJPEGColorSpace(frame_->format()))
+      if (CheckColorSpace(frame_.get(), COLOR_SPACE_JPEG))
         *color_space = kJPEG_SkYUVColorSpace;
+      else if (CheckColorSpace(frame_.get(), COLOR_SPACE_HD_REC709))
+        *color_space = kRec709_SkYUVColorSpace;
       else
         *color_space = kRec601_SkYUVColorSpace;
     }
@@ -220,23 +220,22 @@ class VideoImageGenerator : public SkImageGenerator {
     for (int plane = VideoFrame::kYPlane; plane <= VideoFrame::kVPlane;
          ++plane) {
       if (sizes) {
-        gfx::Size size;
-        size =
-            VideoFrame::PlaneSize(frame_->format(),
-                                  plane,
+        const gfx::Size size =
+            VideoFrame::PlaneSize(frame_->format(), plane,
                                   gfx::Size(frame_->visible_rect().width(),
                                             frame_->visible_rect().height()));
         sizes[plane].set(size.width(), size.height());
       }
       if (row_bytes && planes) {
         size_t offset;
-        int y_shift = (frame_->format() == media::VideoFrame::YV16) ? 0 : 1;
-        if (plane == media::VideoFrame::kYPlane) {
-          offset = (frame_->stride(media::VideoFrame::kYPlane) *
+        const int y_shift =
+            (frame_->format() == media::PIXEL_FORMAT_YV16) ? 0 : 1;
+        if (plane == VideoFrame::kYPlane) {
+          offset = (frame_->stride(VideoFrame::kYPlane) *
                     frame_->visible_rect().y()) +
                    frame_->visible_rect().x();
         } else {
-          offset = (frame_->stride(media::VideoFrame::kUPlane) *
+          offset = (frame_->stride(VideoFrame::kUPlane) *
                     (frame_->visible_rect().y() >> y_shift)) +
                    (frame_->visible_rect().x() >> 1);
         }
@@ -273,23 +272,15 @@ class VideoImageGenerator : public SkImageGenerator {
 };
 
 SkCanvasVideoRenderer::SkCanvasVideoRenderer()
-    : last_frame_timestamp_(media::kNoTimestamp()),
-      frame_deleting_timer_(
+    : last_image_deleting_timer_(
           FROM_HERE,
           base::TimeDelta::FromSeconds(kTemporaryResourceDeletionDelay),
           this,
-          &SkCanvasVideoRenderer::ResetLastFrame),
-      accelerated_generator_(nullptr),
-      accelerated_last_frame_timestamp_(media::kNoTimestamp()),
-      accelerated_frame_deleting_timer_(
-          FROM_HERE,
-          base::TimeDelta::FromSeconds(kTemporaryResourceDeletionDelay),
-          this,
-          &SkCanvasVideoRenderer::ResetAcceleratedLastFrame) {
-  last_frame_.setIsVolatile(true);
-}
+          &SkCanvasVideoRenderer::ResetCache) {}
 
-SkCanvasVideoRenderer::~SkCanvasVideoRenderer() {}
+SkCanvasVideoRenderer::~SkCanvasVideoRenderer() {
+  ResetCache();
+}
 
 void SkCanvasVideoRenderer::Paint(const scoped_refptr<VideoFrame>& video_frame,
                                   SkCanvas* canvas,
@@ -311,96 +302,46 @@ void SkCanvasVideoRenderer::Paint(const scoped_refptr<VideoFrame>& video_frame,
   // Paint black rectangle if there isn't a frame available or the
   // frame has an unexpected format.
   if (!video_frame.get() || video_frame->natural_size().IsEmpty() ||
-      !IsYUVOrNative(video_frame->format())) {
+      !(media::IsYuvPlanar(video_frame->format()) ||
+        video_frame->HasTextures())) {
     canvas->drawRect(dest, paint);
     canvas->flush();
     return;
   }
 
-  SkBitmap* target_frame = nullptr;
+  gpu::gles2::GLES2Interface* gl = context_3d.gl;
 
-  if (video_frame->format() == VideoFrame::NATIVE_TEXTURE) {
-    // Draw HW Video on both SW and HW Canvas.
-    // In SW Canvas case, rely on skia drawing Ganesh SkBitmap on SW SkCanvas.
-    if (accelerated_last_frame_.isNull() ||
-        video_frame->timestamp() != accelerated_last_frame_timestamp_) {
-      DCHECK(context_3d.gl);
+  if (!last_image_ || video_frame->timestamp() != last_timestamp_) {
+    ResetCache();
+    // Generate a new image.
+    // Note: Skia will hold onto |video_frame| via |video_generator| only when
+    // |video_frame| is software.
+    // Holding |video_frame| longer than this call when using GPUVideoDecoder
+    // could cause problems since the pool of VideoFrames has a fixed size.
+    if (video_frame->HasTextures()) {
       DCHECK(context_3d.gr_context);
-      if (accelerated_generator_) {
-        // Reset SkBitmap used in SWVideo-to-HWCanvas path.
-        accelerated_last_frame_.reset();
-        accelerated_generator_ = nullptr;
+      DCHECK(gl);
+      if (media::VideoFrame::NumPlanes(video_frame->format()) == 1) {
+        last_image_ =
+            NewSkImageFromVideoFrameNative(video_frame.get(), context_3d);
+      } else {
+        last_image_ =
+            NewSkImageFromVideoFrameYUVTextures(video_frame.get(), context_3d);
       }
-      if (!CopyVideoFrameTextureToSkBitmapTexture(
-              video_frame.get(), &accelerated_last_frame_, context_3d)) {
-        NOTREACHED();
-        return;
-      }
-      DCHECK(video_frame->visible_rect().width() ==
-                 accelerated_last_frame_.width() &&
-             video_frame->visible_rect().height() ==
-                 accelerated_last_frame_.height());
-
-      accelerated_last_frame_timestamp_ = video_frame->timestamp();
+    } else {
+      auto video_generator = new VideoImageGenerator(video_frame);
+      last_image_ = skia::AdoptRef(SkImage::NewFromGenerator(video_generator));
     }
-    target_frame = &accelerated_last_frame_;
-    accelerated_frame_deleting_timer_.Reset();
-  } else if (canvas->getGrContext()) {
-    DCHECK(video_frame->format() != VideoFrame::NATIVE_TEXTURE);
-    if (accelerated_last_frame_.isNull() ||
-        video_frame->timestamp() != accelerated_last_frame_timestamp_) {
-      // Draw SW Video on HW Canvas.
-      if (!accelerated_generator_ && !accelerated_last_frame_.isNull()) {
-        // Reset SkBitmap used in HWVideo-to-HWCanvas path.
-        accelerated_last_frame_.reset();
-      }
-      accelerated_generator_ = new VideoImageGenerator(video_frame);
-
-      // Note: This takes ownership of |accelerated_generator_|.
-      if (!SkInstallDiscardablePixelRef(accelerated_generator_,
-                                        &accelerated_last_frame_)) {
-        NOTREACHED();
-        return;
-      }
-      DCHECK(video_frame->visible_rect().width() ==
-                 accelerated_last_frame_.width() &&
-             video_frame->visible_rect().height() ==
-                 accelerated_last_frame_.height());
-
-      accelerated_last_frame_timestamp_ = video_frame->timestamp();
-    } else if (accelerated_generator_) {
-      accelerated_generator_->set_frame(video_frame);
-    }
-    target_frame = &accelerated_last_frame_;
-    accelerated_frame_deleting_timer_.Reset();
-  } else {
-    // Draw SW Video on SW Canvas.
-    DCHECK(video_frame->format() != VideoFrame::NATIVE_TEXTURE);
-    if (last_frame_.isNull() ||
-        video_frame->timestamp() != last_frame_timestamp_) {
-      // Check if |bitmap| needs to be (re)allocated.
-      if (last_frame_.isNull() ||
-          last_frame_.width() != video_frame->visible_rect().width() ||
-          last_frame_.height() != video_frame->visible_rect().height()) {
-        last_frame_.allocN32Pixels(video_frame->visible_rect().width(),
-                                   video_frame->visible_rect().height());
-        last_frame_.setIsVolatile(true);
-      }
-      last_frame_.lockPixels();
-      ConvertVideoFrameToRGBPixels(
-          video_frame, last_frame_.getPixels(), last_frame_.rowBytes());
-      last_frame_.notifyPixelsChanged();
-      last_frame_.unlockPixels();
-      last_frame_timestamp_ = video_frame->timestamp();
-    }
-    target_frame = &last_frame_;
-    frame_deleting_timer_.Reset();
+    if (!last_image_)  // Couldn't create the SkImage.
+      return;
+    last_timestamp_ = video_frame->timestamp();
   }
+  last_image_deleting_timer_.Reset();
 
   paint.setXfermodeMode(mode);
   paint.setFilterQuality(kLow_SkFilterQuality);
 
-  bool need_transform =
+  const bool need_transform =
       video_rotation != VIDEO_ROTATION_0 ||
       dest_rect.size() != video_frame->visible_rect().size() ||
       !dest_rect.origin().IsOrigin();
@@ -432,19 +373,41 @@ void SkCanvasVideoRenderer::Paint(const scoped_refptr<VideoFrame>& video_frame,
           gfx::SizeF(rotated_dest_size.height(), rotated_dest_size.width());
     }
     canvas->scale(
-        SkFloatToScalar(rotated_dest_size.width() / target_frame->width()),
-        SkFloatToScalar(rotated_dest_size.height() / target_frame->height()));
-    canvas->translate(-SkFloatToScalar(target_frame->width() * 0.5f),
-                      -SkFloatToScalar(target_frame->height() * 0.5f));
+        SkFloatToScalar(rotated_dest_size.width() / last_image_->width()),
+        SkFloatToScalar(rotated_dest_size.height() / last_image_->height()));
+    canvas->translate(-SkFloatToScalar(last_image_->width() * 0.5f),
+                      -SkFloatToScalar(last_image_->height() * 0.5f));
   }
-  canvas->drawBitmap(*target_frame, 0, 0, &paint);
+
+  // This is a workaround for crbug.com/524717. SkBitmaps are read back before a
+  // SkPicture is sent to multiple threads while SkImages are not. The long term
+  // solution is for Skia to provide a SkPicture filter that makes a picture
+  // safe for multiple CPU raster threads (skbug.com/4321). We limit the
+  // workaround to cases where the src frame is a texture and the canvas is
+  // recording.
+  if (last_image_.get()->getTexture() &&
+      canvas->imageInfo().colorType() == kUnknown_SkColorType) {
+    SkBitmap bmp;
+    GrWrapTextureInBitmap(last_image_.get()->getTexture(),
+        last_image_.get()->width(), last_image_.get()->height(), true, &bmp);
+    // Even though the bitmap is logically immutable we do not mark it as such
+    // because doing so would defer readback until rasterization, which will be
+    // on another thread and is therefore unsafe.
+    canvas->drawBitmap(bmp, 0, 0, &paint);
+  } else {
+    canvas->drawImage(last_image_.get(), 0, 0, &paint);
+  }
+
   if (need_transform)
     canvas->restore();
+  // Make sure to flush so we can remove the videoframe from the generator.
   canvas->flush();
-  // SkCanvas::flush() causes the generator to generate SkImage, so delete
-  // |video_frame| not to be outlived.
-  if (canvas->getGrContext() && accelerated_generator_)
-    accelerated_generator_->set_frame(nullptr);
+
+  if (video_frame->HasTextures()) {
+    DCHECK(gl);
+    SyncPointClientImpl client(gl);
+    video_frame->UpdateReleaseSyncPoint(&client);
+  }
 }
 
 void SkCanvasVideoRenderer::Copy(const scoped_refptr<VideoFrame>& video_frame,
@@ -456,50 +419,39 @@ void SkCanvasVideoRenderer::Copy(const scoped_refptr<VideoFrame>& video_frame,
 
 // static
 void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
-    const scoped_refptr<media::VideoFrame>& video_frame,
+    const VideoFrame* video_frame,
     void* rgb_pixels,
     size_t row_bytes) {
-  DCHECK(IsYUVOrNative(video_frame->format()))
-      << video_frame->format();
-  if (IsYUV(video_frame->format())) {
-    DCHECK_EQ(video_frame->stride(media::VideoFrame::kUPlane),
-              video_frame->stride(media::VideoFrame::kVPlane));
+  if (!video_frame->IsMappable()) {
+    NOTREACHED() << "Cannot extract pixels from non-CPU frame formats.";
+    return;
+  }
+  if (!media::IsYuvPlanar(video_frame->format())) {
+    NOTREACHED() << "Non YUV formats are not supported";
+    return;
   }
 
-  size_t y_offset = 0;
-  size_t uv_offset = 0;
-  if (IsYUV(video_frame->format())) {
-    int y_shift = (video_frame->format() == media::VideoFrame::YV16) ? 0 : 1;
-    // Use the "left" and "top" of the destination rect to locate the offset
-    // in Y, U and V planes.
-    y_offset = (video_frame->stride(media::VideoFrame::kYPlane) *
-                video_frame->visible_rect().y()) +
-                video_frame->visible_rect().x();
-    // For format YV12, there is one U, V value per 2x2 block.
-    // For format YV16, there is one U, V value per 2x1 block.
-    uv_offset = (video_frame->stride(media::VideoFrame::kUPlane) *
-                (video_frame->visible_rect().y() >> y_shift)) +
-                (video_frame->visible_rect().x() >> 1);
-  }
+  DCHECK_EQ(video_frame->stride(VideoFrame::kUPlane),
+            video_frame->stride(VideoFrame::kVPlane));
+
+  const int y_shift =
+      (video_frame->format() == media::PIXEL_FORMAT_YV16) ? 0 : 1;
+  // Use the "left" and "top" of the destination rect to locate the offset
+  // in Y, U and V planes.
+  const size_t y_offset = (video_frame->stride(VideoFrame::kYPlane) *
+                           video_frame->visible_rect().y()) +
+                          video_frame->visible_rect().x();
+  // For format YV12, there is one U, V value per 2x2 block.
+  // For format YV16, there is one U, V value per 2x1 block.
+  const size_t uv_offset = (video_frame->stride(VideoFrame::kUPlane) *
+                            (video_frame->visible_rect().y() >> y_shift)) +
+                           (video_frame->visible_rect().x() >> 1);
 
   switch (video_frame->format()) {
-    case VideoFrame::YV12:
-    case VideoFrame::I420:
-      LIBYUV_I420_TO_ARGB(
-          video_frame->data(VideoFrame::kYPlane) + y_offset,
-          video_frame->stride(VideoFrame::kYPlane),
-          video_frame->data(VideoFrame::kUPlane) + uv_offset,
-          video_frame->stride(VideoFrame::kUPlane),
-          video_frame->data(VideoFrame::kVPlane) + uv_offset,
-          video_frame->stride(VideoFrame::kVPlane),
-          static_cast<uint8*>(rgb_pixels),
-          row_bytes,
-          video_frame->visible_rect().width(),
-          video_frame->visible_rect().height());
-      break;
-
-    case VideoFrame::YV12J:
-      ConvertYUVToRGB32(
+    case PIXEL_FORMAT_YV12:
+    case PIXEL_FORMAT_I420:
+      if (CheckColorSpace(video_frame, COLOR_SPACE_JPEG)) {
+        ConvertYUVToRGB32(
           video_frame->data(VideoFrame::kYPlane) + y_offset,
           video_frame->data(VideoFrame::kUPlane) + uv_offset,
           video_frame->data(VideoFrame::kVPlane) + uv_offset,
@@ -510,23 +462,31 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
           video_frame->stride(VideoFrame::kUPlane),
           row_bytes,
           YV12J);
+      } else if (CheckColorSpace(video_frame, COLOR_SPACE_HD_REC709)) {
+        ConvertYUVToRGB32(video_frame->data(VideoFrame::kYPlane) + y_offset,
+                          video_frame->data(VideoFrame::kUPlane) + uv_offset,
+                          video_frame->data(VideoFrame::kVPlane) + uv_offset,
+                          static_cast<uint8*>(rgb_pixels),
+                          video_frame->visible_rect().width(),
+                          video_frame->visible_rect().height(),
+                          video_frame->stride(VideoFrame::kYPlane),
+                          video_frame->stride(VideoFrame::kUPlane), row_bytes,
+                          YV12HD);
+      } else {
+        LIBYUV_I420_TO_ARGB(
+            video_frame->data(VideoFrame::kYPlane) + y_offset,
+            video_frame->stride(VideoFrame::kYPlane),
+            video_frame->data(VideoFrame::kUPlane) + uv_offset,
+            video_frame->stride(VideoFrame::kUPlane),
+            video_frame->data(VideoFrame::kVPlane) + uv_offset,
+            video_frame->stride(VideoFrame::kVPlane),
+            static_cast<uint8*>(rgb_pixels),
+            row_bytes,
+            video_frame->visible_rect().width(),
+            video_frame->visible_rect().height());
+      }
       break;
-
-    case VideoFrame::YV12HD:
-      ConvertYUVToRGB32(
-          video_frame->data(VideoFrame::kYPlane) + y_offset,
-          video_frame->data(VideoFrame::kUPlane) + uv_offset,
-          video_frame->data(VideoFrame::kVPlane) + uv_offset,
-          static_cast<uint8*>(rgb_pixels),
-          video_frame->visible_rect().width(),
-          video_frame->visible_rect().height(),
-          video_frame->stride(VideoFrame::kYPlane),
-          video_frame->stride(VideoFrame::kUPlane),
-          row_bytes,
-          YV12HD);
-      break;
-
-    case VideoFrame::YV16:
+    case PIXEL_FORMAT_YV16:
       LIBYUV_I422_TO_ARGB(
           video_frame->data(VideoFrame::kYPlane) + y_offset,
           video_frame->stride(VideoFrame::kYPlane),
@@ -540,26 +500,33 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
           video_frame->visible_rect().height());
       break;
 
-    case VideoFrame::YV12A:
-      // Since libyuv doesn't support YUVA, fallback to media, which is not ARM
-      // optimized.
-      // TODO(fbarchard, mtomasz): Use libyuv, then copy the alpha channel.
-      ConvertYUVAToARGB(
+  case PIXEL_FORMAT_YV12A:
+      libyuv::I420AlphaToARGB(
           video_frame->data(VideoFrame::kYPlane) + y_offset,
-          video_frame->data(VideoFrame::kUPlane) + uv_offset,
-          video_frame->data(VideoFrame::kVPlane) + uv_offset,
-          video_frame->data(VideoFrame::kAPlane),
-          static_cast<uint8*>(rgb_pixels),
-          video_frame->visible_rect().width(),
-          video_frame->visible_rect().height(),
           video_frame->stride(VideoFrame::kYPlane),
+          video_frame->data(VideoFrame::kUPlane) + uv_offset,
           video_frame->stride(VideoFrame::kUPlane),
+          video_frame->data(VideoFrame::kVPlane) + uv_offset,
+          video_frame->stride(VideoFrame::kVPlane),
+          video_frame->data(VideoFrame::kAPlane) + y_offset,
           video_frame->stride(VideoFrame::kAPlane),
+          static_cast<uint8*>(rgb_pixels),
           row_bytes,
-          YV12);
+          video_frame->visible_rect().width(),
+          video_frame->visible_rect().height());
+    // TODO(fbarchard): Implement I420AlphaToABGR and remove swizzle below.
+#if SK_R32_SHIFT == 0 && SK_G32_SHIFT == 8 && SK_B32_SHIFT == 16 && \
+    SK_A32_SHIFT == 24
+      libyuv::ARGBToABGR(static_cast<uint8*>(rgb_pixels),
+                         row_bytes,
+                         static_cast<uint8*>(rgb_pixels),
+                         row_bytes,
+                         video_frame->visible_rect().width(),
+                         video_frame->visible_rect().height());
+#endif
       break;
 
-    case VideoFrame::YV24:
+    case PIXEL_FORMAT_YV24:
       libyuv::I444ToARGB(
           video_frame->data(VideoFrame::kYPlane) + y_offset,
           video_frame->stride(VideoFrame::kYPlane),
@@ -581,22 +548,17 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
                          video_frame->visible_rect().height());
 #endif
       break;
-
-    case VideoFrame::NATIVE_TEXTURE:
-      NOTREACHED();
-      break;
-#if defined(VIDEO_HOLE)
-    case VideoFrame::HOLE:
-#endif  // defined(VIDEO_HOLE)
-    case VideoFrame::ARGB:
-    case VideoFrame::UNKNOWN:
-    case VideoFrame::NV12:
+    case PIXEL_FORMAT_NV12:
+    case PIXEL_FORMAT_ARGB:
+    case PIXEL_FORMAT_XRGB:
+    case PIXEL_FORMAT_UYVY:
+    case PIXEL_FORMAT_UNKNOWN:
       NOTREACHED();
   }
 }
 
 // static
-void SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
+void SkCanvasVideoRenderer::CopyVideoFrameSingleTextureToGLTexture(
     gpu::gles2::GLES2Interface* gl,
     VideoFrame* video_frame,
     unsigned int texture,
@@ -604,12 +566,15 @@ void SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
     unsigned int type,
     bool premultiply_alpha,
     bool flip_y) {
-  DCHECK(video_frame && video_frame->format() == VideoFrame::NATIVE_TEXTURE);
-  DCHECK_EQ(1u, VideoFrame::NumTextures(video_frame->texture_format()));
+  DCHECK(video_frame);
+  DCHECK(video_frame->HasTextures());
+  DCHECK_EQ(1u, VideoFrame::NumPlanes(video_frame->format()));
+
   const gpu::MailboxHolder& mailbox_holder = video_frame->mailbox_holder(0);
   DCHECK(mailbox_holder.texture_target == GL_TEXTURE_2D ||
          mailbox_holder.texture_target == GL_TEXTURE_RECTANGLE_ARB ||
-         mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES);
+         mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES)
+      << mailbox_holder.texture_target;
 
   gl->WaitSyncPointCHROMIUM(mailbox_holder.sync_point);
   uint32 source_texture = gl->CreateAndConsumeTextureCHROMIUM(
@@ -617,16 +582,13 @@ void SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
 
   // The video is stored in a unmultiplied format, so premultiply
   // if necessary.
-  gl->PixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM, premultiply_alpha);
   // Application itself needs to take care of setting the right |flip_y|
   // value down to get the expected result.
   // "flip_y == true" means to reverse the video orientation while
   // "flip_y == false" means to keep the intrinsic orientation.
-  gl->PixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, flip_y);
   gl->CopyTextureCHROMIUM(GL_TEXTURE_2D, source_texture, texture,
-                          internal_format, type);
-  gl->PixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, false);
-  gl->PixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM, false);
+                          internal_format, type,
+                          flip_y, premultiply_alpha, false);
 
   gl->DeleteTextures(1, &source_texture);
   gl->Flush();
@@ -635,15 +597,10 @@ void SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
   video_frame->UpdateReleaseSyncPoint(&client);
 }
 
-void SkCanvasVideoRenderer::ResetLastFrame() {
-  last_frame_.reset();
-  last_frame_timestamp_ = media::kNoTimestamp();
-}
-
-void SkCanvasVideoRenderer::ResetAcceleratedLastFrame() {
-  accelerated_last_frame_.reset();
-  accelerated_generator_ = nullptr;
-  accelerated_last_frame_timestamp_ = media::kNoTimestamp();
+void SkCanvasVideoRenderer::ResetCache() {
+  // Clear cached values.
+  last_image_ = nullptr;
+  last_timestamp_ = kNoTimestamp();
 }
 
 }  // namespace media

@@ -14,10 +14,14 @@
 #include "base/mac/mac_logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sys_byteorder.h"
+#include "base/sys_info.h"
 #include "base/thread_task_runner_handle.h"
+#include "base/version.h"
 #include "content/common/gpu/media/vt_video_decode_accelerator.h"
 #include "content/public/common/content_switches.h"
 #include "media/base/limits.h"
+#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_image_io_surface.h"
 #include "ui/gl/scoped_binders.h"
 
 using content_common_gpu_media::kModuleVt;
@@ -60,12 +64,19 @@ static const int kNumPictureBuffers = media::limits::kMaxVideoFrames + 1;
 // reorder queue.)
 static const int kMaxReorderQueueSize = 16;
 
+// When set to false, always create a new decoder instead of reusing the
+// existing configuration when the configuration changes. This works around a
+// bug in VideoToolbox that results in corruption before Mac OS X 10.10.3. The
+// value is set in InitializeVideoToolbox().
+static bool g_enable_compatible_configuration_reuse = true;
+
 // Build an |image_config| dictionary for VideoToolbox initialization.
 static base::ScopedCFTypeRef<CFMutableDictionaryRef>
 BuildImageConfig(CMVideoDimensions coded_dimensions) {
   base::ScopedCFTypeRef<CFMutableDictionaryRef> image_config;
 
-  // TODO(sandersd): Does it save some work or memory to use 4:2:0?
+  // 4:2:2 is used over the native 4:2:0 because only 4:2:2 can be directly
+  // bound to a texture by CGLTexImageIOSurface2D().
   int32_t pixel_format = kCVPixelFormatType_422YpCbCr8;
 #define CFINT(i) CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &i)
   base::ScopedCFTypeRef<CFNumberRef> cf_pixel_format(CFINT(pixel_format));
@@ -213,6 +224,12 @@ static bool InitializeVideoToolboxInternal() {
     return false;
   }
 
+  // Set |g_enable_compatible_configuration_reuse| to false on
+  // Mac OS X < 10.10.3.
+  base::Version os_x_version(base::SysInfo::OperatingSystemVersion());
+  if (os_x_version.IsOlderThan("10.10.3"))
+    g_enable_compatible_configuration_reuse = false;
+
   return true;
 }
 
@@ -258,6 +275,16 @@ VTVideoDecodeAccelerator::Frame::Frame(int32_t bitstream_id)
 VTVideoDecodeAccelerator::Frame::~Frame() {
 }
 
+VTVideoDecodeAccelerator::PictureInfo::PictureInfo(uint32_t client_texture_id,
+                                                   uint32_t service_texture_id)
+    : client_texture_id(client_texture_id),
+      service_texture_id(service_texture_id) {}
+
+VTVideoDecodeAccelerator::PictureInfo::~PictureInfo() {
+  if (gl_image)
+    gl_image->Destroy(false);
+}
+
 bool VTVideoDecodeAccelerator::FrameOrder::operator()(
     const linked_ptr<Frame>& lhs,
     const linked_ptr<Frame>& rhs) const {
@@ -271,10 +298,11 @@ bool VTVideoDecodeAccelerator::FrameOrder::operator()(
 }
 
 VTVideoDecodeAccelerator::VTVideoDecodeAccelerator(
-    CGLContextObj cgl_context,
-    const base::Callback<bool(void)>& make_context_current)
-    : cgl_context_(cgl_context),
-      make_context_current_(make_context_current),
+    const base::Callback<bool(void)>& make_context_current,
+    const base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)>&
+        bind_image)
+    : make_context_current_(make_context_current),
+      bind_image_(bind_image),
       client_(nullptr),
       state_(STATE_DECODING),
       format_(nullptr),
@@ -291,6 +319,7 @@ VTVideoDecodeAccelerator::VTVideoDecodeAccelerator(
 }
 
 VTVideoDecodeAccelerator::~VTVideoDecodeAccelerator() {
+  DCHECK(gpu_thread_checker_.CalledOnValidThread());
 }
 
 bool VTVideoDecodeAccelerator::Initialize(
@@ -377,7 +406,7 @@ bool VTVideoDecodeAccelerator::ConfigureDecoder() {
   coded_size_.SetSize(coded_dimensions.width, coded_dimensions.height);
 
   // If the session is compatible, there's nothing else to do.
-  if (session_ &&
+  if (g_enable_compatible_configuration_reuse && session_ &&
       VTDecompressionSessionCanAcceptFormatDescription(session_, format_)) {
     return true;
   }
@@ -465,7 +494,9 @@ void VTVideoDecodeAccelerator::DecodeTask(
   //
   // Locate relevant NALUs and compute the size of the rewritten data. Also
   // record any parameter sets for VideoToolbox initialization.
-  bool config_changed = false;
+  std::vector<uint8_t> sps;
+  std::vector<uint8_t> spsext;
+  std::vector<uint8_t> pps;
   bool has_slice = false;
   size_t data_size = 0;
   std::vector<media::H264NALU> nalus;
@@ -487,9 +518,6 @@ void VTVideoDecodeAccelerator::DecodeTask(
     }
     switch (nalu.nal_unit_type) {
       case media::H264NALU::kSPS:
-        last_sps_.assign(nalu.data, nalu.data + nalu.size);
-        last_spsext_.clear();
-        config_changed = true;
         result = parser_.ParseSPS(&last_sps_id_);
         if (result == media::H264Parser::kUnsupportedStream) {
           DLOG(ERROR) << "Unsupported SPS";
@@ -501,17 +529,16 @@ void VTVideoDecodeAccelerator::DecodeTask(
           NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
           return;
         }
+        sps.assign(nalu.data, nalu.data + nalu.size);
+        spsext.clear();
         break;
 
       case media::H264NALU::kSPSExt:
         // TODO(sandersd): Check that the previous NALU was an SPS.
-        last_spsext_.assign(nalu.data, nalu.data + nalu.size);
-        config_changed = true;
+        spsext.assign(nalu.data, nalu.data + nalu.size);
         break;
 
       case media::H264NALU::kPPS:
-        last_pps_.assign(nalu.data, nalu.data + nalu.size);
-        config_changed = true;
         result = parser_.ParsePPS(&last_pps_id_);
         if (result == media::H264Parser::kUnsupportedStream) {
           DLOG(ERROR) << "Unsupported PPS";
@@ -523,6 +550,7 @@ void VTVideoDecodeAccelerator::DecodeTask(
           NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
           return;
         }
+        pps.assign(nalu.data, nalu.data + nalu.size);
         break;
 
       case media::H264NALU::kSliceDataA:
@@ -550,7 +578,7 @@ void VTVideoDecodeAccelerator::DecodeTask(
           }
 
           // TODO(sandersd): Maintain a cache of configurations and reconfigure
-          // only when a slice references a new config.
+          // when a slice references a new config.
           DCHECK_EQ(slice_hdr.pic_parameter_set_id, last_pps_id_);
           const media::H264PPS* pps =
               parser_.GetPPS(slice_hdr.pic_parameter_set_id);
@@ -589,12 +617,24 @@ void VTVideoDecodeAccelerator::DecodeTask(
   }
 
   // Initialize VideoToolbox.
-  // TODO(sandersd): Instead of assuming that the last SPS and PPS units are
-  // always the correct ones, maintain a cache of recent SPS and PPS units and
-  // select from them using the slice header.
+  bool config_changed = false;
+  if (!sps.empty() && sps != last_sps_) {
+    last_sps_.swap(sps);
+    last_spsext_.swap(spsext);
+    config_changed = true;
+  }
+  if (!pps.empty() && pps != last_pps_) {
+    last_pps_.swap(pps);
+    config_changed = true;
+  }
   if (config_changed) {
-    if (last_sps_.size() == 0 || last_pps_.size() == 0) {
-      DLOG(ERROR) << "Invalid configuration data";
+    if (last_sps_.empty()) {
+      DLOG(ERROR) << "Invalid configuration; no SPS";
+      NotifyError(INVALID_ARGUMENT, SFT_INVALID_STREAM);
+      return;
+    }
+    if (last_pps_.empty()) {
+      DLOG(ERROR) << "Invalid configuration; no PPS";
       NotifyError(INVALID_ARGUMENT, SFT_INVALID_STREAM);
       return;
     }
@@ -614,7 +654,7 @@ void VTVideoDecodeAccelerator::DecodeTask(
 
   // If the session is not configured by this point, fail.
   if (!session_) {
-    DLOG(ERROR) << "Configuration data missing";
+    DLOG(ERROR) << "Cannot decode without configuration";
     NotifyError(INVALID_ARGUMENT, SFT_INVALID_STREAM);
     return;
   }
@@ -785,10 +825,12 @@ void VTVideoDecodeAccelerator::AssignPictureBuffers(
   DCHECK(gpu_thread_checker_.CalledOnValidThread());
 
   for (const media::PictureBuffer& picture : pictures) {
-    DCHECK(!texture_ids_.count(picture.id()));
+    DCHECK(!picture_info_map_.count(picture.id()));
     assigned_picture_ids_.insert(picture.id());
     available_picture_ids_.push_back(picture.id());
-    texture_ids_[picture.id()] = picture.texture_id();
+    picture_info_map_.insert(picture.id(), make_scoped_ptr(new PictureInfo(
+                                               picture.internal_texture_id(),
+                                               picture.texture_id())));
   }
 
   // Pictures are not marked as uncleared until after this method returns, and
@@ -800,8 +842,13 @@ void VTVideoDecodeAccelerator::AssignPictureBuffers(
 
 void VTVideoDecodeAccelerator::ReusePictureBuffer(int32_t picture_id) {
   DCHECK(gpu_thread_checker_.CalledOnValidThread());
-  DCHECK_EQ(CFGetRetainCount(picture_bindings_[picture_id]), 1);
-  picture_bindings_.erase(picture_id);
+  DCHECK(picture_info_map_.count(picture_id));
+  PictureInfo* picture_info = picture_info_map_.find(picture_id)->second;
+  DCHECK_EQ(CFGetRetainCount(picture_info->cv_image), 1);
+  picture_info->cv_image.reset();
+  picture_info->gl_image->Destroy(false);
+  picture_info->gl_image = nullptr;
+
   if (assigned_picture_ids_.count(picture_id) != 0) {
     available_picture_ids_.push_back(picture_id);
     ProcessWorkQueues();
@@ -960,7 +1007,10 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
     return false;
 
   int32_t picture_id = available_picture_ids_.back();
-  IOSurfaceRef surface = CVPixelBufferGetIOSurface(frame.image.get());
+  DCHECK(picture_info_map_.count(picture_id));
+  PictureInfo* picture_info = picture_info_map_.find(picture_id)->second;
+  DCHECK(!picture_info->cv_image);
+  DCHECK(!picture_info->gl_image);
 
   if (!make_context_current_.Run()) {
     DLOG(ERROR) << "Failed to make GL context current";
@@ -968,11 +1018,14 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
     return false;
   }
 
+  IOSurfaceRef surface = CVPixelBufferGetIOSurface(frame.image.get());
   glEnable(GL_TEXTURE_RECTANGLE_ARB);
-  gfx::ScopedTextureBinder
-      texture_binder(GL_TEXTURE_RECTANGLE_ARB, texture_ids_[picture_id]);
+  gfx::ScopedTextureBinder texture_binder(GL_TEXTURE_RECTANGLE_ARB,
+                                          picture_info->service_texture_id);
+  CGLContextObj cgl_context =
+      static_cast<CGLContextObj>(gfx::GLContext::GetCurrent()->GetHandle());
   CGLError status = CGLTexImageIOSurface2D(
-      cgl_context_,                 // ctx
+      cgl_context,                  // ctx
       GL_TEXTURE_RECTANGLE_ARB,     // target
       GL_RGB,                       // internal_format
       frame.coded_size.width(),     // width
@@ -981,16 +1034,36 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
       GL_UNSIGNED_SHORT_8_8_APPLE,  // type
       surface,                      // io_surface
       0);                           // plane
+  glDisable(GL_TEXTURE_RECTANGLE_ARB);
   if (status != kCGLNoError) {
     NOTIFY_STATUS("CGLTexImageIOSurface2D()", status, SFT_PLATFORM_ERROR);
     return false;
   }
-  glDisable(GL_TEXTURE_RECTANGLE_ARB);
 
+  bool allow_overlay = false;
+  scoped_refptr<gfx::GLImageIOSurface> gl_image(new gfx::GLImageIOSurface(
+      gfx::GenericSharedMemoryId(), frame.coded_size, GL_BGRA_EXT));
+  if (gl_image->Initialize(surface, gfx::BufferFormat::BGRA_8888)) {
+    allow_overlay = true;
+  } else {
+    gl_image = nullptr;
+  }
+  bind_image_.Run(picture_info->client_texture_id, GL_TEXTURE_RECTANGLE_ARB,
+                  gl_image);
+
+  // Assign the new image(s) to the the picture info.
+  picture_info->gl_image = gl_image;
+  picture_info->cv_image = frame.image;
   available_picture_ids_.pop_back();
-  picture_bindings_[picture_id] = frame.image;
+
+  // TODO(sandersd): Currently, the size got from
+  // CMVideoFormatDescriptionGetDimensions is visible size. We pass it to
+  // GpuVideoDecoder so that GpuVideoDecoder can use correct visible size in
+  // resolution changed. We should find the correct API to get the real
+  // coded size and fix it.
   client_->PictureReady(media::Picture(picture_id, frame.bitstream_id,
-                                       gfx::Rect(frame.coded_size), false));
+                                       gfx::Rect(frame.coded_size),
+                                       allow_overlay));
   return true;
 }
 

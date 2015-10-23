@@ -40,7 +40,7 @@
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/CompositedDeprecatedPaintLayerMapping.h"
 #include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
-#include "core/page/Chrome.h"
+#include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/plugins/PluginView.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -56,6 +56,7 @@
 #include "platform/scroll/ScrollAnimator.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebCompositorAnimationTimeline.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebLayerPositionConstraint.h"
 #include "public/platform/WebScrollbarLayer.h"
@@ -80,9 +81,9 @@ WebLayer* toWebLayer(blink::GraphicsLayer* layer)
 
 namespace blink {
 
-PassOwnPtr<ScrollingCoordinator> ScrollingCoordinator::create(Page* page)
+PassOwnPtrWillBeRawPtr<ScrollingCoordinator> ScrollingCoordinator::create(Page* page)
 {
-    return adoptPtr(new ScrollingCoordinator(page));
+    return adoptPtrWillBeNoop(new ScrollingCoordinator(page));
 }
 
 ScrollingCoordinator::ScrollingCoordinator(Page* page)
@@ -93,10 +94,27 @@ ScrollingCoordinator::ScrollingCoordinator(Page* page)
     , m_wasFrameScrollable(false)
     , m_lastMainThreadScrollingReasons(0)
 {
+    if (RuntimeEnabledFeatures::compositorAnimationTimelinesEnabled()) {
+        ASSERT(m_page);
+        ASSERT(m_page->mainFrame()->isLocalFrame());
+        ASSERT(Platform::current()->compositorSupport());
+        m_programmaticScrollAnimatorTimeline = adoptPtr(Platform::current()->compositorSupport()->createAnimationTimeline());
+        m_page->chromeClient().attachCompositorAnimationTimeline(m_programmaticScrollAnimatorTimeline.get(), toLocalFrame(m_page->mainFrame()));
+    }
 }
 
 ScrollingCoordinator::~ScrollingCoordinator()
 {
+    ASSERT(!m_page);
+}
+
+DEFINE_TRACE(ScrollingCoordinator)
+{
+    visitor->trace(m_page);
+#if ENABLE(OILPAN)
+    visitor->trace(m_horizontalScrollbars);
+    visitor->trace(m_verticalScrollbars);
+#endif
 }
 
 void ScrollingCoordinator::setShouldHandleScrollGestureOnMainThreadRegion(const Region& region)
@@ -172,23 +190,23 @@ void ScrollingCoordinator::updateAfterCompositingChangeIfNeeded()
     }
     m_wasFrameScrollable = frameIsScrollable;
 
-    if (WebLayer* scrollingWebLayer = frameView ? toWebLayer(frameView->layerForScrolling()) : nullptr) {
-        scrollingWebLayer->setBounds(frameView->contentsSize());
+    if (WebLayer* layoutViewportScrollLayer = frameView ? toWebLayer(frameView->layerForScrolling()) : nullptr) {
+        layoutViewportScrollLayer->setBounds(frameView->contentsSize());
 
         // If there is a non-root fullscreen element, prevent the viewport from
         // scrolling.
         Document* mainFrameDocument = m_page->deprecatedLocalMainFrame()->document();
         Element* fullscreenElement = Fullscreen::fullscreenElementFrom(*mainFrameDocument);
-        WebLayer* pinchViewportScrollLayer = toWebLayer(m_page->frameHost().pinchViewport().scrollLayer());
+        WebLayer* visualViewportScrollLayer = toWebLayer(m_page->frameHost().visualViewport().scrollLayer());
 
-        if (pinchViewportScrollLayer) {
+        if (visualViewportScrollLayer) {
             if (fullscreenElement && fullscreenElement != mainFrameDocument->documentElement())
-                toWebLayer(m_page->frameHost().pinchViewport().scrollLayer())->setUserScrollable(false, false);
+                visualViewportScrollLayer->setUserScrollable(false, false);
             else
-                toWebLayer(m_page->frameHost().pinchViewport().scrollLayer())->setUserScrollable(true, true);
+                visualViewportScrollLayer->setUserScrollable(true, true);
         }
 
-        scrollingWebLayer->setUserScrollable(frameView->userInputScrollable(HorizontalScrollbar), frameView->userInputScrollable(VerticalScrollbar));
+        layoutViewportScrollLayer->setUserScrollable(frameView->userInputScrollable(HorizontalScrollbar), frameView->userInputScrollable(VerticalScrollbar));
     }
 
     const FrameTree& tree = m_page->mainFrame()->tree();
@@ -423,9 +441,9 @@ bool ScrollingCoordinator::scrollableAreaScrollLayerDidChange(ScrollableArea* sc
 
     // Update the viewport layer registration if the outer viewport may have changed.
     if (m_page->settings().rootLayerScrolls() && isForRootLayer(scrollableArea))
-        m_page->chrome().registerViewportLayers();
+        m_page->chromeClient().registerViewportLayers();
 
-    scrollableArea->layerForScrollingDidChange();
+    scrollableArea->layerForScrollingDidChange(m_programmaticScrollAnimatorTimeline.get());
 
     return !!webLayer;
 }
@@ -713,6 +731,13 @@ void ScrollingCoordinator::setShouldUpdateScrollLayerPositionOnMainThread(MainTh
 void ScrollingCoordinator::willBeDestroyed()
 {
     ASSERT(m_page);
+
+    if (m_programmaticScrollAnimatorTimeline) {
+        ASSERT(m_page->mainFrame()->isLocalFrame());
+        m_page->chromeClient().detachCompositorAnimationTimeline(m_programmaticScrollAnimatorTimeline.get(), toLocalFrame(m_page->mainFrame()));
+        m_programmaticScrollAnimatorTimeline.clear();
+    }
+
     m_page = nullptr;
     for (const auto& scrollbar : m_horizontalScrollbars)
         GraphicsLayer::unregisterContentsLayer(scrollbar.value->layer());
@@ -926,7 +951,7 @@ bool ScrollingCoordinator::isForViewport(ScrollableArea* scrollableArea) const
         isForRootLayer(scrollableArea) :
         isForMainFrame(scrollableArea);
 
-    return isForOuterViewport || scrollableArea == &m_page->frameHost().pinchViewport();
+    return isForOuterViewport || scrollableArea == &m_page->frameHost().visualViewport();
 }
 
 void ScrollingCoordinator::frameViewRootLayerDidChange(FrameView* frameView)

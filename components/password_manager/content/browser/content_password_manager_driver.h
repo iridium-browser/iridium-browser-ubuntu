@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
 #include "components/password_manager/core/browser/password_generation_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
@@ -29,6 +30,7 @@ class Message;
 }
 
 namespace password_manager {
+enum class BadMessageReason;
 
 // There is one ContentPasswordManagerDriver per RenderFrameHost.
 // The lifetime is managed by the ContentPasswordManagerDriverFactory.
@@ -51,7 +53,8 @@ class ContentPasswordManagerDriver : public PasswordManagerDriver {
   void AccountCreationFormsFound(
       const std::vector<autofill::FormData>& forms) override;
   void AutofillDataReceived(
-      const std::map<autofill::FormData, autofill::FormFieldData>& predictions)
+      const std::map<autofill::FormData,
+                     autofill::PasswordFormFieldPredictionMap>& predictions)
       override;
   void GeneratedPasswordAccepted(const base::string16& password) override;
   void FillSuggestion(const base::string16& username,
@@ -59,6 +62,7 @@ class ContentPasswordManagerDriver : public PasswordManagerDriver {
   void PreviewSuggestion(const base::string16& username,
                          const base::string16& password) override;
   void ClearPreviewedForm() override;
+  void ForceSavePassword() override;
 
   PasswordGenerationManager* GetPasswordGenerationManager() override;
   PasswordManager* GetPasswordManager() override;
@@ -70,14 +74,20 @@ class ContentPasswordManagerDriver : public PasswordManagerDriver {
 
   // Pass-throughs to PasswordManager.
   void OnPasswordFormsParsed(const std::vector<autofill::PasswordForm>& forms);
+  void OnPasswordFormsParsedNoRenderCheck(
+      const std::vector<autofill::PasswordForm>& forms);
   void OnPasswordFormsRendered(
       const std::vector<autofill::PasswordForm>& visible_forms,
       bool did_stop_loading);
   void OnPasswordFormSubmitted(const autofill::PasswordForm& password_form);
   void OnInPageNavigation(const autofill::PasswordForm& password_form);
   void OnPasswordNoLongerGenerated(const autofill::PasswordForm& password_form);
+  void OnFocusedPasswordFormFound(const autofill::PasswordForm& password_form);
 
  private:
+  bool CheckChildProcessSecurityPolicy(const GURL& url,
+                                       BadMessageReason reason);
+
   content::RenderFrameHost* render_frame_host_;
   PasswordManagerClient* client_;
   PasswordGenerationManager password_generation_manager_;

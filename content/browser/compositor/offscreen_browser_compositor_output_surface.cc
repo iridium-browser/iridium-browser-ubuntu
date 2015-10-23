@@ -30,10 +30,12 @@ namespace content {
 OffscreenBrowserCompositorOutputSurface::
     OffscreenBrowserCompositorOutputSurface(
         const scoped_refptr<ContextProviderCommandBuffer>& context,
+        const scoped_refptr<ContextProviderCommandBuffer>& worker_context,
         const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
         scoped_ptr<BrowserCompositorOverlayCandidateValidator>
             overlay_candidate_validator)
     : BrowserCompositorOutputSurface(context,
+                                     worker_context,
                                      vsync_manager,
                                      overlay_candidate_validator.Pass()),
       fbo_(0),
@@ -55,6 +57,12 @@ void OffscreenBrowserCompositorOutputSurface::EnsureBackbuffer() {
     reflector_texture_.reset(new ReflectorTexture(context_provider()));
 
     GLES2Interface* gl = context_provider_->ContextGL();
+
+    int max_texture_size =
+        context_provider_->ContextCapabilities().gpu.max_texture_size;
+    int texture_width = std::min(max_texture_size, surface_size_.width());
+    int texture_height = std::min(max_texture_size, surface_size_.height());
+
     cc::ResourceFormat format = cc::RGBA_8888;
     gl->BindTexture(GL_TEXTURE_2D, reflector_texture_->texture_id());
     gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -62,7 +70,7 @@ void OffscreenBrowserCompositorOutputSurface::EnsureBackbuffer() {
     gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     gl->TexImage2D(GL_TEXTURE_2D, 0, GLInternalFormat(format),
-                   surface_size_.width(), surface_size_.height(), 0,
+                   texture_width, texture_height, 0,
                    GLDataFormat(format), GLDataType(format), nullptr);
     if (!fbo_)
       gl->GenFramebuffers(1, &fbo_);
@@ -127,6 +135,15 @@ void OffscreenBrowserCompositorOutputSurface::SwapBuffers(
   }
 
   client_->DidSwapBuffers();
+
+  // TODO(oshima): sync with the reflector's SwapBuffersComplete
+  // (crbug.com/520567).
+  // The original implementation had a flickering issue (crbug.com/515332).
+  uint32_t sync_point =
+      context_provider_->ContextGL()->InsertSyncPointCHROMIUM();
+  context_provider_->ContextSupport()->SignalSyncPoint(
+      sync_point, base::Bind(&OutputSurface::OnSwapBuffersComplete,
+                             weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OffscreenBrowserCompositorOutputSurface::OnReflectorChanged() {
@@ -136,8 +153,7 @@ void OffscreenBrowserCompositorOutputSurface::OnReflectorChanged() {
 
 base::Closure
 OffscreenBrowserCompositorOutputSurface::CreateCompositionStartedCallback() {
-  return base::Bind(&OutputSurface::OnSwapBuffersComplete,
-                    weak_ptr_factory_.GetWeakPtr());
+  return base::Closure();
 }
 
 #if defined(OS_MACOSX)

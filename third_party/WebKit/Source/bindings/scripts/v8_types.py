@@ -70,7 +70,9 @@ ARRAY_BUFFER_AND_VIEW_TYPES = TYPED_ARRAY_TYPES.union(frozenset([
     'ArrayBuffer',
     'ArrayBufferView',
     'DataView',
+    'SharedArrayBuffer',
 ]))
+
 
 IdlType.is_array_buffer_or_view = property(
     lambda self: self.base_type in ARRAY_BUFFER_AND_VIEW_TYPES)
@@ -182,8 +184,10 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
             return 'String'
         return 'V8StringResource<%s>' % string_mode()
 
-    if idl_type.is_array_buffer_or_view and raw_type:
-        return idl_type.implemented_as + '*'
+    if idl_type.base_type == 'ArrayBufferView' and 'FlexibleArrayBufferView' in extended_attributes:
+        return 'FlexibleArrayBufferView'
+    if idl_type.base_type in TYPED_ARRAY_TYPES and 'FlexibleArrayBufferView' in extended_attributes:
+        return 'Flexible' + idl_type.base_type + 'View'
     if idl_type.is_interface_type:
         implemented_as_class = idl_type.implemented_as
         if raw_type or (used_as_rvalue_type and idl_type.is_garbage_collected):
@@ -323,12 +327,10 @@ IdlTypeBase.gc_type = property(gc_type)
 def is_traceable(idl_type):
     return (idl_type.is_garbage_collected
             or idl_type.is_will_be_garbage_collected
-            or idl_type.is_dictionary
-            or idl_type.is_union_type)
+            or idl_type.is_dictionary)
 
 IdlTypeBase.is_traceable = property(is_traceable)
-IdlUnionType.is_traceable = property(
-    lambda self: any((member_type.is_traceable for member_type in self.member_types)))
+IdlUnionType.is_traceable = property(lambda self: True)
 IdlArrayOrSequenceType.is_traceable = property(
     lambda self: self.element_type.is_traceable)
 
@@ -343,6 +345,8 @@ def includes_for_cpp_class(class_name, relative_dir_posix):
 
 INCLUDES_FOR_TYPE = {
     'object': set(),
+    'ArrayBufferView': set(['bindings/core/v8/V8ArrayBufferView.h',
+                            'core/dom/FlexibleArrayBufferView.h']),
     'Dictionary': set(['bindings/core/v8/Dictionary.h']),
     'EventHandler': set(['bindings/core/v8/V8AbstractEventListener.h',
                          'bindings/core/v8/V8EventListenerList.h']),
@@ -376,6 +380,10 @@ def includes_for_type(idl_type, extended_attributes=None):
     base_idl_type = idl_type.base_type
     if base_idl_type in INCLUDES_FOR_TYPE:
         return INCLUDES_FOR_TYPE[base_idl_type]
+    if idl_type.base_type in TYPED_ARRAY_TYPES:
+        return INCLUDES_FOR_TYPE['ArrayBufferView'].union(
+            set(['bindings/%s/v8/V8%s.h' % (component_dir[base_idl_type], base_idl_type)])
+        )
     if idl_type.is_basic_type:
         return set()
     if base_idl_type.endswith('ConstructorConstructor'):
@@ -499,6 +507,7 @@ V8_VALUE_TO_CPP_VALUE = {
     # Interface types
     'Dictionary': 'Dictionary({v8_value}, {isolate}, exceptionState)',
     'EventTarget': 'toEventTarget({isolate}, {v8_value})',
+    'FlexibleArrayBufferView': 'toFlexibleArrayBufferView({isolate}, {v8_value}, {variable_name}, allocateFlexibleArrayBufferViewStorage({v8_value}))',
     'NodeFilter': 'toNodeFilter({v8_value}, info.Holder(), ScriptState::current({isolate}))',
     'Promise': 'ScriptPromise::cast(ScriptState::current({isolate}), {v8_value})',
     'SerializedScriptValue': 'SerializedScriptValueFactory::instance().create({isolate}, {v8_value}, 0, 0, exceptionState)',
@@ -551,6 +560,11 @@ def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name
     # Simple types
     idl_type = idl_type.preprocessed_type
     base_idl_type = idl_type.as_union_type.name if idl_type.is_union_type else idl_type.base_type
+
+    if 'FlexibleArrayBufferView' in extended_attributes:
+        if base_idl_type not in TYPED_ARRAY_TYPES.union(set(['ArrayBufferView'])):
+            raise "Unrecognized base type for extended attribute 'FlexibleArrayBufferView': %s" % (idl_type.base_type)
+        base_idl_type = 'FlexibleArrayBufferView'
 
     if idl_type.is_integer_type:
         configuration = 'NormalConversion'
@@ -648,6 +662,10 @@ def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variabl
         return {
             'error_message': 'no V8 -> C++ conversion for IDL type: %s' % idl_type.name
         }
+    elif 'FlexibleArrayBufferView' in extended_attributes:
+        if idl_type.base_type not in TYPED_ARRAY_TYPES.union(set(['ArrayBufferView'])):
+            raise "Unrecognized base type for extended attribute 'FlexibleArrayBufferView': %s" % (idl_type.base_type)
+        set_expression = cpp_value
     else:
         assign_expression = cpp_value
 
@@ -934,8 +952,17 @@ def union_literal_cpp_value(idl_type, idl_literal):
     return '%s::from%s(%s)' % (idl_type.name, member_type.name,
                                member_type.literal_cpp_value(idl_literal))
 
+
+def array_or_sequence_literal_cpp_value(idl_type, idl_literal):
+    # Only support empty arrays.
+    if idl_literal.value == '[]':
+        return cpp_type(idl_type) + '()'
+    raise ValueError('Unsupported literal type: ' + idl_literal.idl_type)
+
+
 IdlType.literal_cpp_value = literal_cpp_value
 IdlUnionType.literal_cpp_value = union_literal_cpp_value
+IdlArrayOrSequenceType.literal_cpp_value = array_or_sequence_literal_cpp_value
 
 
 ################################################################################
@@ -950,10 +977,10 @@ def cpp_type_has_null_value(idl_type):
     # - Interface types (raw pointer or RefPtr/PassRefPtr) represent null as
     #   a null pointer.
     # - Union types, as thier container classes can represent null value.
-    # - 'Object' type. We use ScriptValue for object type.
+    # - 'Object' and 'any' type. We use ScriptValue for object type.
     return (idl_type.is_string_type or idl_type.is_interface_type or
             idl_type.is_enum or idl_type.is_union_type
-            or idl_type.base_type == 'object'
+            or idl_type.base_type == 'object' or idl_type.base_type == 'any'
             or idl_type.is_callback_function or idl_type.is_callback_interface)
 
 IdlTypeBase.cpp_type_has_null_value = property(cpp_type_has_null_value)

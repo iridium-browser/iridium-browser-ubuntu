@@ -10,15 +10,16 @@ import collections
 import os
 
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import cbuildbot_config
-from chromite.cbuildbot import failures_lib
+from chromite.cbuildbot import config_lib
 from chromite.cbuildbot import constants
+from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import lab_status
 from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cgroups
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import image_test_lib
 from chromite.lib import osutils
 from chromite.lib import perf_uploader
 from chromite.lib import timeout_util
@@ -57,7 +58,6 @@ class UnitTestStage(generic_stages.BoardSpecificBuilderStage):
     with timeout_util.Timeout(self.UNIT_TEST_TIMEOUT):
       commands.RunUnitTests(self._build_root,
                             self._current_board,
-                            full=(not self._run.config.quick_unit),
                             blacklist=self._run.config.unittest_blacklist,
                             extra_env=extra_env)
 
@@ -234,7 +234,7 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
     elif issubclass(exc_type, failures_lib.BoardNotAvailable):
       # Some boards may not have been setup in the lab yet for
       # non-code-checkin configs.
-      if not cbuildbot_config.IsPFQType(self._run.config.build_type):
+      if not config_lib.IsPFQType(self._run.config.build_type):
         logging.warning('HWTest did not run because the board was not '
                         'available in the lab yet')
         return self._HandleExceptionAsWarning(exc_info)
@@ -257,6 +257,11 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
                       'See UploadTestArtifacts for details.')
       return
 
+    if (self.suite_config.suite == constants.HWTEST_AFDO_SUITE and
+        not self._run.attrs.metadata.GetValue('chrome_was_uprevved')):
+      logging.info('Chrome was not uprevved. Nothing to do in this stage')
+      return
+
     build = '/'.join([self._bot_id, self.version])
     if self._run.options.remote_trybot and self._run.options.hwtest:
       debug = self._run.options.debug_forced
@@ -264,20 +269,19 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
       debug = self._run.options.debug
 
     self._CheckLabStatus()
-    commands.RunHWTestSuite(build,
-                            self.suite_config.suite,
-                            self._current_board,
-                            pool=self.suite_config.pool,
-                            num=self.suite_config.num,
-                            file_bugs=self.suite_config.file_bugs,
-                            wait_for_results=self.wait_for_results,
-                            priority=self.suite_config.priority,
-                            timeout_mins=self.suite_config.timeout_mins,
-                            retry=self.suite_config.retry,
-                            max_retries=self.suite_config.max_retries,
-                            minimum_duts=self.suite_config.minimum_duts,
-                            suite_min_duts=self.suite_config.suite_min_duts,
-                            debug=debug)
+    commands.RunHWTestSuite(
+        build, self.suite_config.suite, self._current_board,
+        pool=self.suite_config.pool, num=self.suite_config.num,
+        file_bugs=self.suite_config.file_bugs,
+        wait_for_results=self.wait_for_results,
+        priority=self.suite_config.priority,
+        timeout_mins=self.suite_config.timeout_mins,
+        retry=self.suite_config.retry,
+        max_retries=self.suite_config.max_retries,
+        minimum_duts=self.suite_config.minimum_duts,
+        suite_min_duts=self.suite_config.suite_min_duts,
+        offload_failures_only=self.suite_config.offload_failures_only,
+        debug=debug)
 
 
 class AUTestStage(HWTestStage):
@@ -311,7 +315,6 @@ class ASyncHWTestStage(HWTestStage, generic_stages.ForgivingBuilderStage):
 
 
 class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
-                     generic_stages.ForgivingBuilderStage,
                      generic_stages.ArchivingStageMixin):
   """Stage that launches tests on the produced disk image."""
 
@@ -351,27 +354,27 @@ class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
     Args:
       test_results_dir: A path to the directory with perf files.
     """
-    # Import image_test here so that extra imports from image_test does not
-    # affect cbuildbot in bootstrap.
-    from chromite.lib import image_test
     # A dict of list of perf values, keyed by test name.
     perf_entries = collections.defaultdict(list)
     for root, _, filenames in os.walk(test_results_dir):
       for relative_name in filenames:
-        if not image_test.IsPerfFile(relative_name):
+        if not image_test_lib.IsPerfFile(relative_name):
           continue
         full_name = os.path.join(root, relative_name)
         entries = perf_uploader.LoadPerfValues(full_name)
-        test_name = image_test.ImageTestCase.GetTestName(relative_name)
+        test_name = image_test_lib.ImageTestCase.GetTestName(relative_name)
         perf_entries[test_name].extend(entries)
 
     platform_name = self._run.bot_id
     cros_ver = self._run.GetVersionInfo().VersionString()
     chrome_ver = self._run.DetermineChromeVersion()
     for test_name, perf_values in perf_entries.iteritems():
-      perf_uploader.UploadPerfValues(perf_values, platform_name, test_name,
-                                     cros_version=cros_ver,
-                                     chrome_version=chrome_ver)
+      try:
+        perf_uploader.UploadPerfValues(perf_values, platform_name, test_name,
+                                       cros_version=cros_ver,
+                                       chrome_version=chrome_ver)
+      except Exception:
+        logging.exception('Fail to upload perf result for test %s.', test_name)
 
 
 class BinhostTestStage(generic_stages.BuilderStage):
@@ -381,4 +384,7 @@ class BinhostTestStage(generic_stages.BuilderStage):
 
   def PerformStage(self):
     # Verify our binhosts.
-    commands.RunBinhostTest(self._build_root)
+    # Don't check for incremental compatibility when we uprev chrome.
+    incremental = not (self._run.config.chrome_rev or
+                       self._run.options.chrome_rev)
+    commands.RunBinhostTest(self._build_root, incremental=incremental)

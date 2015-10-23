@@ -15,7 +15,6 @@
 #include "chromeos/login/auth/authenticator.h"
 #include "chromeos/login/auth/extended_authenticator.h"
 #include "chromeos/login/auth/login_performer.h"
-#include "chromeos/login/auth/online_attempt_host.h"
 #include "chromeos/login/auth/user_context.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -34,11 +33,12 @@ class ChromeLoginPerformer : public LoginPerformer {
   explicit ChromeLoginPerformer(Delegate* delegate);
   ~ChromeLoginPerformer() override;
 
+  bool IsUserWhitelisted(const std::string& user_id,
+                         bool* wildcard_match) override;
+
  protected:
   bool RunTrustedCheck(const base::Closure& callback) override;
   void DidRunTrustedCheck(const base::Closure& callback);
-  bool IsUserWhitelisted(const std::string& user_id,
-                         bool* wildcard_match) override;
 
   void RunOnlineWhitelistCheck(const std::string& user_id,
                                bool wildcard_match,

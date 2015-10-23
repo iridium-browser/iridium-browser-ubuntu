@@ -16,8 +16,8 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "components/nacl/common/nacl_messages.h"
 #include "components/nacl/common/nacl_renderer_messages.h"
 #include "components/nacl/common/nacl_switches.h"
@@ -143,16 +143,13 @@ void DebugStubPortSelectedHandler(uint16_t port) {
 // the FD #.
 void SetUpIPCAdapter(
     IPC::ChannelHandle* handle,
-    scoped_refptr<base::MessageLoopProxy> message_loop_proxy,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     struct NaClApp* nap,
     int nacl_fd,
     NaClIPCAdapter::ResolveFileTokenCallback resolve_file_token_cb,
     NaClIPCAdapter::OpenResourceCallback open_resource_cb) {
-  scoped_refptr<NaClIPCAdapter> ipc_adapter(
-      new NaClIPCAdapter(*handle,
-                         message_loop_proxy.get(),
-                         resolve_file_token_cb,
-                         open_resource_cb));
+  scoped_refptr<NaClIPCAdapter> ipc_adapter(new NaClIPCAdapter(
+      *handle, task_runner.get(), resolve_file_token_cb, open_resource_cb));
   ipc_adapter->ConnectChannel();
 #if defined(OS_POSIX)
   handle->socket =
@@ -263,10 +260,9 @@ void NaClListener::Listen() {
   std::string channel_name =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kProcessChannelID);
-  channel_ = IPC::SyncChannel::Create(
-      this, io_thread_.message_loop_proxy().get(), &shutdown_event_);
-  filter_ = new IPC::SyncMessageFilter(&shutdown_event_);
-  channel_->AddFilter(filter_.get());
+  channel_ = IPC::SyncChannel::Create(this, io_thread_.task_runner().get(),
+                                      &shutdown_event_);
+  filter_ = channel_->CreateSyncMessageFilter();
   channel_->AddFilter(new FileTokenMessageFilter());
   channel_->Init(channel_name, IPC::Channel::MODE_CLIENT, true);
   main_loop_ = base::MessageLoop::current();
@@ -331,8 +327,7 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
 #if defined(OS_LINUX) || defined(OS_MACOSX)
   int urandom_fd = dup(base::GetUrandomFD());
   if (urandom_fd < 0) {
-    LOG(ERROR) << "Failed to dup() the urandom FD";
-    return;
+    LOG(FATAL) << "Failed to dup() the urandom FD";
   }
   NaClChromeMainSetUrandomFd(urandom_fd);
 #endif
@@ -347,8 +342,7 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
 
   nap = NaClAppCreate();
   if (nap == NULL) {
-    LOG(ERROR) << "NaClAppCreate() failed";
-    return;
+    LOG(FATAL) << "NaClAppCreate() failed";
   }
 
   IPC::ChannelHandle browser_handle;
@@ -363,39 +357,34 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
     // Create the PPAPI IPC channels between the NaCl IRT and the host
     // (browser/renderer) processes. The IRT uses these channels to
     // communicate with the host and to initialize the IPC dispatchers.
-    SetUpIPCAdapter(&browser_handle, io_thread_.message_loop_proxy(),
-                    nap, NACL_CHROME_DESC_BASE,
+    SetUpIPCAdapter(&browser_handle, io_thread_.task_runner(), nap,
+                    NACL_CHROME_DESC_BASE,
                     NaClIPCAdapter::ResolveFileTokenCallback(),
                     NaClIPCAdapter::OpenResourceCallback());
-    SetUpIPCAdapter(&ppapi_renderer_handle, io_thread_.message_loop_proxy(),
-                    nap, NACL_CHROME_DESC_BASE + 1,
+    SetUpIPCAdapter(&ppapi_renderer_handle, io_thread_.task_runner(), nap,
+                    NACL_CHROME_DESC_BASE + 1,
                     NaClIPCAdapter::ResolveFileTokenCallback(),
                     NaClIPCAdapter::OpenResourceCallback());
-    SetUpIPCAdapter(&manifest_service_handle,
-                    io_thread_.message_loop_proxy(),
-                    nap,
-                    NACL_CHROME_DESC_BASE + 2,
-                    base::Bind(&NaClListener::ResolveFileToken,
-                               base::Unretained(this)),
-                    base::Bind(&NaClListener::OnOpenResource,
-                               base::Unretained(this)));
+    SetUpIPCAdapter(
+        &manifest_service_handle, io_thread_.task_runner(), nap,
+        NACL_CHROME_DESC_BASE + 2,
+        base::Bind(&NaClListener::ResolveFileToken, base::Unretained(this)),
+        base::Bind(&NaClListener::OnOpenResource, base::Unretained(this)));
   }
 
-  trusted_listener_ = new NaClTrustedListener(
-      IPC::Channel::GenerateVerifiedChannelID("nacl"),
-      io_thread_.message_loop_proxy().get(),
-      &shutdown_event_);
+  trusted_listener_ =
+      new NaClTrustedListener(IPC::Channel::GenerateVerifiedChannelID("nacl"),
+                              io_thread_.task_runner().get(), &shutdown_event_);
   if (!Send(new NaClProcessHostMsg_PpapiChannelsCreated(
           browser_handle,
           ppapi_renderer_handle,
           trusted_listener_->TakeClientChannelHandle(),
           manifest_service_handle)))
-    LOG(ERROR) << "Failed to send IPC channel handle to NaClProcessHost.";
+    LOG(FATAL) << "Failed to send IPC channel handle to NaClProcessHost.";
 
   struct NaClChromeMainArgs* args = NaClChromeMainArgsCreate();
   if (args == NULL) {
-    LOG(ERROR) << "NaClChromeMainArgsCreate() failed";
-    return;
+    LOG(FATAL) << "NaClChromeMainArgsCreate() failed";
   }
 
 #if defined(OS_LINUX) || defined(OS_MACOSX)
@@ -416,8 +405,7 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
   args->irt_fd = _open_osfhandle(reinterpret_cast<intptr_t>(irt_handle),
                                  _O_RDONLY | _O_BINARY);
   if (args->irt_fd < 0) {
-    LOG(ERROR) << "_open_osfhandle() failed";
-    return;
+    LOG(FATAL) << "_open_osfhandle() failed";
   }
 #else
   args->irt_fd = irt_handle;

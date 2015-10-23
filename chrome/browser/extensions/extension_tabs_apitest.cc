@@ -57,6 +57,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiNewTabTest, Tabs) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "crud.html")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabAudible) {
+  ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "audible.html")) << message_;
+}
+
+// http://crbug.com/521410
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabMuted) {
+  ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "muted.html")) << message_;
+}
+
 // Flaky on windows: http://crbug.com/238667
 #if defined(OS_WIN)
 #define MAYBE_Tabs2 DISABLED_Tabs2
@@ -141,8 +150,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabGetCurrent) {
   ASSERT_TRUE(RunExtensionTest("tabs/get_current")) << message_;
 }
 
-// Flaky on the trybots. See http://crbug.com/96725.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabConnect) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabConnect) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("tabs/connect")) << message_;
 }

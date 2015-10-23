@@ -18,8 +18,8 @@ class GURL;
 namespace blink {
 class WebDocument;
 class WebElement;
-class WebFormElement;
 class WebFormControlElement;
+class WebFormElement;
 class WebFrame;
 class WebInputElement;
 class WebNode;
@@ -32,6 +32,7 @@ struct FormFieldData;
 struct WebElementDescriptor;
 
 // A bit field mask to extract data from WebFormControlElement.
+// Copied to components/autofill/ios/browser/resources/autofill_controller.js.
 enum ExtractMask {
   EXTRACT_NONE        = 0,
   EXTRACT_VALUE       = 1 << 0,  // Extract value from WebFormControlElement.
@@ -49,6 +50,7 @@ enum ExtractMask {
 // not relevant to Autofill: (1) the Netflix queue; (2) the Amazon wishlist;
 // (3) router configuration pages; and (4) other configuration pages, e.g. for
 // Google code project settings.
+// Copied to components/autofill/ios/browser/resources/autofill_controller.js.
 extern const size_t kMaxParseableFields;
 
 // Returns true if |element| is a month input element.
@@ -175,6 +177,15 @@ bool IsWebElementEmpty(const blink::WebElement& element);
 
 // Return a gfx::RectF that is the bounding box for |element| scaled by |scale|.
 gfx::RectF GetScaledBoundingBox(float scale, blink::WebElement* element);
+
+// Previews |suggestion| in |input_element| and highlights the suffix of
+// |suggestion| not included in the |input_element| text. |input_element| must
+// not be null. |user_input| should be the text typed by the user into
+// |input_element|. Note that |user_input| cannot be easily derived from
+// |input_element| by calling value(), because of http://crbug.com/507714.
+void PreviewSuggestion(const base::string16& suggestion,
+                       const base::string16& user_input,
+                       blink::WebFormControlElement* input_element);
 
 }  // namespace autofill
 

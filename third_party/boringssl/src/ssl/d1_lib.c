@@ -151,14 +151,9 @@ void dtls1_free(SSL *s) {
   s->d1 = NULL;
 }
 
-const SSL_CIPHER *dtls1_get_cipher(size_t i) {
-  const SSL_CIPHER *ciph = ssl3_get_cipher(i);
+int dtls1_supports_cipher(const SSL_CIPHER *cipher) {
   /* DTLS does not support stream ciphers. */
-  if (ciph == NULL || ciph->algorithm_enc == SSL_RC4) {
-    return NULL;
-  }
-
-  return ciph;
+  return cipher->algorithm_enc != SSL_RC4;
 }
 
 void dtls1_start_timer(SSL *s) {
@@ -267,7 +262,7 @@ int dtls1_check_timeout_num(SSL *s) {
 
   if (s->d1->num_timeouts > DTLS1_MAX_TIMEOUTS) {
     /* fail the connection, enough alerts have been sent */
-    OPENSSL_PUT_ERROR(SSL, dtls1_check_timeout_num, SSL_R_READ_TIMEOUT_EXPIRED);
+    OPENSSL_PUT_ERROR(SSL, SSL_R_READ_TIMEOUT_EXPIRED);
     return -1;
   }
 
@@ -333,10 +328,11 @@ int dtls1_set_handshake_header(SSL *s, int htype, unsigned long len) {
   s2n(msg_hdr->seq, p);
   l2n3(0, p);
   l2n3(msg_hdr->msg_len, p);
-  return ssl3_finish_mac(s, serialised_header, sizeof(serialised_header)) &&
-         ssl3_finish_mac(s, message + DTLS1_HM_HEADER_LENGTH, len);
+  return ssl3_update_handshake_hash(s, serialised_header,
+                                    sizeof(serialised_header)) &&
+         ssl3_update_handshake_hash(s, message + DTLS1_HM_HEADER_LENGTH, len);
 }
 
 int dtls1_handshake_write(SSL *s) {
-  return dtls1_do_write(s, SSL3_RT_HANDSHAKE);
+  return dtls1_do_write(s, SSL3_RT_HANDSHAKE, dtls1_use_current_epoch);
 }

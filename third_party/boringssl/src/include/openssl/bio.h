@@ -64,6 +64,7 @@
 #include <openssl/err.h> /* for ERR_print_errors_fp */
 #include <openssl/ex_data.h>
 #include <openssl/stack.h>
+#include <openssl/thread.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -74,8 +75,6 @@ extern "C" {
 
 
 /* Allocation and freeing. */
-
-DEFINE_STACK_OF(BIO);
 
 /* BIO_new creates a new BIO with the given type and a reference count of one.
  * It returns the fresh |BIO|, or NULL on error. */
@@ -206,7 +205,7 @@ OPENSSL_EXPORT void BIO_clear_flags(BIO *bio, int flags);
  * flags on |bio|. */
 OPENSSL_EXPORT void BIO_set_retry_read(BIO *bio);
 
-/* BIO_set_retry_read sets the |BIO_FLAGS_WRITE| and |BIO_FLAGS_SHOULD_RETRY|
+/* BIO_set_retry_write sets the |BIO_FLAGS_WRITE| and |BIO_FLAGS_SHOULD_RETRY|
  * flags on |bio|. */
 OPENSSL_EXPORT void BIO_set_retry_write(BIO *bio);
 
@@ -337,6 +336,21 @@ OPENSSL_EXPORT int BIO_hexdump(BIO *bio, const uint8_t *data, size_t len,
 /* BIO_print_errors prints the current contents of the error stack to |bio|
  * using human readable strings where possible. */
 OPENSSL_EXPORT void BIO_print_errors(BIO *bio);
+
+/* BIO_read_asn1 reads a single ASN.1 object from |bio|. If successful it sets
+ * |*out| to be an allocated buffer (that should be freed with |OPENSSL_free|),
+ * |*out_size| to the length, in bytes, of that buffer and returns one.
+ * Otherwise it returns zero.
+ *
+ * If the length of the object is greater than |max_len| or 2^32 then the
+ * function will fail. Long-form tags are not supported. If the length of the
+ * object is indefinite the full contents of |bio| are read, unless it would be
+ * greater than |max_len|, in which case the function fails.
+ *
+ * If the function fails then some unknown amount of data may have been read
+ * from |bio|. */
+OPENSSL_EXPORT int BIO_read_asn1(BIO *bio, uint8_t **out, size_t *out_len,
+                                 size_t max_len);
 
 
 /* Memory BIOs.
@@ -640,7 +654,7 @@ OPENSSL_EXPORT int BIO_zero_copy_get_read_buf(BIO* bio,
  * error stack. */
 OPENSSL_EXPORT int BIO_zero_copy_get_read_buf_done(BIO* bio, size_t bytes_read);
 
-/* BIO_zero_copy_get_write_buf_done initiates a zero copy write operation.
+/* BIO_zero_copy_get_write_buf initiates a zero copy write operation.
  * |out_write_buf| is set to to the internal write buffer, and |out_buf_offset|
  * is set to the current write position of |out_write_buf|.
  * The number of bytes available for write from |out_write_buf| +
@@ -651,7 +665,7 @@ OPENSSL_EXPORT int BIO_zero_copy_get_read_buf_done(BIO* bio, size_t bytes_read);
  * stack.
  *
  * The zero copy write operation is completed by calling
- * |BIO_zero_copy_write_buf_done|. Neither |BIO_zero_copy_get_write_buf|
+ * |BIO_zero_copy_get_write_buf_done|. Neither |BIO_zero_copy_get_write_buf|
  * nor any other I/O write operation may be called while a zero copy write
  * operation is active. */
 OPENSSL_EXPORT int BIO_zero_copy_get_write_buf(BIO* bio,
@@ -659,14 +673,20 @@ OPENSSL_EXPORT int BIO_zero_copy_get_write_buf(BIO* bio,
                                                size_t* out_buf_offset,
                                                size_t* out_available_bytes);
 
-/* BIO_zero_copy_write_buf_done must be called after writing to a BIO using
- * |BIO_zero_copy_get_write_buf_done| to finish the write operation. The
+/* BIO_zero_copy_get_write_buf_done must be called after writing to a BIO using
+ * |BIO_zero_copy_get_write_buf| to finish the write operation. The
  * |bytes_written| argument gives the number of bytes written.
  *
  * It returns one on success. In case of error it returns zero and pushes to the
  * error stack. */
 OPENSSL_EXPORT int BIO_zero_copy_get_write_buf_done(BIO* bio,
                                                     size_t bytes_written);
+
+
+/* Deprecated functions. */
+
+/* ERR_print_errors is an alias for |BIO_print_errors|. */
+OPENSSL_EXPORT void ERR_print_errors(BIO *bio);
 
 
 /* BIO_NOCLOSE and |BIO_CLOSE| can be used as symbolic arguments when a "close
@@ -709,6 +729,15 @@ OPENSSL_EXPORT int BIO_zero_copy_get_write_buf_done(BIO* bio,
  * to BIO_print_errors_fp. It has subsequently been renamed back to
  * ERR_print_errors_fp. */
 #define BIO_print_errors_fp ERR_print_errors_fp
+
+
+/* Deprecated functions. */
+
+/* Returns a filter |BIO| that base64-encodes data written into it, and decodes
+ * data read from it. |BIO_gets| is not supported. Call |BIO_flush| when done
+ * writing, to signal that no more data are to be encoded. The flag
+ * |BIO_FLAGS_BASE64_NO_NL| may be set to encode all the data on one line. */
+OPENSSL_EXPORT const BIO_METHOD *BIO_f_base64(void);
 
 
 /* Private functions */
@@ -784,7 +813,7 @@ struct bio_st {
   /* num is a BIO-specific value. For example, in fd BIOs it's used to store a
    * file descriptor. */
   int num;
-  int references;
+  CRYPTO_refcount_t references;
   void *ptr;
   /* next_bio points to the next |BIO| in a chain. This |BIO| owns a reference
    * to |next_bio|. */
@@ -854,24 +883,6 @@ struct bio_st {
 }  /* extern C */
 #endif
 
-#define BIO_F_BIO_callback_ctrl 100
-#define BIO_F_BIO_ctrl 101
-#define BIO_F_BIO_new 102
-#define BIO_F_BIO_new_file 103
-#define BIO_F_BIO_new_mem_buf 104
-#define BIO_F_BIO_zero_copy_get_read_buf 105
-#define BIO_F_BIO_zero_copy_get_read_buf_done 106
-#define BIO_F_BIO_zero_copy_get_write_buf 107
-#define BIO_F_BIO_zero_copy_get_write_buf_done 108
-#define BIO_F_bio_io 109
-#define BIO_F_bio_make_pair 110
-#define BIO_F_bio_write 111
-#define BIO_F_buffer_ctrl 112
-#define BIO_F_conn_ctrl 113
-#define BIO_F_conn_state 114
-#define BIO_F_file_ctrl 115
-#define BIO_F_file_read 116
-#define BIO_F_mem_write 117
 #define BIO_R_BAD_FOPEN_MODE 100
 #define BIO_R_BROKEN_PIPE 101
 #define BIO_R_CONNECT_ERROR 102

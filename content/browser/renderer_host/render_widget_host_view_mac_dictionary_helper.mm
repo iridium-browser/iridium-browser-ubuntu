@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/sys_string_conversions.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_dictionary_helper.h"
+
+#include "base/strings/sys_string_conversions.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac.h"
 
 namespace content {
@@ -23,7 +24,7 @@ void RenderWidgetHostViewMacDictionaryHelper::ShowDefinitionForSelection() {
   NSRange selection_range = [view_->cocoa_view() selectedRange];
   NSAttributedString* attr_string =
       [view_->cocoa_view() attributedSubstringForProposedRange:selection_range
-                                           actualRange:nil];
+                                                   actualRange:nil];
   if (!attr_string) {
     if (view_->selected_text().empty())
       return;

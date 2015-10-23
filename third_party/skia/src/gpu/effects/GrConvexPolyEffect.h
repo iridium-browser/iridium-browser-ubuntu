@@ -8,7 +8,7 @@
 #ifndef GrConvexPolyEffect_DEFINED
 #define GrConvexPolyEffect_DEFINED
 
-#include "GrDrawTargetCaps.h"
+#include "GrCaps.h"
 #include "GrFragmentProcessor.h"
 #include "GrProcessor.h"
 #include "GrTypesPriv.h"
@@ -69,12 +69,12 @@ public:
 
     const SkScalar* getEdges() const { return fEdges; }
 
-    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
-
-    GrGLFragmentProcessor* createGLInstance() const override;
-
 private:
     GrConvexPolyEffect(GrPrimitiveEdgeType edgeType, int n, const SkScalar edges[]);
+
+    GrGLFragmentProcessor* onCreateGLInstance() const override;
+
+    void onGetGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     bool onIsEqual(const GrFragmentProcessor& other) const override;
 

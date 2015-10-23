@@ -8,10 +8,12 @@
 #include "ash/host/ash_window_tree_host_unified.h"
 #include "ash/host/root_window_transformer.h"
 #include "ash/host/transformer_helper.h"
+#include "ash/ime/input_method_event_handler.h"
 #include "base/command_line.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host_ozone.h"
+#include "ui/events/event_processor.h"
 #include "ui/events/null_event_targeter.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/transform.h"
@@ -45,6 +47,10 @@ class AshWindowTreeHostOzone : public AshWindowTreeHost,
   void OnCursorVisibilityChangedNative(bool show) override;
   void SetBounds(const gfx::Rect& bounds) override;
   void DispatchEvent(ui::Event* event) override;
+
+  // ui::internal::InputMethodDelegate:
+  ui::EventDispatchDetails DispatchKeyEventPostIME(
+      ui::KeyEvent* event) override;
 
   // Temporarily disable the tap-to-click feature. Used on CrOS.
   void SetTapToClickPaused(bool state);
@@ -130,6 +136,16 @@ void AshWindowTreeHostOzone::DispatchEvent(ui::Event* event) {
   if (event->IsLocatedEvent())
     TranslateLocatedEvent(static_cast<ui::LocatedEvent*>(event));
   SendEventToProcessor(event);
+}
+
+ui::EventDispatchDetails AshWindowTreeHostOzone::DispatchKeyEventPostIME(
+    ui::KeyEvent* event) {
+  input_method_handler()->SetPostIME(true);
+  ui::EventDispatchDetails details =
+      event_processor()->OnEventFromSource(event);
+  if (!details.dispatcher_destroyed)
+    input_method_handler()->SetPostIME(false);
+  return details;
 }
 
 void AshWindowTreeHostOzone::SetTapToClickPaused(bool state) {

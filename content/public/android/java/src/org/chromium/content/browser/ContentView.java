@@ -11,7 +11,6 @@ import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -21,6 +20,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
 
+import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 
@@ -31,7 +31,7 @@ import org.chromium.base.VisibleForTesting;
 public class ContentView extends FrameLayout
         implements ContentViewCore.InternalAccessDelegate, SmartClipProvider {
 
-    private static final String TAG = "ContentView";
+    private static final String TAG = "cr.ContentView";
 
     protected final ContentViewCore mContentViewCore;
 
@@ -189,7 +189,7 @@ public class ContentView extends FrameLayout
      */
     @Override
     public void scrollBy(int x, int y) {
-        mContentViewCore.scrollBy(x, y);
+        mContentViewCore.scrollBy(x, y, false);
     }
 
     @Override
@@ -227,6 +227,25 @@ public class ContentView extends FrameLayout
     @Override
     protected int computeVerticalScrollRange() {
         return mContentViewCore.computeVerticalScrollRange();
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        ContentViewClient client = mContentViewCore.getContentViewClient();
+
+        // Allow the ContentViewClient to override the ContentView's width.
+        int desiredWidthMeasureSpec = client.getDesiredWidthMeasureSpec();
+        if (MeasureSpec.getMode(desiredWidthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+            widthMeasureSpec = desiredWidthMeasureSpec;
+        }
+
+        // Allow the ContentViewClient to override the ContentView's height.
+        int desiredHeightMeasureSpec = client.getDesiredHeightMeasureSpec();
+        if (MeasureSpec.getMode(desiredHeightMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+            heightMeasureSpec = desiredHeightMeasureSpec;
+        }
+
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
 
     // End FrameLayout overrides.

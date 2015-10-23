@@ -34,6 +34,7 @@ class DefaultAccessPolicy : public AccessPolicy {
   bool CanSetViewSurfaceId(const ServerView* view) const override;
   bool CanSetViewBounds(const ServerView* view) const override;
   bool CanSetViewProperties(const ServerView* view) const override;
+  bool CanSetViewTextInputState(const ServerView* view) const override;
   bool CanSetFocus(const ServerView* view) const override;
   bool ShouldNotifyOnHierarchyChange(
       const ServerView* view,
@@ -43,6 +44,7 @@ class DefaultAccessPolicy : public AccessPolicy {
 
  private:
   bool WasCreatedByThisConnection(const ServerView* view) const;
+  bool IsDescendantOfEmbedRoot(const ServerView* view) const;
 
   const mojo::ConnectionSpecificId connection_id_;
   AccessPolicyDelegate* delegate_;

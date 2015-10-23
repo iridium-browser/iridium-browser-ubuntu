@@ -136,7 +136,8 @@ void TtsExtensionEventHandler::OnTtsEvent(Utterance* utterance,
   arguments->Set(0, details.release());
 
   scoped_ptr<extensions::Event> event(
-      new extensions::Event(events::kOnEvent, arguments.Pass()));
+      new extensions::Event(::extensions::events::TTS_ON_EVENT,
+                            ::events::kOnEvent, arguments.Pass()));
   event->restrict_to_browser_context = utterance->browser_context();
   event->event_url = utterance->src_url();
   extensions::EventRouter::Get(utterance->browser_context())

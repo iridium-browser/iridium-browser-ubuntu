@@ -32,7 +32,6 @@
 #include "chrome/browser/chrome_elf_init_win.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/install_verification/win/install_verification.h"
-#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/shell_integration.h"
@@ -44,7 +43,6 @@
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -54,6 +52,7 @@
 #include "chrome/installer/util/installer_util_strings.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/shell_util.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/browser/utility_process_host_client.h"
@@ -315,9 +314,6 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
     // Make sure that we know how to handle exceptions from the message loop.
     InitializeWindowProcExceptions();
   }
-
-  // Prime the parental controls cache on Windows.
-  ignore_result(IncognitoModePrefs::ArePlatformParentalControlsEnabled());
 }
 
 int ChromeBrowserMainPartsWin::PreCreateThreads() {
@@ -352,7 +348,8 @@ void ChromeBrowserMainPartsWin::PostProfileInit() {
     // This function will create a read only section if cache file exists
     // otherwise it will spawn utility process to build cache file, which will
     // be used during next browser start/postprofileinit.
-    if (!content::LoadFontCache(path)) {
+    if (!variations::GetVariationParamValue("LightSpeed",
+          "DisableDWriteFontCache").empty() || !content::LoadFontCache(path)) {
       // We delay building of font cache until first startup page loads.
       // During first renderer start there are lot of things happening
       // simultaneously some of them are:

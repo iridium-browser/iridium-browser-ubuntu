@@ -185,6 +185,12 @@ QuicAlarm* QuicConnectionPeer::GetTimeoutAlarm(QuicConnection* connection) {
 }
 
 // static
+QuicAlarm* QuicConnectionPeer::GetMtuDiscoveryAlarm(
+    QuicConnection* connection) {
+  return connection->mtu_discovery_alarm_.get();
+}
+
+// static
 QuicPacketWriter* QuicConnectionPeer::GetWriter(QuicConnection* connection) {
   return connection->writer_;
 }
@@ -226,6 +232,24 @@ void QuicConnectionPeer::SetSequenceNumberOfLastSentPacket(
 // static
 QuicConnectionStats* QuicConnectionPeer::GetStats(QuicConnection* connection) {
   return &connection->stats_;
+}
+
+// static
+QuicPacketCount QuicConnectionPeer::GetPacketsBetweenMtuProbes(
+    QuicConnection* connection) {
+  return connection->packets_between_mtu_probes_;
+}
+
+// static
+void QuicConnectionPeer::SetPacketsBetweenMtuProbes(QuicConnection* connection,
+                                                    QuicPacketCount packets) {
+  connection->packets_between_mtu_probes_ = packets;
+}
+
+// static
+void QuicConnectionPeer::SetNextMtuProbeAt(QuicConnection* connection,
+                                           QuicPacketSequenceNumber number) {
+  connection->next_mtu_probe_at_ = number;
 }
 
 }  // namespace test

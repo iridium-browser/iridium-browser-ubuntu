@@ -24,18 +24,19 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/android/android_about_app_info.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/common/translate_pref_names.h"
+#include "components/version_info/version_info.h"
 #include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/user_agent.h"
+#include "content/public/browser/user_metrics.h"
 #include "jni/PrefServiceBridge_jni.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -123,23 +124,6 @@ bool IsContentSettingUserModifiable(ContentSettingsType content_settings_type) {
   HostContentSettingsMap::ProviderType provider =
       content_settings->GetProviderTypeFromSource(source);
   return provider >= HostContentSettingsMap::PREF_PROVIDER;
-}
-
-void OnGotProfilePath(ScopedJavaGlobalRef<jobject>* callback,
-                      std::string path) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_path = ConvertUTF8ToJavaString(env, path);
-  Java_PrefServiceBridge_onGotProfilePath(env, j_path.obj(), callback->obj());
-}
-
-std::string GetProfilePathOnFileThread(Profile* profile) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
-  if (!profile)
-    return std::string();
-
-  base::FilePath profile_path = profile->GetPath();
-  return base::MakeAbsoluteFilePath(profile_path).value();
 }
 
 PrefService* GetPrefService() {
@@ -291,12 +275,47 @@ static jboolean GetTranslateManaged(JNIEnv* env, jobject obj) {
   return GetPrefService()->IsManagedPreference(prefs::kEnableTranslate);
 }
 
+static jboolean GetAutoDetectEncodingEnabled(JNIEnv* env, jobject obj) {
+  return GetPrefService()->GetBoolean(prefs::kWebKitUsesUniversalDetector);
+}
+
 static jboolean GetSearchSuggestEnabled(JNIEnv* env, jobject obj) {
   return GetPrefService()->GetBoolean(prefs::kSearchSuggestEnabled);
 }
 
 static jboolean GetSearchSuggestManaged(JNIEnv* env, jobject obj) {
   return GetPrefService()->IsManagedPreference(prefs::kSearchSuggestEnabled);
+}
+
+static jboolean GetSafeBrowsingExtendedReportingEnabled(JNIEnv* env,
+                                                        jobject obj) {
+  return GetPrefService()->GetBoolean(
+      prefs::kSafeBrowsingExtendedReportingEnabled);
+}
+
+static void SetSafeBrowsingExtendedReportingEnabled(JNIEnv* env,
+                                                    jobject obj,
+                                                    jboolean enabled) {
+  GetPrefService()->SetBoolean(prefs::kSafeBrowsingExtendedReportingEnabled,
+                               enabled);
+}
+
+static jboolean GetSafeBrowsingExtendedReportingManaged(JNIEnv* env,
+                                                        jobject obj) {
+  return GetPrefService()->IsManagedPreference(
+      prefs::kSafeBrowsingExtendedReportingEnabled);
+}
+
+static jboolean GetSafeBrowsingEnabled(JNIEnv* env, jobject obj) {
+  return GetPrefService()->GetBoolean(prefs::kSafeBrowsingEnabled);
+}
+
+static void SetSafeBrowsingEnabled(JNIEnv* env, jobject obj, jboolean enabled) {
+  GetPrefService()->SetBoolean(prefs::kSafeBrowsingEnabled, enabled);
+}
+
+static jboolean GetSafeBrowsingManaged(JNIEnv* env, jobject obj) {
+  return GetPrefService()->IsManagedPreference(prefs::kSafeBrowsingEnabled);
 }
 
 static jboolean GetProtectedMediaIdentifierEnabled(JNIEnv* env, jobject obj) {
@@ -562,6 +581,12 @@ static void SetTranslateEnabled(JNIEnv* env, jobject obj, jboolean enabled) {
   GetPrefService()->SetBoolean(prefs::kEnableTranslate, enabled);
 }
 
+static void SetAutoDetectEncodingEnabled(JNIEnv* env, jobject obj,
+                                         jboolean enabled) {
+  content::RecordAction(base::UserMetricsAction("AutoDetectChange"));
+  GetPrefService()->SetBoolean(prefs::kWebKitUsesUniversalDetector, enabled);
+}
+
 static void ResetTranslateDefaults(JNIEnv* env, jobject obj) {
   scoped_ptr<translate::TranslatePrefs> translate_prefs =
       ChromeTranslateClient::CreateTranslatePrefs(GetPrefService());
@@ -646,15 +671,6 @@ static jboolean GetMicUserModifiable(JNIEnv* env, jobject obj) {
 static jboolean GetMicManagedByCustodian(JNIEnv* env, jobject obj) {
   return IsContentSettingManagedByCustodian(
              CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
-}
-
-static jboolean GetAutologinEnabled(JNIEnv* env, jobject obj) {
-  return GetPrefService()->GetBoolean(prefs::kAutologinEnabled);
-}
-
-static void SetAutologinEnabled(JNIEnv* env, jobject obj,
-                                jboolean autologinEnabled) {
-  GetPrefService()->SetBoolean(prefs::kAutologinEnabled, autologinEnabled);
 }
 
 static void SetJavaScriptAllowed(JNIEnv* env, jobject obj, jstring pattern,
@@ -748,73 +764,28 @@ static void ResetAcceptLanguages(JNIEnv* env,
   std::string accept_languages(l10n_util::GetStringUTF8(IDS_ACCEPT_LANGUAGES));
   std::string locale_string(ConvertJavaStringToUTF8(env, default_locale));
 
-  PrependToAcceptLanguagesIfNecessary(locale_string, &accept_languages);
+  PrefServiceBridge::PrependToAcceptLanguagesIfNecessary(locale_string,
+                                                         &accept_languages);
   GetPrefService()->SetString(prefs::kAcceptLanguages, accept_languages);
-}
-
-void PrependToAcceptLanguagesIfNecessary(std::string locale,
-                                         std::string* accept_languages) {
-  if (locale.size() != 5u || locale[2] != '_')  // not well-formed
-    return;
-
-  std::string language(locale.substr(0, 2));
-  std::string region(locale.substr(3, 2));
-
-  // Java mostly follows ISO-639-1 and ICU, except for the following three.
-  // See documentation on java.util.Locale constructor for more.
-  if (language == "iw") {
-    language = "he";
-  } else if (language == "ji") {
-    language = "yi";
-  } else if (language == "in") {
-    language = "id";
-  }
-
-  std::string language_region(language + "-" + region);
-
-  if (accept_languages->find(language_region) == std::string::npos) {
-    std::vector<std::string> parts;
-    parts.push_back(language_region);
-    // If language is not in the accept languages list, also add language code.
-    if (accept_languages->find(language + ",") == std::string::npos &&
-        !std::equal(language.rbegin(), language.rend(),
-                    accept_languages->rbegin()))
-      parts.push_back(language);
-    parts.push_back(*accept_languages);
-    *accept_languages = JoinString(parts, ',');
-  }
 }
 
 // Sends all information about the different versions to Java.
 // From browser_about_handler.cc
 static jobject GetAboutVersionStrings(JNIEnv* env, jobject obj) {
-  chrome::VersionInfo version_info;
-  std::string os_version = version_info.OSType();
+  std::string os_version = version_info::GetOSType();
   os_version += " " + AndroidAboutAppInfo::GetOsInfo();
 
   base::android::BuildInfo* android_build_info =
         base::android::BuildInfo::GetInstance();
   std::string application(android_build_info->package_label());
   application.append(" ");
-  application.append(version_info.Version());
+  application.append(version_info::GetVersionNumber());
 
   // OK to release, returning to Java.
   return Java_PrefServiceBridge_createAboutVersionStrings(
       env,
       ConvertUTF8ToJavaString(env, application).obj(),
-      ConvertUTF8ToJavaString(env, content::GetWebKitVersion()).obj(),
-      ConvertUTF8ToJavaString(
-          env, AndroidAboutAppInfo::GetJavaScriptVersion()).obj(),
       ConvertUTF8ToJavaString(env, os_version).obj()).Release();
-}
-
-static void GetProfilePath(JNIEnv* env, jobject obj, jobject j_callback) {
-  ScopedJavaGlobalRef<jobject>* callback = new ScopedJavaGlobalRef<jobject>();
-  callback->Reset(env, j_callback);
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&GetProfilePathOnFileThread, GetOriginalProfile()),
-      base::Bind(&OnGotProfilePath, base::Owned(callback)));
 }
 
 static jstring GetSupervisedUserCustodianName(JNIEnv* env, jobject obj) {
@@ -859,6 +830,56 @@ static jstring GetSupervisedUserSecondCustodianProfileImageURL(JNIEnv* env,
           prefs::kSupervisedUserSecondCustodianProfileImageURL)).Release();
 }
 
-bool RegisterPrefServiceBridge(JNIEnv* env) {
+// static
+bool PrefServiceBridge::RegisterPrefServiceBridge(JNIEnv* env) {
   return RegisterNativesImpl(env);
+}
+
+// static
+void PrefServiceBridge::PrependToAcceptLanguagesIfNecessary(
+    const std::string& locale,
+    std::string* accept_languages) {
+  if (locale.size() != 5u || locale[2] != '_')  // not well-formed
+    return;
+
+  std::string language(locale.substr(0, 2));
+  std::string region(locale.substr(3, 2));
+
+  // Java mostly follows ISO-639-1 and ICU, except for the following three.
+  // See documentation on java.util.Locale constructor for more.
+  if (language == "iw") {
+    language = "he";
+  } else if (language == "ji") {
+    language = "yi";
+  } else if (language == "in") {
+    language = "id";
+  }
+
+  std::string language_region(language + "-" + region);
+
+  if (accept_languages->find(language_region) == std::string::npos) {
+    std::vector<std::string> parts;
+    parts.push_back(language_region);
+    // If language is not in the accept languages list, also add language code.
+    if (accept_languages->find(language + ",") == std::string::npos &&
+        !std::equal(language.rbegin(), language.rend(),
+                    accept_languages->rbegin())) {
+      parts.push_back(language);
+    }
+    parts.push_back(*accept_languages);
+    *accept_languages = base::JoinString(parts, ",");
+  }
+}
+
+// static
+std::string PrefServiceBridge::GetAndroidPermissionForContentSetting(
+    ContentSettingsType content_type) {
+  JNIEnv* env = AttachCurrentThread();
+  base::android::ScopedJavaLocalRef<jstring> android_permission =
+      Java_PrefServiceBridge_getAndroidPermissionForContentSetting(
+          env, content_type);
+  if (android_permission.is_null())
+    return std::string();
+
+  return ConvertJavaStringToUTF8(android_permission);
 }

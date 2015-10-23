@@ -29,6 +29,7 @@
 #include "platform/PlatformExport.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/DoublePoint.h"
+#include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollAnimator.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "platform/scroll/Scrollbar.h"
@@ -45,6 +46,7 @@ class PlatformWheelEvent;
 class ProgrammaticScrollAnimator;
 struct ScrollAlignment;
 class ScrollAnimator;
+class WebCompositorAnimationTimeline;
 
 enum ScrollBehavior {
     ScrollBehaviorAuto,
@@ -57,7 +59,16 @@ enum IncludeScrollbarsInRect {
     IncludeScrollbars,
 };
 
+#if ENABLE(OILPAN)
+// Oilpan: Using the transition type WillBeGarbageCollectedMixin is
+// problematic non-Oilpan as the type expands to DummyBase, exporting it
+// also from 'platform' as a result. Bringing about duplicate DummyBases
+// as core also exports same; with component build linking fails as a
+// result. Hence the workaround of not using a transition type.
+class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin {
+#else
 class PLATFORM_EXPORT ScrollableArea {
+#endif
     WTF_MAKE_NONCOPYABLE(ScrollableArea);
 public:
     static int pixelsPerLineStep();
@@ -70,12 +81,13 @@ public:
 
     // The window that hosts the ScrollableArea. The ScrollableArea will communicate scrolls and repaints to the
     // host window in the window's coordinate space.
-    virtual HostWindow* hostWindow() const { return 0; };
+    virtual HostWindow* hostWindow() const { return 0; }
 
-    virtual bool scroll(ScrollDirection, ScrollGranularity, float delta = 1);
-    virtual void setScrollPosition(const DoublePoint&, ScrollBehavior = ScrollBehaviorInstant);
-    void scrollToOffsetWithoutAnimation(const FloatPoint&, bool cancelProgrammaticAnimations = true);
-    void scrollToOffsetWithoutAnimation(ScrollbarOrientation, float offset);
+    virtual ScrollResultOneDimensional userScroll(ScrollDirectionPhysical, ScrollGranularity, float delta = 1);
+
+    virtual void setScrollPosition(const DoublePoint&, ScrollType, ScrollBehavior = ScrollBehaviorInstant);
+    virtual void scrollBy(const DoubleSize&, ScrollType, ScrollBehavior = ScrollBehaviorInstant);
+    void setScrollPositionSingleAxis(ScrollbarOrientation, double, ScrollType, ScrollBehavior = ScrollBehaviorInstant);
 
     // Scrolls the area so that the given rect, given in the document's content coordinates, such that it's
     // visible in the area. Returns the new location of the input rect relative once again to the document.
@@ -88,23 +100,9 @@ public:
     // cenetered in the second rect, which is given relative to the area's origin.
     void scrollIntoRect(const LayoutRect& rectInContent, const FloatRect& targetRectInFrame);
 
-    void programmaticallyScrollSmoothlyToOffset(const FloatPoint&);
-
-    // Should be called when the scroll position changes externally, for example if the scroll layer position
-    // is updated on the scrolling thread and we need to notify the main thread.
-    void notifyScrollPositionChanged(const DoublePoint&);
-
     static bool scrollBehaviorFromString(const String&, ScrollBehavior&);
 
     virtual ScrollResult handleWheel(const PlatformWheelEvent&);
-
-    // Functions for controlling if you can scroll past the end of the document.
-    bool constrainsScrollingToContentEdge() const { return m_constrainsScrollingToContentEdge; }
-    void setConstrainsScrollingToContentEdge(bool constrainsScrollingToContentEdge) { m_constrainsScrollingToContentEdge = constrainsScrollingToContentEdge; }
-
-    // Adjust the passed in scroll position to keep it between the minimum and maximum positions.
-    IntPoint adjustScrollPositionWithinRange(const IntPoint&) const;
-    DoublePoint adjustScrollPositionWithinRange(const DoublePoint&) const;
 
     bool inLiveResize() const { return m_inLiveResize; }
     void willStartLiveResize();
@@ -153,7 +151,6 @@ public:
     // is causing too much nasty bugs but does not add too benefit on low-dpi devices.
     virtual bool shouldUseIntegerScrollOffset() const { return !RuntimeEnabledFeatures::fractionalScrollOffsetsEnabled(); }
 
-    // FIXME(bokan): Meaningless name, rename to isActiveFocus
     virtual bool isActive() const = 0;
     virtual int scrollSize(ScrollbarOrientation) const = 0;
     virtual void invalidateScrollbar(Scrollbar*, const IntRect&);
@@ -206,7 +203,7 @@ public:
 
     virtual bool shouldSuspendScrollAnimations() const { return true; }
     virtual void scrollbarStyleChanged() { }
-
+    virtual void scrollbarVisibilityChanged() { }
     virtual bool scrollbarsCanBeActive() const = 0;
 
     // Returns the bounding box of this scrollable area, in the coordinate system of the enclosing scroll view.
@@ -224,7 +221,7 @@ public:
     // animations.
     bool scheduleAnimation();
     virtual void serviceScrollAnimations(double monotonicTime);
-    void updateCompositorScrollAnimations();
+    virtual void updateCompositorScrollAnimations();
     virtual void registerForAnimation() { }
     virtual void deregisterForAnimation() { }
 
@@ -272,8 +269,9 @@ public:
     bool hasLayerForVerticalScrollbar() const;
     bool hasLayerForScrollCorner() const;
 
-    void layerForScrollingDidChange();
+    void layerForScrollingDidChange(WebCompositorAnimationTimeline*);
 
+    void cancelScrollAnimation();
     void cancelProgrammaticScrollAnimation();
 
     virtual ~ScrollableArea();
@@ -299,18 +297,30 @@ public:
     // semantics for now but it should be cleaned up at the source.
     virtual bool isProgrammaticallyScrollable() { return true; }
 
+    // Subtracts space occupied by this ScrollableArea's scrollbars.
+    // Does nothing if overlay scrollbars are enabled.
+    IntSize excludeScrollbars(const IntSize&) const;
+
+    // Need to promptly let go of owned animator objects.
+    EAGERLY_FINALIZE();
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
+
 protected:
     ScrollableArea();
 
     void setScrollOrigin(const IntPoint&);
     void resetScrollOriginChanged() { m_scrollOriginChanged = false; }
 
-private:
-    void scrollPositionChanged(const DoublePoint&);
-
-    // NOTE: Only called from the ScrollAnimator.
+    // Needed to let the animators call scrollPositionChanged.
     friend class ScrollAnimator;
-    void setScrollOffsetFromAnimation(const DoublePoint&);
+    friend class ProgrammaticScrollAnimator;
+    void scrollPositionChanged(const DoublePoint&, ScrollType);
+
+    void clearScrollAnimators();
+
+private:
+    void programmaticScrollHelper(const DoublePoint&, ScrollBehavior);
+    void userScrollHelper(const DoublePoint&, ScrollBehavior);
 
     // This function should be overriden by subclasses to perform the actual
     // scroll of the content. By default the DoublePoint version will just
@@ -319,10 +329,10 @@ private:
     // precision scroll offset.
     // FIXME: Remove the IntPoint version. And change the function to
     // take DoubleSize. crbug.com/414283.
-    virtual void setScrollOffset(const IntPoint&) = 0;
-    virtual void setScrollOffset(const DoublePoint& offset)
+    virtual void setScrollOffset(const IntPoint&, ScrollType) = 0;
+    virtual void setScrollOffset(const DoublePoint& offset, ScrollType scrollType)
     {
-        setScrollOffset(flooredIntPoint(offset));
+        setScrollOffset(flooredIntPoint(offset), scrollType);
     }
 
     virtual int lineStep(ScrollbarOrientation) const;
@@ -335,12 +345,11 @@ private:
     IntRect m_verticalBarDamage;
 
     struct ScrollableAreaAnimators {
-        RefPtr<ScrollAnimator> scrollAnimator;
+        OwnPtr<ScrollAnimator> scrollAnimator;
         OwnPtr<ProgrammaticScrollAnimator> programmaticScrollAnimator;
     };
 
     mutable OwnPtr<ScrollableAreaAnimators> m_animators;
-    unsigned m_constrainsScrollingToContentEdge : 1;
 
     unsigned m_inLiveResize : 1;
 

@@ -252,9 +252,9 @@ class TestingProfile : public Profile {
   void DestroyOffTheRecordProfile() override {}
   bool HasOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
-  bool IsSupervised() override;
-  bool IsChild() override;
-  bool IsLegacySupervised() override;
+  bool IsSupervised() const override;
+  bool IsChild() const override;
+  bool IsLegacySupervised() const override;
 #if defined(ENABLE_EXTENSIONS)
   void SetExtensionSpecialStoragePolicy(
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
@@ -308,7 +308,8 @@ class TestingProfile : public Profile {
   void BlockUntilHistoryProcessesPendingRequests();
 
   chrome_browser_net::Predictor* GetNetworkPredictor() override;
-  DevToolsNetworkController* GetDevToolsNetworkController() override;
+  DevToolsNetworkControllerHandle* GetDevToolsNetworkControllerHandle()
+      override;
   void ClearNetworkingHistorySince(base::Time time,
                                    const base::Closure& completion) override;
   GURL GetHomePage() override;
@@ -380,6 +381,8 @@ class TestingProfile : public Profile {
   // The path to this profile. This will be valid in either of the two above
   // cases.
   base::FilePath profile_path_;
+
+  base::FilePath extensions_path_;
 
   // We keep a weak pointer to the dependency manager we want to notify on our
   // death. Defaults to the Singleton implementation but overridable for

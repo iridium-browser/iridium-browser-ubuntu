@@ -32,8 +32,6 @@ struct FormData {
   GURL origin;
   // The action target of the form.
   GURL action;
-  // true if this form was submitted by a user gesture and not javascript.
-  bool user_submitted;
   // true if this form is a form tag.
   bool is_form_tag;
   // A vector of all the input fields in the form.
@@ -45,10 +43,10 @@ std::ostream& operator<<(std::ostream& os, const FormData& form);
 
 // Serialize FormData. Used by the PasswordManager to persist FormData
 // pertaining to password forms. Serialized data is appended to |pickle|.
-void SerializeFormData(const FormData& form_data, Pickle* pickle);
+void SerializeFormData(const FormData& form_data, base::Pickle* pickle);
 // Deserialize FormData. This assumes that |iter| is currently pointing to
 // the part of a pickle created by SerializeFormData. Returns true on success.
-bool DeserializeFormData(PickleIterator* iter, FormData* form_data);
+bool DeserializeFormData(base::PickleIterator* iter, FormData* form_data);
 
 // Serialize FormData. Used by the PasswordManager to persist FormData
 // pertaining to password forms in base64 string. It is useful since in some

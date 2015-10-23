@@ -21,7 +21,7 @@ template <>
 struct ParamTraits<network_hints::LookupRequest> {
   typedef network_hints::LookupRequest param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -42,7 +42,7 @@ IPC_MESSAGE_CONTROL1(NetworkHintsMsg_DNSPrefetch,
 
 
 // Request for preconnect to host providing resource specified by URL
-IPC_MESSAGE_CONTROL2(NetworkHintsMsg_Preconnect,
+IPC_MESSAGE_CONTROL3(NetworkHintsMsg_Preconnect,
                      GURL /* preconnect target url */,
-                     int  /* number of connections */)
-
+                     bool /* Does connection have its credentials flag set */,
+                     int /* number of connections */)

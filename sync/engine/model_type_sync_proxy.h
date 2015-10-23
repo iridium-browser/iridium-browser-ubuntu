@@ -8,7 +8,7 @@
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 // Interface used by sync backend to issue requests to a synced data type.
 class SYNC_EXPORT_PRIVATE ModelTypeSyncProxy {

@@ -48,6 +48,7 @@ class PrinterProviderInternalAPI : public BrowserContextKeyedAPI {
   friend class PrinterProviderInternalReportPrintersFunction;
   friend class PrinterProviderInternalReportPrinterCapabilityFunction;
   friend class PrinterProviderInternalReportPrintResultFunction;
+  friend class PrinterProviderInternalReportUsbPrinterInfoFunction;
 
   // BrowserContextKeyedAPI implementation.
   static const bool kServiceRedirectedInIncognito = true;
@@ -73,9 +74,17 @@ class PrinterProviderInternalAPI : public BrowserContextKeyedAPI {
   // |PrinterProviderInternalReportPrintResultFunction|.
   void NotifyPrintResult(const Extension* extension,
                          int request_id,
-                         core_api::printer_provider_internal::PrintError error);
+                         api::printer_provider_internal::PrintError error);
 
-  ObserverList<PrinterProviderInternalAPIObserver> observers_;
+  // Notifies observers that a printerProvider.onGetUsbPrinterInfoRequested
+  // callback has been called. Called from
+  // |PrinterProviderInternalReportUsbPrinterInfoFunction|.
+  void NotifyGetUsbPrinterInfoResult(
+      const Extension* extension,
+      int request_id,
+      const api::printer_provider::PrinterInfo* printer_info);
+
+  base::ObserverList<PrinterProviderInternalAPIObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(PrinterProviderInternalAPI);
 };
@@ -149,6 +158,22 @@ class PrinterProviderInternalGetPrintDataFunction
                              PRINTERPROVIDERINTERNAL_GETPRINTDATA)
 
   DISALLOW_COPY_AND_ASSIGN(PrinterProviderInternalGetPrintDataFunction);
+};
+
+class PrinterProviderInternalReportUsbPrinterInfoFunction
+    : public UIThreadExtensionFunction {
+ public:
+  PrinterProviderInternalReportUsbPrinterInfoFunction();
+
+ protected:
+  ~PrinterProviderInternalReportUsbPrinterInfoFunction() override;
+  ExtensionFunction::ResponseAction Run() override;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION("printerProviderInternal.reportUsbPrinterInfo",
+                             PRINTERPROVIDERINTERNAL_REPORTUSBPRINTERINFO)
+
+  DISALLOW_COPY_AND_ASSIGN(PrinterProviderInternalReportUsbPrinterInfoFunction);
 };
 
 }  // namespace extensions

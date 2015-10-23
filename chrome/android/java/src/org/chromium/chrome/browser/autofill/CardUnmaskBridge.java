@@ -7,8 +7,8 @@ package org.chromium.chrome.browser.autofill;
 import android.app.Activity;
 import android.os.Handler;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.browser.ResourceId;
 import org.chromium.chrome.browser.autofill.CardUnmaskPrompt.CardUnmaskPromptDelegate;
 import org.chromium.ui.base.WindowAndroid;
@@ -67,12 +67,31 @@ public class CardUnmaskBridge implements CardUnmaskPromptDelegate {
         nativeOnUserInput(mNativeCardUnmaskPromptViewAndroid, cvc, month, year, shouldStoreLocally);
     }
 
+    @Override
+    public void onNewCardLinkClicked() {
+        nativeOnNewCardLinkClicked(mNativeCardUnmaskPromptViewAndroid);
+    }
+
     /**
      * Shows a prompt for unmasking a Wallet credit card.
      */
     @CalledByNative
     private void show() {
         if (mCardUnmaskPrompt != null) mCardUnmaskPrompt.show();
+    }
+
+    /**
+     * After a prompt is already showing, update some UI elements.
+     * @param title The dialog title.
+     * @param instructions Expository text.
+     * @param shouldRequestExpirationDate Whether to show the Update + Verify UI or just the
+     * Verify UI.
+     */
+    @CalledByNative
+    private void update(String title, String instructions, boolean shouldRequestExpirationDate) {
+        if (mCardUnmaskPrompt != null) {
+            mCardUnmaskPrompt.update(title, instructions, shouldRequestExpirationDate);
+        }
     }
 
     /**
@@ -109,4 +128,5 @@ public class CardUnmaskBridge implements CardUnmaskPromptDelegate {
     private native void nativeOnUserInput(
             long nativeCardUnmaskPromptViewAndroid, String cvc, String month, String year,
             boolean shouldStoreLocally);
+    private native void nativeOnNewCardLinkClicked(long nativeCardUnmaskPromptViewAndroid);
 }

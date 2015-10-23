@@ -9,12 +9,6 @@
 #include "base/logging.h"
 #import "base/mac/scoped_nsobject.h"
 
-namespace {
-// The key needed for objc_setAssociatedObject. Any value will do, because the
-// address is the key.
-const char kObserverAssociatedObjectKey = 'h';
-}
-
 // Used for observing the objects tracked in the WeakNSObjectCounter. This
 // object will be dealloced when the tracked object is dealloced and will
 // notify the shared counter.
@@ -29,11 +23,6 @@ const char kObserverAssociatedObjectKey = 'h';
   linked_ptr<NSUInteger> _counter;
 }
 
-- (instancetype)init {
-  NOTREACHED();
-  return nil;
-}
-
 - (instancetype)initWithSharedCounter:(const linked_ptr<NSUInteger>&)counter
                    objectToBeObserved:(id)object {
   self = [super init];
@@ -41,11 +30,18 @@ const char kObserverAssociatedObjectKey = 'h';
     DCHECK(counter.get());
     DCHECK(object);
     _counter = counter;
-    objc_setAssociatedObject(object, &kObserverAssociatedObjectKey, self,
-                             OBJC_ASSOCIATION_RETAIN);
+    objc_setAssociatedObject(
+        object,
+        reinterpret_cast<const void*>(_counter.get()),  // The key.
+        self, OBJC_ASSOCIATION_RETAIN);
     (*_counter)++;
   }
   return self;
+}
+
+- (instancetype)init {
+  NOTREACHED();
+  return nil;
 }
 
 - (void)dealloc {

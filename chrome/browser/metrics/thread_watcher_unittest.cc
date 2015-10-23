@@ -6,11 +6,12 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
@@ -257,9 +258,9 @@ class ThreadWatcherTest : public ::testing::Test {
     db_thread_.reset(new content::TestBrowserThread(BrowserThread::DB));
     io_thread_.reset(new content::TestBrowserThread(BrowserThread::IO));
     watchdog_thread_.reset(new WatchDogThread());
-    db_thread_->Start();
-    io_thread_->Start();
-    watchdog_thread_->Start();
+    db_thread_->StartAndWaitForTesting();
+    io_thread_->StartAndWaitForTesting();
+    watchdog_thread_->StartAndWaitForTesting();
 
     WatchDogThread::PostTask(
         FROM_HERE,
@@ -351,11 +352,10 @@ TEST_F(ThreadWatcherTest, ThreadNamesOnlyArgs) {
 
   // Verify the data.
   base::StringTokenizer tokens(crash_on_hang_thread_names, ",");
-  std::vector<std::string> values;
   while (tokens.GetNext()) {
-    const std::string& token = tokens.token();
-    base::SplitString(token, ':', &values);
-    std::string thread_name = values[0];
+    std::vector<base::StringPiece> values = base::SplitStringPiece(
+        tokens.token_piece(), ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    std::string thread_name = values[0].as_string();
 
     ThreadWatcherList::CrashOnHangThreadMap::iterator it =
         crash_on_hang_threads.find(thread_name);
@@ -381,11 +381,10 @@ TEST_F(ThreadWatcherTest, ThreadNamesAndLiveThresholdArgs) {
 
   // Verify the data.
   base::StringTokenizer tokens(thread_names_and_live_threshold, ",");
-  std::vector<std::string> values;
   while (tokens.GetNext()) {
-    const std::string& token = tokens.token();
-    base::SplitString(token, ':', &values);
-    std::string thread_name = values[0];
+    std::vector<base::StringPiece> values = base::SplitStringPiece(
+        tokens.token_piece(), ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    std::string thread_name = values[0].as_string();
 
     ThreadWatcherList::CrashOnHangThreadMap::iterator it =
         crash_on_hang_threads.find(thread_name);
@@ -411,11 +410,10 @@ TEST_F(ThreadWatcherTest, CrashOnHangThreadsAllArgs) {
 
   // Verify the data.
   base::StringTokenizer tokens(crash_on_hang_thread_data, ",");
-  std::vector<std::string> values;
   while (tokens.GetNext()) {
-    const std::string& token = tokens.token();
-    base::SplitString(token, ':', &values);
-    std::string thread_name = values[0];
+    std::vector<base::StringPiece> values = base::SplitStringPiece(
+        tokens.token_piece(), ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    std::string thread_name = values[0].as_string();
 
     ThreadWatcherList::CrashOnHangThreadMap::iterator it =
         crash_on_hang_threads.find(thread_name);
@@ -435,13 +433,7 @@ TEST_F(ThreadWatcherTest, CrashOnHangThreadsAllArgs) {
 
 // Test registration. When thread_watcher_list_ goes out of scope after
 // TearDown, all thread watcher objects will be deleted.
-// This test is crashing flakily on Android: http://crbug.com/485091
-#if defined(OS_ANDROID)
-#define MAYBE_Registration DISABLED_Registration
-#else
-#define MAYBE_Registration Registration
-#endif
-TEST_F(ThreadWatcherTest, MAYBE_Registration) {
+TEST_F(ThreadWatcherTest, Registration) {
   // Check ThreadWatcher object has all correct parameters.
   EXPECT_EQ(io_thread_id, io_watcher_->thread_id());
   EXPECT_EQ(io_thread_name, io_watcher_->thread_name());
@@ -697,7 +689,7 @@ TEST_F(ThreadWatcherListTest, Restart) {
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop_for_ui);
 
   scoped_ptr<WatchDogThread> watchdog_thread_(new WatchDogThread());
-  watchdog_thread_->Start();
+  watchdog_thread_->StartAndWaitForTesting();
 
   // See http://crbug.com/347887.
   // StartWatchingAll() will PostDelayedTask to create g_thread_watcher_list_,
@@ -706,9 +698,8 @@ TEST_F(ThreadWatcherListTest, Restart) {
   // g_thread_watcher_list_ later on.
   ThreadWatcherList::StartWatchingAll(*base::CommandLine::ForCurrentProcess());
   ThreadWatcherList::StopWatchingAll();
-  message_loop_for_ui.PostDelayedTask(
-      FROM_HERE,
-      message_loop_for_ui.QuitClosure(),
+  message_loop_for_ui.task_runner()->PostDelayedTask(
+      FROM_HERE, message_loop_for_ui.QuitClosure(),
       base::TimeDelta::FromSeconds(
           ThreadWatcherList::g_initialize_delay_seconds));
   message_loop_for_ui.Run();
@@ -719,9 +710,8 @@ TEST_F(ThreadWatcherListTest, Restart) {
 
   // Proceed with just |StartWatchingAll| and ensure it'll be started.
   ThreadWatcherList::StartWatchingAll(*base::CommandLine::ForCurrentProcess());
-  message_loop_for_ui.PostDelayedTask(
-      FROM_HERE,
-      message_loop_for_ui.QuitClosure(),
+  message_loop_for_ui.task_runner()->PostDelayedTask(
+      FROM_HERE, message_loop_for_ui.QuitClosure(),
       base::TimeDelta::FromSeconds(
           ThreadWatcherList::g_initialize_delay_seconds + 1));
   message_loop_for_ui.Run();
@@ -732,9 +722,8 @@ TEST_F(ThreadWatcherListTest, Restart) {
 
   // Finally, StopWatchingAll() must stop.
   ThreadWatcherList::StopWatchingAll();
-  message_loop_for_ui.PostDelayedTask(
-      FROM_HERE,
-      message_loop_for_ui.QuitClosure(),
+  message_loop_for_ui.task_runner()->PostDelayedTask(
+      FROM_HERE, message_loop_for_ui.QuitClosure(),
       base::TimeDelta::FromSeconds(
           ThreadWatcherList::g_initialize_delay_seconds));
   message_loop_for_ui.Run();

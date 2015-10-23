@@ -7,17 +7,14 @@
 
 #include "core/layout/ClipPathOperation.h"
 #include "core/style/ShapeValue.h"
-
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 TEST(ComputedStyleTest, ShapeOutsideBoxEqual)
 {
-    RefPtr<ShapeValue> shape1 = ShapeValue::createBoxShapeValue(ContentBox);
-    RefPtr<ShapeValue> shape2 = ShapeValue::createBoxShapeValue(ContentBox);
+    RefPtrWillBeRawPtr<ShapeValue> shape1 = ShapeValue::createBoxShapeValue(ContentBox);
+    RefPtrWillBeRawPtr<ShapeValue> shape2 = ShapeValue::createBoxShapeValue(ContentBox);
     RefPtr<ComputedStyle> style1 = ComputedStyle::create();
     RefPtr<ComputedStyle> style2 = ComputedStyle::create();
     style1->setShapeOutside(shape1);
@@ -29,8 +26,8 @@ TEST(ComputedStyleTest, ShapeOutsideCircleEqual)
 {
     RefPtr<BasicShapeCircle> circle1 = BasicShapeCircle::create();
     RefPtr<BasicShapeCircle> circle2 = BasicShapeCircle::create();
-    RefPtr<ShapeValue> shape1 = ShapeValue::createShapeValue(circle1, ContentBox);
-    RefPtr<ShapeValue> shape2 = ShapeValue::createShapeValue(circle2, ContentBox);
+    RefPtrWillBeRawPtr<ShapeValue> shape1 = ShapeValue::createShapeValue(circle1, ContentBox);
+    RefPtrWillBeRawPtr<ShapeValue> shape2 = ShapeValue::createShapeValue(circle2, ContentBox);
     RefPtr<ComputedStyle> style1 = ComputedStyle::create();
     RefPtr<ComputedStyle> style2 = ComputedStyle::create();
     style1->setShapeOutside(shape1);
@@ -50,4 +47,4 @@ TEST(ComputedStyleTest, ClipPathEqual)
     ASSERT_EQ(*style1, *style2);
 }
 
-}
+} // namespace blink

@@ -159,13 +159,17 @@ bool ProfileHelper::IsSigninProfile(const Profile* profile) {
 
 // static
 bool ProfileHelper::IsOwnerProfile(Profile* profile) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kStubCrosSettings)) {
+    return true;
+  }
+
   if (!profile)
     return false;
   const user_manager::User* user =
       ProfileHelper::Get()->GetUserByProfile(profile);
   if (!user)
     return false;
-
   return user->email() == user_manager::UserManager::Get()->GetOwnerEmail();
 }
 
@@ -277,11 +281,11 @@ Profile* ProfileHelper::GetProfileByUserUnsafe(const user_manager::User* user) {
   if (user->is_profile_created()) {
     profile = ProfileHelper::GetProfileByUserIdHash(user->username_hash());
   } else {
-    LOG(WARNING) << "ProfileHelper::GetProfileByUserUnsafe is called when "
-                    "|user|'s profile is not created. It probably means that "
-                    "something is wrong with a calling code. Please report in "
-                    "http://crbug.com/361528 if you see this message. user_id: "
-                 << user->email();
+    LOG(ERROR) << "ProfileHelper::GetProfileByUserUnsafe is called when "
+                  "|user|'s profile is not created. It probably means that "
+                  "something is wrong with a calling code. Please report in "
+                  "http://crbug.com/361528 if you see this message. user_id: "
+               << user->email();
     profile = ProfileManager::GetActiveUserProfile();
   }
 

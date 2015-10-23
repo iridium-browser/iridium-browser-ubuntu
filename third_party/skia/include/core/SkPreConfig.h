@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -6,36 +5,26 @@
  * found in the LICENSE file.
  */
 
+// IWYU pragma: private, include "SkTypes.h"
 
 #ifndef SkPreConfig_DEFINED
 #define SkPreConfig_DEFINED
 
-#ifdef WEBKIT_VERSION_MIN_REQUIRED
-    #include "config.h"
-#endif
-
 // Allows embedders that want to disable macros that take arguments to just
 // define that symbol to be one of these
-//
 #define SK_NOTHING_ARG1(arg1)
 #define SK_NOTHING_ARG2(arg1, arg2)
 #define SK_NOTHING_ARG3(arg1, arg2, arg3)
 
 //////////////////////////////////////////////////////////////////////
 
-#if !defined(SK_BUILD_FOR_ANDROID) && !defined(SK_BUILD_FOR_IOS) && !defined(SK_BUILD_FOR_PALM) && !defined(SK_BUILD_FOR_WINCE) && !defined(SK_BUILD_FOR_WIN32) && !defined(SK_BUILD_FOR_UNIX) && !defined(SK_BUILD_FOR_MAC) && !defined(SK_BUILD_FOR_SDL) && !defined(SK_BUILD_FOR_BREW)
+#if !defined(SK_BUILD_FOR_ANDROID) && !defined(SK_BUILD_FOR_IOS) && !defined(SK_BUILD_FOR_WIN32) && !defined(SK_BUILD_FOR_UNIX) && !defined(SK_BUILD_FOR_MAC)
 
     #ifdef __APPLE__
         #include "TargetConditionals.h"
     #endif
 
-    #if defined(PALMOS_SDK_VERSION)
-        #define SK_BUILD_FOR_PALM
-    #elif defined(UNDER_CE)
-        #define SK_BUILD_FOR_WINCE
-    #elif defined(WIN32)
-        #define SK_BUILD_FOR_WIN32
-    #elif defined(__SYMBIAN32__)
+    #if defined(WIN32) || defined(__SYMBIAN32__)
         #define SK_BUILD_FOR_WIN32
     #elif defined(ANDROID)
         #define SK_BUILD_FOR_ANDROID
@@ -183,12 +172,6 @@
         #else
             #define SK_ARM_ARCH 3
         #endif
-
-        #if defined(__thumb2__) && (SK_ARM_ARCH >= 6) \
-                || !defined(__thumb__) && ((SK_ARM_ARCH > 5) || defined(__ARM_ARCH_5E__) \
-                || defined(__ARM_ARCH_5TE__) || defined(__ARM_ARCH_5TEJ__))
-            #define SK_ARM_HAS_EDSP
-        #endif
     #endif
 #endif
 
@@ -199,8 +182,7 @@
 
 // All 64-bit ARM chips have NEON.  Many 32-bit ARM chips do too.
 // TODO: Why don't we want NEON on iOS?
-#if !defined(SK_ARM_HAS_NEON) && !defined(SK_BUILD_FOR_IOS) && \
-    (defined(SK_CPU_ARM64) || defined(__ARM_NEON__))
+#if !defined(SK_ARM_HAS_NEON) && !defined(SK_BUILD_FOR_IOS) && defined(__ARM_NEON)
     #define SK_ARM_HAS_NEON
 #endif
 

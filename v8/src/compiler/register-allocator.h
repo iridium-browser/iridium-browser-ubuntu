@@ -140,6 +140,10 @@ class LifetimePosition final {
     return LifetimePosition(kMaxInt);
   }
 
+  static inline LifetimePosition FromInt(int value) {
+    return LifetimePosition(value);
+  }
+
  private:
   static const int kHalfStep = 2;
   static const int kStep = 2 * kHalfStep;
@@ -330,6 +334,9 @@ class LiveRange final : public ZoneObject {
   // range and which follows both start and last processed use position
   UsePosition* NextRegisterPosition(LifetimePosition start) const;
 
+  // Returns the first use position requiring stack slot, or nullptr.
+  UsePosition* NextSlotPosition(LifetimePosition start) const;
+
   // Returns use position for which register is beneficial in this live
   // range and which follows both start and last processed use position
   UsePosition* NextUsePositionRegisterIsBeneficial(
@@ -397,6 +404,16 @@ class LiveRange final : public ZoneObject {
   void CommitSpillsAtDefinition(InstructionSequence* sequence,
                                 const InstructionOperand& operand,
                                 bool might_be_duplicated);
+  // This must be applied on top level ranges.
+  // If all the children of this range are spilled in deferred blocks, and if
+  // for any non-spilled child with a use position requiring a slot, that range
+  // is contained in a deferred block, mark the range as
+  // IsSpilledOnlyInDeferredBlocks, so that we avoid spilling at definition,
+  // and instead let the LiveRangeConnector perform the spills within the
+  // deferred blocks. If so, we insert here spills for non-spilled ranges
+  // with slot use positions.
+  bool TryCommitSpillInDeferredBlock(InstructionSequence* code,
+                                     const InstructionOperand& spill_operand);
 
   void SetSpillStartIndex(int start) {
     spill_start_index_ = Min(start, spill_start_index_);
@@ -427,6 +444,19 @@ class LiveRange final : public ZoneObject {
   SpillAtDefinitionList* spills_at_definition() const {
     return spills_at_definition_;
   }
+
+  // Used solely by the Greedy Allocator:
+  unsigned GetSize();
+  float weight() const { return weight_; }
+  void set_weight(float weight) { weight_ = weight; }
+
+  bool IsSpilledOnlyInDeferredBlocks() const {
+    return spilled_in_deferred_block_;
+  }
+
+  static const int kInvalidSize = -1;
+  static const float kInvalidWeight;
+  static const float kMaxWeight;
 
  private:
   void set_spill_type(SpillType value) {
@@ -468,6 +498,18 @@ class LiveRange final : public ZoneObject {
   // This is used as a cache, it's invalid outside of BuildLiveRanges.
   mutable UsePosition* current_hint_position_;
 
+  // greedy: the number of LifetimePositions covered by this range. Used to
+  // prioritize selecting live ranges for register assignment, as well as
+  // in weight calculations.
+  int size_;
+
+  // greedy: a metric for resolving conflicts between ranges with an assigned
+  // register and ranges that intersect them and need a register.
+  float weight_;
+
+  // TODO(mtrofin): generalize spilling after definition, currently specialized
+  // just for spill in a single deferred block.
+  bool spilled_in_deferred_block_;
   DISALLOW_COPY_AND_ASSIGN(LiveRange);
 };
 
@@ -607,6 +649,13 @@ class RegisterAllocationData final : public ZoneObject {
   PhiMapValue* InitializePhiMap(const InstructionBlock* block,
                                 PhiInstruction* phi);
   PhiMapValue* GetPhiMapValueFor(int virtual_register);
+  bool IsBlockBoundary(LifetimePosition pos) const;
+
+  void Print(const InstructionSequence* instructionSequence);
+  void Print(const Instruction* instruction);
+  void Print(const LiveRange* range, bool with_children = false);
+  void Print(const InstructionOperand& op);
+  void Print(const MoveOperands* move);
 
  private:
   Zone* const allocation_zone_;
@@ -768,6 +817,9 @@ class RegisterAllocator : public ZoneObject {
   LifetimePosition FindOptimalSpillingPos(LiveRange* range,
                                           LifetimePosition pos);
 
+  const ZoneVector<LiveRange*>& GetFixedRegisters() const;
+  const char* RegisterName(int allocation_index) const;
+
  private:
   RegisterAllocationData* const data_;
   const RegisterKind mode_;
@@ -786,8 +838,6 @@ class LinearScanAllocator final : public RegisterAllocator {
   void AllocateRegisters();
 
  private:
-  const char* RegisterName(int allocation_index) const;
-
   ZoneVector<LiveRange*>& unhandled_live_ranges() {
     return unhandled_live_ranges_;
   }
@@ -838,55 +888,6 @@ class LinearScanAllocator final : public RegisterAllocator {
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(LinearScanAllocator);
-};
-
-class CoalescedLiveRanges;
-
-
-// A variant of the LLVM Greedy Register Allocator. See
-// http://blog.llvm.org/2011/09/greedy-register-allocation-in-llvm-30.html
-class GreedyAllocator final : public RegisterAllocator {
- public:
-  explicit GreedyAllocator(RegisterAllocationData* data, RegisterKind kind,
-                           Zone* local_zone);
-
-  void AllocateRegisters();
-
- private:
-  LifetimePosition GetSplittablePos(LifetimePosition pos);
-  const RegisterConfiguration* config() const { return data()->config(); }
-  Zone* local_zone() const { return local_zone_; }
-  bool TryReuseSpillForPhi(LiveRange* range);
-  int GetHintedRegister(LiveRange* range);
-
-  typedef ZonePriorityQueue<std::pair<unsigned, LiveRange*>> PQueue;
-
-  unsigned GetLiveRangeSize(LiveRange* range);
-  void Enqueue(LiveRange* range);
-
-  void Evict(LiveRange* range);
-  float CalculateSpillWeight(LiveRange* range);
-  float CalculateMaxSpillWeight(const ZoneSet<LiveRange*>& ranges);
-
-
-  bool TryAllocate(LiveRange* current, ZoneSet<LiveRange*>* conflicting);
-  bool TryAllocatePhysicalRegister(unsigned reg_id, LiveRange* range,
-                                   ZoneSet<LiveRange*>* conflicting);
-  bool HandleSpillOperands(LiveRange* range);
-  void AllocateBlockedRange(LiveRange* current, LifetimePosition pos,
-                            bool spill);
-
-  LiveRange* SpillBetweenUntil(LiveRange* range, LifetimePosition start,
-                               LifetimePosition until, LifetimePosition end);
-  void AssignRangeToRegister(int reg_id, LiveRange* range);
-
-  LifetimePosition FindProgressingSplitPosition(LiveRange* range,
-                                                bool* is_spill_pos);
-
-  Zone* local_zone_;
-  ZoneVector<CoalescedLiveRanges*> allocations_;
-  PQueue queue_;
-  DISALLOW_COPY_AND_ASSIGN(GreedyAllocator);
 };
 
 
@@ -942,14 +943,24 @@ class ReferenceMapPopulator final : public ZoneObject {
 };
 
 
+// Insert moves of the form
+//
+//          Operand(child_(k+1)) = Operand(child_k)
+//
+// where child_k and child_(k+1) are consecutive children of a range (so
+// child_k->next() == child_(k+1)), and Operand(...) refers to the
+// assigned operand, be it a register or a slot.
 class LiveRangeConnector final : public ZoneObject {
  public:
   explicit LiveRangeConnector(RegisterAllocationData* data);
 
-  // Phase 8: reconnect split ranges with moves.
+  // Phase 8: reconnect split ranges with moves, when the control flow
+  // between the ranges is trivial (no branches).
   void ConnectRanges(Zone* local_zone);
 
-  // Phase 9: insert moves to connect ranges across basic blocks.
+  // Phase 9: insert moves to connect ranges across basic blocks, when the
+  // control flow between them cannot be trivially resolved, such as joining
+  // branches.
   void ResolveControlFlow(Zone* local_zone);
 
  private:
@@ -958,6 +969,7 @@ class LiveRangeConnector final : public ZoneObject {
   Zone* code_zone() const { return code()->zone(); }
 
   bool CanEagerlyResolveControlFlow(const InstructionBlock* block) const;
+
   void ResolveControlFlow(const InstructionBlock* block,
                           const InstructionOperand& cur_op,
                           const InstructionBlock* pred,

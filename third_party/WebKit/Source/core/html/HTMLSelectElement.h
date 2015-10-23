@@ -40,12 +40,14 @@ class ExceptionState;
 class HTMLOptionElement;
 class HTMLOptionElementOrHTMLOptGroupElement;
 class HTMLElementOrLong;
+class PopupMenu;
 
 class CORE_EXPORT HTMLSelectElement final : public HTMLFormControlElementWithState, public TypeAheadDataSource {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLSelectElement> create(Document&);
     static PassRefPtrWillBeRawPtr<HTMLSelectElement> create(Document&, HTMLFormElement*);
+    ~HTMLSelectElement() override;
 
     int selectedIndex() const;
     void setSelectedIndex(int);
@@ -55,14 +57,14 @@ public:
     void optionSelectedByUser(int index, bool dispatchChangeEvent, bool allowMultipleSelection = false);
 
     // For ValidityState
-    virtual String validationMessage() const override;
-    virtual bool valueMissing() const override;
+    String validationMessage() const override;
+    bool valueMissing() const override;
 
-    virtual void resetImpl() override;
+    void resetImpl() override;
 
     unsigned length() const;
 
-    int size() const { return m_size; }
+    unsigned size() const { return m_size; }
     bool multiple() const { return m_multiple; }
 
     bool usesMenuList() const;
@@ -88,12 +90,12 @@ public:
 
     const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems() const;
 
-    virtual void accessKeyAction(bool sendMouseEvents) override;
+    void accessKeyAction(bool sendMouseEvents) override;
     void accessKeySetSelectedIndex(int);
 
     void setMultiple(bool);
 
-    void setSize(int);
+    void setSize(unsigned);
 
     void setOption(unsigned index, HTMLOptionElement*, ExceptionState&);
     void setLength(unsigned, ExceptionState&);
@@ -128,37 +130,64 @@ public:
 
     int listIndexForOption(const HTMLOptionElement&);
 
+    // Helper functions for popup menu implementations.
+    String itemText(const Element&) const;
+    bool itemIsDisplayNone(Element&) const;
+    // itemComputedStyle() returns nullptr only if the owner Document is not
+    // active.  So, It returns a valid object when we open a popup.
+    const ComputedStyle* itemComputedStyle(Element&) const;
+    IntRect elementRectRelativeToViewport() const;
+    // Text starting offset in LTR.
+    LayoutUnit clientPaddingLeft() const;
+    // Text starting offset in RTL.
+    LayoutUnit clientPaddingRight() const;
+    void valueChanged(unsigned listIndex);
+    // A popup is canceled when the popup was hidden without selecting an item.
+    void popupDidCancel();
+    // Provisional selection is a selection made using arrow keys or type ahead.
+    void provisionalSelectionChanged(unsigned);
+    void popupDidHide();
+    bool popupIsVisible() const { return m_popupIsVisible; }
+    int optionIndexToBeShown() const;
+    void showPopup();
+    void hidePopup();
+    PopupMenu* popup() const { return m_popup.get(); }
+
     DECLARE_VIRTUAL_TRACE();
 
 protected:
     HTMLSelectElement(Document&, HTMLFormElement*);
 
 private:
-    virtual const AtomicString& formControlType() const override;
+    void willRecalcStyle(StyleRecalcChange) override;
 
-    virtual bool shouldShowFocusRingOnMouseFocus() const override;
+    const AtomicString& formControlType() const override;
 
-    virtual void dispatchFocusEvent(Element* oldFocusedElement, WebFocusType) override;
-    virtual void dispatchBlurEvent(Element* newFocusedElement, WebFocusType) override;
+    bool shouldShowFocusRingOnMouseFocus() const override;
 
-    virtual bool canStartSelection() const override { return false; }
+    void dispatchFocusEvent(Element* oldFocusedElement, WebFocusType, InputDeviceCapabilities* sourceCapabilities) override;
+    void dispatchBlurEvent(Element* newFocusedElement, WebFocusType, InputDeviceCapabilities* sourceCapabilities) override;
 
-    virtual bool isEnumeratable() const override { return true; }
-    virtual bool isInteractiveContent() const override;
-    virtual bool supportsAutofocus() const override;
-    virtual bool supportLabels() const override { return true; }
+    bool canStartSelection() const override { return false; }
 
-    virtual FormControlState saveFormControlState() const override;
-    virtual void restoreFormControlState(const FormControlState&) override;
+    bool isEnumeratable() const override { return true; }
+    bool isInteractiveContent() const override;
+    bool supportsAutofocus() const override;
+    bool supportLabels() const override { return true; }
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
-    virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    FormControlState saveFormControlState() const override;
+    void restoreFormControlState(const FormControlState&) override;
 
-    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
-    virtual bool appendFormData(FormDataList&, bool) override;
-    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
+    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    bool isPresentationAttribute(const QualifiedName&) const override;
 
-    virtual void defaultEventHandler(Event*) override;
+    LayoutObject* createLayoutObject(const ComputedStyle&) override;
+    void didRecalcStyle(StyleRecalcChange) override;
+    void detach(const AttachContext& = AttachContext()) override;
+    bool appendFormData(FormDataList&, bool) override;
+    void didAddUserAgentShadowRoot(ShadowRoot&) override;
+
+    void defaultEventHandler(Event*) override;
 
     void dispatchInputAndChangeEventForMenuList(bool requiresUserGesture = true);
 
@@ -167,10 +196,10 @@ private:
     void typeAheadFind(KeyboardEvent*);
     void saveLastSelection();
 
-    virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
+    InsertionNotificationRequest insertedInto(ContainerNode*) override;
 
-    virtual bool isOptionalFormControl() const override { return !isRequiredFormControl(); }
-    virtual bool isRequiredFormControl() const override;
+    bool isOptionalFormControl() const override { return !isRequiredFormControl(); }
+    bool isRequiredFormControl() const override;
 
     bool hasPlaceholderLabelOption() const;
 
@@ -193,6 +222,7 @@ private:
     void setOptionsChangedOnLayoutObject();
     size_t searchOptionsForValue(const String&, size_t listIndexStart, size_t listIndexEnd) const;
     void updateListBoxSelection(bool deselectOtherOptions, bool scroll = true);
+    void setIndexToSelectOnCancel(int listIndex);
 
     enum SkipDirection {
         SkipBackwards = -1,
@@ -207,21 +237,21 @@ private:
     int listIndexForEventTargetOption(const Event&);
     AutoscrollController* autoscrollController() const;
 
-    virtual void childrenChanged(const ChildrenChange&) override;
-    virtual bool areAuthorShadowsAllowed() const override { return false; }
-    virtual void finishParsingChildren() override;
+    void childrenChanged(const ChildrenChange&) override;
+    bool areAuthorShadowsAllowed() const override { return false; }
+    void finishParsingChildren() override;
 
     // TypeAheadDataSource functions.
-    virtual int indexOfSelectedOption() const override;
-    virtual int optionCount() const override;
-    virtual String optionAtIndex(int index) const override;
+    int indexOfSelectedOption() const override;
+    int optionCount() const override;
+    String optionAtIndex(int index) const override;
 
     // m_listItems contains HTMLOptionElement, HTMLOptGroupElement, and HTMLHRElement objects.
     mutable WillBeHeapVector<RawPtrWillBeMember<HTMLElement>> m_listItems;
     Vector<bool> m_lastOnChangeSelection;
     Vector<bool> m_cachedStateForActiveSelection;
     TypeAhead m_typeAhead;
-    int m_size;
+    unsigned m_size;
     int m_lastOnChangeIndex;
     int m_activeSelectionAnchorIndex;
     int m_activeSelectionEndIndex;
@@ -231,6 +261,10 @@ private:
     mutable bool m_shouldRecalcListItems;
     int m_suggestedIndex;
     bool m_isAutofilledByPreview;
+
+    RefPtrWillBeMember<PopupMenu> m_popup;
+    int m_indexToSelectOnCancel;
+    bool m_popupIsVisible;
 };
 
 } // namespace blink

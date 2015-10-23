@@ -52,17 +52,16 @@
 namespace blink {
 
 // FIXME: This should not require DeprecatedPaintLayer. There is currently a cycle where
-// in order to determine if we shoulBeNormalFlowOnly() we have to ask the paint
+// in order to determine if we shoulBeTreatedAsStackingContextForPainting() we have to ask the paint
 // layer about some of its state.
 DeprecatedPaintLayerStackingNode::DeprecatedPaintLayerStackingNode(DeprecatedPaintLayer* layer)
     : m_layer(layer)
-    , m_normalFlowListDirty(true)
 #if ENABLE(ASSERT)
     , m_layerListMutationAllowed(true)
     , m_stackingParent(0)
 #endif
 {
-    m_isNormalFlowOnly = shouldBeNormalFlowOnly();
+    m_isTreatedAsStackingContextForPainting = shouldBeTreatedAsStackingContextForPainting();
 
     // Non-stacking contexts should have empty z-order lists. As this is already the case,
     // there is no need to dirty / recompute these lists.
@@ -74,10 +73,8 @@ DeprecatedPaintLayerStackingNode::~DeprecatedPaintLayerStackingNode()
 #if ENABLE(ASSERT)
     if (!layoutObject()->documentBeingDestroyed()) {
         ASSERT(!isInStackingParentZOrderLists());
-        ASSERT(!isInStackingParentNormalFlowList());
 
         updateStackingParentForZOrderLists(0);
-        updateStackingParentForNormalFlowList(0);
     }
 #endif
 }
@@ -117,22 +114,6 @@ void DeprecatedPaintLayerStackingNode::dirtyStackingContextZOrderLists()
 {
     if (DeprecatedPaintLayerStackingNode* stackingNode = ancestorStackingContextNode())
         stackingNode->dirtyZOrderLists();
-}
-
-void DeprecatedPaintLayerStackingNode::dirtyNormalFlowList()
-{
-    ASSERT(m_layerListMutationAllowed);
-
-#if ENABLE(ASSERT)
-    updateStackingParentForNormalFlowList(0);
-#endif
-
-    if (m_normalFlowList)
-        m_normalFlowList->clear();
-    m_normalFlowListDirty = true;
-
-    if (!layoutObject()->documentBeingDestroyed())
-        compositor()->setNeedsCompositingUpdate(CompositingUpdateRebuildTree);
 }
 
 void DeprecatedPaintLayerStackingNode::rebuildZOrderLists()
@@ -175,34 +156,12 @@ void DeprecatedPaintLayerStackingNode::rebuildZOrderLists()
     m_zOrderListsDirty = false;
 }
 
-void DeprecatedPaintLayerStackingNode::updateNormalFlowList()
-{
-    if (!m_normalFlowListDirty)
-        return;
-
-    ASSERT(m_layerListMutationAllowed);
-
-    for (DeprecatedPaintLayer* child = layer()->firstChild(); child; child = child->nextSibling()) {
-        if (child->stackingNode()->isNormalFlowOnly() && (!layer()->reflectionInfo() || layer()->reflectionInfo()->reflectionLayer() != child)) {
-            if (!m_normalFlowList)
-                m_normalFlowList = adoptPtr(new Vector<DeprecatedPaintLayerStackingNode*>);
-            m_normalFlowList->append(child->stackingNode());
-        }
-    }
-
-#if ENABLE(ASSERT)
-    updateStackingParentForNormalFlowList(this);
-#endif
-
-    m_normalFlowListDirty = false;
-}
-
 void DeprecatedPaintLayerStackingNode::collectLayers(OwnPtr<Vector<DeprecatedPaintLayerStackingNode*>>& posBuffer, OwnPtr<Vector<DeprecatedPaintLayerStackingNode*>>& negBuffer)
 {
     if (layer()->isInTopLayer())
         return;
 
-    if (!isNormalFlowOnly()) {
+    if (isTreatedAsStackingContextForPainting()) {
         OwnPtr<Vector<DeprecatedPaintLayerStackingNode*>>& buffer = (zIndex() >= 0) ? posBuffer : negBuffer;
         if (!buffer)
             buffer = adoptPtr(new Vector<DeprecatedPaintLayerStackingNode*>);
@@ -232,14 +191,6 @@ bool DeprecatedPaintLayerStackingNode::isInStackingParentZOrderLists() const
     return false;
 }
 
-bool DeprecatedPaintLayerStackingNode::isInStackingParentNormalFlowList() const
-{
-    if (!m_stackingParent || m_stackingParent->normalFlowListDirty())
-        return false;
-
-    return (m_stackingParent->normalFlowList() && m_stackingParent->normalFlowList()->find(this) != kNotFound);
-}
-
 void DeprecatedPaintLayerStackingNode::updateStackingParentForZOrderLists(DeprecatedPaintLayerStackingNode* stackingParent)
 {
     if (m_posZOrderList) {
@@ -253,26 +204,17 @@ void DeprecatedPaintLayerStackingNode::updateStackingParentForZOrderLists(Deprec
     }
 }
 
-void DeprecatedPaintLayerStackingNode::updateStackingParentForNormalFlowList(DeprecatedPaintLayerStackingNode* stackingParent)
-{
-    if (m_normalFlowList) {
-        for (size_t i = 0; i < m_normalFlowList->size(); ++i)
-            m_normalFlowList->at(i)->setStackingParent(stackingParent);
-    }
-}
 #endif
 
 void DeprecatedPaintLayerStackingNode::updateLayerListsIfNeeded()
 {
     updateZOrderLists();
-    updateNormalFlowList();
 
     if (!layer()->reflectionInfo())
         return;
 
     DeprecatedPaintLayer* reflectionLayer = layer()->reflectionInfo()->reflectionLayer();
     reflectionLayer->stackingNode()->updateZOrderLists();
-    reflectionLayer->stackingNode()->updateNormalFlowList();
 }
 
 void DeprecatedPaintLayerStackingNode::updateStackingNodesAfterStyleChange(const ComputedStyle* oldStyle)
@@ -292,22 +234,15 @@ void DeprecatedPaintLayerStackingNode::updateStackingNodesAfterStyleChange(const
         clearZOrderLists();
 }
 
-// FIXME: Rename shouldBeNormalFlowOnly to something more accurate now that CSS
-// 2.1 defines the term "normal flow".
-bool DeprecatedPaintLayerStackingNode::shouldBeNormalFlowOnly() const
+void DeprecatedPaintLayerStackingNode::updateIsTreatedAsStackingContextForPainting()
 {
-    return !isStackingContext() && !layoutObject()->isPositioned();
-}
-
-void DeprecatedPaintLayerStackingNode::updateIsNormalFlowOnly()
-{
-    bool isNormalFlowOnly = shouldBeNormalFlowOnly();
-    if (isNormalFlowOnly == this->isNormalFlowOnly())
+    bool isTreatedAsStackingContextForPainting = shouldBeTreatedAsStackingContextForPainting();
+    if (isTreatedAsStackingContextForPainting == this->isTreatedAsStackingContextForPainting())
         return;
 
-    m_isNormalFlowOnly = isNormalFlowOnly;
-    if (DeprecatedPaintLayer* p = layer()->parent())
-        p->stackingNode()->dirtyNormalFlowList();
+    m_isTreatedAsStackingContextForPainting = isTreatedAsStackingContextForPainting;
+    if (!layoutObject()->documentBeingDestroyed() && !layer()->isRootLayer())
+        compositor()->setNeedsCompositingUpdate(CompositingUpdateRebuildTree);
     dirtyStackingContextZOrderLists();
 }
 

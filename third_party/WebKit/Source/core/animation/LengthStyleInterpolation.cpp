@@ -53,22 +53,20 @@ bool pixelsForKeyword(CSSPropertyID property, CSSValueID valueID, double& result
 
 bool LengthStyleInterpolation::canCreateFrom(const CSSValue& value, CSSPropertyID property)
 {
-    if (value.isPrimitiveValue()) {
-        const CSSPrimitiveValue& primitiveValue = toCSSPrimitiveValue(value);
-        if (primitiveValue.cssCalcValue())
-            return true;
+    if (!value.isPrimitiveValue())
+        return false;
 
-        if (primitiveValue.isValueID()) {
-            CSSValueID valueID = primitiveValue.getValueID();
-            double pixels;
-            return pixelsForKeyword(property, valueID, pixels);
-        }
+    const CSSPrimitiveValue& primitiveValue = toCSSPrimitiveValue(value);
+    if (primitiveValue.isCalculated())
+        return true;
 
-        CSSPrimitiveValue::LengthUnitType type;
-        // Only returns true if the type is a primitive length unit.
-        return CSSPrimitiveValue::unitTypeToLengthUnitType(primitiveValue.primitiveType(), type);
+    if (primitiveValue.isValueID()) {
+        CSSValueID valueID = primitiveValue.getValueID();
+        double pixels;
+        return pixelsForKeyword(property, valueID, pixels);
     }
-    return value.isCalcValue();
+
+    return primitiveValue.isLength() || primitiveValue.isPercentage() || primitiveValue.isCalculatedPercentageWithLength();
 }
 
 PassOwnPtrWillBeRawPtr<InterpolableValue> LengthStyleInterpolation::toInterpolableValue(const CSSValue& value, CSSPropertyID id)
@@ -269,7 +267,7 @@ static Length lengthFromInterpolableValue(const InterpolableValue& value, Interp
     if (hasPixels && hasPercent)
         return Length(CalculationValue::create(pixelsAndPercent, range));
     if (hasPixels)
-        return Length(clampToRange(pixelsAndPercent.pixels, range), Fixed);
+        return Length(CSSPrimitiveValue::clampToCSSLengthRange(clampToRange(pixelsAndPercent.pixels, range)), Fixed);
     if (hasPercent)
         return Length(clampToRange(pixelsAndPercent.percent, range), Percent);
     ASSERT_NOT_REACHED();
@@ -294,7 +292,7 @@ PassRefPtrWillBeRawPtr<CSSPrimitiveValue> LengthStyleInterpolation::fromInterpol
     switch (unitTypeCount) {
     case 0:
         // TODO: this case should never be reached. This issue should be fixed once we have multiple interpolators.
-        return CSSPrimitiveValue::create(0, CSSPrimitiveValue::CSS_PX);
+        return CSSPrimitiveValue::create(0, CSSPrimitiveValue::UnitType::Pixels);
     case 1:
         for (size_t i = 0; i < CSSPrimitiveValue::LengthUnitTypeCount; i++) {
             const InterpolableNumber *subValueType = toInterpolableNumber(listOfTypes->get(i));
@@ -312,19 +310,24 @@ PassRefPtrWillBeRawPtr<CSSPrimitiveValue> LengthStyleInterpolation::fromInterpol
     }
 }
 
-void LengthStyleInterpolation::apply(StyleResolverState& state) const
+void LengthStyleInterpolation::applyInterpolableValue(CSSPropertyID property, const InterpolableValue& value, InterpolationRange range, StyleResolverState& state, LengthSetter lengthSetter)
 {
-    if (m_lengthSetter) {
-        (state.style()->*m_lengthSetter)(lengthFromInterpolableValue(*m_cachedValue, m_range, state.style()->effectiveZoom()));
+    if (lengthSetter && isPixelsOrPercentOnly(value)) {
+        (state.style()->*lengthSetter)(lengthFromInterpolableValue(value, range, state.style()->effectiveZoom()));
 #if ENABLE(ASSERT)
-        RefPtrWillBeRawPtr<AnimatableValue> before = CSSAnimatableValueFactory::create(m_id, *state.style());
-        StyleBuilder::applyProperty(m_id, state, fromInterpolableValue(*m_cachedValue, m_range).get());
-        RefPtrWillBeRawPtr<AnimatableValue> after = CSSAnimatableValueFactory::create(m_id, *state.style());
+        RefPtrWillBeRawPtr<AnimatableValue> before = CSSAnimatableValueFactory::create(property, *state.style());
+        StyleBuilder::applyProperty(property, state, fromInterpolableValue(value, range).get());
+        RefPtrWillBeRawPtr<AnimatableValue> after = CSSAnimatableValueFactory::create(property, *state.style());
         ASSERT(before->equals(*after));
 #endif
     } else {
-        StyleBuilder::applyProperty(m_id, state, fromInterpolableValue(*m_cachedValue, m_range).get());
+        StyleBuilder::applyProperty(property, state, fromInterpolableValue(value, range).get());
     }
+}
+
+void LengthStyleInterpolation::apply(StyleResolverState& state) const
+{
+    applyInterpolableValue(m_id, *m_cachedValue, m_range, state, m_lengthSetter);
 }
 
 DEFINE_TRACE(LengthStyleInterpolation)

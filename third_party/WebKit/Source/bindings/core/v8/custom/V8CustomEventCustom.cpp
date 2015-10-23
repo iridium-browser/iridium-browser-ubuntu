@@ -50,7 +50,7 @@ static v8::Local<v8::Value> cacheState(v8::Isolate* isolate, v8::Local<v8::Objec
 }
 
 
-void V8CustomEvent::detailAttributeGetterCustom(const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8CustomEvent::detailAttributeGetterCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     CustomEvent* event = V8CustomEvent::toImpl(info.Holder());
 
@@ -61,43 +61,16 @@ void V8CustomEvent::detailAttributeGetterCustom(const v8::PropertyCallbackInfo<v
         return;
     }
 
-    if (!event->serializedDetail()) {
-        // If we're in an isolated world and the event was created in the main world,
-        // we need to find the 'detail' property on the main world wrapper and clone it.
-        v8::Local<v8::Value> mainWorldDetail = V8HiddenValue::getHiddenValueFromMainWorldWrapper(info.GetIsolate(), event, V8HiddenValue::detail(info.GetIsolate()));
-        if (!mainWorldDetail.IsEmpty())
-            event->setSerializedDetail(SerializedScriptValueFactory::instance().createAndSwallowExceptions(info.GetIsolate(), mainWorldDetail));
-    }
-
-    if (event->serializedDetail()) {
-        result = event->serializedDetail()->deserialize();
-        v8SetReturnValue(info, cacheState(info.GetIsolate(), info.Holder(), result));
-        return;
-    }
-
-    v8SetReturnValue(info, cacheState(info.GetIsolate(), info.Holder(), v8::Null(info.GetIsolate())));
-}
-
-void V8CustomEvent::initCustomEventMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
-{
-    CustomEvent* event = V8CustomEvent::toImpl(info.Holder());
-    ASSERT(!event->serializedDetail());
-
-    TOSTRING_VOID(V8StringResource<>, typeArg, info[0]);
-    bool canBubbleArg;
-    bool cancelableArg;
-    if (!v8Call(info[1]->BooleanValue(info.GetIsolate()->GetCurrentContext()), canBubbleArg)
-        || !v8Call(info[2]->BooleanValue(info.GetIsolate()->GetCurrentContext()), cancelableArg))
-        return;
-    v8::Local<v8::Value> detailsArg = info[3];
-
-    event->initEvent(typeArg, canBubbleArg, cancelableArg);
-
-    if (!detailsArg.IsEmpty()) {
-        V8HiddenValue::setHiddenValue(info.GetIsolate(), info.Holder(), V8HiddenValue::detail(info.GetIsolate()), detailsArg);
-        if (DOMWrapperWorld::current(info.GetIsolate()).isIsolatedWorld())
-            event->setSerializedDetail(SerializedScriptValueFactory::instance().createAndSwallowExceptions(info.GetIsolate(), detailsArg));
-    }
+    // Be careful not to return a V8 value which is created in different world.
+    v8::Local<v8::Value> detail;
+    if (SerializedScriptValue* serializedValue = event->serializedDetail())
+        detail = serializedValue->deserialize();
+    else
+        detail = event->detail().v8ValueFor(ScriptState::current(info.GetIsolate()));
+    // |detail| should be null when it is an empty handle because its default value is null.
+    if (detail.IsEmpty())
+        detail = v8::Null(info.GetIsolate());
+    v8SetReturnValue(info, cacheState(info.GetIsolate(), info.Holder(), detail));
 }
 
 } // namespace blink

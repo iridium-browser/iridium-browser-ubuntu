@@ -44,10 +44,10 @@ void NativeAppWindowViews::Init(AppWindow* app_window,
   Observe(app_window_->web_contents());
 
   widget_ = new views::Widget;
+  widget_->AddObserver(this);
   InitializeWindow(app_window, create_params);
 
   OnViewWasResized();
-  widget_->AddObserver(this);
 }
 
 NativeAppWindowViews::~NativeAppWindowViews() {
@@ -415,9 +415,6 @@ void NativeAppWindowViews::HideWithApp() {
 }
 
 void NativeAppWindowViews::ShowWithApp() {
-}
-
-void NativeAppWindowViews::UpdateShelfMenu() {
 }
 
 gfx::Size NativeAppWindowViews::GetContentMinimumSize() const {

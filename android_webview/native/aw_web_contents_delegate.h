@@ -27,8 +27,7 @@ class AwWebContentsDelegate
                  const gfx::Rect& selection_rect,
                  int active_match_ordinal,
                  bool final_update) override;
-  void CanDownload(content::RenderViewHost* source,
-                   const GURL& url,
+  void CanDownload(const GURL& url,
                    const std::string& request_method,
                    const base::Callback<void(bool)>& callback) override;
   void RunFileChooser(content::WebContents* web_contents,
@@ -44,12 +43,14 @@ class AwWebContentsDelegate
                               content::InvalidateTypes changed_flags) override;
   void WebContentsCreated(content::WebContents* source_contents,
                           int opener_render_frame_id,
-                          const base::string16& frame_name,
+                          const std::string& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) override;
 
   void CloseContents(content::WebContents* source) override;
   void ActivateContents(content::WebContents* contents) override;
+  void LoadingStateChanged(content::WebContents* source,
+                           bool to_different_document) override;
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,

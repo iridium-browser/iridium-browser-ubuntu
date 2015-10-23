@@ -81,9 +81,6 @@ void WrenchIconPainter::Paint(gfx::Canvas* canvas,
     case BEZEL_PRESSED:
       resource_id = IDR_TOOLBAR_BEZEL_PRESSED;
       break;
-    case BEZEL_RAISED:
-      resource_id = IDR_TOOLBAR_BEZEL_RAISED;
-      break;
   }
 
   if (resource_id) {
@@ -149,6 +146,8 @@ int WrenchIconPainter::GetCurrentSeverityImageID() const {
   switch (severity_) {
     case SEVERITY_NONE:
       return 0;
+    case SEVERITY_INFO:
+      return IDR_TOOLS_BAR_INFO;
     case SEVERITY_LOW:
       return IDR_TOOLS_BAR_LOW;
     case SEVERITY_MEDIUM:

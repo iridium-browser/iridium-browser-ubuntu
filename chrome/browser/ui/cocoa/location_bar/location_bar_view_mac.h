@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
+#include "chrome/browser/ui/omnibox/chrome_omnibox_edit_controller.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/ui/zoom/zoom_event_manager_observer.h"
@@ -25,7 +25,6 @@
 class CommandUpdater;
 class ContentSettingDecoration;
 class EVBubbleDecoration;
-class GeneratedCreditCardDecoration;
 class KeywordHintDecoration;
 class LocationBarDecoration;
 class LocationIconDecoration;
@@ -45,7 +44,7 @@ class ZoomDecorationTest;
 
 class LocationBarViewMac : public LocationBar,
                            public LocationBarTesting,
-                           public OmniboxEditController,
+                           public ChromeOmniboxEditController,
                            public SearchModelObserver,
                            public ui_zoom::ZoomEventManagerObserver {
  public:
@@ -71,7 +70,6 @@ class LocationBarViewMac : public LocationBar,
   bool ShowPageActionPopup(const extensions::Extension* extension,
                            bool grant_active_tab) override;
   void UpdateOpenPDFInReaderPrompt() override;
-  void UpdateGeneratedCreditCardView() override;
   void SaveStateToContents(content::WebContents* contents) override;
   void Revert() override;
   const OmniboxView* GetOmniboxView() const override;
@@ -122,10 +120,6 @@ class LocationBarViewMac : public LocationBar,
   // info bubble aims.
   NSPoint GetPageInfoBubblePoint() const;
 
-  // Get the point in window coordinates in the "generated cc" icon at which the
-  // corresponding info bubble aims.
-  NSPoint GetGeneratedCreditCardBubblePoint() const;
-
   // When any image decorations change, call this to ensure everything is
   // redrawn and laid out if necessary.
   void OnDecorationsChanged();
@@ -153,18 +147,21 @@ class LocationBarViewMac : public LocationBar,
   // is called and this function returns |NSZeroPoint|.
   NSPoint GetPageActionBubblePoint(ExtensionAction* page_action);
 
+  // Updates the controller, and, if |contents| is non-null, restores saved
+  // state that the tab holds.
+  void Update(const content::WebContents* contents);
+
   // Clears any location bar state stored for |contents|.
   void ResetTabState(content::WebContents* contents);
 
-  // OmniboxEditController:
-  void Update(const content::WebContents* contents) override;
+  // ChromeOmniboxEditController:
+  void UpdateWithoutTabRestore() override;
   void OnChanged() override;
   void OnSetFocus() override;
   void ShowURL() override;
-  InstantController* GetInstant() override;
-  content::WebContents* GetWebContents() override;
   ToolbarModel* GetToolbarModel() override;
   const ToolbarModel* GetToolbarModel() const override;
+  content::WebContents* GetWebContents() override;
 
   NSImage* GetKeywordImage(const base::string16& keyword);
 
@@ -260,9 +257,6 @@ class LocationBarViewMac : public LocationBar,
 
   // The voice search icon.
   scoped_ptr<MicSearchDecoration> mic_search_decoration_;
-
-  // Generated CC hint decoration.
-  scoped_ptr<GeneratedCreditCardDecoration> generated_credit_card_decoration_;
 
   // The right-hand-side button to manage passwords associated with a page.
   scoped_ptr<ManagePasswordsDecoration> manage_passwords_decoration_;

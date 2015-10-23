@@ -23,13 +23,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// http://rawgit.com/w3c/touch-events/v1-errata/touchevents.html#touch-interface
+// https://w3c.github.io/touch-events/#touch-interface
+
+// TODO(rbyers): Touch should have a constructor. http://crbug.com/508675
 
 [
     WillBeGarbageCollected,
 ] interface Touch {
-    // FIXME: identifier should be long, not unsigned long.
-    readonly attribute unsigned long identifier;
+    readonly attribute long identifier;
     readonly attribute EventTarget target;
     readonly attribute double screenX;
     readonly attribute double screenY;
@@ -37,17 +38,14 @@
     readonly attribute double clientY;
     readonly attribute double pageX;
     readonly attribute double pageY;
-
-    // Touch Events Extensions
-    // http://rawgit.com/w3c/touch-events/master/touchevents.html#touch-interface
-    // FIXME: radiusX and radiusY should be float, not double.
-    readonly attribute double radiusX;
-    readonly attribute double radiusY;
+    readonly attribute float radiusX;
+    readonly attribute float radiusY;
+    readonly attribute float rotationAngle;
     readonly attribute float force;
 
     // Non-standard APIs
-    [MeasureAs=PrefixedTouchRadiusX] readonly attribute double webkitRadiusX;
-    [MeasureAs=PrefixedTouchRadiusY] readonly attribute double webkitRadiusY;
-    [MeasureAs=PrefixedTouchRotationAngle] readonly attribute float webkitRotationAngle;
-    [MeasureAs=PrefixedTouchForce] readonly attribute float webkitForce;
+    [DeprecateAs=PrefixedTouchRadiusX, ImplementedAs=radiusX] readonly attribute float webkitRadiusX;
+    [DeprecateAs=PrefixedTouchRadiusY, ImplementedAs=radiusY] readonly attribute float webkitRadiusY;
+    [DeprecateAs=PrefixedTouchRotationAngle, ImplementedAs=rotationAngle] readonly attribute float webkitRotationAngle;
+    [DeprecateAs=PrefixedTouchForce, ImplementedAs=force] readonly attribute float webkitForce;
 };

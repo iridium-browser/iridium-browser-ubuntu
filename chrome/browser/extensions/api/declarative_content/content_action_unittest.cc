@@ -45,7 +45,7 @@ scoped_ptr<base::DictionaryValue> SimpleManifest() {
 class RequestContentScriptTest : public ExtensionServiceTestBase {
  public:
   RequestContentScriptTest()
-      : extension_(ExtensionBuilder().SetManifest(SimpleManifest()).Build()) {};
+      : extension_(ExtensionBuilder().SetManifest(SimpleManifest()).Build()) {}
 
   // TODO(rdevlin.cronin): This should be SetUp(), but an issues with invoking
   // InitializeEmptyExtensionService() within SetUp() means that we have to
@@ -68,22 +68,19 @@ class RequestContentScriptTest : public ExtensionServiceTestBase {
 TEST(DeclarativeContentActionTest, InvalidCreation) {
   TestExtensionEnvironment env;
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result;
+  scoped_ptr<const ContentAction> result;
 
   // Test wrong data type passed.
   error.clear();
   result = ContentAction::Create(
-      NULL, NULL, *ParseJson("[]"), &error, &bad_message);
-  EXPECT_TRUE(bad_message);
+      NULL, NULL, *ParseJson("[]"), &error);
   EXPECT_EQ("", error);
   EXPECT_FALSE(result.get());
 
   // Test missing instanceType element.
   error.clear();
   result = ContentAction::Create(
-      NULL, NULL, *ParseJson("{}"), &error, &bad_message);
-  EXPECT_TRUE(bad_message);
+      NULL, NULL, *ParseJson("{}"), &error);
   EXPECT_EQ("", error);
   EXPECT_FALSE(result.get());
 
@@ -93,7 +90,7 @@ TEST(DeclarativeContentActionTest, InvalidCreation) {
       "{\n"
       "  \"instanceType\": \"declarativeContent.UnknownType\",\n"
       "}"),
-                                 &error, &bad_message);
+                                 &error);
   EXPECT_THAT(error, HasSubstr("invalid instanceType"));
   EXPECT_FALSE(result.get());
 }
@@ -103,18 +100,15 @@ TEST(DeclarativeContentActionTest, ShowPageActionWithoutPageAction) {
 
   const Extension* extension = env.MakeExtension(base::DictionaryValue());
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       NULL,
       extension,
       *ParseJson(
            "{\n"
            "  \"instanceType\": \"declarativeContent.ShowPageAction\",\n"
            "}"),
-      &error,
-      &bad_message);
+      &error);
   EXPECT_THAT(error, testing::HasSubstr("without a page action"));
-  EXPECT_FALSE(bad_message);
   ASSERT_FALSE(result.get());
 }
 
@@ -124,20 +118,16 @@ TEST(DeclarativeContentActionTest, ShowPageAction) {
   const Extension* extension = env.MakeExtension(
       *ParseJson("{\"page_action\": { \"default_title\": \"Extension\" } }"));
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       NULL,
       extension,
       *ParseJson(
            "{\n"
            "  \"instanceType\": \"declarativeContent.ShowPageAction\",\n"
            "}"),
-      &error,
-      &bad_message);
+      &error);
   EXPECT_EQ("", error);
-  EXPECT_FALSE(bad_message);
   ASSERT_TRUE(result.get());
-  EXPECT_EQ(ContentAction::ACTION_SHOW_PAGE_ACTION, result->GetType());
 
   ExtensionAction* page_action =
       ExtensionActionManager::Get(env.profile())->GetPageAction(*extension);
@@ -145,15 +135,15 @@ TEST(DeclarativeContentActionTest, ShowPageAction) {
   const int tab_id = ExtensionTabUtil::GetTabId(contents.get());
   EXPECT_FALSE(page_action->GetIsVisible(tab_id));
   ContentAction::ApplyInfo apply_info = {
-    env.profile(), contents.get()
+    extension, env.profile(), contents.get(), 100
   };
-  result->Apply(extension->id(), base::Time(), &apply_info);
+  result->Apply(apply_info);
   EXPECT_TRUE(page_action->GetIsVisible(tab_id));
-  result->Apply(extension->id(), base::Time(), &apply_info);
+  result->Apply(apply_info);
   EXPECT_TRUE(page_action->GetIsVisible(tab_id));
-  result->Revert(extension->id(), base::Time(), &apply_info);
+  result->Revert(apply_info);
   EXPECT_TRUE(page_action->GetIsVisible(tab_id));
-  result->Revert(extension->id(), base::Time(), &apply_info);
+  result->Revert(apply_info);
   EXPECT_FALSE(page_action->GetIsVisible(tab_id));
 }
 
@@ -182,17 +172,13 @@ TEST(DeclarativeContentActionTest, SetIcon) {
   const Extension* extension = env.MakeExtension(
       *ParseJson("{\"page_action\": { \"default_title\": \"Extension\" } }"));
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       NULL,
       extension,
       *dict,
-      &error,
-      &bad_message);
+      &error);
   EXPECT_EQ("", error);
-  EXPECT_FALSE(bad_message);
   ASSERT_TRUE(result.get());
-  EXPECT_EQ(ContentAction::ACTION_SET_ICON, result->GetType());
 
   ExtensionAction* page_action =
       ExtensionActionManager::Get(env.profile())->GetPageAction(*extension);
@@ -200,22 +186,21 @@ TEST(DeclarativeContentActionTest, SetIcon) {
   const int tab_id = ExtensionTabUtil::GetTabId(contents.get());
   EXPECT_FALSE(page_action->GetIsVisible(tab_id));
   ContentAction::ApplyInfo apply_info = {
-    env.profile(), contents.get()
+    extension, env.profile(), contents.get(), 100
   };
 
   // The declarative icon shouldn't exist unless the content action is applied.
   EXPECT_TRUE(page_action->GetDeclarativeIcon(tab_id).IsEmpty());
-  result->Apply(extension->id(), base::Time(), &apply_info);
+  result->Apply(apply_info);
   EXPECT_FALSE(page_action->GetDeclarativeIcon(tab_id).IsEmpty());
-  result->Revert(extension->id(), base::Time(), &apply_info);
+  result->Revert(apply_info);
   EXPECT_TRUE(page_action->GetDeclarativeIcon(tab_id).IsEmpty());
 }
 
 TEST_F(RequestContentScriptTest, MissingScripts) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -224,18 +209,15 @@ TEST_F(RequestContentScriptTest, MissingScripts) {
           "  \"allFrames\": true,\n"
           "  \"matchAboutBlank\": true\n"
           "}"),
-      &error,
-      &bad_message);
+      &error);
   EXPECT_THAT(error, testing::HasSubstr("Missing parameter is required"));
-  EXPECT_FALSE(bad_message);
   ASSERT_FALSE(result.get());
 }
 
 TEST_F(RequestContentScriptTest, CSS) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -243,19 +225,15 @@ TEST_F(RequestContentScriptTest, CSS) {
           "  \"instanceType\": \"declarativeContent.RequestContentScript\",\n"
           "  \"css\": [\"style.css\"]\n"
           "}"),
-      &error,
-      &bad_message);
+      &error);
   EXPECT_EQ("", error);
-  EXPECT_FALSE(bad_message);
   ASSERT_TRUE(result.get());
-  EXPECT_EQ(ContentAction::ACTION_REQUEST_CONTENT_SCRIPT, result->GetType());
 }
 
 TEST_F(RequestContentScriptTest, JS) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -263,19 +241,15 @@ TEST_F(RequestContentScriptTest, JS) {
           "  \"instanceType\": \"declarativeContent.RequestContentScript\",\n"
           "  \"js\": [\"script.js\"]\n"
           "}"),
-      &error,
-      &bad_message);
+      &error);
   EXPECT_EQ("", error);
-  EXPECT_FALSE(bad_message);
   ASSERT_TRUE(result.get());
-  EXPECT_EQ(ContentAction::ACTION_REQUEST_CONTENT_SCRIPT, result->GetType());
 }
 
 TEST_F(RequestContentScriptTest, CSSBadType) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -283,17 +257,14 @@ TEST_F(RequestContentScriptTest, CSSBadType) {
           "  \"instanceType\": \"declarativeContent.RequestContentScript\",\n"
           "  \"css\": \"style.css\"\n"
           "}"),
-      &error,
-      &bad_message);
-  EXPECT_TRUE(bad_message);
+      &error);
   ASSERT_FALSE(result.get());
 }
 
 TEST_F(RequestContentScriptTest, JSBadType) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -301,17 +272,14 @@ TEST_F(RequestContentScriptTest, JSBadType) {
           "  \"instanceType\": \"declarativeContent.RequestContentScript\",\n"
           "  \"js\": \"script.js\"\n"
           "}"),
-      &error,
-      &bad_message);
-  EXPECT_TRUE(bad_message);
+      &error);
   ASSERT_FALSE(result.get());
 }
 
 TEST_F(RequestContentScriptTest, AllFrames) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -320,19 +288,15 @@ TEST_F(RequestContentScriptTest, AllFrames) {
           "  \"js\": [\"script.js\"],\n"
           "  \"allFrames\": true\n"
           "}"),
-      &error,
-      &bad_message);
+      &error);
   EXPECT_EQ("", error);
-  EXPECT_FALSE(bad_message);
   ASSERT_TRUE(result.get());
-  EXPECT_EQ(ContentAction::ACTION_REQUEST_CONTENT_SCRIPT, result->GetType());
 }
 
 TEST_F(RequestContentScriptTest, MatchAboutBlank) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -341,19 +305,15 @@ TEST_F(RequestContentScriptTest, MatchAboutBlank) {
           "  \"js\": [\"script.js\"],\n"
           "  \"matchAboutBlank\": true\n"
           "}"),
-      &error,
-      &bad_message);
+      &error);
   EXPECT_EQ("", error);
-  EXPECT_FALSE(bad_message);
   ASSERT_TRUE(result.get());
-  EXPECT_EQ(ContentAction::ACTION_REQUEST_CONTENT_SCRIPT, result->GetType());
 }
 
 TEST_F(RequestContentScriptTest, AllFramesBadType) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -362,17 +322,14 @@ TEST_F(RequestContentScriptTest, AllFramesBadType) {
           "  \"js\": [\"script.js\"],\n"
           "  \"allFrames\": null\n"
           "}"),
-      &error,
-      &bad_message);
-  EXPECT_TRUE(bad_message);
+      &error);
   ASSERT_FALSE(result.get());
 }
 
 TEST_F(RequestContentScriptTest, MatchAboutBlankBadType) {
   Init();
   std::string error;
-  bool bad_message = false;
-  scoped_refptr<const ContentAction> result = ContentAction::Create(
+  scoped_ptr<const ContentAction> result = ContentAction::Create(
       profile(),
       extension(),
       *ParseJson(
@@ -381,9 +338,7 @@ TEST_F(RequestContentScriptTest, MatchAboutBlankBadType) {
           "  \"js\": [\"script.js\"],\n"
           "  \"matchAboutBlank\": null\n"
           "}"),
-      &error,
-      &bad_message);
-  EXPECT_TRUE(bad_message);
+      &error);
   ASSERT_FALSE(result.get());
 }
 

@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/strings/string16.h"
@@ -24,13 +25,14 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_content_client.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
@@ -62,6 +64,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/system/statistics_provider.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -72,7 +75,20 @@ namespace {
 
 #if defined(OS_CHROMEOS)
 
-const char kFCCLabelTextPath[] = "fcc/label.txt";
+// Directory containing the regulatory labels for supported regions.
+const char kRegulatoryLabelsDirectory[] = "regulatory_labels";
+
+// File names of the image file and the file containing alt text for the label.
+const char kRegulatoryLabelImageFilename[] = "label.png";
+const char kRegulatoryLabelTextFilename[] = "label.txt";
+
+// Default region code to use if there's no label for the VPD region code.
+const char kDefaultRegionCode[] = "us";
+
+struct RegulatoryLabel {
+  const std::string label_text;
+  const std::string image_url;
+};
 
 // Returns message that informs user that for update it's better to
 // connect to a network of one of the allowed types.
@@ -127,15 +143,57 @@ bool CanChangeChannel(Profile* profile) {
   return false;
 }
 
-// Reads the file containing the FCC label text, if found. Must be called from
-// the blocking pool.
-std::string ReadFCCLabelText() {
-  const base::FilePath asset_dir(FILE_PATH_LITERAL(chrome::kChromeOSAssetPath));
-  const base::FilePath label_file_path =
-      asset_dir.AppendASCII(kFCCLabelTextPath);
+// Returns the path of the regulatory labels directory for a given region, if
+// found. Must be called from the blocking pool.
+base::FilePath GetRegulatoryLabelDirForRegion(const std::string& region) {
+  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+
+  // Generate the path under the asset dir or URL host to the regulatory files
+  // for the region, e.g., "regulatory_labels/us/".
+  const base::FilePath region_path =
+      base::FilePath(kRegulatoryLabelsDirectory).AppendASCII(region);
+
+  // Check for file existence starting in /usr/share/chromeos-assets/, e.g.,
+  // "/usr/share/chromeos-assets/regulatory_labels/us/label.png".
+  const base::FilePath asset_dir(chrome::kChromeOSAssetPath);
+  if (base::PathExists(asset_dir.Append(region_path)
+                           .AppendASCII(kRegulatoryLabelImageFilename))) {
+    return region_path;
+  }
+
+  return base::FilePath();
+}
+
+// Finds the directory for the regulatory label, using the VPD region code.
+// Also tries "us" as a fallback region. Must be called from the blocking pool.
+base::FilePath FindRegulatoryLabelDir() {
+  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+
+  std::string region;
+  base::FilePath region_path;
+  // Use the VPD region code to find the label dir.
+  if (chromeos::system::StatisticsProvider::GetInstance()->GetMachineStatistic(
+          "region", &region) && !region.empty()) {
+    region_path = GetRegulatoryLabelDirForRegion(region);
+  }
+
+  // Try the fallback region code if no directory was found.
+  if (region_path.empty() && region != kDefaultRegionCode)
+    region_path = GetRegulatoryLabelDirForRegion(kDefaultRegionCode);
+
+  return region_path;
+}
+
+// Reads the file containing the regulatory label text, if found, relative to
+// the asset directory. Must be called from the blocking pool.
+std::string ReadRegulatoryLabelText(const base::FilePath& path) {
+  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  base::FilePath text_path(chrome::kChromeOSAssetPath);
+  text_path = text_path.Append(path);
+  text_path = text_path.AppendASCII(kRegulatoryLabelTextFilename);
 
   std::string contents;
-  if (base::ReadFileToString(label_file_path, &contents))
+  if (base::ReadFileToString(text_path, &contents))
     return contents;
   return std::string();
 }
@@ -347,11 +405,9 @@ void HelpHandler::Observe(int type, const content::NotificationSource& source,
 
 // static
 base::string16 HelpHandler::BuildBrowserVersionString() {
-  chrome::VersionInfo version_info;
+  std::string version = version_info::GetVersionNumber();
 
-  std::string version = version_info.Version();
-
-  std::string modifier = chrome::VersionInfo::GetVersionStringModifier();
+  std::string modifier = chrome::GetChannelString();
   if (!modifier.empty())
     version += " " + modifier;
 
@@ -422,8 +478,8 @@ void HelpHandler::OnPageLoaded(const base::ListValue* args) {
   base::PostTaskAndReplyWithResult(
       content::BrowserThread::GetBlockingPool(),
       FROM_HERE,
-      base::Bind(&ReadFCCLabelText),
-      base::Bind(&HelpHandler::OnFCCLabelTextRead,
+      base::Bind(&FindRegulatoryLabelDir),
+      base::Bind(&HelpHandler::OnRegulatoryLabelDirFound,
                  weak_factory_.GetWeakPtr()));
 #endif
 }
@@ -606,10 +662,31 @@ void HelpHandler::OnTargetChannel(const std::string& channel) {
       "help.HelpPage.updateTargetChannel", base::StringValue(channel));
 }
 
-void HelpHandler::OnFCCLabelTextRead(const std::string& text) {
+void HelpHandler::OnRegulatoryLabelDirFound(const base::FilePath& path) {
+  if (path.empty())
+    return;
+
+  base::PostTaskAndReplyWithResult(
+      content::BrowserThread::GetBlockingPool(), FROM_HERE,
+      base::Bind(&ReadRegulatoryLabelText, path),
+      base::Bind(&HelpHandler::OnRegulatoryLabelTextRead,
+                 weak_factory_.GetWeakPtr()));
+
+  // Send the image path to the WebUI.
+  OnRegulatoryLabelImageFound(path.AppendASCII(kRegulatoryLabelImageFilename));
+}
+
+void HelpHandler::OnRegulatoryLabelImageFound(const base::FilePath& path) {
+  std::string url = std::string("chrome://") + chrome::kChromeOSAssetHost +
+      "/" + path.MaybeAsASCII();
+  web_ui()->CallJavascriptFunction("help.HelpPage.setRegulatoryLabelPath",
+                                   base::StringValue(url));
+}
+
+void HelpHandler::OnRegulatoryLabelTextRead(const std::string& text) {
   // Remove unnecessary whitespace.
   web_ui()->CallJavascriptFunction(
-      "help.HelpPage.setProductLabelText",
+      "help.HelpPage.setRegulatoryLabelText",
       base::StringValue(base::CollapseWhitespaceASCII(text, true)));
 }
 

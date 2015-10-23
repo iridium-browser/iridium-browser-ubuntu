@@ -22,12 +22,9 @@
 #include "wtf/RefPtr.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/Vector.h"
-#include "wtf/testing/WTFTestHelpers.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 class ComposedTreeTraversalTest : public ::testing::Test {
 protected:
@@ -39,9 +36,9 @@ protected:
     void setupSampleHTML(const char* mainHTML, const char* shadowHTML, unsigned);
 
 private:
-    virtual void SetUp() override;
+    void SetUp() override;
 
-    HTMLDocument* m_document;
+    RefPtrWillBePersistent<HTMLDocument> m_document;
     OwnPtr<DummyPageHolder> m_dummyPageHolder;
 };
 
@@ -62,7 +59,7 @@ void ComposedTreeTraversalTest::setupSampleHTML(const char* mainHTML, const char
     RefPtrWillBeRawPtr<Element> body = document().body();
     body->setInnerHTML(String::fromUTF8(mainHTML), ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> shadowHost = toElement(NodeTraversal::childAt(*body, index));
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = shadowHost->createShadowRoot(ASSERT_NO_EXCEPTION);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = shadowHost->createShadowRootInternal(ShadowRootType::OpenByDefault, ASSERT_NO_EXCEPTION);
     shadowRoot->setInnerHTML(String::fromUTF8(shadowHTML), ASSERT_NO_EXCEPTION);
     body->updateDistribution();
 }
@@ -102,7 +99,7 @@ TEST_F(ComposedTreeTraversalTest, childAt)
     RefPtrWillBeRawPtr<Element> m01 = m0->querySelector("#m01", ASSERT_NO_EXCEPTION);
 
     RefPtrWillBeRawPtr<Element> shadowHost = m0;
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = shadowHost->shadowRoot();
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = shadowHost->openShadowRoot();
     RefPtrWillBeRawPtr<Element> s00 = shadowRoot->querySelector("#s00", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> s02 = shadowRoot->querySelector("#s02", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> s03 = shadowRoot->querySelector("#s03", ASSERT_NO_EXCEPTION);
@@ -184,7 +181,7 @@ TEST_F(ComposedTreeTraversalTest, commonAncestor)
     RefPtrWillBeRawPtr<Element> m20 = body->querySelector("#m20", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> m21 = body->querySelector("#m21", ASSERT_NO_EXCEPTION);
 
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = m1->shadowRoot();
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = m1->openShadowRoot();
     RefPtrWillBeRawPtr<Element> s10 = shadowRoot->querySelector("#s10", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> s11 = shadowRoot->querySelector("#s11", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> s12 = shadowRoot->querySelector("#s12", ASSERT_NO_EXCEPTION);
@@ -250,7 +247,7 @@ TEST_F(ComposedTreeTraversalTest, nextSkippingChildren)
     RefPtrWillBeRawPtr<Element> m10 = body->querySelector("#m10", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> m11 = body->querySelector("#m11", ASSERT_NO_EXCEPTION);
 
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = m1->shadowRoot();
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = m1->openShadowRoot();
     RefPtrWillBeRawPtr<Element> s11 = shadowRoot->querySelector("#s11", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> s12 = shadowRoot->querySelector("#s12", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> s120 = shadowRoot->querySelector("#s120", ASSERT_NO_EXCEPTION);
@@ -307,7 +304,7 @@ TEST_F(ComposedTreeTraversalTest, lastWithin)
 
     RefPtrWillBeRawPtr<Element> m10 = body->querySelector("#m10", ASSERT_NO_EXCEPTION);
 
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = m1->shadowRoot();
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = m1->openShadowRoot();
     RefPtrWillBeRawPtr<Element> s11 = shadowRoot->querySelector("#s11", ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> s12 = shadowRoot->querySelector("#s12", ASSERT_NO_EXCEPTION);
 
@@ -327,4 +324,4 @@ TEST_F(ComposedTreeTraversalTest, lastWithin)
     EXPECT_EQ(*m10->firstChild(), ComposedTreeTraversal::lastWithinOrSelf(*s12));
 }
 
-} // namespace
+} // namespace blink

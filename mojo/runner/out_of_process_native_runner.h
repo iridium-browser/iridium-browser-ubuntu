@@ -9,7 +9,6 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "mojo/public/cpp/bindings/error_handler.h"
 #include "mojo/shell/native_runner.h"
 
 namespace mojo {
@@ -27,6 +26,7 @@ class OutOfProcessNativeRunner : public shell::NativeRunner {
 
   // |NativeRunner| method:
   void Start(const base::FilePath& app_path,
+             bool start_sandboxed,
              shell::NativeApplicationCleanup cleanup,
              InterfaceRequest<Application> application_request,
              const base::Closure& app_completed_callback) override;

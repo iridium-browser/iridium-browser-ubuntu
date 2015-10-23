@@ -11,7 +11,6 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_uuid.h"
@@ -74,7 +73,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // The value returned if the RSSI or transmit power cannot be read.
   static const int kUnknownPower = 127;
 
-  struct ConnectionInfo {
+  struct DEVICE_BLUETOOTH_EXPORT ConnectionInfo {
     int rssi;
     int transmit_power;
     int max_transmit_power;

@@ -22,7 +22,7 @@ remoting.HostDaemonFacade = function() {
   /** @private {Object<number, remoting.HostDaemonFacade.PendingReply>} */
   this.pendingReplies_ = {};
 
-  /** @private {?chrome.runtime.Port} */
+  /** @private {?Port} */
   this.port_ = null;
 
   /** @private {string} */
@@ -49,6 +49,10 @@ remoting.HostDaemonFacade = function() {
 
   /** @private */
   this.onDisconnectCallback_ = this.onDisconnect_.bind(this);
+
+  /** @private */
+  this.debugMessageHandler_ =
+      new remoting.NativeMessageHostDebugMessageHandler();
 
   this.initialize_();
 };
@@ -180,6 +184,10 @@ remoting.HostDaemonFacade.prototype.postMessageInternal_ = function(message) {
  * @private
  */
 remoting.HostDaemonFacade.prototype.onIncomingMessage_ = function(message) {
+  if (this.debugMessageHandler_.handleMessage(message)) {
+    return;
+  }
+
   /** @type {number} */
   var id = message['id'];
   if (typeof(id) != 'number') {

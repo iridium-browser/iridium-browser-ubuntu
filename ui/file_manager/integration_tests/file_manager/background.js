@@ -45,14 +45,9 @@ var videoPlayerApp = new RemoteCall(VIDEO_PLAYER_APP_ID);
  * @param {Promise} promise Promise.
  */
 function testPromise(promise) {
-  promise.then(function() {
-    return new Promise(checkIfNoErrorsOccured);
-  }).then(chrome.test.callbackPass(function() {
-    // The callbacPass is necessary to avoid prematurely finishing tests.
-    // Don't put chrome.test.succeed() here to avoid doubled success log.
-  }), function(error) {
-    chrome.test.fail(error.stack || error);
-  });
+  return testPromiseAndApps(
+      promise,
+      [remoteCall, galleryApp, audioPlayerApp, videoPlayerApp]);
 };
 
 /**
@@ -61,54 +56,66 @@ function testPromise(promise) {
  */
 function StepsRunner() {
   /**
-   * List of steps.
-   * @type {Array.<function>}
+   * Function to notify the end of the current closure.
+   * @type {?function}
    * @private
    */
-  this.steps_ = [];
+  this.next_ = null;
 }
 
 /**
  * Creates a StepsRunner instance and runs the passed steps.
+ * @param {!Array<function>} steps
+ * @return {Promise} Promise to be fulfilled after test finishes.
  */
 StepsRunner.run = function(steps) {
   var stepsRunner = new StepsRunner();
-  stepsRunner.run_(steps);
+  return stepsRunner.run_(steps);
+};
+
+/**
+ * Creates a StepsRunner instance and runs multiple groups of steps.
+ * @param {!Array<!Array<function>>} groups
+ */
+StepsRunner.runGroups = function(groups) {
+  // Squash all groups into a flat list of steps.
+  StepsRunner.run(Array.prototype.concat.apply([], groups));
 };
 
 StepsRunner.prototype = {
   /**
-   * @return {function} The next closure.
+   * @return {?function} The next closure.
    */
   get next() {
-    return this.steps_[0];
+    var next = this.next_;
+    this.next_ = null;
+    return next;
   }
 };
 
 /**
  * Runs a sequence of the added test steps.
- * @type {Array.<function>} List of the sequential steps.
+ * @type {Array<function>} List of the sequential steps.
+ * @return {Promise} Promise to be fulfilled after test finishes.
  */
 StepsRunner.prototype.run_ = function(steps) {
-  this.steps_ = steps.slice(0);
-
-  // An extra step which acts as an empty callback for optional asynchronous
-  // calls in the last provided step.
-  this.steps_.push(function() {});
-
-  this.steps_ = this.steps_.map(function(f) {
-    return chrome.test.callbackPass(function() {
-      this.steps_.shift();
-      f.apply(this, arguments);
+  return steps.reduce(function(previousPromise, currentClosure) {
+    return previousPromise.then(function(arg) {
+      return new Promise(function(resolve, reject) {
+        this.next_ = resolve;
+        currentClosure.apply(this, [arg]);
+      }.bind(this));
     }.bind(this));
-  }.bind(this));
-
-  this.next();
+  }.bind(this), Promise.resolve())
+  // Adds the last closure to notify the completion of the run.
+  .then(chrome.test.callbackPass(function() {
+    return true;
+  }));
 };
 
 /**
  * Basic entry set for the local volume.
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var BASIC_LOCAL_ENTRY_SET = [
@@ -125,7 +132,7 @@ var BASIC_LOCAL_ENTRY_SET = [
  * TODO(hirono): Add a case for an entry cached by FileCache. For testing
  *               Drive, create more entries with Drive specific attributes.
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var BASIC_DRIVE_ENTRY_SET = [
@@ -149,7 +156,7 @@ var NESTED_ENTRY_SET = [
  * Expecetd list of preset entries in fake test volumes. This should be in sync
  * with FakeTestVolume::PrepareTestEntries in the test harness.
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var BASIC_FAKE_ENTRY_SET = [
@@ -161,7 +168,7 @@ var BASIC_FAKE_ENTRY_SET = [
  * Expected files shown in "Recent". Directories (e.g. 'photos') are not in this
  * list as they are not expected in "Recent".
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var RECENT_ENTRY_SET = [
@@ -179,7 +186,7 @@ var RECENT_ENTRY_SET = [
  * "available offline". Google Documents, Google Spreadsheets, and the files
  * cached locally are "available offline".
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var OFFLINE_ENTRY_SET = [
@@ -191,7 +198,7 @@ var OFFLINE_ENTRY_SET = [
  * Expected files shown in "Shared with me", which should be the entries labeled
  * with "shared-with-me".
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var SHARED_WITH_ME_ENTRY_SET = [
@@ -234,7 +241,7 @@ function openNewWindow(appState, initialRoot, opt_callback) {
  *     fileSystem.chooseEntry() API.
  * @param {string} volumeName Volume name passed to the selectVolume remote
  *     funciton.
- * @param {Array.<TestEntryInfo>} expectedSet Expected set of the entries.
+ * @param {Array<TestEntryInfo>} expectedSet Expected set of the entries.
  * @param {function(windowId:string):Promise} closeDialog Function to close the
  *     dialog.
  * @return {Promise} Promise to be fulfilled with the result entry of the
@@ -290,9 +297,10 @@ function openAndWaitForClosingDialog(
  *     Can be null.
  * @param {?string} initialRoot Root path to be used as a default current
  *     directory during initialization. Can be null, for no default path.
- * @param {function(string, Array.<Array.<string>>)=} opt_callback Callback with
+ * @param {function(string, Array<Array<string>>)=} opt_callback Callback with
  *     the window ID and with the file list.
- * @return {Promise} Promise to be fulfilled with window ID.
+ * @return {Promise} Promise to be fulfilled with the result object, which
+ *     coutnains the window ID and the file list.
  */
 function setupAndWaitUntilReady(appState, initialRoot, opt_callback) {
   var windowPromise = openNewWindow(appState, initialRoot);
@@ -315,9 +323,10 @@ function setupAndWaitUntilReady(appState, initialRoot, opt_callback) {
     driveEntriesPromise,
     detailedTablePromise
   ]).then(function(results) {
+    var result = {windowId: results[0], fileList: results[3]};
     if (opt_callback)
-      opt_callback(results[0], results[3]);
-    return results[0];
+      opt_callback(result);
+    return result;
   }).catch(function(e) {
     chrome.test.fail(e.stack || e);
   });
@@ -328,15 +337,12 @@ function setupAndWaitUntilReady(appState, initialRoot, opt_callback) {
  * @param {function()} Completion callback.
  */
 function checkIfNoErrorsOccured(callback) {
-  remoteCall.callRemoteTestUtil('getErrorCount', null, [], function(count) {
-    chrome.test.assertEq(0, count, 'The error count is not 0.');
-    callback();
-  });
+  checkIfNoErrorsOccuredOnApp(remoteCall, callback);
 }
 
 /**
  * Returns the name of the given file list entry.
- * @param {Array.<string>} file An entry in a file list.
+ * @param {Array<string>} file An entry in a file list.
  * @return {string} Name of the file.
  */
 function getFileName(fileListEntry) {
@@ -345,7 +351,7 @@ function getFileName(fileListEntry) {
 
 /**
  * Returns the size of the given file list entry.
- * @param {Array.<string>} An entry in a file list.
+ * @param {Array<string>} An entry in a file list.
  * @return {string} Size of the file.
  */
 function getFileSize(fileListEntry) {
@@ -354,7 +360,7 @@ function getFileSize(fileListEntry) {
 
 /**
  * Returns the type of the given file list entry.
- * @param {Array.<string>} An entry in a file list.
+ * @param {Array<string>} An entry in a file list.
  * @return {string} Type of the file.
  */
 function getFileType(fileListEntry) {

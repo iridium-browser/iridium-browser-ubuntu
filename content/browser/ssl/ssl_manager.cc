@@ -115,33 +115,16 @@ void SSLManager::DidCommitProvisionalLoad(const LoadCommittedDetails& details) {
 
   if (details.is_main_frame) {
     if (entry) {
-      // Decode the security details.
-      int ssl_cert_id;
-      net::CertStatus ssl_cert_status;
-      int ssl_security_bits;
-      int ssl_connection_status;
-      SignedCertificateTimestampIDStatusList
-          ssl_signed_certificate_timestamp_ids;
-      DeserializeSecurityInfo(details.serialized_security_info,
-                              &ssl_cert_id,
-                              &ssl_cert_status,
-                              &ssl_security_bits,
-                              &ssl_connection_status,
-                              &ssl_signed_certificate_timestamp_ids);
-
       // We may not have an entry if this is a navigation to an initial blank
-      // page. Reset the SSL information and add the new data we have.
-      entry->GetSSL() = SSLStatus();
-      entry->GetSSL().cert_id = ssl_cert_id;
-      entry->GetSSL().cert_status = ssl_cert_status;
-      entry->GetSSL().security_bits = ssl_security_bits;
-      entry->GetSSL().connection_status = ssl_connection_status;
-      entry->GetSSL().signed_certificate_timestamp_ids =
-          ssl_signed_certificate_timestamp_ids;
+      // page. Add the new data we have.
+      entry->GetSSL() = details.ssl_status;
     }
   }
 
-  UpdateEntry(entry);
+  policy()->UpdateEntry(entry, controller_->delegate()->GetWebContents());
+  // Always notify the WebContents that the SSL state changed when a
+  // load is committed, in case the active navigation entry has changed.
+  NotifyDidChangeVisibleSSLState();
 }
 
 void SSLManager::DidDisplayInsecureContent() {
@@ -204,12 +187,16 @@ void SSLManager::UpdateEntry(NavigationEntryImpl* entry) {
 
   SSLStatus original_ssl_status = entry->GetSSL();  // Copy!
 
-  WebContentsImpl* contents =
-      static_cast<WebContentsImpl*>(controller_->delegate()->GetWebContents());
-  policy()->UpdateEntry(entry, contents);
+  policy()->UpdateEntry(entry, controller_->delegate()->GetWebContents());
 
   if (!entry->GetSSL().Equals(original_ssl_status))
-    contents->DidChangeVisibleSSLState();
+    NotifyDidChangeVisibleSSLState();
+}
+
+void SSLManager::NotifyDidChangeVisibleSSLState() {
+  WebContentsImpl* contents =
+      static_cast<WebContentsImpl*>(controller_->delegate()->GetWebContents());
+  contents->DidChangeVisibleSSLState();
 }
 
 }  // namespace content

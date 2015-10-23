@@ -20,6 +20,8 @@
  * Boston, MA 02110-1301, USA.
  */
 
+// http://www.w3.org/TR/SVG2/types.html#InterfaceSVGAngle
+
 [
     ImplementedAs=SVGAngleTearOff,
     SetWrapperReferenceTo(SVGElement contextElement),
@@ -36,11 +38,8 @@
     readonly attribute unsigned short unitType;
     [RaisesException=Setter] attribute float value;
     [RaisesException=Setter] attribute float valueInSpecifiedUnits;
-
-    [TreatNullAs=NullString, RaisesException=Setter] attribute DOMString valueAsString;
+    [RaisesException=Setter] attribute DOMString valueAsString;
 
     [RaisesException] void newValueSpecifiedUnits(unsigned short unitType, float valueInSpecifiedUnits);
-
     [RaisesException] void convertToSpecifiedUnits(unsigned short unitType);
 };
-

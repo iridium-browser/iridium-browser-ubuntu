@@ -176,6 +176,8 @@ static media::EmeInitDataType ConvertInitDataType(
 }
 
 cdm::KeyStatus ConvertKeyStatus(media::CdmKeyInformation::KeyStatus status) {
+  // TODO(jrummell): Remove kOutputNotAllowed, add kOutputRestricted to CDM
+  // interface. http://crbug.com/507791.
   switch (status) {
     case media::CdmKeyInformation::KeyStatus::USABLE:
       return cdm::kUsable;
@@ -183,7 +185,7 @@ cdm::KeyStatus ConvertKeyStatus(media::CdmKeyInformation::KeyStatus status) {
       return cdm::kInternalError;
     case media::CdmKeyInformation::KeyStatus::EXPIRED:
       return cdm::kExpired;
-    case media::CdmKeyInformation::KeyStatus::OUTPUT_NOT_ALLOWED:
+    case media::CdmKeyInformation::KeyStatus::OUTPUT_RESTRICTED:
       return cdm::kOutputNotAllowed;
     case media::CdmKeyInformation::KeyStatus::OUTPUT_DOWNSCALED:
       return cdm::kOutputDownscaled;
@@ -330,13 +332,7 @@ void ClearKeyCdm::LoadSession(uint32 promise_id,
 
   if (std::string(kLoadableSessionId) !=
       std::string(session_id, session_id_length)) {
-    // TODO(jrummell): This should be resolved with undefined, not rejected.
-    std::string message("Incorrect session id specified for LoadSession().");
-    host_->OnRejectPromise(promise_id,
-                           cdm::kInvalidAccessError,
-                           0,
-                           message.data(),
-                           message.length());
+    host_->OnResolveNewSessionPromise(promise_id, nullptr, 0);
     return;
   }
 

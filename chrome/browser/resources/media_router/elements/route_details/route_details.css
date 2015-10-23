@@ -2,34 +2,34 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-#back-to-devices {
-  -webkit-padding-start: 10px;
-  color: rgb(20, 86, 218);
-  font-weight: bold;
-  line-height: 2em;
-}
-
-#back-to-devices:hover {
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-hr {
+#close-route-button {
+  background-color: white;
+  color: rgb(33, 150, 243);
   margin: 0;
+  text-align: end;
+  width: 100%;
 }
 
-.route {
-  -webkit-padding-start: 10px;
-  line-height: 1.125em;
+#close-button {
+  -webkit-margin-start: auto;
 }
 
-.route-status {
-  color: rgb(125, 125, 125);
-  margin: 8px 0;
+#custom-controller {
+  display: inline-block;
+  height: 160px;
+  width: 100%;
 }
 
-.route-title {
-  font-weight: bold;
-  margin: 8px 0;
+#route-details-header {
+  background-color: rgb(33, 150, 243);
+  font-size: 1.4em;
+}
+
+#route-information {
+  -webkit-padding-start: 30px;
+  background-color: white;
+  font-size: 1.2em;
+  height: 40px;
   overflow: hidden;
+  padding: 20px 30px;
 }

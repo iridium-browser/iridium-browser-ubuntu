@@ -37,6 +37,7 @@
 #include "core/animation/css/CSSAnimationUpdate.h"
 #include "core/css/CSSKeyframesRule.h"
 #include "core/css/StylePropertySet.h"
+#include "core/css/resolver/StyleResolverState.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "wtf/HashMap.h"
@@ -55,16 +56,24 @@ class CSSAnimations final {
 public:
     CSSAnimations();
 
-    const AtomicString getAnimationNameForInspector(const Animation&);
+    bool isAnimationForInspector(const Animation&);
     bool isTransitionAnimationForInspector(const Animation&) const;
 
     static const StylePropertyShorthand& propertiesForTransitionAll();
-    static bool isAllowedAnimation(CSSPropertyID);
-    static PassOwnPtrWillBeRawPtr<CSSAnimationUpdate> calculateUpdate(const Element* animatingElement, Element&, const ComputedStyle&, ComputedStyle* parentStyle, StyleResolver*);
+    static bool isAnimatableProperty(CSSPropertyID);
+    static void calculateUpdate(const Element* animatingElement, Element&, const ComputedStyle&, ComputedStyle* parentStyle, CSSAnimationUpdate&, StyleResolver*);
 
-    void setPendingUpdate(PassOwnPtrWillBeRawPtr<CSSAnimationUpdate> update) { m_pendingUpdate = update; }
+    void setPendingUpdate(const CSSAnimationUpdate& update)
+    {
+        clearPendingUpdate();
+        m_pendingUpdate.copy(update);
+    }
+    void clearPendingUpdate()
+    {
+        m_pendingUpdate.clear();
+    }
     void maybeApplyPendingUpdate(Element*);
-    bool isEmpty() const { return m_animations.isEmpty() && m_transitions.isEmpty() && !m_pendingUpdate; }
+    bool isEmpty() const { return m_animations.isEmpty() && m_transitions.isEmpty() && m_pendingUpdate.isEmpty(); }
     void cancel();
 
     DECLARE_TRACE();
@@ -120,16 +129,16 @@ private:
     using TransitionMap = WillBeHeapHashMap<CSSPropertyID, RunningTransition>;
     TransitionMap m_transitions;
 
-    OwnPtrWillBeMember<CSSAnimationUpdate> m_pendingUpdate;
+    CSSAnimationUpdate m_pendingUpdate;
 
     ActiveInterpolationMap m_previousActiveInterpolationsForAnimations;
 
-    static void calculateAnimationUpdate(CSSAnimationUpdate*, const Element* animatingElement, Element&, const ComputedStyle&, ComputedStyle* parentStyle, StyleResolver*);
-    static void calculateTransitionUpdate(CSSAnimationUpdate*, const Element* animatingElement, const ComputedStyle&);
-    static void calculateTransitionUpdateForProperty(CSSPropertyID, const CSSTransitionData&, size_t transitionIndex, const ComputedStyle& oldStyle, const ComputedStyle&, const TransitionMap* activeTransitions, CSSAnimationUpdate*, const Element*);
+    static void calculateAnimationUpdate(CSSAnimationUpdate&, const Element* animatingElement, Element&, const ComputedStyle&, ComputedStyle* parentStyle, StyleResolver*);
+    static void calculateTransitionUpdate(CSSAnimationUpdate&, const Element* animatingElement, const ComputedStyle&);
+    static void calculateTransitionUpdateForProperty(CSSPropertyID, const CSSTransitionData&, size_t transitionIndex, const ComputedStyle& oldStyle, const ComputedStyle&, const TransitionMap* activeTransitions, CSSAnimationUpdate&, const Element*);
 
-    static void calculateAnimationActiveInterpolations(CSSAnimationUpdate*, const Element* animatingElement, double timelineCurrentTime);
-    static void calculateTransitionActiveInterpolations(CSSAnimationUpdate*, const Element* animatingElement, double timelineCurrentTime);
+    static void calculateAnimationActiveInterpolations(CSSAnimationUpdate&, const Element* animatingElement, double timelineCurrentTime);
+    static void calculateTransitionActiveInterpolations(CSSAnimationUpdate&, const Element* animatingElement, double timelineCurrentTime);
 
     class AnimationEventDelegate final : public AnimationEffect::EventDelegate {
     public:
@@ -140,8 +149,8 @@ private:
             , m_previousIteration(nullValue())
         {
         }
-        virtual bool requiresIterationEvents(const AnimationEffect&) override;
-        virtual void onEventCondition(const AnimationEffect&) override;
+        bool requiresIterationEvents(const AnimationEffect&) override;
+        void onEventCondition(const AnimationEffect&) override;
         DECLARE_VIRTUAL_TRACE();
 
     private:
@@ -164,8 +173,8 @@ private:
             , m_previousPhase(AnimationEffect::PhaseNone)
         {
         }
-        virtual bool requiresIterationEvents(const AnimationEffect&) override { return false; }
-        virtual void onEventCondition(const AnimationEffect&) override;
+        bool requiresIterationEvents(const AnimationEffect&) override { return false; }
+        void onEventCondition(const AnimationEffect&) override;
         DECLARE_VIRTUAL_TRACE();
 
     private:

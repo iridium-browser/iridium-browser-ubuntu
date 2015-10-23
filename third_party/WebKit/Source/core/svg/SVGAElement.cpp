@@ -42,7 +42,6 @@
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderTypes.h"
-#include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/svg/animation/SVGSMILElement.h"
@@ -167,18 +166,19 @@ bool SVGAElement::shouldHaveFocusAppearance() const
     return !m_wasFocusedByMouse || SVGGraphicsElement::supportsFocus();
 }
 
-void SVGAElement::dispatchFocusEvent(Element* oldFocusedElement, WebFocusType type)
+// TODO(lanwei): Will add the InputDeviceCapabilities when SVGAElement gets focus later, see https://crbug.com/476530.
+void SVGAElement::dispatchFocusEvent(Element* oldFocusedElement, WebFocusType type, InputDeviceCapabilities* sourceCapabilities)
 {
     if (type != WebFocusTypePage)
         m_wasFocusedByMouse = type == WebFocusTypeMouse;
-    SVGGraphicsElement::dispatchFocusEvent(oldFocusedElement, type);
+    SVGGraphicsElement::dispatchFocusEvent(oldFocusedElement, type, sourceCapabilities);
 }
 
-void SVGAElement::dispatchBlurEvent(Element* newFocusedElement, WebFocusType type)
+void SVGAElement::dispatchBlurEvent(Element* newFocusedElement, WebFocusType type, InputDeviceCapabilities* sourceCapabilities)
 {
     if (type != WebFocusTypePage)
         m_wasFocusedByMouse = false;
-    SVGGraphicsElement::dispatchBlurEvent(newFocusedElement, type);
+    SVGGraphicsElement::dispatchBlurEvent(newFocusedElement, type, sourceCapabilities);
 }
 
 bool SVGAElement::isURLAttribute(const Attribute& attribute) const
@@ -200,7 +200,7 @@ bool SVGAElement::isKeyboardFocusable() const
         return SVGElement::isKeyboardFocusable();
 
     if (isLink())
-        return document().frameHost()->chrome().client().tabsToLinks();
+        return document().frameHost()->chromeClient().tabsToLinks();
     return SVGElement::isKeyboardFocusable();
 }
 

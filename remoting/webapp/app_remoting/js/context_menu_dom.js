@@ -29,8 +29,9 @@ var remoting = remoting || {};
  * @implements {remoting.WindowShape.ClientUI}
  * @implements {remoting.ContextMenuAdapter}
  * @param {HTMLElement} root The root of the context menu DOM.
+ * @param {remoting.WindowShape} windowShape
  */
-remoting.ContextMenuDom = function(root) {
+remoting.ContextMenuDom = function(root, windowShape) {
   /** @private {HTMLElement} */
   this.root_ = root;
   /** @private {HTMLElement} */
@@ -59,6 +60,9 @@ remoting.ContextMenuDom = function(root) {
    */
   this.stubDragged_ = false;
 
+  /** @private */
+  this.windowShape_ = windowShape;
+
   /**
    * @private
    */
@@ -74,7 +78,11 @@ remoting.ContextMenuDom = function(root) {
 
   this.root_.hidden = false;
   this.root_.style.bottom = this.bottom_ + 'px';
-  remoting.windowShape.addCallback(this);
+  this.windowShape_.registerClientUI(this);
+};
+
+remoting.ContextMenuDom.prototype.dispose = function() {
+  this.windowShape_.unregisterClientUI(this);
 };
 
 /**
@@ -121,8 +129,12 @@ remoting.ContextMenuDom.prototype.create = function(
   if (opt_parentId) {
     var parent = /** @type {HTMLElement} */
         (this.menu_.querySelector('[data-id="' + opt_parentId + '"]'));
-    base.debug.assert(parent != null);
-    base.debug.assert(!parent.classList.contains('menu-group-item'));
+    console.assert(
+        parent != null,
+        'No parent match for [data-id="' + /** @type {string} */(opt_parentId) +
+        '"] in create().');
+    console.assert(!parent.classList.contains('menu-group-item'),
+                   'Nested sub-menus are not supported.');
     parent.classList.add('menu-group-header');
     menuEntry.classList.add('menu-group-item');
     insertBefore = this.getInsertionPointForParent(
@@ -203,7 +215,9 @@ remoting.ContextMenuDom.prototype.onClick_ = function(event) {
 remoting.ContextMenuDom.prototype.getInsertionPointForParent = function(
     parentId) {
   var parentNode = this.menu_.querySelector('[data-id="' + parentId + '"]');
-  base.debug.assert(parentNode != null);
+  console.assert(parentNode != null,
+                 'No parent match for [data-id="' + parentId +
+                 '"] in getInsertionPointForParent().');
   var childNode = /** @type {HTMLElement} */ (parentNode.nextSibling);
   while (childNode != null && childNode.classList.contains('menu-group-item')) {
     childNode = childNode.nextSibling;
@@ -219,7 +233,7 @@ remoting.ContextMenuDom.prototype.getInsertionPointForParent = function(
  * @private
  */
 remoting.ContextMenuDom.prototype.onTransitionEnd_ = function() {
-  remoting.windowShape.updateClientWindowShape();
+  this.windowShape_.updateClientWindowShape();
 };
 
 /**
@@ -281,7 +295,7 @@ remoting.ContextMenuDom.prototype.showMenu_ = function(show) {
   }
 
   this.screen_.hidden = !show;
-  remoting.windowShape.updateClientWindowShape();
+  this.windowShape_.updateClientWindowShape();
 };
 
 /**
@@ -297,7 +311,5 @@ remoting.ContextMenuDom.prototype.onDragUpdate_ = function(deltaX, deltaY) {
   // helps keep the position of the context menu consistent with the window
   // shape (though it's still not perfect).
   window.requestAnimationFrame(
-      function() {
-        remoting.windowShape.updateClientWindowShape();
-      });
+      this.windowShape_.updateClientWindowShape.bind(this.windowShape_));
 };

@@ -6,18 +6,18 @@
 
 from __future__ import print_function
 
+import collections
 import ConfigParser
 import contextlib
 import datetime
+import itertools
 import os
-import shutil
+import re
 import sys
-import tempfile
 import time
 from xml.etree import ElementTree
 from xml.dom import minidom
 
-from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import chroot_lib
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import constants
@@ -35,7 +35,7 @@ from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
-from chromite.lib import gs
+from chromite.lib import graphite
 from chromite.lib import osutils
 from chromite.lib import patch as cros_patch
 from chromite.lib import timeout_util
@@ -171,12 +171,7 @@ class BootstrapStage(PatchChangesStage):
     self.chromite_patch_pool = chromite_patch_pool
     self.manifest_patch_pool = manifest_patch_pool
     self.returncode = None
-    # Bootstrap chromite in a subdirectory of the buildroot. This directory
-    # requires exec permissions so that cbuildbot can be re-executed after
-    # chromite is patched.
-    self.tempdir = os.path.join(self._run.options.buildroot,
-                                'chromite-bootstrap')
-    osutils.RmDir(self.tempdir, ignore_missing=True)
+    self.tempdir = None
 
   def _ApplyManifestPatches(self, patch_pool):
     """Apply a pool of manifest patches to a temp manifest checkout.
@@ -253,7 +248,7 @@ class BootstrapStage(PatchChangesStage):
     else:
       PatchChangesStage.HandleApplyFailures(self, failures)
 
-  def PerformStage(self):
+  def _PerformStageInTempDir(self):
     # The plan for the builders is to use master branch to bootstrap other
     # branches. Now, if we wanted to test patches for both the bootstrap code
     # (on master) and the branched chromite (say, R20), we need to filter the
@@ -304,6 +299,12 @@ class BootstrapStage(PatchChangesStage):
     result_obj = cros_build_lib.RunCommand(
         cmd, cwd=self.tempdir, kill_timeout=30, error_code_ok=True)
     self.returncode = result_obj.returncode
+
+  def PerformStage(self):
+    with osutils.TempDir(base_dir=self._run.options.bootstrap_dir) as tempdir:
+      self.tempdir = tempdir
+      self._PerformStageInTempDir()
+    self.tempdir = None
 
 
 class SyncStage(generic_stages.BuilderStage):
@@ -577,79 +578,6 @@ class ManifestVersionedSyncStage(SyncStage):
     else:
       yield manifest
 
-  def CommitProjectSDKManifest(self, manifest, current_version, debug):
-    """Create and submit the Product SDK Manifest.
-
-    Create the Project SDK manifest, and push it to the external manifest
-    repository.
-
-    Args:
-      manifest: Path to new manifest to commit.
-      current_version: Version to use when commiting manifest (e.g. 6770.0.0).
-      debug: Is this a debug build?
-    """
-    # Use a static dir, but don't overlap with other users, we might conflict.
-    git_repo = os.path.join(
-        self._build_root, constants.PROJECT_SDK_MANIFEST_VERSIONS_PATH)
-    external_manifest_url = self._GetManifestVersionsRepoUrl(
-        internal=False, test=debug)
-
-    logging.info('Using manifest URL: %s', external_manifest_url)
-    manifest_version.RefreshManifestCheckout(
-        git_repo, external_manifest_url)
-
-    sdk_manifest_name = '%s.xml' % current_version
-    latest_manifest_path = os.path.join(
-        git_repo, constants.LATEST_PROJECT_SDK_MANIFEST)
-    sdk_manifest_path = os.path.join(
-        git_repo, 'project-sdk', sdk_manifest_name)
-
-    if os.path.exists(sdk_manifest_path):
-      raise failures_lib.StepFailure(
-          'Project SDK Manifest already exists: %s' % sdk_manifest_path)
-
-    # Create branch for pushing new manifest file.
-    branch = 'temp_project_sdk_creation_branch'
-    git.CreatePushBranch(branch, git_repo, sync=False)
-
-    # Create new manifest file.
-    logging.info('Creating Project SDK Manifest as: %s', sdk_manifest_path)
-    osutils.SafeMakedirs(os.path.dirname(sdk_manifest_path))
-    shutil.copyfile(manifest, sdk_manifest_path)
-
-    # Create 'latest' link to new manifest.
-    osutils.SafeUnlink(latest_manifest_path)
-    os.symlink(sdk_manifest_name, latest_manifest_path)
-
-    # Commit it locally.
-    logging.info('Committing Project SDK Manifest.')
-    git.AddPath(sdk_manifest_path)
-    git.AddPath(latest_manifest_path)
-    git.Commit(git_repo, 'Create project_sdk for %s.' % current_version)
-
-    # Push it to Gerrit.
-    logging.info('Pushing Project SDK Manifest.')
-    git.PushWithRetry(branch, git_repo)
-
-    # Push to GS.
-    gs_ctx = gs.GSContext(dry_run=self._run.debug)
-    publish_uri = os.path.join(constants.BRILLO_RELEASE_MANIFESTS_URL,
-                               sdk_manifest_name)
-
-    # We use the default ACL (public readable) for this file.
-    logging.info('Pushing Project SDK Manifest to: %s', publish_uri)
-    gs_ctx.Copy(manifest, publish_uri)
-
-    # Populate a file on GS with the newest version published.
-    with tempfile.NamedTemporaryFile() as latest:
-      osutils.WriteFile(latest.name, current_version)
-      gs_ctx.Copy(latest.name, constants.BRILLO_LATEST_RELEASE_URL)
-
-    # Log what we published.
-    logging.info('Project SDK Manifest \'%s\' published:',
-                 os.path.basename(sdk_manifest_path))
-    logging.info('%s', osutils.ReadFile(manifest))
-
   def _GetMasterVersion(self, master_id, timeout=5 * 60):
     """Get the platform version associated with the master_build_id.
 
@@ -733,28 +661,6 @@ class ManifestVersionedSyncStage(SyncStage):
         next_manifest, filter_cros=self._run.options.local) as new_manifest:
       self.ManifestCheckout(new_manifest)
 
-    # TODO(dgarrett): Push this logic into it's own stage.
-    # If we are a Canary Master, create an additional derivative Manifest for
-    # the Project SDK builders.
-    if (cbuildbot_config.IsCanaryType(self._run.config.build_type) and
-        self._run.config.master):
-      logging.info('Creating Project SDK Manifest.')
-      sdk_manifest = None
-      try:
-        with tempfile.NamedTemporaryFile() as pinned_manifest_file:
-          pinned_manifest = self.repo.ExportManifest(mark_revision=True)
-          osutils.WriteFile(pinned_manifest_file.name, pinned_manifest)
-          sdk_manifest = manifest_version.ConvertToProjectSdkManifest(
-              pinned_manifest_file.name)
-
-        self.CommitProjectSDKManifest(
-            sdk_manifest,
-            self.manifest_manager.current_version,
-            self._run.options.debug)
-      finally:
-        if sdk_manifest:
-          os.unlink(sdk_manifest)
-
     # Set the status inflight at the end of the ManifestVersionedSync
     # stage. This guarantees that all syncing has completed.
     if self.manifest_manager:
@@ -773,6 +679,9 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
   # TODO(mtennant): Turn this into self._run.attrs.sub_manager or similar.
   # An instance of lkgm_manager.LKGMManager for slave builds.
   sub_manager = None
+  MAX_BUILD_HISTORY_LENGTH = 10
+  MilestoneVersion = collections.namedtuple(
+      'MilestoneVersion', ['milestone', 'platform'])
 
   def __init__(self, builder_run, **kwargs):
     super(MasterSlaveLKGMSyncStage, self).__init__(builder_run, **kwargs)
@@ -838,7 +747,8 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
         chrome_version=self._chrome_version,
         build_id=build_id)
     if MasterSlaveLKGMSyncStage.sub_manager:
-      MasterSlaveLKGMSyncStage.sub_manager.CreateFromManifest(manifest)
+      MasterSlaveLKGMSyncStage.sub_manager.CreateFromManifest(
+          manifest, build_id=build_id)
 
     return manifest
 
@@ -846,6 +756,39 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
     """Returns the version of Chrome to uprev."""
     return cros_mark_chrome_as_stable.GetLatestRelease(
         constants.CHROMIUM_GOB_URL)
+
+  def GetLastChromeOSVersion(self):
+    """Fetching ChromeOS version from the last run.
+
+    Fetching the chromeos version from the last run that published a manifest
+    by querying CIDB. Master builds that failed before publishing a manifest
+    will be ignored.
+
+    Returns:
+      A namedtuple MilestoneVersion,
+      e.g. MilestoneVersion(milestone='44', platform='7072.0.0-rc4')
+      or None if failed to retrieve milestone and platform versions.
+    """
+    build_id, db = self._run.GetCIDBHandle()
+
+    if db is None:
+      return None
+
+    builds = db.GetBuildHistory(
+        build_config=self._run.config.name,
+        num_results=self.MAX_BUILD_HISTORY_LENGTH,
+        ignore_build_id=build_id)
+    full_versions = [b.get('full_version') for b in builds]
+    old_version = next(itertools.ifilter(bool, full_versions), None)
+    if old_version:
+      pattern = r'^R(\d+)-(\d+.\d+.\d+(-rc\d+)*)'
+      m = re.match(pattern, old_version)
+      if m:
+        milestone = m.group(1)
+        platform = m.group(2)
+      return self.MilestoneVersion(
+          milestone=milestone, platform=platform)
+    return None
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -858,6 +801,17 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
 
     ManifestVersionedSyncStage.PerformStage(self)
 
+    # Generate blamelist
+    cros_version = self.GetLastChromeOSVersion()
+    if cros_version:
+      old_filename = self.manifest_manager.GetBuildSpecFilePath(
+          cros_version.milestone, cros_version.platform)
+      if not os.path.exists(old_filename):
+        logging.error('Could not generate blamelist, '
+                      'manifest file does not exist: %s', old_filename)
+      else:
+        logging.debug('Generate blamelist against: %s', old_filename)
+        lkgm_manager.GenerateBlameList(self.repo, old_filename)
 
 class CommitQueueSyncStage(MasterSlaveLKGMSyncStage):
   """Commit Queue Sync stage that handles syncing and applying patches.
@@ -1152,20 +1106,16 @@ class PreCQLauncherStage(SyncStage):
       A set of configs to test.
     """
     configs_to_test = None
-    try:
-      # If a pre-cq config is specified in the commit message, use that.
-      # Otherwise, look in appropriate COMMIT-QUEUE.ini. Otherwise, default to
-      # constants.PRE_CQ_DEFAULT_CONFIGS
-      lines = cros_patch.GetOptionLinesFromCommitMessage(
-          change.commit_message, constants.PRE_CQ_CONFIGS_OPTION_REGEX)
-      if lines is not None:
-        configs_to_test = self._ParsePreCQOption(' '.join(lines))
-      configs_to_test = configs_to_test or self._ParsePreCQOption(
-          triage_lib.GetOptionForChange(
-              self._build_root, change, 'GENERAL',
-              constants.PRE_CQ_CONFIGS_OPTION))
-    except ConfigParser.Error:
-      logging.error('%s has malformed config file', change, exc_info=True)
+    # If a pre-cq config is specified in the commit message, use that.
+    # Otherwise, look in appropriate COMMIT-QUEUE.ini. Otherwise, default to
+    # constants.PRE_CQ_DEFAULT_CONFIGS
+    lines = cros_patch.GetOptionLinesFromCommitMessage(
+        change.commit_message, constants.PRE_CQ_CONFIGS_OPTION_REGEX)
+    if lines is not None:
+      configs_to_test = self._ParsePreCQOption(' '.join(lines))
+    configs_to_test = configs_to_test or self._ParsePreCQOption(
+        triage_lib.GetOptionForChange(self._build_root, change, 'GENERAL',
+                                      constants.PRE_CQ_CONFIGS_OPTION))
 
     return set(configs_to_test or constants.PRE_CQ_DEFAULT_CONFIGS)
 
@@ -1197,7 +1147,7 @@ class PreCQLauncherStage(SyncStage):
         configs_to_test.update(constants.PRE_CQ_DEFAULT_CONFIGS)
 
       # Verify that all of the configs are valid.
-      if all(c in cbuildbot_config.GetConfig() for c in configs_to_test):
+      if all(c in self._run.site_config for c in configs_to_test):
         return configs_to_test
 
     return None
@@ -1248,17 +1198,16 @@ class PreCQLauncherStage(SyncStage):
       logging.error('%s has malformed config file', change, exc_info=True)
     return bool(result and result.lower() == 'yes')
 
-
-  def LaunchTrybot(self, plan, config):
+  def LaunchTrybot(self, plan, configs):
     """Launch a Pre-CQ run with the provided list of CLs.
 
     Args:
       pool: ValidationPool corresponding to |plan|.
       plan: The list of patches to test in the pre-cq tryjob.
-      config: The pre-cq config name to launch.
+      configs: A list of pre-cq config names to launch.
     """
-    cmd = ['cbuildbot', '--remote', config,
-           '--timeout', str(self.INFLIGHT_TIMEOUT * 60)]
+    cmd = ['cbuildbot', '--remote',
+           '--timeout', str(self.INFLIGHT_TIMEOUT * 60)] + configs
     for patch in plan:
       cmd += ['-g', cros_patch.AddPrefix(patch, patch.gerrit_number)]
       self._PrintPatchStatus(patch, 'testing')
@@ -1266,13 +1215,13 @@ class PreCQLauncherStage(SyncStage):
       logging.debug('Would have launched tryjob with %s', cmd)
     else:
       cros_build_lib.RunCommand(cmd, cwd=self._build_root)
+
     build_id, db = self._run.GetCIDBHandle()
     actions = [
         clactions.CLAction.FromGerritPatchAndAction(
             patch, constants.CL_ACTION_TRYBOT_LAUNCHING, config)
-        for patch in plan]
+        for patch, config in itertools.product(plan, configs)]
     db.InsertCLActions(build_id, actions)
-
 
   def GetDisjointTransactionsToTest(self, pool, progress_map):
     """Get the list of disjoint transactions to test.
@@ -1495,6 +1444,23 @@ class PreCQLauncherStage(SyncStage):
     # Changes that will be passed.
     will_pass = set()
 
+    # Separately count and log the number of mergable and speculative changes in
+    # each of the possible pre-cq statuses (or in status None).
+    POSSIBLE_STATUSES = clactions.PRE_CQ_CL_STATUSES | {None}
+    status_counts = {}
+    for count_bin in itertools.product((True, False), POSSIBLE_STATUSES):
+      status_counts[count_bin] = 0
+    for c, status in status_map.iteritems():
+      count_bin = (c.IsMergeable(), status)
+      status_counts[count_bin] = status_counts[count_bin] + 1
+    for count_bin, count in sorted(status_counts.items()):
+      subtype = 'mergeable' if count_bin[0] else 'speculative'
+      status = count_bin[1]
+      name = '.'.join(['pre-cq-status', status if status else 'None'])
+      logging.info('Sending stat (name, subtype, count): (%s, %s, %s)',
+                   name, subtype, count)
+      graphite.StatsFactory.GetInstance().Gauge(name).send(subtype, count)
+
     for change in inflight:
       if status_map[change] != constants.CL_STATUS_INFLIGHT:
         build_ids = [x for _, _, x in progress_map[change].values()]
@@ -1533,22 +1499,34 @@ class PreCQLauncherStage(SyncStage):
 
     is_tree_open = tree_status.IsTreeOpen(throttled_ok=True)
     launch_count = 0
+    cl_launch_count = 0
     launch_count_limit = (self.last_cycle_launch_count +
                           self.MAX_LAUNCHES_PER_CYCLE_DERIVATIVE)
+    launches = {}
     for plan, config in self.GetDisjointTransactionsToTest(
         pool, launchable_progress_map):
-      if is_tree_open:
-        if launch_count < launch_count_limit:
-          self.LaunchTrybot(plan, config)
-          launch_count += 1
-        else:
-          logging.info('Hit maximum launch count of %s this cycle, not '
-                       'launching config %s for plan %s.',
-                       launch_count_limit, config,
-                       cros_patch.GetChangesAsString(plan))
+      launches.setdefault(frozenset(plan), []).append(config)
+
+    for plan, configs in launches.iteritems():
+      if not is_tree_open:
+        logging.info('Tree is closed, not launching configs %r for plan %s.',
+                     configs, cros_patch.GetChangesAsString(plan))
+      elif launch_count >= launch_count_limit:
+        logging.info('Hit or exceeded maximum launch count of %s this cycle, '
+                     'not launching configs %r for plan %s.',
+                     launch_count_limit, configs,
+                     cros_patch.GetChangesAsString(plan))
       else:
-        logging.info('Tree is closed, not launching config %s for plan %s.',
-                     config, cros_patch.GetChangesAsString(plan))
+        self.LaunchTrybot(plan, configs)
+        launch_count += len(configs)
+        cl_launch_count += len(configs) * len(plan)
+
+    graphite.StatsFactory.GetInstance().Counter('pre-cq').increment(
+        'launch_count', launch_count)
+    graphite.StatsFactory.GetInstance().Counter('pre-cq').increment(
+        'cl_launch_count', cl_launch_count)
+    graphite.StatsFactory.GetInstance().Counter('pre-cq').increment(
+        'tick_count')
 
     self.last_cycle_launch_count = launch_count
 

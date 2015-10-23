@@ -32,8 +32,14 @@ void TestAppWindowContents::NativeWindowClosed() {
 void TestAppWindowContents::DispatchWindowShownForTests() const {
 }
 
+void TestAppWindowContents::OnWindowReady() {}
+
 content::WebContents* TestAppWindowContents::GetWebContents() const {
   return web_contents_.get();
+}
+
+WindowController* TestAppWindowContents::GetWindowController() const {
+  return nullptr;
 }
 
 }  // namespace extensions

@@ -34,8 +34,7 @@ TcpCubicBytesSender::TcpCubicBytesSender(
     QuicPacketCount initial_tcp_congestion_window,
     QuicPacketCount max_congestion_window,
     QuicConnectionStats* stats)
-    : hybrid_slow_start_(clock),
-      cubic_(clock),
+    : cubic_(clock),
       rtt_stats_(rtt_stats),
       stats_(stats),
       reno_(reno),
@@ -78,17 +77,9 @@ void TcpCubicBytesSender::SetFromConfig(const QuicConfig& config,
   }
 }
 
-bool TcpCubicBytesSender::ResumeConnectionState(
+void TcpCubicBytesSender::ResumeConnectionState(
     const CachedNetworkParameters& cached_network_params,
     bool max_bandwidth_resumption) {
-  // If the previous bandwidth estimate is less than an hour old, store in
-  // preparation for doing bandwidth resumption.
-  int64 seconds_since_estimate =
-      clock_->WallNow().ToUNIXSeconds() - cached_network_params.timestamp();
-  if (seconds_since_estimate > kNumSecondsPerHour) {
-    return false;
-  }
-
   QuicBandwidth bandwidth = QuicBandwidth::FromBytesPerSecond(
       max_bandwidth_resumption
           ? cached_network_params.max_bandwidth_estimate_bytes_per_second()
@@ -99,12 +90,8 @@ bool TcpCubicBytesSender::ResumeConnectionState(
   // Make sure CWND is in appropriate range (in case of bad data).
   QuicByteCount new_congestion_window = bandwidth.ToBytesPerPeriod(rtt_ms);
   congestion_window_ =
-      max(min(new_congestion_window, kMaxTcpCongestionWindow * kMaxSegmentSize),
+      max(min(new_congestion_window, kMaxCongestionWindow * kMaxSegmentSize),
           kMinCongestionWindowForBandwidthResumption * kMaxSegmentSize);
-
-  // TODO(rjshade): Set appropriate CWND when previous connection was in slow
-  // start at time of estimate.
-  return true;
 }
 
 void TcpCubicBytesSender::SetNumEmulatedConnections(int num_connections) {
@@ -267,11 +254,6 @@ QuicBandwidth TcpCubicBytesSender::BandwidthEstimate() const {
     return QuicBandwidth::Zero();
   }
   return QuicBandwidth::FromBytesAndTimeDelta(GetCongestionWindow(), srtt);
-}
-
-bool TcpCubicBytesSender::HasReliableBandwidthEstimate() const {
-  return !InSlowStart() && !InRecovery() &&
-         !rtt_stats_->smoothed_rtt().IsZero();
 }
 
 QuicTime::Delta TcpCubicBytesSender::RetransmissionDelay() const {

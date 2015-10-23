@@ -15,22 +15,25 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/time/time.h"
+#include "chrome/browser/bad_message.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/media/webrtc_log_list.h"
 #include "chrome/browser/media/webrtc_log_uploader.h"
 #include "chrome/browser/media/webrtc_rtp_dump_handler.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/media/webrtc_logging_messages.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "gpu/config/gpu_info.h"
 #include "net/base/address_family.h"
+#include "net/base/ip_address_number.h"
 #include "net/url_request/url_request_context_getter.h"
 
 #if defined(OS_LINUX)
@@ -489,7 +492,8 @@ void WebRtcLoggingHandlerHost::OnLoggingStoppedInRenderer() {
     // and must not be invoked.
     DLOG(ERROR) << "OnLoggingStoppedInRenderer invoked in state "
                 << logging_state_;
-    BadMessageReceived();
+    bad_message::ReceivedBadMessage(
+        this, bad_message::WRLHH_LOGGING_STOPPED_BAD_STATE);
     return;
   }
   logging_started_time_ = base::Time();
@@ -570,9 +574,8 @@ void WebRtcLoggingHandlerHost::LogInitialInfoOnIOThread(
   }
 
   // Chrome version
-  chrome::VersionInfo version_info;
-  LogToCircularBuffer("Chrome version: " + version_info.Version() + " " +
-                      chrome::VersionInfo::GetVersionStringModifier());
+  LogToCircularBuffer("Chrome version: " + version_info::GetVersionNumber() +
+                      " " + chrome::GetChannelString());
 
   // OS
   LogToCircularBuffer(base::SysInfo::OperatingSystemName() + " " +

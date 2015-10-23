@@ -124,11 +124,11 @@ MULTIPROCESS_TEST_MAIN(ChromeWatcherClientTestProcess) {
 class ChromeWatcherClientThread : public base::SimpleThread {
  public:
   ChromeWatcherClientThread()
-      : client_(base::Bind(&ChromeWatcherClientThread::GenerateCommandLine,
+      : SimpleThread("ChromeWatcherClientTest thread"),
+        client_(base::Bind(&ChromeWatcherClientThread::GenerateCommandLine,
                            base::Unretained(this))),
         complete_(false, false),
-        result_(false),
-        SimpleThread("ChromeWatcherClientTest thread") {}
+        result_(false) {}
 
   // Waits up to |timeout| for the call to EnsureInitialized to complete. If it
   // does, sets |result| to the return value of EnsureInitialized and returns
@@ -164,6 +164,7 @@ class ChromeWatcherClientThread : public base::SimpleThread {
  private:
   // Returns a command line to launch back into ChromeWatcherClientTestProcess.
   base::CommandLine GenerateCommandLine(HANDLE parent_handle,
+                                        DWORD main_thread_id,
                                         HANDLE on_initialized_event) {
     base::CommandLine ret = base::GetMultiProcessTestChildBaseCommandLine();
     ret.AppendSwitchASCII(switches::kTestChildProcess,
@@ -174,6 +175,11 @@ class ChromeWatcherClientThread : public base::SimpleThread {
     ret.AppendSwitchASCII(
         kParentHandle,
         base::UintToString(reinterpret_cast<unsigned int>(parent_handle)));
+
+    // Our child does not actually need the main thread ID, but we verify here
+    // that the correct ID is being passed from the client.
+    EXPECT_EQ(::GetCurrentThreadId(), main_thread_id);
+
     ret.AppendSwitchASCII(kNamedEventSuffix,
                           base::UTF16ToASCII(NamedEventSuffix()));
     return ret;
@@ -221,8 +227,7 @@ class ChromeWatcherClientTest : public testing::Test {
   void TearDown() override {
     // Even if we never launched, the following is harmless.
     SignalExit();
-    int exit_code = 0;
-    thread_.client().WaitForExit(&exit_code);
+    thread_.client().WaitForExit(nullptr);
     thread_.Join();
   }
 

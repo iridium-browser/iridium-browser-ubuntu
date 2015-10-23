@@ -178,14 +178,6 @@ void SerialIoHandlerWin::ReadImpl() {
   DCHECK(pending_read_buffer());
   DCHECK(file().IsValid());
 
-  DWORD errors;
-  COMSTAT status;
-  if (!ClearCommError(file().GetPlatformFile(), &errors, &status) ||
-      errors != 0) {
-    QueueReadCompleted(0, serial::RECEIVE_ERROR_SYSTEM_ERROR);
-    return;
-  }
-
   if (!SetCommMask(file().GetPlatformFile(), EV_RXCHAR)) {
     VPLOG(1) << "Failed to set serial event flags";
   }
@@ -211,6 +203,7 @@ void SerialIoHandlerWin::WriteImpl() {
                         NULL,
                         &write_context_->overlapped);
   if (!ok && GetLastError() != ERROR_IO_PENDING) {
+    VPLOG(1) << "Write failed";
     QueueWriteCompleted(0, serial::SEND_ERROR_SYSTEM_ERROR);
   }
 }
@@ -237,7 +230,7 @@ bool SerialIoHandlerWin::ConfigurePortImpl() {
 
   // Set up some sane default options that are not configurable.
   config.fBinary = TRUE;
-  config.fParity = FALSE;
+  config.fParity = TRUE;
   config.fAbortOnError = TRUE;
   config.fOutxDsrFlow = FALSE;
   config.fDtrControl = DTR_CONTROL_ENABLE;
@@ -290,6 +283,26 @@ void SerialIoHandlerWin::OnIOCompleted(
     DWORD error) {
   DCHECK(CalledOnValidThread());
   if (context == comm_context_) {
+    DWORD errors;
+    COMSTAT status;
+    if (!ClearCommError(file().GetPlatformFile(), &errors, &status) ||
+        errors != 0) {
+      if (errors & CE_BREAK) {
+        ReadCompleted(0, serial::RECEIVE_ERROR_BREAK);
+      } else if (errors & CE_FRAME) {
+        ReadCompleted(0, serial::RECEIVE_ERROR_FRAME_ERROR);
+      } else if (errors & CE_OVERRUN) {
+        ReadCompleted(0, serial::RECEIVE_ERROR_OVERRUN);
+      } else if (errors & CE_RXOVER) {
+        ReadCompleted(0, serial::RECEIVE_ERROR_BUFFER_OVERFLOW);
+      } else if (errors & CE_RXPARITY) {
+        ReadCompleted(0, serial::RECEIVE_ERROR_PARITY_ERROR);
+      } else {
+        ReadCompleted(0, serial::RECEIVE_ERROR_SYSTEM_ERROR);
+      }
+      return;
+    }
+
     if (read_canceled()) {
       ReadCompleted(bytes_transferred, read_cancel_reason());
     } else if (error != ERROR_SUCCESS && error != ERROR_OPERATION_ABORTED) {
@@ -301,6 +314,7 @@ void SerialIoHandlerWin::OnIOCompleted(
                            NULL,
                            &read_context_->overlapped);
       if (!ok && GetLastError() != ERROR_IO_PENDING) {
+        VPLOG(1) << "Read failed";
         ReadCompleted(0, serial::RECEIVE_ERROR_SYSTEM_ERROR);
       }
     }
@@ -321,6 +335,18 @@ void SerialIoHandlerWin::OnIOCompleted(
       WriteCompleted(0, write_cancel_reason());
     } else if (error != ERROR_SUCCESS && error != ERROR_OPERATION_ABORTED) {
       WriteCompleted(0, serial::SEND_ERROR_SYSTEM_ERROR);
+      if (error == ERROR_GEN_FAILURE && IsReadPending()) {
+        // For devices using drivers such as FTDI, CP2xxx, when device is
+        // disconnected, the context is comm_context_ and the error is
+        // ERROR_OPERATION_ABORTED.
+        // However, for devices using CDC-ACM driver, when device is
+        // disconnected, the context is write_context_ and the error is
+        // ERROR_GEN_FAILURE. In this situation, in addition to a write error
+        // signal, also need to generate a read error signal
+        // serial::OnReceiveError which will notify the app about the
+        // disconnection.
+        CancelRead(serial::RECEIVE_ERROR_SYSTEM_ERROR);
+      }
     } else {
       WriteCompleted(bytes_transferred,
                      error == ERROR_SUCCESS ? serial::SEND_ERROR_NONE
@@ -387,6 +413,22 @@ serial::ConnectionInfoPtr SerialIoHandlerWin::GetPortInfo() const {
   info->stop_bits = StopBitsConstantToEnum(config.StopBits);
   info->cts_flow_control = config.fOutxCtsFlow != 0;
   return info.Pass();
+}
+
+bool SerialIoHandlerWin::SetBreak() {
+  if (!SetCommBreak(file().GetPlatformFile())) {
+    VPLOG(1) << "Failed to set break";
+    return false;
+  }
+  return true;
+}
+
+bool SerialIoHandlerWin::ClearBreak() {
+  if (!ClearCommBreak(file().GetPlatformFile())) {
+    VPLOG(1) << "Failed to clear break";
+    return false;
+  }
+  return true;
 }
 
 std::string SerialIoHandler::MaybeFixUpPortName(const std::string& port_name) {

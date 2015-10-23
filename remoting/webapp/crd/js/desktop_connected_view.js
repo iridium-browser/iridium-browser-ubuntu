@@ -36,13 +36,13 @@ remoting.DesktopConnectedView = function(container, connectionInfo) {
   /** @private {remoting.DesktopViewport} */
   this.viewport_ = null;
 
-  /** private {remoting.ConnectedView} */
+  /** @private {remoting.ConnectedView} */
   this.view_ = null;
 
   /** @private {remoting.VideoFrameRecorder} */
   this.videoFrameRecorder_ = null;
 
-  /** private {base.Disposable} */
+  /** @private {base.Disposable} */
   this.eventHooks_ = null;
 
   /** @private */
@@ -106,6 +106,14 @@ remoting.DesktopConnectedView.prototype.getResizeToClient = function() {
   return false;
 };
 
+/**
+ * @return {boolean} True if the right-hand Ctrl key is mapped to the Meta
+ *     (Windows, Command) key.
+ */
+remoting.DesktopConnectedView.prototype.getMapRightCtrl = function() {
+  return this.host_.options.remapKeys[0x0700e4] === 0x0700e7;
+};
+
 remoting.DesktopConnectedView.prototype.toggleStats = function() {
   this.stats_.toggle();
 };
@@ -130,19 +138,21 @@ remoting.DesktopConnectedView.prototype.getViewportForTesting = function() {
   return this.viewport_;
 };
 
+/** @return {remoting.ConnectedView} */
+remoting.DesktopConnectedView.prototype.getConnectedViewForTesting =
+    function() {
+  return this.view_;
+};
+
 /** @private */
 remoting.DesktopConnectedView.prototype.initPlugin_ = function() {
-  base.debug.assert(remoting.app instanceof remoting.DesktopRemoting);
+  console.assert(remoting.app instanceof remoting.DesktopRemoting,
+                '|remoting.app| is not an instance of DesktopRemoting.');
   var drApp = /** @type {remoting.DesktopRemoting} */ (remoting.app);
   var mode = drApp.getConnectionMode();
 
-  // Show the Send Keys menu only if the plugin has the injectKeyEvent feature,
-  // and the Ctrl-Alt-Del button only in Me2Me mode.
-  if (!this.plugin_.hasFeature(
-          remoting.ClientPlugin.Feature.INJECT_KEY_EVENT)) {
-    var sendKeysElement = document.getElementById('send-keys-menu');
-    sendKeysElement.hidden = true;
-  } else if (mode == remoting.DesktopRemoting.Mode.IT2ME) {
+  // Show the Ctrl-Alt-Del button only in Me2Me mode.
+  if (mode == remoting.DesktopRemoting.Mode.IT2ME) {
     var sendCadElement = document.getElementById('send-ctrl-alt-del');
     sendCadElement.hidden = true;
   }
@@ -235,6 +245,25 @@ remoting.DesktopConnectedView.prototype.onFullScreenChanged_ = function (
 };
 
 /**
+ * Set whether or not the right-hand Ctrl key should send the Meta (Windows,
+ * Command) key-code.
+ *
+ * @param {boolean} enable True to enable the mapping; false to disable.
+ */
+remoting.DesktopConnectedView.prototype.setMapRightCtrl = function(enable) {
+  if (enable === this.getMapRightCtrl()) {
+    return;  // In case right Ctrl is mapped, but not to right Meta.
+  }
+
+  if (enable) {
+    this.host_.options.remapKeys[0x0700e4] = 0x0700e7;
+  } else {
+    delete this.host_.options.remapKeys[0x0700e4]
+  }
+  this.setRemapKeys(this.host_.options.remapKeys);
+};
+
+/**
  * Sends a Ctrl-Alt-Del sequence to the remoting client.
  *
  * @return {void} Nothing.
@@ -258,12 +287,13 @@ remoting.DesktopConnectedView.prototype.sendPrintScreen = function() {
  * Sets and stores the key remapping setting for the current host. If set,
  * these mappings override the defaults for the client platform.
  *
- * @param {string} remappings Comma-separated list of key remappings.
+ * @param {!Object} remappings
  */
 remoting.DesktopConnectedView.prototype.setRemapKeys = function(remappings) {
   this.plugin_.setRemapKeys(remappings);
   // Save the new remapping setting.
-  this.host_.options.remapKeys = remappings;
+  this.host_.options.remapKeys =
+      /** @type {!Object} */ (base.deepCopy(remappings));
   this.host_.options.save();
 };
 

@@ -6,12 +6,12 @@
 
 #include "base/command_line.h"
 #include "base/path_service.h"
+#include "base/strings/pattern.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sync/open_tabs_ui_delegate.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -90,7 +90,7 @@ class ExtensionSessionsTest : public InProcessBrowserTest {
   void SetUpOnMainThread() override;
 
  protected:
-  static KeyedService* BuildProfileSyncService(
+  static scoped_ptr<KeyedService> BuildProfileSyncService(
       content::BrowserContext* profile);
 
   void CreateTestProfileSyncService();
@@ -121,11 +121,10 @@ void ExtensionSessionsTest::SetUpOnMainThread() {
   CreateTestExtension();
 }
 
-KeyedService* ExtensionSessionsTest::BuildProfileSyncService(
-    content::BrowserContext* profile) {
-
-  ProfileSyncComponentsFactoryMock* factory =
-      new ProfileSyncComponentsFactoryMock();
+scoped_ptr<KeyedService> ExtensionSessionsTest::BuildProfileSyncService(
+    content::BrowserContext* context) {
+  scoped_ptr<ProfileSyncComponentsFactoryMock> factory(
+      new ProfileSyncComponentsFactoryMock());
 
   factory->SetLocalDeviceInfoProvider(
       scoped_ptr<sync_driver::LocalDeviceInfoProvider>(
@@ -137,9 +136,8 @@ KeyedService* ExtensionSessionsTest::BuildProfileSyncService(
               sync_pb::SyncEnums_DeviceType_TYPE_LINUX,
               "device_id")));
 
-  return new ProfileSyncServiceMock(
-      scoped_ptr<ProfileSyncComponentsFactory>(factory),
-      static_cast<Profile*>(profile));
+  return make_scoped_ptr(new ProfileSyncServiceMock(
+      factory.Pass(), static_cast<Profile*>(context)));
 }
 
 void ExtensionSessionsTest::CreateTestProfileSyncService() {
@@ -350,7 +348,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSessionsTest,
 IN_PROC_BROWSER_TEST_F(ExtensionSessionsTest, RestoreForeignSessionInvalidId) {
   CreateSessionModels();
 
-  EXPECT_TRUE(MatchPattern(utils::RunFunctionAndReturnError(
+  EXPECT_TRUE(base::MatchPattern(utils::RunFunctionAndReturnError(
       CreateFunction<SessionsRestoreFunction>(true).get(),
       "[\"tag3.0\"]",
       browser_), "Invalid session id: \"tag3.0\"."));
@@ -359,7 +357,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSessionsTest, RestoreForeignSessionInvalidId) {
 IN_PROC_BROWSER_TEST_F(ExtensionSessionsTest, RestoreInIncognito) {
   CreateSessionModels();
 
-  EXPECT_TRUE(MatchPattern(utils::RunFunctionAndReturnError(
+  EXPECT_TRUE(base::MatchPattern(utils::RunFunctionAndReturnError(
       CreateFunction<SessionsRestoreFunction>(true).get(),
       "[\"1\"]",
       CreateIncognitoBrowser()),

@@ -14,12 +14,12 @@
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/apps/ephemeral_app_service.h"
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
-#include "chrome/browser/extensions/app_sync_data.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/notifier_state_tracker.h"
+#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "content/public/browser/power_save_blocker.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
@@ -45,20 +45,20 @@
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notifier_settings.h"
 
-using extensions::AppSyncData;
 using extensions::Event;
 using extensions::EventRouter;
 using extensions::Extension;
 using extensions::ExtensionPrefs;
 using extensions::ExtensionRegistry;
 using extensions::ExtensionRegistryObserver;
+using extensions::ExtensionSyncData;
 using extensions::ExtensionSystem;
 using extensions::Manifest;
 using extensions::ResultCatcher;
 
 namespace {
 
-namespace alarms = extensions::core_api::alarms;
+namespace alarms = extensions::api::alarms;
 
 const char kPowerTestApp[] = "ephemeral_apps/power";
 
@@ -293,13 +293,6 @@ void EphemeralAppTestBase::PromoteEphemeralApp(
 void EphemeralAppTestBase::DisableEphemeralApp(
     const Extension* app,
     Extension::DisableReason disable_reason) {
-  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
-
-  // Disabling due to a permissions increase also involves setting the
-  // DidExtensionEscalatePermissions flag.
-  if (disable_reason == Extension::DISABLE_PERMISSIONS_INCREASE)
-    prefs->SetDidExtensionEscalatePermissions(app, true);
-
   ExtensionSystem::Get(profile())->extension_service()->DisableExtension(
       app->id(), disable_reason);
 
@@ -379,7 +372,7 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
     EXPECT_TRUE(extensions::util::IsEphemeralApp(app_id, profile()));
 
     // Ephemeral apps should not be synced.
-    scoped_ptr<AppSyncData> sync_change = GetLastSyncChangeForApp(app_id);
+    scoped_ptr<ExtensionSyncData> sync_change = GetLastSyncChangeForApp(app_id);
     EXPECT_FALSE(sync_change.get());
 
     // Ephemeral apps should not be assigned ordinals.
@@ -433,7 +426,8 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
 
     scoped_ptr<base::ListValue> args(new base::ListValue());
     args->Append(dummy_alarm.ToValue().release());
-    scoped_ptr<Event> event(new Event(alarms::OnAlarm::kEventName,
+    scoped_ptr<Event> event(new Event(extensions::events::ALARMS_ON_ALARM,
+                                      alarms::OnAlarm::kEventName,
                                       args.Pass()));
 
     event_router->DispatchEventToExtension(app_id, event.Pass());
@@ -455,7 +449,8 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
     ASSERT_TRUE(app);
 
     // Ephemeral apps should not be synced.
-    scoped_ptr<AppSyncData> sync_change = GetLastSyncChangeForApp(app->id());
+    scoped_ptr<ExtensionSyncData> sync_change =
+        GetLastSyncChangeForApp(app->id());
     EXPECT_FALSE(sync_change.get());
 
     // Promote the app to a regular installed app.
@@ -483,22 +478,25 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
     ASSERT_TRUE(app);
 
     // Simulate an install from sync.
+    int disable_reasons = enable_from_sync ? 0 : Extension::DISABLE_USER_ACTION;
     const syncer::StringOrdinal kAppLaunchOrdinal("x");
     const syncer::StringOrdinal kPageOrdinal("y");
-    AppSyncData app_sync_data(*app,
-                              enable_from_sync,
-                              false /* incognito enabled */,
-                              false /* remote install */,
-                              extensions::ExtensionSyncData::BOOLEAN_UNSET,
-                              kAppLaunchOrdinal,
-                              kPageOrdinal,
-                              extensions::LAUNCH_TYPE_REGULAR);
+    ExtensionSyncData app_sync_data(
+        *app,
+        enable_from_sync,
+        disable_reasons,
+        false /* incognito enabled */,
+        false /* remote install */,
+        extensions::ExtensionSyncData::BOOLEAN_UNSET,
+        kAppLaunchOrdinal,
+        kPageOrdinal,
+        extensions::LAUNCH_TYPE_REGULAR);
 
     std::string app_id = app->id();
     app = NULL;
 
     ExtensionSyncService* sync_service = ExtensionSyncService::Get(profile());
-    sync_service->ProcessAppSyncData(app_sync_data);
+    sync_service->ApplySyncData(app_sync_data);
 
     // Verify the installation.
     VerifyPromotedApp(app_id, expected_set);
@@ -526,12 +524,13 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
             new syncer::SyncErrorFactoryMock()));
   }
 
-  scoped_ptr<AppSyncData> GetLastSyncChangeForApp(const std::string& id) {
-    scoped_ptr<AppSyncData> sync_data;
+  scoped_ptr<ExtensionSyncData> GetLastSyncChangeForApp(const std::string& id) {
+    scoped_ptr<ExtensionSyncData> sync_data;
     for (syncer::SyncChangeList::iterator it =
              mock_sync_processor_.changes().begin();
          it != mock_sync_processor_.changes().end(); ++it) {
-      scoped_ptr<AppSyncData> data(AppSyncData::CreateFromSyncChange(*it));
+      scoped_ptr<ExtensionSyncData> data(
+          ExtensionSyncData::CreateFromSyncChange(*it));
       if (data.get() && data->id() == id)
         sync_data.reset(data.release());
     }
@@ -539,7 +538,8 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
     return sync_data.Pass();
   }
 
-  void VerifySyncChange(const AppSyncData* sync_change, bool expect_enabled) {
+  void VerifySyncChange(const ExtensionSyncData* sync_change,
+                        bool expect_enabled) {
     if (!kEnableSync)
       return;
 
@@ -547,7 +547,7 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
     EXPECT_TRUE(sync_change->page_ordinal().IsValid());
     EXPECT_TRUE(sync_change->app_launch_ordinal().IsValid());
     EXPECT_FALSE(sync_change->uninstalled());
-    EXPECT_EQ(expect_enabled, sync_change->extension_sync_data().enabled());
+    EXPECT_EQ(expect_enabled, sync_change->enabled());
   }
 
   void TestInstallEvent(bool close_app) {
@@ -697,15 +697,15 @@ IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest, StickyNotificationSettings) {
   ASSERT_TRUE(app);
 
   // Disable notifications for this app.
-  DesktopNotificationService* notification_service =
-      DesktopNotificationServiceFactory::GetForProfile(profile());
-  ASSERT_TRUE(notification_service);
+  NotifierStateTracker* notifier_state_tracker =
+      NotifierStateTrackerFactory::GetForProfile(profile());
+  ASSERT_TRUE(notifier_state_tracker);
 
   message_center::NotifierId notifier_id(
       message_center::NotifierId::APPLICATION, app->id());
-  EXPECT_TRUE(notification_service->IsNotifierEnabled(notifier_id));
-  notification_service->SetNotifierEnabled(notifier_id, false);
-  EXPECT_FALSE(notification_service->IsNotifierEnabled(notifier_id));
+  EXPECT_TRUE(notifier_state_tracker->IsNotifierEnabled(notifier_id));
+  notifier_state_tracker->SetNotifierEnabled(notifier_id, false);
+  EXPECT_FALSE(notifier_state_tracker->IsNotifierEnabled(notifier_id));
 
   // Remove the app.
   CloseAppWaitForUnload(app->id());
@@ -716,7 +716,7 @@ IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest, StickyNotificationSettings) {
   ASSERT_TRUE(app);
   message_center::NotifierId reinstalled_notifier_id(
       message_center::NotifierId::APPLICATION, app->id());
-  EXPECT_FALSE(notification_service->IsNotifierEnabled(
+  EXPECT_FALSE(notifier_state_tracker->IsNotifierEnabled(
       reinstalled_notifier_id));
 }
 
@@ -865,7 +865,8 @@ IN_PROC_BROWSER_TEST_F(EphemeralAppBrowserTest,
   PromoteEphemeralAppAndVerify(app, ExtensionRegistry::BLACKLISTED);
 
   // The app should be synced, but disabled.
-  scoped_ptr<AppSyncData> sync_change = GetLastSyncChangeForApp(app->id());
+  scoped_ptr<ExtensionSyncData> sync_change =
+      GetLastSyncChangeForApp(app->id());
   VerifySyncChange(sync_change.get(), false);
 }
 

@@ -19,10 +19,9 @@ public:
     // For CallbackPromiseAdapter. Ownership of a given error is not
     // transferred.
     using WebType = WebServiceWorkerCacheError;
-    static DOMException* take(ScriptPromiseResolver*, WebType* webErrorRaw);
-    static void dispose(WebType* webErrorRaw);
+    static DOMException* take(ScriptPromiseResolver*, WebServiceWorkerCacheError webError) { return createException(webError); }
 
-    static DOMException* createException(WebType webError);
+    static DOMException* createException(WebServiceWorkerCacheError webError);
 };
 
 } // namespace blink

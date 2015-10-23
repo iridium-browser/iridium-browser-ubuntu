@@ -24,24 +24,26 @@
  */
 
 #include "config.h"
-
 #include "wtf/HashSet.h"
+
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
 #include <gtest/gtest.h>
 
-namespace {
+namespace WTF {
 
 template<int initialCapacity>
-    struct InitialCapacityTestHashTraits : public WTF::UnsignedWithZeroKeyHashTraits<int> {
+struct InitialCapacityTestHashTraits : public UnsignedWithZeroKeyHashTraits<int> {
     static const int minimumTableSize = initialCapacity;
 };
+
+namespace {
 
 template<unsigned size>
 void testInitialCapacity()
 {
-    const unsigned initialCapacity = WTF::HashTableCapacityForSize<size>::value;
+    const unsigned initialCapacity = HashTableCapacityForSize<size>::value;
     HashSet<int, DefaultHash<int>::Hash, InitialCapacityTestHashTraits<initialCapacity>> testSet;
 
     // Initial capacity is null.
@@ -78,6 +80,44 @@ template<unsigned size> void generateTestCapacityUpToSize()
 TEST(HashSetTest, InitialCapacity)
 {
     generateTestCapacityUpToSize<128>();
+}
+
+template<unsigned size> void testReserveCapacity();
+template<> void testReserveCapacity<0>() {}
+template<unsigned size> void testReserveCapacity()
+{
+    const unsigned expectedInitialCapacity = HashTableCapacityForSize<size>::value;
+    HashSet<int> testSet;
+
+    // Initial capacity is null.
+    EXPECT_EQ(0UL, testSet.capacity());
+
+    testSet.reserveCapacityForSize(size);
+    EXPECT_EQ(expectedInitialCapacity, testSet.capacity());
+
+    // Adding items up to size should never change the capacity.
+    for (size_t i = 0; i < size; ++i) {
+        testSet.add(i + 1); // Avoid adding '0'.
+        EXPECT_EQ(expectedInitialCapacity, testSet.capacity());
+    }
+
+    // Adding items up to less than half the capacity should not change the capacity.
+    unsigned capacityLimit = expectedInitialCapacity / 2 - 1;
+    for (size_t i = size; i < capacityLimit; ++i) {
+        testSet.add(i + 1);
+        EXPECT_EQ(expectedInitialCapacity, testSet.capacity());
+    }
+
+    // Adding one more item increase the capacity.
+    testSet.add(expectedInitialCapacity);
+    EXPECT_GT(testSet.capacity(), expectedInitialCapacity);
+
+    testReserveCapacity<size-1>();
+}
+
+TEST(HashSetTest, ReserveCapacity)
+{
+    testReserveCapacity<128>();
 }
 
 struct Dummy {
@@ -163,7 +203,7 @@ TEST(HashSetTest, HashSetOwnPtr)
     EXPECT_EQ(ptr2, ownPtr2);
 }
 
-class DummyRefCounted: public WTF::RefCounted<DummyRefCounted> {
+class DummyRefCounted : public RefCounted<DummyRefCounted> {
 public:
     DummyRefCounted(bool& isDeleted) : m_isDeleted(isDeleted) { m_isDeleted = false; }
     ~DummyRefCounted() { m_isDeleted = true; }
@@ -208,5 +248,6 @@ TEST(HashSetTest, HashSetRefPtr)
     EXPECT_EQ(1, DummyRefCounted::s_refInvokesCount);
 }
 
+} // anonymous namespace
 
-} // namespace
+} // namespace WTF

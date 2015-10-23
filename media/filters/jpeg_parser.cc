@@ -33,18 +33,6 @@ using base::BigEndianReader;
 
 namespace media {
 
-namespace {
-enum JpegMarker {
-  SOF0 = 0xC0,     // start of frame (baseline)
-  DHT = 0xC4,      // define huffman table
-  SOI = 0xD8,      // start of image
-  SOS = 0xDA,      // start of scan
-  DQT = 0xDB,      // define quantization table
-  DRI = 0xDD,      // define restart internal
-  MARKER1 = 0xFF,  // jpeg marker prefix
-};
-}
-
 static bool InRange(int value, int a, int b) {
   return a <= value && value <= b;
 }
@@ -281,6 +269,66 @@ static bool ParseSOS(const char* buffer,
   return true;
 }
 
+// |eoi_ptr| will point to the end of image (after EOI marker) after search
+// succeeds. Returns true on EOI marker found, or false.
+static bool SearchEOI(const char* buffer, size_t length, const char** eoi_ptr) {
+  DCHECK(buffer);
+  DCHECK(eoi_ptr);
+  BigEndianReader reader(buffer, length);
+  uint8_t marker2;
+
+  while (reader.remaining() > 0) {
+    const char* marker1_ptr = static_cast<const char*>(
+        memchr(reader.ptr(), JPEG_MARKER_PREFIX, reader.remaining()));
+    if (!marker1_ptr)
+      return false;
+    reader.Skip(marker1_ptr - reader.ptr() + 1);
+
+    do {
+      READ_U8_OR_RETURN_FALSE(&marker2);
+    } while (marker2 == JPEG_MARKER_PREFIX);  // skip fill bytes
+
+    switch (marker2) {
+      // Compressed data escape.
+      case 0x00:
+        break;
+      // Restart
+      case JPEG_RST0:
+      case JPEG_RST1:
+      case JPEG_RST2:
+      case JPEG_RST3:
+      case JPEG_RST4:
+      case JPEG_RST5:
+      case JPEG_RST6:
+      case JPEG_RST7:
+        break;
+      case JPEG_EOI:
+        *eoi_ptr = reader.ptr();
+        return true;
+      default:
+        // Skip for other markers.
+        uint16_t size;
+        READ_U16_OR_RETURN_FALSE(&size);
+        if (size < sizeof(size)) {
+          DLOG(ERROR) << "Ill-formed JPEG. Segment size (" << size
+                      << ") is smaller than size field (" << sizeof(size)
+                      << ")";
+          return false;
+        }
+        size -= sizeof(size);
+
+        if (!reader.Skip(size)) {
+          DLOG(ERROR) << "Ill-formed JPEG. Remaining size ("
+                      << reader.remaining()
+                      << ") is smaller than header specified (" << size << ")";
+          return false;
+        }
+        break;
+    }
+  }
+  return false;
+}
+
 // |result| is already initialized to 0 in ParseJpegPicture.
 static bool ParseSOI(const char* buffer,
                      size_t length,
@@ -297,21 +345,15 @@ static bool ParseSOI(const char* buffer,
   // Once reached SOS, all neccesary data are parsed.
   while (!has_marker_sos) {
     READ_U8_OR_RETURN_FALSE(&marker1);
-    if (marker1 != MARKER1)
+    if (marker1 != JPEG_MARKER_PREFIX)
       return false;
 
     do {
       READ_U8_OR_RETURN_FALSE(&marker2);
-    } while (marker2 == MARKER1);  // skip fill bytes
+    } while (marker2 == JPEG_MARKER_PREFIX);  // skip fill bytes
 
     uint16_t size;
     READ_U16_OR_RETURN_FALSE(&size);
-    if (reader.remaining() < size) {
-      DLOG(ERROR) << "Ill-formed JPEG. Remaining size (" << reader.remaining()
-                  << ") is smaller than header specified (" << size << ")";
-      return false;
-    }
-
     // The size includes the size field itself.
     if (size < sizeof(size)) {
       DLOG(ERROR) << "Ill-formed JPEG. Segment size (" << size
@@ -320,33 +362,54 @@ static bool ParseSOI(const char* buffer,
     }
     size -= sizeof(size);
 
+    if (reader.remaining() < size) {
+      DLOG(ERROR) << "Ill-formed JPEG. Remaining size (" << reader.remaining()
+                  << ") is smaller than header specified (" << size << ")";
+      return false;
+    }
+
     switch (marker2) {
-      case SOF0:
+      case JPEG_SOF0:
         if (!ParseSOF(reader.ptr(), size, &result->frame_header)) {
           DLOG(ERROR) << "ParseSOF failed";
           return false;
         }
         break;
-      case DQT:
+      case JPEG_SOF1:
+      case JPEG_SOF2:
+      case JPEG_SOF3:
+      case JPEG_SOF5:
+      case JPEG_SOF6:
+      case JPEG_SOF7:
+      case JPEG_SOF9:
+      case JPEG_SOF10:
+      case JPEG_SOF11:
+      case JPEG_SOF13:
+      case JPEG_SOF14:
+      case JPEG_SOF15:
+        DLOG(ERROR) << "Only SOF0 (baseline) is supported, but got SOF"
+                    << (marker2 - JPEG_SOF0);
+        return false;
+      case JPEG_DQT:
         if (!ParseDQT(reader.ptr(), size, result->q_table)) {
           DLOG(ERROR) << "ParseDQT failed";
           return false;
         }
         has_marker_dqt = true;
         break;
-      case DHT:
+      case JPEG_DHT:
         if (!ParseDHT(reader.ptr(), size, result->dc_table, result->ac_table)) {
           DLOG(ERROR) << "ParseDHT failed";
           return false;
         }
         break;
-      case DRI:
+      case JPEG_DRI:
         if (!ParseDRI(reader.ptr(), size, &result->restart_interval)) {
           DLOG(ERROR) << "ParseDRI failed";
           return false;
         }
         break;
-      case SOS:
+      case JPEG_SOS:
         if (!ParseSOS(reader.ptr(), size, result->frame_header,
                       &result->scan)) {
           DLOG(ERROR) << "ParseSOS failed";
@@ -369,6 +432,8 @@ static bool ParseSOI(const char* buffer,
   // Scan data follows scan header immediately.
   result->data = reader.ptr();
   result->data_size = reader.remaining();
+  const size_t kSoiSize = 2;
+  result->image_size = length + kSoiSize;
 
   return true;
 }
@@ -384,12 +449,33 @@ bool ParseJpegPicture(const uint8_t* buffer,
   uint8_t marker1, marker2;
   READ_U8_OR_RETURN_FALSE(&marker1);
   READ_U8_OR_RETURN_FALSE(&marker2);
-  if (marker1 != MARKER1 || marker2 != SOI) {
+  if (marker1 != JPEG_MARKER_PREFIX || marker2 != JPEG_SOI) {
     DLOG(ERROR) << "Not a JPEG";
     return false;
   }
 
   return ParseSOI(reader.ptr(), reader.remaining(), result);
+}
+
+bool ParseJpegStream(const uint8_t* buffer,
+                     size_t length,
+                     JpegParseResult* result) {
+  DCHECK(buffer);
+  DCHECK(result);
+  if (!ParseJpegPicture(buffer, length, result))
+    return false;
+
+  BigEndianReader reader(
+      reinterpret_cast<const char*>(result->data), result->data_size);
+  const char* eoi_ptr = nullptr;
+  if (!SearchEOI(reader.ptr(), reader.remaining(), &eoi_ptr)) {
+    DLOG(ERROR) << "SearchEOI failed";
+    return false;
+  }
+  DCHECK(eoi_ptr);
+  result->data_size = eoi_ptr - result->data;
+  result->image_size = eoi_ptr - reinterpret_cast<const char*>(buffer);
+  return true;
 }
 
 }  // namespace media

@@ -7,6 +7,7 @@
 #include <ostream>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -14,21 +15,17 @@
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/policy/policy_helpers.h"
 #include "components/policy/core/common/policy_pref_names.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/url_formatter/url_fixer.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/request_priority.h"
-#include "net/url_request/url_request.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
 // TODO(joaodasilva): this file should be moved next to
 // components/policy/core/browser/url_blacklist_manager.(cc|h).
 // However, url_fixer_upper.h can't be included from the component. Rather
-// than having it mocked out, the actual url_fixer::SegmentURL call is used
+// than having it mocked out, the actual url_formatter::SegmentURL call is used
 // to make sure that the parsing of URL filters is correct.
 
 namespace policy {
@@ -37,7 +34,7 @@ namespace {
 
 // Helper to get the disambiguated SegmentURL() function.
 URLBlacklist::SegmentURLCallback GetSegmentURLCallback() {
-  return url_fixer::SegmentURL;
+  return url_formatter::SegmentURL;
 }
 
 class TestingURLBlacklistManager : public URLBlacklistManager {
@@ -642,17 +639,9 @@ TEST_F(URLBlacklistManagerTest, DontBlockResources) {
   blacklist_manager_->SetBlacklist(blacklist.Pass());
   EXPECT_TRUE(blacklist_manager_->IsURLBlocked(GURL("http://google.com")));
 
-  net::TestURLRequestContext context;
-  scoped_ptr<net::URLRequest> request(context.CreateRequest(
-      GURL("http://google.com"), net::DEFAULT_PRIORITY, NULL));
-
   int reason = net::ERR_UNEXPECTED;
-  // Background requests aren't filtered.
-  EXPECT_FALSE(blacklist_manager_->IsRequestBlocked(*request.get(), &reason));
-
-  // Main frames are filtered.
-  request->SetLoadFlags(net::LOAD_MAIN_FRAME);
-  EXPECT_TRUE(blacklist_manager_->IsRequestBlocked(*request.get(), &reason));
+  EXPECT_TRUE(blacklist_manager_->ShouldBlockRequestForFrame(
+      GURL("http://google.com"), &reason));
   EXPECT_EQ(net::ERR_BLOCKED_BY_ADMINISTRATOR, reason);
 }
 

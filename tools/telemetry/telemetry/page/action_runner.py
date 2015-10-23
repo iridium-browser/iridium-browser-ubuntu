@@ -8,6 +8,7 @@ import urlparse
 
 from telemetry.internal.actions.drag import DragAction
 from telemetry.internal.actions.javascript_click import ClickElementAction
+from telemetry.internal.actions.load_media import LoadMediaAction
 from telemetry.internal.actions.loop import LoopAction
 from telemetry.internal.actions.mouse_click import MouseClickAction
 from telemetry.internal.actions.navigate import NavigateAction
@@ -17,6 +18,7 @@ from telemetry.internal.actions.pinch import PinchAction
 from telemetry.internal.actions.play import PlayAction
 from telemetry.internal.actions.repaint_continuously import (
     RepaintContinuouslyAction)
+from telemetry.internal.actions.repeatable_scroll import RepeatableScrollAction
 from telemetry.internal.actions.scroll import ScrollAction
 from telemetry.internal.actions.scroll_bounce import ScrollBounceAction
 from telemetry.internal.actions.seek import SeekAction
@@ -31,6 +33,11 @@ class ActionRunner(object):
   def __init__(self, tab, skip_waits=False):
     self._tab = tab
     self._skip_waits = skip_waits
+
+  @property
+  def tab(self):
+    """Returns the tab on which actions are performed."""
+    return self._tab
 
   def _RunAction(self, action):
     action.WillRunAction(self._tab)
@@ -96,23 +103,6 @@ class ActionRunner(object):
       An instance of action_runner.Interaction
     """
     return self.CreateInteraction('Gesture_' + label, repeatable)
-
-  def NavigateToPage(self, page, timeout_in_seconds=60):
-    """Navigates to the given page.
-
-    TODO(ariblue): Remove this sometime in/after Feb 2015. NavigateToPage has
-    been deprecated since action_runner will support arbitrary user stories
-    and web contents.
-    """
-    logging.warn('NavigateToPage is deprecated. Please use Navigate instead.')
-    if page.is_file:
-      target_side_url = self._tab.browser.http_server.UrlOf(page.file_path_url)
-    else:
-      target_side_url = page.url
-    self._RunAction(NavigateAction(
-        url=target_side_url,
-        script_to_evaluate_on_commit=page.script_to_evaluate_on_commit,
-        timeout_in_seconds=timeout_in_seconds))
 
   def Navigate(self, url, script_to_evaluate_on_commit=None,
                timeout_in_seconds=60):
@@ -369,6 +359,30 @@ class ActionRunner(object):
         speed_in_pixels_per_second=speed_in_pixels_per_second,
         use_touch=use_touch, synthetic_gesture_source=synthetic_gesture_source))
 
+  def RepeatableBrowserDrivenScroll(self, x_scroll_distance_ratio=0.0,
+                                    y_scroll_distance_ratio=0.5,
+                                    repeat_count=0,
+                                    repeat_delay_ms=250):
+    """Perform a browser driven repeatable scroll gesture.
+
+    The scroll gesture is driven from the browser, this is useful because the
+    main thread often isn't resposive but the browser process usually is, so the
+    delay between the scroll gestures should be consistent.
+
+    Args:
+      x_scroll_distance_ratio: The horizontal lenght of the scroll as a fraction
+          of the screen width.
+      y_scroll_distance_ratio: The vertical lenght of the scroll as a fraction
+          of the screen height.
+      repeat_count: The number of additional times to repeat the gesture.
+      repeat_delay_ms: The delay in milliseconds between each scroll gesture.
+    """
+    self._RunAction(RepeatableScrollAction(
+        x_scroll_distance_ratio=x_scroll_distance_ratio,
+        y_scroll_distance_ratio=y_scroll_distance_ratio,
+        repeat_count=repeat_count,
+        repeat_delay_ms=repeat_delay_ms))
+
   def ScrollElement(self, selector=None, text=None, element_function=None,
                     left_start_ratio=0.5, top_start_ratio=0.5,
                     direction='down', distance=None, distance_expr=None,
@@ -545,6 +559,27 @@ class ActionRunner(object):
         left_start_ratio=left_start_ratio, top_start_ratio=top_start_ratio,
         direction=direction, distance=distance,
         speed_in_pixels_per_second=speed_in_pixels_per_second))
+
+  def LoadMedia(self, selector=None, event_timeout_in_seconds=0,
+                event_to_await='canplaythrough'):
+    """Invokes load() on media elements and awaits an event.
+
+    Args:
+      selector: A CSS selector describing the element. If none is
+          specified, play the first media element on the page. If the
+          selector matches more than 1 media element, all of them will
+          be played.
+      event_timeout_in_seconds: Maximum waiting time for the event to be fired.
+          0 means do not wait.
+      event_to_await: Which event to await. For example: 'canplaythrough' or
+          'loadedmetadata'.
+
+    Raises:
+      TimeoutException: If the maximum waiting time is exceeded.
+    """
+    self._RunAction(LoadMediaAction(
+        selector=selector, timeout_in_seconds=event_timeout_in_seconds,
+        event_to_await=event_to_await))
 
   def PlayMedia(self, selector=None,
                 playing_event_timeout_in_seconds=0,

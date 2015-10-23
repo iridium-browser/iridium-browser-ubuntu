@@ -4,21 +4,18 @@
 
 #include "content/test/fake_compositor_dependencies.h"
 
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "cc/test/fake_external_begin_frame_source.h"
 #include "third_party/khronos/GLES2/gl2.h"
+#include "ui/gfx/buffer_types.h"
 
 namespace content {
 
-FakeCompositorDependencies::FakeCompositorDependencies()
-    : use_single_thread_scheduler_(true) {
+FakeCompositorDependencies::FakeCompositorDependencies() {
 }
 
 FakeCompositorDependencies::~FakeCompositorDependencies() {
-}
-
-bool FakeCompositorDependencies::IsImplSidePaintingEnabled() {
-  return true;
 }
 
 bool FakeCompositorDependencies::IsGpuRasterizationForced() {
@@ -42,28 +39,28 @@ bool FakeCompositorDependencies::IsDistanceFieldTextEnabled() {
 }
 
 bool FakeCompositorDependencies::IsZeroCopyEnabled() {
-  return false;
+  return true;
 }
 
 bool FakeCompositorDependencies::IsOneCopyEnabled() {
-  return true;
+  return false;
+}
+
+bool FakeCompositorDependencies::IsPersistentGpuMemoryBufferEnabled() {
+  return false;
 }
 
 bool FakeCompositorDependencies::IsElasticOverscrollEnabled() {
   return false;
 }
-
-bool FakeCompositorDependencies::UseSingleThreadScheduler() {
-  return use_single_thread_scheduler_;
-}
-
-uint32 FakeCompositorDependencies::GetImageTextureTarget() {
-  return GL_TEXTURE_2D;
+std::vector<unsigned> FakeCompositorDependencies::GetImageTextureTargets() {
+  return std::vector<unsigned>(static_cast<size_t>(gfx::BufferFormat::LAST) + 1,
+                               GL_TEXTURE_2D);
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
 FakeCompositorDependencies::GetCompositorMainThreadTaskRunner() {
-  return base::MessageLoopProxy::current();
+  return base::ThreadTaskRunnerHandle::Get();
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -103,6 +100,10 @@ cc::TaskGraphRunner* FakeCompositorDependencies::GetTaskGraphRunner() {
 
 bool FakeCompositorDependencies::IsGatherPixelRefsEnabled() {
   return false;
+}
+
+bool FakeCompositorDependencies::IsThreadedAnimationEnabled() {
+  return true;
 }
 
 }  // namespace content

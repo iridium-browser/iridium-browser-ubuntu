@@ -10,6 +10,7 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
@@ -38,6 +39,7 @@
 #include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -115,6 +117,12 @@ void AppLauncherHandler::CreateAppInfo(
   // chrome/browser/resources/ntp4/page_list_view.js in @typedef for AppInfo.
   // Please update it whenever you add or remove any keys here.
   value->Clear();
+
+  // Communicate the kiosk flag so the apps page can disable showing the
+  // context menu in kiosk mode.
+  value->SetBoolean(
+      "kioskMode",
+      base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode));
 
   // The Extension class 'helpfully' wraps bidi control characters that
   // impede our ability to determine directionality.
@@ -556,9 +564,15 @@ void AppLauncherHandler::HandleUninstallApp(const base::ListValue* args) {
   bool dont_confirm = false;
   if (args->GetBoolean(1, &dont_confirm) && dont_confirm) {
     base::AutoReset<bool> auto_reset(&ignore_changes_, true);
-    ExtensionUninstallAccepted();
+    // Do the uninstall work here.
+    extension_service_->UninstallExtension(
+        extension_id_prompting_, extensions::UNINSTALL_REASON_USER_INITIATED,
+        base::Bind(&base::DoNothing), nullptr);
+    CleanupAfterUninstall();
   } else {
-    GetExtensionUninstallDialog()->ConfirmUninstall(extension);
+    GetExtensionUninstallDialog()->ConfirmUninstall(
+        extension, extensions::UNINSTALL_REASON_USER_INITIATED,
+        extensions::UNINSTALL_SOURCE_CHROME_APPS_PAGE);
   }
 }
 
@@ -592,9 +606,8 @@ void AppLauncherHandler::HandleShowAppInfo(const base::ListValue* args) {
                             AppInfoLaunchSource::NUM_LAUNCH_SOURCES);
 
   ShowAppInfoInNativeDialog(
-      web_ui()->GetWebContents()->GetTopLevelNativeWindow(),
-      GetAppInfoNativeDialogSize(), Profile::FromWebUI(web_ui()), extension,
-      base::Closure());
+      web_ui()->GetWebContents(), GetAppInfoNativeDialogSize(),
+      Profile::FromWebUI(web_ui()), extension, base::Closure());
 }
 
 void AppLauncherHandler::HandleReorderApps(const base::ListValue* args) {
@@ -768,26 +781,9 @@ void AppLauncherHandler::PromptToEnableApp(const std::string& extension_id) {
   extension_enable_flow_->StartForWebContents(web_ui()->GetWebContents());
 }
 
-void AppLauncherHandler::ExtensionUninstallAccepted() {
-  // Do the uninstall work here.
-  DCHECK(!extension_id_prompting_.empty());
-
-  // The extension can be uninstalled in another window while the UI was
-  // showing. Do nothing in that case.
-  const Extension* extension =
-      extension_service_->GetInstalledExtension(extension_id_prompting_);
-  if (!extension)
-    return;
-
-  extension_service_->UninstallExtension(
-      extension_id_prompting_,
-      extensions::UNINSTALL_REASON_USER_INITIATED,
-      base::Bind(&base::DoNothing),
-      NULL);
-  CleanupAfterUninstall();
-}
-
-void AppLauncherHandler::ExtensionUninstallCanceled() {
+void AppLauncherHandler::OnExtensionUninstallDialogClosed(
+    bool did_start_uninstall,
+    const base::string16& error) {
   CleanupAfterUninstall();
 }
 

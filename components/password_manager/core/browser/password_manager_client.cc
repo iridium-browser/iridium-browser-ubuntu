@@ -18,7 +18,7 @@ bool PasswordManagerClient::IsSavingEnabledForCurrentPage() const {
   return true;
 }
 
-void PasswordManagerClient::AutofillResultsComputed() {
+void PasswordManagerClient::ForceSavePassword() {
 }
 
 void PasswordManagerClient::PasswordWasAutofilled(
@@ -84,6 +84,10 @@ PasswordManagerClient::GetAutofillManagerForMainFrame() {
 
 const GURL& PasswordManagerClient::GetMainFrameURL() const {
   return GURL::EmptyGURL();
+}
+
+bool PasswordManagerClient::IsUpdatePasswordUIEnabled() const {
+  return false;
 }
 
 }  // namespace password_manager

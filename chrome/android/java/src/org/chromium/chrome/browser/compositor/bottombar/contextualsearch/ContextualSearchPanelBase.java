@@ -10,14 +10,18 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchOptOutPromo.ContextualSearchPromoHost;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.StateChangeReason;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.privacy.ContextualSearchPreferenceFragment;
 import org.chromium.chrome.browser.util.MathUtils;
+import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 
 /**
@@ -25,17 +29,42 @@ import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
  */
 abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandler
         implements ContextualSearchPromoHost {
+    /**
+     * The side padding of Search Bar icons in dps.
+     */
+    private static final float SEARCH_BAR_ICON_SIDE_PADDING_DP = 16.f;
 
     /**
-     * The height of the expanded Contextual Search Panel relative to the height
-     * of the screen.
+     * The height of the Search Bar's border in dps.
+     */
+    private static final float SEARCH_BAR_BORDER_HEIGHT_DP = 1.f;
+
+    /**
+     * The height of the expanded Search Panel relative to the height of the screen.
      */
     private static final float EXPANDED_PANEL_HEIGHT_PERCENTAGE = .7f;
 
     /**
-     * The height of the Toolbar in dps.
+     * The height of the expanded Search Panel relative to the height of the screen when
+     * the panel is in the narrow width mode.
      */
-    private static final float TOOLBAR_HEIGHT_DP = 56.f;
+    private static final float NARROW_EXPANDED_PANEL_HEIGHT_PERCENTAGE = .3f;
+
+    /**
+     * The height of the maximized Search Panel relative to the height of the screen when
+     * the panel is in the narrow width mode.
+     */
+    private static final float NARROW_MAXIMIZED_PANEL_HEIGHT_PERCENTAGE = .9f;
+
+    /**
+     * The width of the small version of the Search Panel in dps.
+     */
+    private static final float SMALL_PANEL_WIDTH_DP = 600.f;
+
+    /**
+     * The minimum width a screen should have in order to trigger the small version of the Panel.
+     */
+    private static final float SMALL_PANEL_WIDTH_THRESHOLD_DP = 620.f;
 
     /**
      * The height of the Contextual Search Panel's Shadow in dps.
@@ -53,65 +82,55 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     private static final float BASE_PAGE_BRIGHTNESS_STATE_EXPANDED = .7f;
 
     /**
-     * The brightness of the base page when the Panel is maximized.
+     * The brightness of the base page when the Panel is maximized. This value matches the alert
+     * dialog brightness filter.
      */
-    private static final float BASE_PAGE_BRIGHTNESS_STATE_MAXIMIZED = .3f;
+    private static final float BASE_PAGE_BRIGHTNESS_STATE_MAXIMIZED = .4f;
 
     /**
-     * The opacity of the search provider icon when the Panel is peeking.
+     * The opacity of the arrow icon when the Panel is peeking.
      */
-    private static final float SEARCH_PROVIDER_ICON_OPACITY_STATE_PEEKED = 1.f;
+    private static final float ARROW_ICON_OPACITY_STATE_PEEKED = 1.f;
 
     /**
-     * The opacity of the search provider icon when the Panel is expanded.
+     * The opacity of the arrow icon when the Panel is expanded.
      */
-    private static final float SEARCH_PROVIDER_ICON_OPACITY_STATE_EXPANDED = 1.f;
+    private static final float ARROW_ICON_OPACITY_STATE_EXPANDED = 1.f;
 
     /**
-     * The opacity of the search provider icon when the Panel is maximized.
+     * The opacity of the arrow icon when the Panel is maximized.
      */
-    private static final float SEARCH_PROVIDER_ICON_OPACITY_STATE_MAXIMIZED = 0.f;
+    private static final float ARROW_ICON_OPACITY_STATE_MAXIMIZED = 0.f;
 
     /**
-     * The opacity of the search icon when the Panel is peeking.
+     * The rotation of the arrow icon when the Panel is peeking.
      */
-    private static final float SEARCH_ICON_OPACITY_PEEKED = 0.f;
+    private static final float ARROW_ICON_ROTATION_STATE_PEEKED = -90.f;
 
     /**
-     * The opacity of the search icon when the Panel is expanded.
+     * The rotation of the arrow icon when the Panel is expanded.
      */
-    private static final float SEARCH_ICON_OPACITY_EXPANDED = 0.f;
+    private static final float ARROW_ICON_ROTATION_STATE_EXPANDED = -270.f;
 
     /**
-     * The opacity of the search icon when the Panel is maximized.
+     * The opacity of the close icon when the Panel is peeking.
      */
-    private static final float SEARCH_ICON_OPACITY_MAXIMIZED = 1.f;
+    private static final float CLOSE_ICON_OPACITY_STATE_PEEKED = 0.f;
 
     /**
-     * The margin top of the Contextual Search Bar in dps.
+     * The opacity of the close icon when the Panel is expanded.
      */
-    private static final float SEARCH_BAR_MARGIN_TOP_DP = 16.f;
+    private static final float CLOSE_ICON_OPACITY_STATE_EXPANDED = 0.f;
 
     /**
-     * The padding left of the Search Icon in dps.
+     * The opacity of the close icon when the Panel is maximized.
      */
-    private static final float SEARCH_ICON_PADDING_LEFT_DP = 16.f;
+    private static final float CLOSE_ICON_OPACITY_STATE_MAXIMIZED = 1.f;
 
     /**
-     * The height of the promo state Contextual Search Panel search bar, in dps.
+     * The id of the close icon drawable.
      */
-    private static final float SEARCH_BAR_HEIGHT_STATE_PROMO = 24.f;
-
-    /**
-     * How much the Promo Panel should displace in order to make some elements
-     * invisible (like the Search Provider Icon and the Search Bar Text).
-     */
-    private static final float DISAPPEARING_ELEMENT_THRESHOLD_DP = 10.f;
-
-    /**
-     * The height of the Search Bar's border in dps.
-     */
-    private static final float SEARCH_BAR_BORDER_HEIGHT_DP = 1.f;
+    public static final int CLOSE_ICON_DRAWABLE_ID = R.drawable.btn_close;
 
     /**
      * The height of the Progress Bar in dps.
@@ -128,29 +147,34 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     private static final float PROGRESS_BAR_VISIBILITY_THRESHOLD_DP = 10.f;
 
     /**
-     * The height of the Search Bar when the Panel is peeking, in dps.
+     * The height of the Toolbar in dps.
      */
-    private final float mSearchBarHeightPeeking;
+    private float mToolbarHeight;
 
     /**
-     * The height of the Search Bar when the Panel is displaying the Promo, in dps.
+     * The padding top of the Search Bar.
      */
-    private final float mSearchBarHeightPromo;
+    private float mSearchBarPaddingTop;
+
+    /**
+     * The height of the Search Bar when the Panel is peeking, in dps.
+     */
+    private float mSearchBarHeightPeeking;
 
     /**
      * The height of the Search Bar when the Panel is expanded, in dps.
      */
-    private final float mSearchBarHeightExpanded;
+    private float mSearchBarHeightExpanded;
 
     /**
      * The height of the Search Bar when the Panel is maximized, in dps.
      */
-    private final float mSearchBarHeightMaximized;
+    private float mSearchBarHeightMaximized;
 
     /**
      * Ratio of dps per pixel.
      */
-    private final float mPxToDp;
+    private float mPxToDp;
 
     /**
      * The approximate Y coordinate of the selection in pixels.
@@ -164,12 +188,6 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     private float mBasePageTargetY = 0.f;
 
     /**
-     * The Y coordinate to apply to the Base Page in order to keep the selection
-     * in view when the Search Panel is in its PROMO state.
-     */
-    private float mPromoBasePageTargetY = 0.f;
-
-    /**
      * Whether the Panel is showing.
      */
     private boolean mIsShowing;
@@ -178,6 +196,17 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      * The current context.
      */
     private final Context mContext;
+
+    /**
+     * The object for handling global Contextual Search management duties
+     */
+    private ContextualSearchManagementDelegate mManagementDelegate;
+
+    /**
+     * The {@link ContextualSearchPanelFeatures} for this panel.
+     */
+    protected ContextualSearchPanelFeatures mSearchPanelFeatures;
+
 
     // ============================================================================================
     // Constructor
@@ -188,17 +217,6 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      */
     public ContextualSearchPanelBase(Context context) {
         mContext = context;
-
-        mPxToDp = 1.f / context.getResources().getDisplayMetrics().density;
-
-        mSearchBarHeightPeeking = context.getResources().getDimension(
-                R.dimen.contextual_search_bar_height) * mPxToDp;
-        mSearchBarHeightMaximized = TOOLBAR_HEIGHT_DP + PANEL_SHADOW_HEIGHT_DP;
-        mSearchBarHeightExpanded =
-                Math.round((mSearchBarHeightPeeking + mSearchBarHeightMaximized) / 2.f);
-        mSearchBarHeightPromo = SEARCH_BAR_HEIGHT_STATE_PROMO + PANEL_SHADOW_HEIGHT_DP;
-
-        initializeUiState();
     }
 
     // ============================================================================================
@@ -222,7 +240,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     /**
      * @return Whether the Panel Promo is available.
      */
-    protected abstract boolean isPanelPromoAvailable();
+    protected abstract boolean isPromoAvailable();
 
     /**
      * Animates the acceptance of the Promo.
@@ -231,8 +249,33 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
 
     /**
      * Event notification that the Panel did get closed.
+     * @param reason The reason the panel is closing.
      */
-    protected abstract void onClose();
+    protected abstract void onClose(StateChangeReason reason);
+
+    // ============================================================================================
+    // Contextual Search Manager Integration
+    // ============================================================================================
+
+    /**
+     * Sets the {@code ContextualSearchManagementDelegate} associated with this panel.
+     * @param delegate The {@code ContextualSearchManagementDelegate}.
+     */
+    public void setManagementDelegate(ContextualSearchManagementDelegate delegate) {
+        if (mManagementDelegate != delegate) {
+            mManagementDelegate = delegate;
+            if (delegate != null) {
+                initializeUiState();
+            }
+        }
+    }
+
+    /**
+     * @return The {@code ContextualSearchManagementDelegate} associated with this Layout.
+     */
+    public ContextualSearchManagementDelegate getManagementDelegate() {
+        return mManagementDelegate;
+    }
 
     // ============================================================================================
     // Layout Integration
@@ -241,6 +284,12 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     private float mLayoutWidth;
     private float mLayoutHeight;
     private boolean mIsToolbarShowing;
+
+    private float mMaximumWidth;
+    private float mMaximumHeight;
+
+    private boolean mIsFullscreenSizePanelForTesting;
+    private boolean mOverrideIsFullscreenSizePanelForTesting;
 
     /**
      * Called when the size of the view has changed.
@@ -253,16 +302,64 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         mLayoutWidth = width;
         mLayoutHeight = height;
         mIsToolbarShowing = isToolbarShowing;
+
+        mMaximumWidth = calculateSearchPanelWidth();
+        mMaximumHeight = getPanelHeightFromState(PanelState.MAXIMIZED);
     }
 
     /**
-     * Returns the Y position of the Contextual Search Panel.
-     * Layouts supporting Contextual Search should override this method.
+     * Overrides the FullscreenSizePanel state for testing.
      *
+     * @param isFullscreenSizePanel
+     */
+    @VisibleForTesting
+    public void setIsFullscreenSizePanelForTesting(boolean isFullscreenSizePanel) {
+        mOverrideIsFullscreenSizePanelForTesting = true;
+        mIsFullscreenSizePanelForTesting = isFullscreenSizePanel;
+    }
+
+    /**
+     * @return Whether the Panel is in fullscreen size.
+     */
+    protected boolean isFullscreenSizePanel() {
+        if (mOverrideIsFullscreenSizePanelForTesting) {
+            return mIsFullscreenSizePanelForTesting;
+        }
+
+        if (!ContextualSearchFieldTrial.isNarrowPanelSupported()) {
+            return true;
+        }
+
+        return getFullscreenWidth() <= SMALL_PANEL_WIDTH_THRESHOLD_DP;
+    }
+
+    /**
+     * @return The current X-position of the Contextual Search Panel.
+     */
+    protected float calculateSearchPanelX() {
+        return isFullscreenSizePanel() ? 0.f :
+            Math.round((getFullscreenWidth() - calculateSearchPanelWidth()) / 2.f);
+    }
+
+    /**
      * @return The current Y-position of the Contextual Search Panel.
      */
-    public float getContextualSearchPanelY() {
+    protected float calculateSearchPanelY() {
         return getFullscreenHeight() - mHeight;
+    }
+
+    /**
+     * @return The current width of the Contextual Search Panel.
+     */
+    protected float calculateSearchPanelWidth() {
+        return isFullscreenSizePanel() ? getFullscreenWidth() : SMALL_PANEL_WIDTH_DP;
+    }
+
+    /**
+     * @return The height of the Chrome toolbar in dp.
+     */
+    public float getToolbarHeight() {
+        return mToolbarHeight;
     }
 
     /**
@@ -271,7 +368,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      */
     public float getFullscreenY(float y) {
         if (mIsToolbarShowing) {
-            y += TOOLBAR_HEIGHT_DP / mPxToDp;
+            y += mToolbarHeight / mPxToDp;
         }
         return y;
     }
@@ -307,9 +404,39 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         // here, there will be a "jump" when swiping the Search Panel around.
         // TODO(pedrosimonetti): Find better way to get the fullscreen height.
         if (mIsToolbarShowing) {
-            height += TOOLBAR_HEIGHT_DP;
+            height += mToolbarHeight;
         }
         return height;
+    }
+
+    /**
+     * @return The maximum width of the Contextual Search Panel in pixels.
+     */
+    public int getMaximumWidthPx() {
+        return Math.round(mMaximumWidth / mPxToDp);
+    }
+
+    /**
+     * @return The maximum height of the Contextual Search Panel in pixels.
+     */
+    public int getMaximumHeightPx() {
+        return Math.round(mMaximumHeight / mPxToDp);
+    }
+
+    /**
+     * @return The width of the Search Content View in pixels.
+     */
+    public int getSearchContentViewWidthPx() {
+        return getMaximumWidthPx();
+    }
+
+    /**
+     * @return The height of the Search Content View in pixels.
+     */
+    public int getSearchContentViewHeightPx() {
+        float searchBarExpandedHeight = isFullscreenSizePanel()
+                ? getToolbarHeight() : mSearchBarHeightPeeking;
+        return Math.round((mMaximumHeight - searchBarExpandedHeight) / mPxToDp);
     }
 
     // ============================================================================================
@@ -319,6 +446,14 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     // --------------------------------------------------------------------------------------------
     // Test Infrastructure
     // --------------------------------------------------------------------------------------------
+
+    /**
+     * @param height The height of the Contextual Search Panel to be set.
+     */
+    @VisibleForTesting
+    public void setHeightForTesting(float height) {
+        mHeight = height;
+    }
 
     /**
      * @param offsetY The vertical offset of the Contextual Search Panel to be
@@ -359,10 +494,17 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     // Contextual Search Panel states
     // --------------------------------------------------------------------------------------------
 
+    private float mOffsetX;
     private float mOffsetY;
     private float mHeight;
-    private float mWidth;
     private boolean mIsMaximized;
+
+    /**
+     * @return The vertical offset of the Contextual Search Panel.
+     */
+    public float getOffsetX() {
+        return mOffsetX;
+    }
 
     /**
      * @return The vertical offset of the Contextual Search Panel.
@@ -372,17 +514,17 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     }
 
     /**
-     * @return The height of the Contextual Search Panel.
+     * @return The width of the Contextual Search Panel in dps.
      */
-    public float getHeight() {
-        return mHeight;
+    public float getWidth() {
+        return mMaximumWidth;
     }
 
     /**
-     * @return The width of the Contextual Search Panel.
+     * @return The height of the Contextual Search Panel in dps.
      */
-    public float getWidth() {
-        return mWidth;
+    public float getHeight() {
+        return mHeight;
     }
 
     /**
@@ -395,26 +537,27 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     // --------------------------------------------------------------------------------------------
     // Contextual Search Bar states
     // --------------------------------------------------------------------------------------------
-
-    private float mSearchBarMarginTop;
+    private float mSearchBarMarginSide;
     private float mSearchBarHeight;
     private float mSearchBarTextOpacity;
     private boolean mIsSearchBarBorderVisible;
     private float mSearchBarBorderY;
     private float mSearchBarBorderHeight;
 
-    boolean mSearchBarShadowVisible = false;
-    float mSearchBarShadowOpacity = 0.f;
+    private boolean mSearchBarShadowVisible = false;
+    private float mSearchBarShadowOpacity = 0.f;
 
-    private float mSearchProviderIconOpacity;
-    private float mSearchIconPaddingLeft;
-    private float mSearchIconOpacity;
+    private float mArrowIconOpacity;
+    private float mArrowIconRotation;
+
+    private float mCloseIconOpacity;
+    private float mCloseIconWidth;
 
     /**
-     * @return The top margin of the Contextual Search Bar.
+     * @return The side margin of the Contextual Search Bar.
      */
-    public float getSearchBarMarginTop() {
-        return mSearchBarMarginTop;
+    public float getSearchBarMarginSide() {
+        return mSearchBarMarginSide;
     }
 
     /**
@@ -467,24 +610,60 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     }
 
     /**
-     * @return The opacity of the search provider's icon.
+     * @return The opacity of the arrow icon.
      */
-    public float getSearchProviderIconOpacity() {
-        return mSearchProviderIconOpacity;
+    public float getArrowIconOpacity() {
+        return mArrowIconOpacity;
     }
 
     /**
-     * @return The left padding of the search icon.
+     * @return The rotation of the arrow icon, in degrees.
      */
-    public float getSearchIconPaddingLeft() {
-        return mSearchIconPaddingLeft;
+    public float getArrowIconRotation() {
+        return mArrowIconRotation;
     }
 
     /**
-     * @return The opacity of the search icon.
+     * @return Whether the close icon is visible.
      */
-    public float getSearchIconOpacity() {
-        return mSearchIconOpacity;
+    public boolean isCloseIconVisible() {
+        return mSearchPanelFeatures.isCloseButtonAvailable();
+    }
+
+    /**
+     * @return The opacity of the close icon.
+     */
+    public float getCloseIconOpacity() {
+        return mCloseIconOpacity;
+    }
+
+    /**
+     * @return The width/height of the close icon.
+     */
+    public float getCloseIconDimension() {
+        if (mCloseIconWidth == 0) {
+            mCloseIconWidth = ApiCompatibilityUtils.getDrawable(mContext.getResources(),
+                    CLOSE_ICON_DRAWABLE_ID).getIntrinsicWidth() * mPxToDp;
+        }
+        return mCloseIconWidth;
+    }
+
+    /**
+     * @return The Y coordinate of the close icon.
+     */
+    public float getCloseIconY() {
+        return getOffsetY() + ((getSearchBarHeight() - getCloseIconDimension()) / 2);
+    }
+
+    /**
+     * @return The X coordinate of the close icon.
+     */
+    public float getCloseIconX() {
+        if (LocalizationUtils.isLayoutRtl()) {
+            return getOffsetX() + getSearchBarMarginSide();
+        } else {
+            return getOffsetX() + getWidth() - getSearchBarMarginSide() - getCloseIconDimension();
+        }
     }
 
     // --------------------------------------------------------------------------------------------
@@ -618,42 +797,6 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         return Math.round((getOffsetY() + getSearchBarHeight()) / mPxToDp);
     }
 
-    // --------------------------------------------------------------------------------------------
-    // Opt In Promo states
-    // --------------------------------------------------------------------------------------------
-
-    private float mPromoContentHeight;
-    private boolean mShouldHidePromoHeader;
-
-    /**
-     * Sets the height of the promo content.
-     */
-    protected void setPromoContentHeight(float height) {
-        mPromoContentHeight = height;
-        updateBasePageTargetY();
-    }
-
-    /**
-     * Gets the height of the promo content, or -1 if height has not been calculated.
-     */
-    public float getPromoContentHeight() {
-        return mPromoContentHeight > 0.0f ? mPromoContentHeight : -1.f;
-    }
-
-    /**
-     * @param shouldHidePromoHeader Sets whether the promo's header should be hidden.
-     */
-    protected void setShouldHidePromoHeader(boolean shouldHidePromoHeader) {
-        mShouldHidePromoHeader = shouldHidePromoHeader;
-    }
-
-    /**
-     * @return Gets whether the promo's header should be hidden.
-     */
-    public boolean shouldHidePromoHeader() {
-        return mShouldHidePromoHeader;
-    }
-
     // ============================================================================================
     // Helpers
     // ============================================================================================
@@ -661,12 +804,25 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     /**
      * Initializes the UI state.
      */
-    private void initializeUiState() {
+    protected void initializeUiState() {
+        mSearchPanelFeatures = new ContextualSearchPanelFeatures(mManagementDelegate.isCustomTab());
         mIsShowing = false;
 
         // Static values.
-        mSearchBarMarginTop = SEARCH_BAR_MARGIN_TOP_DP;
-        mSearchIconPaddingLeft = SEARCH_ICON_PADDING_LEFT_DP;
+        mPxToDp = 1.f / mContext.getResources().getDisplayMetrics().density;
+
+        mToolbarHeight = mContext.getResources().getDimension(
+                mManagementDelegate.getControlContainerHeightResource()) * mPxToDp;
+
+        mSearchBarPaddingTop = PANEL_SHADOW_HEIGHT_DP;
+
+        mSearchBarHeightPeeking = mContext.getResources().getDimension(
+                R.dimen.contextual_search_bar_height) * mPxToDp;
+        mSearchBarHeightMaximized = mContext.getResources().getDimension(
+                R.dimen.toolbar_height_no_shadow) * mPxToDp;
+        mSearchBarHeightExpanded =
+                Math.round((mSearchBarHeightPeeking + mSearchBarHeightMaximized) / 2.f);
+        mSearchBarMarginSide = SEARCH_BAR_ICON_SIDE_PADDING_DP;
         mProgressBarHeight = PROGRESS_BAR_HEIGHT_DP;
         mSearchBarBorderHeight = SEARCH_BAR_BORDER_HEIGHT_DP;
 
@@ -692,14 +848,18 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
             panelHeight = 0;
         } else if (state == PanelState.PEEKED) {
             panelHeight = mSearchBarHeightPeeking;
-        } else if (state == PanelState.PROMO) {
-            panelHeight = getPromoContentHeight()
-                    + mSearchBarHeightPromo;
         } else if (state == PanelState.EXPANDED) {
-            panelHeight = fullscreenHeight * EXPANDED_PANEL_HEIGHT_PERCENTAGE
-                    + PANEL_SHADOW_HEIGHT_DP;
+            if (isFullscreenSizePanel()) {
+                panelHeight = fullscreenHeight * EXPANDED_PANEL_HEIGHT_PERCENTAGE;
+            } else {
+                panelHeight = mLayoutHeight * NARROW_EXPANDED_PANEL_HEIGHT_PERCENTAGE;
+            }
         } else if (state == PanelState.MAXIMIZED) {
-            panelHeight = fullscreenHeight + PANEL_SHADOW_HEIGHT_DP;
+            if (isFullscreenSizePanel()) {
+                panelHeight = fullscreenHeight;
+            } else {
+                panelHeight = mLayoutHeight * NARROW_MAXIMIZED_PANEL_HEIGHT_PERCENTAGE;
+            }
         }
 
         return panelHeight;
@@ -722,6 +882,9 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
             if (!isValidState(state)) {
                 continue;
             }
+            if (!isFullscreenSizePanel() && state == PanelState.EXPANDED) {
+                continue;
+            }
 
             float height = getPanelHeightFromState(state);
             float heightDiff = Math.abs(desiredPanelHeight - height);
@@ -741,7 +904,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      */
     protected void setClampedPanelHeight(float height) {
         final float clampedHeight = MathUtils.clamp(height,
-                getPanelHeightFromState(getMaximumState()),
+                getPanelHeightFromState(PanelState.MAXIMIZED),
                 getPanelHeightFromState(PanelState.PEEKED));
         setPanelHeight(clampedHeight);
     }
@@ -752,10 +915,11 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
 
         if (state == PanelState.CLOSED) {
             mIsShowing = false;
-            destroySearchPromo();
+            destroyPromoView();
             destroyContextualSearchControl();
-            onClose();
-        } else if (state == PanelState.EXPANDED) {
+            onClose(reason);
+        } else if (state == PanelState.EXPANDED && isFullscreenSizePanel()
+                || (state == PanelState.MAXIMIZED && !isFullscreenSizePanel())) {
             showPromoViewAtYPosition(getPromoYPx());
         }
     }
@@ -805,8 +969,6 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
             updatePanelForExpansion(percentage);
         } else if (endState == PanelState.MAXIMIZED) {
             updatePanelForMaximization(percentage);
-        } else if (endState == PanelState.PROMO) {
-            updatePanelForOpeningPromo(percentage);
         }
     }
 
@@ -818,9 +980,9 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      * @param percentage The completion percentage of the transition.
      */
     private void updatePanelSize(float height, PanelState endState, float percentage) {
-        mWidth = getFullscreenWidth();
+        mOffsetX = calculateSearchPanelX();
+        mOffsetY = calculateSearchPanelY();
         mHeight = height;
-        mOffsetY = getContextualSearchPanelY();
         mIsMaximized = height == getPanelHeightFromState(PanelState.MAXIMIZED);
     }
 
@@ -897,11 +1059,12 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         // Search Bar text opacity.
         mSearchBarTextOpacity = 1.f;
 
-        // Search provider icon opacity.
-        mSearchProviderIconOpacity = SEARCH_PROVIDER_ICON_OPACITY_STATE_PEEKED;
+        // Arrow Icon.
+        mArrowIconOpacity = ARROW_ICON_OPACITY_STATE_PEEKED;
+        mArrowIconRotation = ARROW_ICON_ROTATION_STATE_PEEKED;
 
-        // Search icon opacity.
-        mSearchIconOpacity = SEARCH_ICON_OPACITY_PEEKED;
+        // Close icon opacity.
+        mCloseIconOpacity = CLOSE_ICON_OPACITY_STATE_PEEKED;
 
         // Progress Bar.
         mProgressBarOpacity = 0.f;
@@ -937,7 +1100,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         // Search Bar height.
         float searchBarHeight = Math.round(MathUtils.interpolate(
                 mSearchBarHeightPeeking,
-                mSearchBarHeightExpanded,
+                getSearchBarHeightExpanded(),
                 percentage));
         mSearchBarHeight = searchBarHeight;
 
@@ -948,11 +1111,15 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         mIsSearchBarBorderVisible = true;
         mSearchBarBorderY = searchBarHeight - SEARCH_BAR_BORDER_HEIGHT_DP + 1;
 
-        // Search provider icon opacity.
-        mSearchProviderIconOpacity = SEARCH_PROVIDER_ICON_OPACITY_STATE_PEEKED;
+        // Arrow Icon.
+        mArrowIconOpacity = ARROW_ICON_OPACITY_STATE_EXPANDED;
+        mArrowIconRotation = Math.round(MathUtils.interpolate(
+                ARROW_ICON_ROTATION_STATE_PEEKED,
+                ARROW_ICON_ROTATION_STATE_EXPANDED,
+                percentage));
 
-        // Search icon opacity.
-        mSearchIconOpacity = SEARCH_ICON_OPACITY_PEEKED;
+        // Close icon opacity.
+        mCloseIconOpacity = CLOSE_ICON_OPACITY_STATE_EXPANDED;
 
         // Progress Bar.
         float peekedHeight = getPanelHeightFromState(PanelState.PEEKED);
@@ -976,7 +1143,8 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      */
     private void updatePanelForMaximization(float percentage) {
         // Update the opt out promo.
-        updatePromoVisibility(1.f - percentage);
+        float promoVisibilityPercentage = isFullscreenSizePanel() ? 1.f - percentage : 1.f;
+        updatePromoVisibility(promoVisibilityPercentage);
 
         // Base page offset.
         mBasePageY = getBasePageTargetY();
@@ -990,8 +1158,8 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
 
         // Search Bar height.
         float searchBarHeight = Math.round(MathUtils.interpolate(
-                mSearchBarHeightExpanded,
-                mSearchBarHeightMaximized,
+                getSearchBarHeightExpanded(),
+                getSearchBarHeightMaximized(),
                 percentage));
         mSearchBarHeight = searchBarHeight;
 
@@ -1002,19 +1170,29 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         // Search Bar text opacity.
         mSearchBarTextOpacity = 1.f;
 
-        // Search provider icon opacity.
-        float searchProviderIconOpacity = MathUtils.interpolate(
-                SEARCH_PROVIDER_ICON_OPACITY_STATE_EXPANDED,
-                SEARCH_PROVIDER_ICON_OPACITY_STATE_MAXIMIZED,
-                percentage);
-        mSearchProviderIconOpacity = searchProviderIconOpacity;
+        // Determine fading element opacities. If both the arrow icon and close
+        // icon are visible, the arrow icon needs to finish fading out before
+        // the close icon starts fading in. Any other elements fading in or
+        // fading out should use the same percentage.
+        float fadingOutPercentage = percentage;
+        float fadingInPercentage = percentage;
+        if (mSearchPanelFeatures.isCloseButtonAvailable()) {
+            fadingOutPercentage = Math.min(percentage, .5f) / .5f;
+            fadingInPercentage = Math.max(percentage - .5f, 0.f) / .5f;
+        }
 
-        // Search icon opacity.
-        float searchIconOpacity = MathUtils.interpolate(
-                SEARCH_ICON_OPACITY_EXPANDED,
-                SEARCH_ICON_OPACITY_MAXIMIZED,
-                percentage);
-        mSearchIconOpacity = searchIconOpacity;
+        // Arrow Icon.
+        mArrowIconOpacity = MathUtils.interpolate(
+                ARROW_ICON_OPACITY_STATE_EXPANDED,
+                ARROW_ICON_OPACITY_STATE_MAXIMIZED,
+                fadingOutPercentage);
+        mArrowIconRotation = ARROW_ICON_ROTATION_STATE_EXPANDED;
+
+        // Close icon opacity.
+        mCloseIconOpacity = MathUtils.interpolate(
+                CLOSE_ICON_OPACITY_STATE_EXPANDED,
+                CLOSE_ICON_OPACITY_STATE_MAXIMIZED,
+                fadingInPercentage);
 
         // Progress Bar.
         mProgressBarOpacity = 1.f;
@@ -1024,55 +1202,20 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         updateSearchBarShadow();
     }
 
-    /**
-     * Updates the UI state for the peeked to promo transition (and vice versa),
-     * according to a completion |percentage|.
-     *
-     * @param percentage The completion percentage.
-     */
-    private void updatePanelForOpeningPromo(float percentage) {
-        // Base page offset.
-        float baseBaseY = MathUtils.interpolate(
-                0,
-                getPromoBasePageOffsetY(),
-                percentage);
-        mBasePageY = baseBaseY;
+    private float getSearchBarHeightExpanded() {
+        if (isFullscreenSizePanel()) {
+            return mSearchBarHeightExpanded;
+        } else {
+            return mSearchBarHeightPeeking;
+        }
+    }
 
-        // Base page brightness.
-        float brightness = MathUtils.interpolate(
-                BASE_PAGE_BRIGHTNESS_STATE_PEEKED,
-                BASE_PAGE_BRIGHTNESS_STATE_EXPANDED,
-                percentage);
-        mBasePageBrightness = brightness;
-
-        // Search Bar height.
-        float searchBarHeight = Math.round(MathUtils.interpolate(
-                mSearchBarHeightPeeking,
-                mSearchBarHeightPromo,
-                percentage));
-        mSearchBarHeight = searchBarHeight;
-
-        // Search Bar border.
-        mIsSearchBarBorderVisible = false;
-
-        // Search Bar text opacity.
-        float peekedHeight = getPanelHeightFromState(PanelState.PEEKED);
-        float threshold = DISAPPEARING_ELEMENT_THRESHOLD_DP / mPxToDp;
-        float diff = Math.min(mHeight - peekedHeight, threshold);
-        float disappearingElementOpacity = MathUtils.interpolate(1.f, 0.f, diff / threshold);
-        mSearchBarTextOpacity = disappearingElementOpacity;
-
-        // Search provider icon opacity.
-        boolean shouldDisplaySearchProviderIcon = shouldHidePromoHeader();
-        mSearchProviderIconOpacity =
-                shouldDisplaySearchProviderIcon ? 1.f : disappearingElementOpacity;
-
-        // Search icon opacity.
-        mSearchIconOpacity = SEARCH_ICON_OPACITY_PEEKED;
-
-        // Progress Bar.
-        mProgressBarOpacity = 0.f;
-        mProgressBarY = searchBarHeight - PROGRESS_BAR_HEIGHT_DP + 1;
+    private float getSearchBarHeightMaximized() {
+        if (isFullscreenSizePanel()) {
+            return mSearchBarHeightMaximized;
+        } else {
+            return mSearchBarHeightPeeking;
+        }
     }
 
     /**
@@ -1083,7 +1226,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      * visibility between 0 and 1 means the Promo is partially visible.
      */
     private void updatePromoVisibility(float percentage) {
-        if (isPanelPromoAvailable()) {
+        if (isPromoAvailable()) {
             mPromoVisible = true;
 
             mPromoHeightPx = Math.round(MathUtils.clamp(percentage * mPromoContentHeightPx,
@@ -1131,7 +1274,6 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      */
     private void updateBasePageTargetY() {
         mBasePageTargetY = calculateBasePageTargetY(PanelState.EXPANDED);
-        mPromoBasePageTargetY = calculateBasePageTargetY(PanelState.PROMO);
     }
 
     /**
@@ -1142,6 +1284,10 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      * @return The target offset Y.
      */
     private float calculateBasePageTargetY(PanelState expandedState) {
+        // Only a fullscreen wide Panel should offset the base page. A small panel should
+        // always return zero to ensure the Base Page remains in the same position.
+        if (!isFullscreenSizePanel()) return 0.f;
+
         // Convert from px to dp.
         final float selectionY = mBasePageSelectionYPx * mPxToDp;
 
@@ -1150,7 +1296,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         // getPanelFromHeight method). We need the measurement of the portion
         // of the Panel that occludes the page.
         final float expandedHeight = getPanelHeightFromState(expandedState)
-                - PANEL_SHADOW_HEIGHT_DP;
+                - mSearchBarPaddingTop;
 
         // Calculate the offset to center the selection on the available area.
         final float fullscreenHeight = getFullscreenHeight();
@@ -1162,7 +1308,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         offset = Math.min(offset, 0.f);
         // If visible, the Toolbar will be hidden. Therefore, we need to adjust
         // the offset to account for this difference.
-        if (mIsToolbarShowing) offset -= TOOLBAR_HEIGHT_DP;
+        if (mIsToolbarShowing) offset -= mToolbarHeight;
         // Make sure the offset is not greater than the expanded height, because
         // there's nothing to render below the Page.
         offset = Math.max(offset, -expandedHeight);
@@ -1176,14 +1322,6 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      */
     public float getBasePageTargetY() {
         return mBasePageTargetY;
-    }
-
-    /**
-     * @return The Y coordinate to apply to the Base Page in order to keep the
-     *         selection in view when the Search Panel is in PROMO state.
-     */
-    private float getPromoBasePageOffsetY() {
-        return mPromoBasePageTargetY;
     }
 
     // ============================================================================================
@@ -1204,9 +1342,9 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
                     mControl.getResourceAdapter());
         }
 
-        if (mSearchPromoView != null) {
+        if (mPromoView != null) {
             mResourceLoader.registerResource(R.id.contextual_search_opt_out_promo,
-                    mSearchPromoView.getResourceAdapter());
+                    mPromoView.getResourceAdapter());
         }
     }
 
@@ -1239,6 +1377,13 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
             LayoutInflater.from(mContext).inflate(R.layout.contextual_search_view, mContainerView);
             mControl = (ContextualSearchControl)
                     mContainerView.findViewById(R.id.contextual_search_view);
+
+            // Adjust size for small Panel.
+            if (!isFullscreenSizePanel()) {
+                mControl.getLayoutParams().width = getMaximumWidthPx();
+                mControl.requestLayout();
+            }
+
             if (mResourceLoader != null) {
                 mResourceLoader.registerResource(R.id.contextual_search_view,
                         mControl.getResourceAdapter());
@@ -1273,6 +1418,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
         new Handler().post(new Runnable() {
             @Override
             public void run() {
+                setIsPromoActive(false);
                 PreferencesLauncher.launchSettingsPage(mContext,
                         ContextualSearchPreferenceFragment.class.getName());
             }
@@ -1300,7 +1446,7 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     /**
      * The {@link ContextualSearchOptOutPromo} instance.
      */
-    private ContextualSearchOptOutPromo mSearchPromoView;
+    private ContextualSearchOptOutPromo mPromoView;
 
     /**
      * Whether the Search Promo View is visible.
@@ -1310,38 +1456,46 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     /**
      * Creates the Search Promo View.
      */
-    public void createSearchPromo() {
-        if (!isPanelPromoAvailable()) return;
+    public void createPromoView() {
+        if (!isPromoAvailable()) return;
 
         assert mContainerView != null;
 
-        if (mSearchPromoView == null) {
+        if (mPromoView == null) {
             LayoutInflater.from(mContext).inflate(
                     R.layout.contextual_search_opt_out_promo, mContainerView);
-            mSearchPromoView = (ContextualSearchOptOutPromo)
+            mPromoView = (ContextualSearchOptOutPromo)
                     mContainerView.findViewById(R.id.contextual_search_opt_out_promo);
-            if (mResourceLoader != null) {
-                mResourceLoader.registerResource(R.id.contextual_search_opt_out_promo,
-                        mSearchPromoView.getResourceAdapter());
+
+            final int maximumWidth = getMaximumWidthPx();
+
+            // Adjust size for small Panel.
+            if (!isFullscreenSizePanel()) {
+                mPromoView.getLayoutParams().width = maximumWidth;
+                mPromoView.requestLayout();
             }
 
-            mSearchPromoView.setPromoHost(this);
-            setPromoContentHeightPx(
-                    mSearchPromoView.getHeightForGivenWidth(mContainerView.getWidth()));
+            if (mResourceLoader != null) {
+                mResourceLoader.registerResource(R.id.contextual_search_opt_out_promo,
+                        mPromoView.getResourceAdapter());
+            }
+
+            mPromoView.setPromoHost(this);
+            setPromoContentHeightPx(mPromoView.getHeightForGivenWidth(maximumWidth));
         }
 
-        assert mSearchPromoView != null;
+        assert mPromoView != null;
     }
 
     /**
      * Destroys the Search Promo View.
      */
-    protected void destroySearchPromo() {
-        if (!isPanelPromoAvailable()) return;
+    protected void destroyPromoView() {
+        if (!isPromoAvailable()) return;
 
-        if (mSearchPromoView != null) {
-            mContainerView.removeView(mSearchPromoView);
-            mSearchPromoView = null;
+        if (mPromoView != null) {
+            mContainerView.removeView(mPromoView);
+            mPromoView = null;
             if (mResourceLoader != null) {
                 mResourceLoader.unregisterResource(R.id.contextual_search_opt_out_promo);
             }
@@ -1354,14 +1508,15 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      * @param y The Y position.
      */
     public void showPromoViewAtYPosition(float y) {
-        if (mSearchPromoView == null || !isPanelPromoAvailable()) return;
+        if (mPromoView == null || !isPromoAvailable()) return;
 
-        mSearchPromoView.setTranslationY(y);
-        mSearchPromoView.setVisibility(View.VISIBLE);
+        mPromoView.setTranslationX(getOffsetX() / mPxToDp);
+        mPromoView.setTranslationY(y);
+        mPromoView.setVisibility(View.VISIBLE);
 
         // NOTE(pedrosimonetti): We need to call requestLayout, otherwise
         // the Promo View will not become visible.
-        mSearchPromoView.requestLayout();
+        mPromoView.requestLayout();
 
         mIsSearchPromoViewVisible = true;
     }
@@ -1370,13 +1525,13 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
      * Hides the Search Promo View.
      */
     public void hidePromoView() {
-        if (mSearchPromoView == null
+        if (mPromoView == null
                 || !mIsSearchPromoViewVisible
-                || !isPanelPromoAvailable()) {
+                || !isPromoAvailable()) {
             return;
         }
 
-        mSearchPromoView.setVisibility(View.INVISIBLE);
+        mPromoView.setVisibility(View.INVISIBLE);
 
         mIsSearchPromoViewVisible = false;
     }
@@ -1389,70 +1544,5 @@ abstract class ContextualSearchPanelBase extends ContextualSearchPanelStateHandl
     protected void setPromoVisibilityForOptInAnimation(float percentage) {
         updatePromoVisibility(percentage);
         updateSearchBarShadow();
-    }
-
-    // ============================================================================================
-    // Opt In Promo
-    // ============================================================================================
-
-    /**
-     * Updates the UI state for a given |height| when performing the opt-in animation.
-     *
-     * @param height The Contextual Search Panel height.
-     */
-    protected void setPanelHeightForPromoOptInAnimation(float height) {
-        PanelState endState = PanelState.EXPANDED;
-        PanelState startState = PanelState.PROMO;
-        float percentage = getStateCompletion(height, startState, endState);
-
-        updatePanelSize(height, endState, percentage);
-
-        updatePanelForPromoOptInAnimation(percentage);
-    }
-
-    /**
-     * Updates the UI state for the PROMO to EXPANDED transition (and vice versa),
-     * according to a completion |percentage|.
-     *
-     * @param percentage The completion percentage.
-     */
-    private void updatePanelForPromoOptInAnimation(float percentage) {
-        // Base page offset.
-        float baseBaseY = MathUtils.interpolate(
-                getPromoBasePageOffsetY(),
-                getBasePageTargetY(),
-                percentage);
-        mBasePageY = baseBaseY;
-
-        // Base page brightness.
-        mBasePageBrightness = BASE_PAGE_BRIGHTNESS_STATE_EXPANDED;
-
-        // Search Bar height.
-        float searchBarHeight = Math.round(MathUtils.interpolate(
-                mSearchBarHeightPromo,
-                mSearchBarHeightExpanded,
-                percentage));
-        mSearchBarHeight = searchBarHeight;
-
-        // Search Bar border.
-        mIsSearchBarBorderVisible = false;
-
-        // Search Bar text opacity.
-        final float threshold = 0.5f;
-        float searchBarTextOpacity = MathUtils.interpolate(0.f, 1.f,
-                Math.max(percentage - threshold, 0) / threshold);
-        mSearchBarTextOpacity = searchBarTextOpacity;
-
-        // Search provider icon opacity.
-        boolean shouldDisplaySearchProviderIcon = shouldHidePromoHeader();
-        mSearchProviderIconOpacity = shouldDisplaySearchProviderIcon
-                ? 1.f : MathUtils.interpolate(0.f, 1.f, percentage);
-
-        // Search icon opacity.
-        mSearchIconOpacity = SEARCH_ICON_OPACITY_PEEKED;
-
-        // Progress Bar.
-        mProgressBarOpacity = percentage == 1.f ? 1.f : 0.f;
-        mProgressBarY = searchBarHeight - PROGRESS_BAR_HEIGHT_DP + 1;
     }
 }

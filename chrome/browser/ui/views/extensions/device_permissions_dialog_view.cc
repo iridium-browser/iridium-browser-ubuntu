@@ -4,10 +4,15 @@
 
 #include "chrome/browser/ui/views/extensions/device_permissions_dialog_view.h"
 
+#include "base/bind.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/api/chrome_device_permissions_prompt.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "device/usb/usb_device.h"
 #include "extensions/common/extension.h"
@@ -156,6 +161,15 @@ gfx::Size DevicePermissionsDialogView::GetPreferredSize() const {
 
 void ChromeDevicePermissionsPrompt::ShowDialog() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  constrained_window::ShowWebModalDialogViews(
-      new DevicePermissionsDialogView(prompt()), web_contents());
+
+  web_modal::WebContentsModalDialogManager* manager =
+      web_modal::WebContentsModalDialogManager::FromWebContents(web_contents());
+  if (manager) {
+    constrained_window::ShowWebModalDialogViews(
+        new DevicePermissionsDialogView(prompt()), web_contents());
+  } else {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&DevicePermissionsPrompt::Prompt::Dismissed, prompt()));
+  }
 }

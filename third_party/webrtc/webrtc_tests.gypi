@@ -17,12 +17,14 @@
         'libjingle/xmllite/xmllite.gyp:rtc_xmllite',
         'libjingle/xmpp/xmpp.gyp:rtc_xmpp',
         'p2p/p2p.gyp:rtc_p2p',
+        'p2p/p2p.gyp:libstunprober',
         'rtc_p2p_unittest',
         'rtc_sound_tests',
         'rtc_xmllite_unittest',
         'rtc_xmpp_unittest',
         'sound/sound.gyp:rtc_sound',
         '<(DEPTH)/testing/gtest.gyp:gtest',
+        '<(DEPTH)/testing/gmock.gyp:gmock',
       ],
       'conditions': [
         ['OS=="android"', {
@@ -83,7 +85,7 @@
         'webrtc',
       ],
     },
-        {
+    {
       'target_name': 'screenshare_loopback',
       'type': 'executable',
       'sources': [
@@ -147,7 +149,9 @@
         'tools/agc/agc_manager_unittest.cc',
         'video/bitrate_estimator_tests.cc',
         'video/end_to_end_tests.cc',
+        'video/packet_injection_tests.cc',
         'video/send_statistics_proxy_unittest.cc',
+        'video/video_capture_input_unittest.cc',
         'video/video_decoder_unittest.cc',
         'video/video_encoder_unittest.cc',
         'video/video_send_stream_tests.cc',
@@ -171,6 +175,18 @@
         ['OS=="android"', {
           'dependencies': [
             '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
+          ],
+        }],
+        ['enable_protobuf==1', {
+          'defines': [
+            'ENABLE_RTC_EVENT_LOG',
+          ],
+          'dependencies': [
+            'webrtc.gyp:rtc_event_log',
+            'webrtc.gyp:rtc_event_log_proto',
+          ],
+          'sources': [
+            'video/rtc_event_log_unittest.cc',
           ],
         }],
       ],

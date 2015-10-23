@@ -19,7 +19,6 @@ class FakeCompositorDependencies : public CompositorDependencies {
   ~FakeCompositorDependencies() override;
 
   // CompositorDependencies implementation.
-  bool IsImplSidePaintingEnabled() override;
   bool IsGpuRasterizationForced() override;
   bool IsGpuRasterizationEnabled() override;
   int GetGpuRasterizationMSAASampleCount() override;
@@ -27,9 +26,9 @@ class FakeCompositorDependencies : public CompositorDependencies {
   bool IsDistanceFieldTextEnabled() override;
   bool IsZeroCopyEnabled() override;
   bool IsOneCopyEnabled() override;
+  bool IsPersistentGpuMemoryBufferEnabled() override;
   bool IsElasticOverscrollEnabled() override;
-  bool UseSingleThreadScheduler() override;
-  uint32 GetImageTextureTarget() override;
+  std::vector<unsigned> GetImageTextureTargets() override;
   scoped_refptr<base::SingleThreadTaskRunner>
   GetCompositorMainThreadTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner>
@@ -42,17 +41,13 @@ class FakeCompositorDependencies : public CompositorDependencies {
       int routing_id) override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
   bool IsGatherPixelRefsEnabled() override;
-
-  void set_use_single_thread_scheduler(bool use) {
-    use_single_thread_scheduler_ = use;
-  }
+  bool IsThreadedAnimationEnabled() override;
 
  private:
   cc::TestSharedBitmapManager shared_bitmap_manager_;
   cc::TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   cc::TestTaskGraphRunner task_graph_runner_;
   FakeRendererScheduler renderer_scheduler_;
-  bool use_single_thread_scheduler_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeCompositorDependencies);
 };

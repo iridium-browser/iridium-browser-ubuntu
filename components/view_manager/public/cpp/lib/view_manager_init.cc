@@ -5,6 +5,7 @@
 #include "components/view_manager/public/cpp/view_manager_init.h"
 
 #include "components/view_manager/public/cpp/lib/view_manager_client_impl.h"
+#include "components/view_manager/public/cpp/view_manager_delegate.h"
 #include "mojo/application/public/cpp/application_impl.h"
 
 namespace mojo {
@@ -30,12 +31,19 @@ class ViewManagerInit::ClientFactory
 ViewManagerInit::ViewManagerInit(ApplicationImpl* app,
                                  ViewManagerDelegate* delegate,
                                  ViewManagerRootClient* root_client)
-    : app_(app), delegate_(delegate), client_factory_(new ClientFactory(this)) {
-  ApplicationConnection* connection =
-      app_->ConnectToApplication("mojo:view_manager");
-  connection->AddService(client_factory_.get());
-  connection->ConnectToService(&service_);
-  connection->ConnectToService(&view_manager_root_);
+    : app_(app),
+      connection_(nullptr),
+      delegate_(delegate),
+      client_factory_(new ClientFactory(this)) {
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  request->url = mojo::String::From("mojo:view_manager");
+  connection_ = app_->ConnectToApplication(request.Pass());
+
+  // The view_manager will request a ViewManagerClient service for each
+  // ViewManagerRoot created.
+  connection_->AddService<ViewManagerClient>(client_factory_.get());
+  connection_->ConnectToService(&view_manager_root_);
+
   if (root_client) {
     root_client_binding_.reset(new Binding<ViewManagerRootClient>(root_client));
     ViewManagerRootClientPtr root_client_ptr;
@@ -44,15 +52,11 @@ ViewManagerInit::ViewManagerInit(ApplicationImpl* app,
   }
 }
 
-ViewManagerInit::~ViewManagerInit() {
-}
+ViewManagerInit::~ViewManagerInit() {}
 
 void ViewManagerInit::OnCreate(InterfaceRequest<ViewManagerClient> request) {
   // TODO(sky): straighten out lifetime.
-  const bool delete_on_error = false;
-  ViewManagerClientImpl* client = new ViewManagerClientImpl(
-      delegate_, app_->shell(), request.Pass(), delete_on_error);
-  client->SetViewManagerService(service_.Pass());
+  new ViewManagerClientImpl(delegate_, app_->shell(), request.Pass());
 }
 
 }  // namespace mojo

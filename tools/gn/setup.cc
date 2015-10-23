@@ -157,8 +157,6 @@ Setup::Setup()
       loader_(new LoaderImpl(&build_settings_)),
       builder_(new Builder(loader_.get())),
       root_build_file_("//BUILD.gn"),
-      check_for_bad_items_(true),
-      check_for_unused_overrides_(true),
       check_public_headers_(false),
       dotfile_settings_(&build_settings_, std::string()),
       dotfile_scope_(&dotfile_settings_),
@@ -234,14 +232,12 @@ void Setup::RunPreMessageLoop() {
 
 bool Setup::RunPostMessageLoop() {
   Err err;
-  if (check_for_bad_items_) {
+  if (build_settings_.check_for_bad_items()) {
     if (!builder_->CheckForBadItems(&err)) {
       err.PrintToStdout();
       return false;
     }
-  }
 
-  if (check_for_unused_overrides_) {
     if (!build_settings_.build_args().VerifyAllOverridesUsed(&err)) {
       // TODO(brettw) implement a system of warnings. Until we have a better
       // system, print the error but don't return failure.
@@ -374,7 +370,7 @@ bool Setup::SaveArgsToFile() {
 #if defined(OS_WIN)
   // Use Windows lineendings for this file since it will often open in
   // Notepad which can't handle Unix ones.
-  ReplaceSubstringsAfterOffset(&contents, 0, "\n", "\r\n");
+  base::ReplaceSubstringsAfterOffset(&contents, 0, "\n", "\r\n");
 #endif
   if (base::WriteFile(build_arg_file, contents.c_str(),
       static_cast<int>(contents.size())) == -1) {
@@ -447,13 +443,13 @@ bool Setup::FillSourceDir(const base::CommandLine& cmdline) {
 }
 
 bool Setup::FillBuildDir(const std::string& build_dir, bool require_exists) {
+  Err err;
   SourceDir resolved =
       SourceDirForCurrentDirectory(build_settings_.root_path()).
-    ResolveRelativeDir(build_dir, build_settings_.root_path_utf8());
-  if (resolved.is_null()) {
-    Err(Location(), "Couldn't resolve build directory.",
-        "The build directory supplied (\"" + build_dir + "\") was not valid.").
-        PrintToStdout();
+    ResolveRelativeDir(Value(nullptr, build_dir), &err,
+        build_settings_.root_path_utf8());
+  if (err.has_error()) {
+    err.PrintToStdout();
     return false;
   }
 
@@ -622,7 +618,11 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
         err.PrintToStdout();
         return false;
       }
-      whitelist->insert(current_dir.ResolveRelativeFile(item.string_value()));
+      whitelist->insert(current_dir.ResolveRelativeFile(item, &err));
+      if (err.has_error()) {
+        err.PrintToStdout();
+        return false;
+      }
     }
     build_settings_.set_exec_script_whitelist(whitelist.Pass());
   }

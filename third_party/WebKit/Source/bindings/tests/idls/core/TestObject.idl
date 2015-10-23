@@ -188,7 +188,6 @@ interface TestObject {
     [CustomElementCallbacks] readonly attribute long customElementsCallbacksReadonlyLongAttribute;
     [DeprecateAs=LongAttribute] attribute long deprecatedLongAttribute;
     [EnforceRange] attribute long enforceRangeLongAttribute;
-    [ExposeJSAccessors] attribute long exposeJSAccessorsLongAttribute;
     [ImplementedAs=implementedAsName] attribute long implementedAsLongAttribute;
     [Custom, ImplementedAs=implementedAsNameWithCustom] attribute long customImplementedAsLongAttribute;
     [Custom=Getter, ImplementedAs=implementedAsNameWithCustomGetter] attribute long customGetterImplementedAsLongAttribute;
@@ -238,7 +237,6 @@ interface TestObject {
     [Reflect, ReflectOnly=("empty","missing","invalid","a-normal"), ReflectEmpty="empty", ReflectMissing="missing", ReflectInvalid="invalid"] readonly attribute DOMString limitedWithEmptyMissingInvalidAttribute;
 
     [Replaceable] readonly attribute long replaceableReadonlyLongAttribute;
-    [Replaceable, ExposeJSAccessors] readonly attribute long replaceableReadonlyLongAccessor;
     [PutForwards=href] readonly attribute TestNode locationPutForwards;
     [RuntimeEnabled=FeatureName] attribute long runtimeEnabledLongAttribute;
     [Conditional=CONDITION, RuntimeEnabled=FeatureName] attribute long conditionalRuntimeEnabledLongAttribute;
@@ -341,6 +339,8 @@ interface TestObject {
     void voidMethodArrayBufferArg(ArrayBuffer arrayBufferArg);
     void voidMethodArrayBufferOrNullArg(ArrayBuffer? arrayBufferArg);
     void voidMethodArrayBufferViewArg(ArrayBufferView arrayBufferViewArg);
+    void voidMethodFlexibleArrayBufferViewArg([FlexibleArrayBufferView] ArrayBufferView arrayBufferViewArg);
+    void voidMethodFlexibleArrayBufferViewTypedArg([FlexibleArrayBufferView] Float32Array typedArrayBufferViewArg);
     void voidMethodFloat32ArrayArg(Float32Array float32ArrayArg);
     void voidMethodInt32ArrayArg(Int32Array int32ArrayArg);
     void voidMethodUint8ArrayArg(Uint8Array uint8ArrayArg);
@@ -376,6 +376,8 @@ interface TestObject {
     void voidMethodDoubleOrNullOrDOMStringArg((double? or DOMString) arg);
     void voidMethodDOMStringOrArrayBufferOrArrayBufferViewArg((DOMString or ArrayBuffer or ArrayBufferView) arg);
     void voidMethodArrayBufferOrArrayBufferViewOrDictionaryArg((ArrayBuffer or ArrayBufferView or Dictionary) arg);
+    // Array of Union types
+    void voidMethodArrayOfDoubleOrDOMStringArg((double or DOMString)... arg);
     // Currently only used on interface type arguments
     void voidMethodTestInterfaceEmptyOrNullArg(TestInterfaceEmpty? nullableTestInterfaceEmptyArg);
     // Callback interface types
@@ -517,6 +519,7 @@ interface TestObject {
     [Conditional=CONDITION] void conditionalConditionVoidMethod();
     [Conditional=CONDITION] static void conditionalConditionStaticVoidMethod();
     [Custom] void customVoidMethod();
+    [Custom=CallPrologue] void customCallPrologueVoidMethod();
     [Custom=CallEpilogue] void customCallEpilogueVoidMethod();
     [Conditional=CONDITION, Custom] void conditionalConditionCustomVoidMethod();
     [CustomElementCallbacks] void customElementCallbacksVoidMethod();
@@ -544,6 +547,7 @@ interface TestObject {
     [NotEnumerable] void notEnumerableVoidMethod();
     [PerWorldBindings] void perWorldBindingsVoidMethod();
     [PerWorldBindings] void perWorldBindingsVoidMethodTestInterfaceEmptyArg(TestInterfaceEmpty testInterfaceEmptyArg);
+    [PostMessage, RaisesException] void postMessage(SerializedScriptValue message, optional sequence<Transferable> transfer);
     [LogActivity, LogAllWorlds, PerWorldBindings] void activityLoggingForAllWorldsPerWorldBindingsVoidMethod();
     [LogActivity, PerWorldBindings] void activityLoggingForIsolatedWorldsPerWorldBindingsVoidMethod();
     [RaisesException] void raisesExceptionVoidMethod();

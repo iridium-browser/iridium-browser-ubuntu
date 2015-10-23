@@ -7,6 +7,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/onc/onc_constants.h"
@@ -136,6 +137,23 @@ class TestDelegate : public NetworkingPrivateDelegate {
     StringResult(success_callback, failure_callback);
   }
 
+  void UnlockCellularSim(const std::string& guid,
+                         const std::string& pin,
+                         const std::string& puk,
+                         const VoidCallback& success_callback,
+                         const FailureCallback& failure_callback) override {
+    VoidResult(success_callback, failure_callback);
+  }
+
+  void SetCellularSimState(const std::string& guid,
+                           bool require_pin,
+                           const std::string& current_pin,
+                           const std::string& new_pin,
+                           const VoidCallback& success_callback,
+                           const FailureCallback& failure_callback) override {
+    VoidResult(success_callback, failure_callback);
+  }
+
   // Synchronous methods
   scoped_ptr<base::ListValue> GetEnabledNetworkTypes() override {
     scoped_ptr<base::ListValue> result;
@@ -151,10 +169,10 @@ class TestDelegate : public NetworkingPrivateDelegate {
     if (fail_)
       return result.Pass();
     result.reset(new DeviceStateList);
-    scoped_ptr<core_api::networking_private::DeviceStateProperties> properties(
-        new core_api::networking_private::DeviceStateProperties);
-    properties->type = core_api::networking_private::NETWORK_TYPE_ETHERNET;
-    properties->state = core_api::networking_private::DEVICE_STATE_TYPE_ENABLED;
+    scoped_ptr<api::networking_private::DeviceStateProperties> properties(
+        new api::networking_private::DeviceStateProperties);
+    properties->type = api::networking_private::NETWORK_TYPE_ETHERNET;
+    properties->state = api::networking_private::DEVICE_STATE_TYPE_ENABLED;
     result->push_back(properties.Pass());
     return result.Pass();
   }
@@ -276,10 +294,10 @@ class NetworkingPrivateApiTest : public ExtensionApiTest {
     }
   }
 
-  static KeyedService* GetNetworkingPrivateDelegate(
+  static scoped_ptr<KeyedService> GetNetworkingPrivateDelegate(
       content::BrowserContext* profile) {
     CHECK(s_test_delegate_);
-    return s_test_delegate_;
+    return make_scoped_ptr(s_test_delegate_);
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -430,6 +448,14 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, GetCaptivePortalStatus) {
   EXPECT_TRUE(RunNetworkingSubtest("getCaptivePortalStatus")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, UnlockCellularSim) {
+  EXPECT_TRUE(RunNetworkingSubtest("unlockCellularSim")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, SetCellularSimState) {
+  EXPECT_TRUE(RunNetworkingSubtest("setCellularSimState")) << message_;
+}
+
 // Test failure case
 
 class NetworkingPrivateApiTestFail : public NetworkingPrivateApiTest {
@@ -520,6 +546,14 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, GetWifiTDLSStatus) {
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, GetCaptivePortalStatus) {
   EXPECT_FALSE(RunNetworkingSubtest("getCaptivePortalStatus")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, UnlockCellularSim) {
+  EXPECT_FALSE(RunNetworkingSubtest("unlockCellularSim")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, SetCellularSimState) {
+  EXPECT_FALSE(RunNetworkingSubtest("setCellularSimState")) << message_;
 }
 
 #endif // defined(OS_WIN)

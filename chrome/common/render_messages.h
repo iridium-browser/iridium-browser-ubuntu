@@ -4,30 +4,19 @@
 
 // Multiply-included file, no traditional include guard.
 #include <stdint.h>
-#include <map>
-#include <set>
 #include <string>
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/memory/shared_memory.h"
-#include "base/process/process.h"
 #include "base/strings/string16.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "base/values.h"
-#include "build/build_config.h"
 #include "chrome/common/common_param_traits.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
-#include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/search_provider.h"
 #include "chrome/common/web_application_info.h"
-#include "components/content_settings/core/common/content_settings.h"
-#include "components/content_settings/core/common/content_settings_pattern.h"
-#include "components/nacl/common/nacl_types.h"
+#include "components/omnibox/common/omnibox_focus_state.h"
 #include "content/public/common/common_param_traits.h"
-#include "content/public/common/referrer.h"
 #include "content/public/common/top_controls_state.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
@@ -35,10 +24,6 @@
 #include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/base/window_open_disposition.h"
-#include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/ipc/gfx_param_traits.h"
 
 // Singly-included section for enums and custom IPC traits.
 #ifndef CHROME_COMMON_RENDER_MESSAGES_H_
@@ -63,7 +48,7 @@ template <>
 struct ParamTraits<ContentSettingsPattern> {
   typedef ContentSettingsPattern param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -80,8 +65,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusChangeReason,
 IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusState, OMNIBOX_FOCUS_STATE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(search_provider::OSDDType,
                           search_provider::OSDD_TYPE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(search_provider::InstallState,
-                          search_provider::INSTALLED_STATE_LAST)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(search_provider::InstallState,
+                              search_provider::DENIED,
+                              search_provider::INSTALLED_STATE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageAlignment,
                           THEME_BKGRND_IMAGE_ALIGN_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageTiling, THEME_BKGRND_IMAGE_LAST)
@@ -134,6 +120,8 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(InstantMostVisitedItem)
   IPC_STRUCT_TRAITS_MEMBER(url)
   IPC_STRUCT_TRAITS_MEMBER(title)
+  IPC_STRUCT_TRAITS_MEMBER(thumbnail)
+  IPC_STRUCT_TRAITS_MEMBER(favicon)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(RendererContentSettingRules)
@@ -163,21 +151,6 @@ IPC_STRUCT_TRAITS_BEGIN(ThemeBackgroundInfo)
   IPC_STRUCT_TRAITS_MEMBER(image_height)
   IPC_STRUCT_TRAITS_MEMBER(has_attribution)
   IPC_STRUCT_TRAITS_MEMBER(logo_alternate)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::ResourceTypeStat)
-  IPC_STRUCT_TRAITS_MEMBER(count)
-  IPC_STRUCT_TRAITS_MEMBER(size)
-  IPC_STRUCT_TRAITS_MEMBER(liveSize)
-  IPC_STRUCT_TRAITS_MEMBER(decodedSize)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::ResourceTypeStats)
-  IPC_STRUCT_TRAITS_MEMBER(images)
-  IPC_STRUCT_TRAITS_MEMBER(cssStyleSheets)
-  IPC_STRUCT_TRAITS_MEMBER(scripts)
-  IPC_STRUCT_TRAITS_MEMBER(xslStyleSheets)
-  IPC_STRUCT_TRAITS_MEMBER(fonts)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::UsageStats)
@@ -228,18 +201,11 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_WebUIJavaScript,
 IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetContentSettingRules,
                      RendererContentSettingRules /* rules */)
 
-// Asks the renderer to send back stats on the WebCore cache broken down by
-// resource types.
-IPC_MESSAGE_CONTROL0(ChromeViewMsg_GetCacheResourceStats)
-
 // Tells the renderer to create a FieldTrial, and by using a 100% probability
 // for the FieldTrial, forces the FieldTrial to have assigned group name.
 IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetFieldTrialGroup,
                      std::string /* field trial name */,
                      std::string /* group name that was assigned. */)
-
-// Asks the renderer to send back V8 heap stats.
-IPC_MESSAGE_CONTROL0(ChromeViewMsg_GetV8HeapStats)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetPageSequenceNumber,
                     int /* page_seq_no */)
@@ -292,6 +258,10 @@ IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetIsIncognitoProcess,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetClientSidePhishingDetection,
                     bool /* enable_phishing_detection */)
 
+// Reloads the image selected by the most recently opened context menu
+// (if there indeed is an image at that location).
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_RequestReloadImageForContextNode)
+
 // Asks the renderer for a thumbnail of the image selected by the most
 // recently opened context menu, if there is one. If the image's area
 // is greater than thumbnail_min_area it will be downscaled to
@@ -324,13 +294,6 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_RequestThumbnailForContextNode_ACK,
 // ChromeViewHostMsg_DidGetWebApplicationInfo.
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_GetWebApplicationInfo)
 
-#if defined(OS_ANDROID)
-// Asks the renderer to return information about the given meta tag.
-IPC_MESSAGE_ROUTED2(ChromeViewMsg_RetrieveMetaTagContent,
-                    GURL /* expected_url */,
-                    std::string /* tag_name */ )
-#endif  // defined(OS_ANDROID)
-
 // chrome.principals messages ------------------------------------------------
 
 // Message sent from the renderer to the browser to get the list of browser
@@ -352,6 +315,11 @@ IPC_MESSAGE_CONTROL0(ChromeViewHostMsg_ShowBrowserAccountManagementUI)
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_NetErrorInfo,
                     int /* DNS probe status */)
 
+// Tells the renderer whether or not there is a local diagnostics service that
+// can be run via ChromeViewHostMsg_RunNetworkDiagnostics messages.
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetCanShowNetworkDiagnosticsDialog,
+                    bool /* can_show_network_diagnostics_dialog */)
+
 // Provides the information needed by the renderer process to contact a
 // navigation correction service.  Handled by the NetErrorHelper.
 IPC_MESSAGE_ROUTED5(ChromeViewMsg_SetNavigationCorrectionInfo,
@@ -360,6 +328,9 @@ IPC_MESSAGE_ROUTED5(ChromeViewMsg_SetNavigationCorrectionInfo,
                     std::string /* origin_country */,
                     std::string /* API key to use */,
                     GURL /* Google Search URL to use */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RunNetworkDiagnostics,
+                    GURL /* failed_url */)
 
 //-----------------------------------------------------------------------------
 // Misc messages
@@ -481,11 +452,6 @@ IPC_SYNC_MESSAGE_ROUTED2_1(ChromeViewHostMsg_GetSearchProviderInstallState,
                            GURL /* inquiry url */,
                            search_provider::InstallState /* install */)
 
-// Sends back stats about the V8 heap.
-IPC_MESSAGE_CONTROL2(ChromeViewHostMsg_V8HeapStats,
-                     int /* size of heap (allocated from the OS) */,
-                     int /* bytes in use */)
-
 // Notifies when a plugin couldn't be loaded because it's outdated.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedOutdatedPlugin,
                     int /* placeholder ID */,
@@ -497,11 +463,6 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedUnauthorizedPlugin,
                     base::string16 /* name */,
                     std::string /* plugin group identifier */)
 
-// Provide the browser process with information about the WebCore resource
-// cache and current renderer framerate.
-IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_ResourceTypeStats,
-                     blink::WebCache::ResourceTypeStats)
-
 // Message sent from the renderer to the browser to notify it of a
 // window.print() call which should cancel the prerender. The message is sent
 // only when the renderer is prerendering.
@@ -509,14 +470,6 @@ IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_CancelPrerenderForPrinting)
 
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_DidGetWebApplicationInfo,
                     WebApplicationInfo)
-
-#if defined(OS_ANDROID)
-IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_DidRetrieveMetaTagContent,
-                    bool /* success */,
-                    std::string /* tag_name */,
-                    std::string /* tag_content */,
-                    GURL /* expected_url */)
-#endif  // defined(OS_ANDROID)
 
 // Logs events from InstantExtended New Tab Pages.
 IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_LogEvent,
@@ -606,9 +559,14 @@ IPC_SYNC_MESSAGE_CONTROL0_1(ChromeViewHostMsg_IsCrashReportingEnabled,
 
 // Tells the browser process whether the web page wants the banner to be shown.
 // This is a reply from ChromeViewMsg_AppBannerPromptRequest.
-IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_AppBannerPromptReply,
+IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_AppBannerPromptReply,
                     int /* request_id */,
-                    blink::WebAppBannerPromptReply /* reply */)
+                    blink::WebAppBannerPromptReply /* reply */,
+                    std::string /* referrer */)
+
+// Tells the browser to restart the app banner display pipeline.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RequestShowAppBanner,
+                    int32_t /* request_id */)
 
 // Sent by the renderer to indicate that a fields trial has been activated.
 IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_FieldTrialActivated,

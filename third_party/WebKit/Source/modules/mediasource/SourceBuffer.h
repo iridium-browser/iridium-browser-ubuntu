@@ -58,7 +58,7 @@ class SourceBuffer final
     , public ActiveDOMObject
     , public FileReaderLoaderClient
     , public WebSourceBufferClient {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<SourceBuffer>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(SourceBuffer);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SourceBuffer);
     DEFINE_WRAPPERTYPEINFO();
 public:
@@ -66,13 +66,13 @@ public:
     static const AtomicString& segmentsKeyword();
     static const AtomicString& sequenceKeyword();
 
-    virtual ~SourceBuffer();
+    ~SourceBuffer() override;
 
     // SourceBuffer.idl methods
     const AtomicString& mode() const { return m_mode; }
     void setMode(const AtomicString&, ExceptionState&);
     bool updating() const { return m_updating; }
-    PassRefPtrWillBeRawPtr<TimeRanges> buffered(ExceptionState&) const;
+    TimeRanges* buffered(ExceptionState&) const;
     double timestampOffset() const;
     void setTimestampOffset(double, ExceptionState&);
     void appendBuffer(PassRefPtr<DOMArrayBuffer> data, ExceptionState&);
@@ -92,18 +92,20 @@ public:
     void removedFromMediaSource();
 
     // ActiveDOMObject interface
-    virtual bool hasPendingActivity() const override;
-    virtual void suspend() override;
-    virtual void resume() override;
-    virtual void stop() override;
+    bool hasPendingActivity() const override;
+    void suspend() override;
+    void resume() override;
+    void stop() override;
 
     // EventTarget interface
-    virtual ExecutionContext* executionContext() const override;
-    virtual const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
+    const AtomicString& interfaceName() const override;
 
     // WebSourceBufferClient interface
-    virtual void initializationSegmentReceived() override;
+    void initializationSegmentReceived() override;
 
+    // Oilpan: eagerly release owned m_webSourceBuffer
+    EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
 private:
@@ -112,8 +114,11 @@ private:
     bool isRemoved() const;
     void scheduleEvent(const AtomicString& eventName);
 
+    bool prepareAppend(size_t newDataSize, ExceptionState&);
+    bool evictCodedFrames(size_t newDataSize);
     void appendBufferInternal(const unsigned char*, unsigned, ExceptionState&);
     void appendBufferAsyncPart();
+    void appendError(bool decodeError);
 
     void removeAsyncPart();
 
@@ -123,10 +128,10 @@ private:
     void clearAppendStreamState();
 
     // FileReaderLoaderClient interface
-    virtual void didStartLoading() override;
-    virtual void didReceiveDataForClient(const char* data, unsigned dataLength) override;
-    virtual void didFinishLoading() override;
-    virtual void didFail(FileError::ErrorCode) override;
+    void didStartLoading() override;
+    void didReceiveDataForClient(const char* data, unsigned dataLength) override;
+    void didFinishLoading() override;
+    void didFail(FileError::ErrorCode) override;
 
     OwnPtr<WebSourceBuffer> m_webSourceBuffer;
     Member<MediaSource> m_source;

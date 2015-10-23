@@ -18,8 +18,6 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
@@ -28,9 +26,11 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_input.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/autocomplete_provider.h"
+#include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_provider.h"
+#include "components/omnibox/browser/omnibox_popup_model.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -141,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
     autocomplete_controller->Start(AutocompleteInput(
         base::ASCIIToUTF16("chrome"), base::string16::npos, std::string(),
         GURL(), metrics::OmniboxEventProto::NTP, true, false, true, false,
-        ChromeAutocompleteSchemeClassifier(browser()->profile())));
+        false, ChromeAutocompleteSchemeClassifier(browser()->profile())));
 
     EXPECT_TRUE(autocomplete_controller->done());
     EXPECT_FALSE(location_bar->GetDestinationURL().is_valid());

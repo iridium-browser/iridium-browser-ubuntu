@@ -22,6 +22,7 @@
         '../third_party/re2/re2.gyp:re2',
         'password_manager_core_common',
         'password_manager_core_browser_proto',
+        'url_formatter/url_formatter.gyp:url_formatter',
       ],
       'include_dirs': [
         '..',
@@ -46,6 +47,13 @@
         'password_manager/core/browser/affiliation_utils.h',
         'password_manager/core/browser/browser_save_password_progress_logger.cc',
         'password_manager/core/browser/browser_save_password_progress_logger.h',
+        'password_manager/core/browser/credential_manager_password_form_manager.cc',
+        'password_manager/core/browser/credential_manager_password_form_manager.h',
+        'password_manager/core/browser/credential_manager_pending_request_task.cc',
+        'password_manager/core/browser/credential_manager_pending_request_task.h',
+        'password_manager/core/browser/credential_manager_pending_require_user_mediation_task.cc',
+        'password_manager/core/browser/credential_manager_pending_require_user_mediation_task.h',
+        'password_manager/core/browser/credentials_filter.h',
         'password_manager/core/browser/export/csv_writer.cc',
         'password_manager/core/browser/export/csv_writer.h',
         'password_manager/core/browser/facet_manager.cc',
@@ -53,6 +61,7 @@
         'password_manager/core/browser/facet_manager_host.h',
         'password_manager/core/browser/import/csv_reader.cc',
         'password_manager/core/browser/import/csv_reader.h',
+        'password_manager/core/browser/keychain_migration_status_mac.h',
         'password_manager/core/browser/log_receiver.h',
         'password_manager/core/browser/log_router.cc',
         'password_manager/core/browser/log_router.h',
@@ -184,6 +193,29 @@
         'password_manager/core/common/password_manager_ui.h',
       ],
     },
+    {
+      # GN version: //components/password_manager/sync/browser
+      'target_name': 'password_manager_sync_browser',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../google_apis/google_apis.gyp:google_apis',
+        '../net/net.gyp:net',
+        '../sync/sync.gyp:sync',
+        'autofill_core_common',
+        'password_manager_core_browser',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        # Note: sources list duplicated in GN build.
+        'password_manager/sync/browser/password_model_worker.cc',
+        'password_manager/sync/browser/password_model_worker.h',
+        'password_manager/sync/browser/sync_store_result_filter.cc',
+        'password_manager/sync/browser/sync_store_result_filter.h',
+      ],
+    },
   ],
   'conditions': [
     ['OS != "ios"', {
@@ -252,14 +284,14 @@
           ],
           'sources': [
             # Note: sources list duplicated in GN build.
+            'password_manager/content/browser/bad_message.cc',
+            'password_manager/content/browser/bad_message.h',
             'password_manager/content/browser/content_password_manager_driver.cc',
             'password_manager/content/browser/content_password_manager_driver.h',
             'password_manager/content/browser/content_password_manager_driver_factory.cc',
             'password_manager/content/browser/content_password_manager_driver_factory.h',
             'password_manager/content/browser/credential_manager_dispatcher.cc',
             'password_manager/content/browser/credential_manager_dispatcher.h',
-            'password_manager/content/browser/credential_manager_password_form_manager.cc',
-            'password_manager/content/browser/credential_manager_password_form_manager.h',
             'password_manager/content/browser/password_manager_internals_service_factory.cc',
             'password_manager/content/browser/password_manager_internals_service_factory.h',
           ],

@@ -3,7 +3,7 @@
   -- Use of this source code is governed by a BSD-style license that can be
   -- found in the LICENSE file.
   -->
-<html>
+<html i18n-values="dir:textdirection">
 <head>
   <link rel="stylesheet" href="chrome://resources/css/text_defaults.css">
   <link rel="stylesheet" href="../file_manager/foreground/css/list.css">
@@ -12,106 +12,110 @@
   <link rel="stylesheet" href="../file_manager/foreground/css/share_dialog.css">
   <link rel="stylesheet" href="css/gallery.css">
 
-  <!-- Don't load gallery_scripts.js when flattening is disabled -->
-  <if expr="False"><!-- </if>
-    <script src="js/gallery_scripts.js"></script>
-  <if expr="False"> --></if>
+  <script src="chrome://resources/js/polymer_config.js"></script>
+  <script src="chrome://resources/js/util.js"></script>
 
-  <if expr="False">
-    <!-- This section is used when the file manager is loaded with
-         'filemgr-ext-path' command-line flag. -->
-    <!-- Keep the list in sync with gallery_scripts.js. -->
-    <script src="../file_manager/common/js/metrics_base.js"></script>
-    <script src="../file_manager/common/js/metrics.js"></script>
-    <script src="../file_manager/foreground/js/metrics_start.js"></script>
+  <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
+  <link rel="import" href="chrome://resources/polymer/v1_0/paper-checkbox/paper-checkbox.html">
+  <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input.html">
+  <link rel="import" href="chrome://resources/polymer/v1_0/paper-ripple/paper-ripple.html">
+  <link rel="import" href="chrome://resources/polymer/v1_0/paper-slider/paper-slider.html">
+  <link rel="import" href="chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/elements/files_toast.html">
+  <link rel="import" href="chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/elements/files_toggle_ripple.html">
 
-    <!-- Loads the client of the image loader extension -->
-    <script src="../file_manager/common/js/lru_cache.js"></script>
-    <script src="chrome-extension://pmfjbimdmchhbnneeidfognadeopoehp/image_loader_client.js"></script>
-
-    <script src="chrome://resources/js/cr.js"></script>
-    <script src="chrome://resources/js/event_tracker.js"></script>
-    <script src="chrome://resources/js/load_time_data.js"></script>
-
-    <script src="chrome://resources/js/cr/ui.js"></script>
-    <script src="chrome://resources/js/cr/event_target.js"></script>
-    <script src="chrome://resources/js/cr/ui/touch_handler.js"></script>
-    <script src="chrome://resources/js/cr/ui/array_data_model.js"></script>
-    <script src="chrome://resources/js/cr/ui/dialogs.js"></script>
-    <script src="chrome://resources/js/cr/ui/list_item.js"></script>
-    <script src="chrome://resources/js/cr/ui/list_selection_model.js"></script>
-    <script src="chrome://resources/js/cr/ui/list_single_selection_model.js"></script>
-    <script src="chrome://resources/js/cr/ui/list_selection_controller.js"></script>
-    <script src="chrome://resources/js/cr/ui/list.js"></script>
-    <script src="chrome://resources/js/cr/ui/grid.js"></script>
-
-    <!-- Base classes. ->
-    <script src="../file_manager/foreground/js/metadata/metadata_cache_set.js"></script>
-    <script src="../file_manager/foreground/js/metadata/new_metadata_provider.js"></script>
-
-    <script src="../file_manager/common/js/async_util.js"></script>
-    <script src="../file_manager/common/js/file_type.js"></script>
-    <script src="../file_manager/common/js/volume_manager_common.js"></script>
-
-    <script src="../file_manager/foreground/js/metadata/content_metadata_provider.js"></script>
-    <script src="../file_manager/foreground/js/metadata/exif_constants.js"></script>
-    <script src="../file_manager/foreground/js/metadata/external_metadata_provider.js"></script>
-    <script src="../file_manager/foreground/js/metadata/file_system_metadata_provider.js"></script>
-    <script src="../file_manager/foreground/js/metadata/metadata_cache_item.js"></script>
-    <script src="../file_manager/foreground/js/metadata/metadata_item.js"></script>
-    <script src="../file_manager/foreground/js/metadata/metadata_model.js"></script>
-    <script src="../file_manager/foreground/js/metadata/multi_metadata_provider.js"></script>
-    <script src="../file_manager/foreground/js/metadata/thumbnail_model.js"></script>
-    <script src="../file_manager/foreground/js/mouse_inactivity_watcher.js"></script>
-    <script src="../file_manager/foreground/js/share_client.js"></script>
-    <script src="../file_manager/foreground/js/thumbnail_loader.js"></script>
-    <script src="../file_manager/foreground/js/ui/file_manager_dialog_base.js"></script>
-    <script src="../file_manager/foreground/js/ui/share_dialog.js"></script>
-    <script src="../file_manager/foreground/js/volume_manager_wrapper.js"></script>
-
-    <script src="js/image_editor/image_util.js"></script>
-    <script src="js/image_editor/viewport.js"></script>
-    <script src="js/image_editor/image_buffer.js"></script>
-    <script src="js/image_editor/image_view.js"></script>
-    <script src="js/image_editor/commands.js"></script>
-    <script src="js/image_editor/image_editor.js"></script>
-    <script src="js/image_editor/image_transform.js"></script>
-    <script src="js/image_editor/image_adjust.js"></script>
-    <script src="js/image_editor/filter.js"></script>
-    <script src="js/image_editor/image_encoder.js"></script>
-    <script src="js/image_editor/exif_encoder.js"></script>
-
-    <script src="js/entry_list_watcher.js"></script>
-    <script src="js/error_banner.js"></script>
-    <script src="js/gallery.js"></script>
-    <script src="js/gallery_data_model.js"></script>
-    <script src="js/gallery_item.js"></script>
-    <script src="js/mosaic_mode.js"></script>
-    <script src="js/ribbon.js"></script>
-    <script src="js/slide_mode.js"></script>
-  </if>
+  <script src="js/gallery_scripts.js"></script>
+  <style is="custom-style">
+    paper-checkbox {
+      --paper-checkbox-label-color: white;
+      --paper-checkbox-checked-color: white;
+      --paper-checkbox-checked-ink-color: white;
+      --paper-checkbox-checkmark-color: black;
+      --paper-checkbox-unchecked-color: white;
+      --paper-checkbox-unchecked-ink-color: white;
+    }
+    paper-input-container {
+      --paper-input-container-color: rgba(255, 255, 255, 0.2);
+      --paper-input-container-focus-color: white;
+      --paper-input-container-underline-focus: {
+        height: 1px;
+      }
+    }
+    paper-slider {
+      --paper-slider-active-color: white;
+      --paper-slider-knob-color: white;
+      --paper-slider-secondary-color: transparent;
+    }
+  </style>
 </head>
 <body>
   <div class="gallery">
-    <div id="content" class="content"></div>
-    <div id="header" class="header tool dimmable"></div>
-    <div id="toolbar" class="toolbar tool dimmable">
-      <div class="filename-spacer"></div>
-      <div class="middle-spacer">
-        <div class="ribbon-spacer"></div>
-        <div class="edit-bar-spacer"></div>
+    <div id="content" class="content">
+      <div class="thumbnail-view"></div>
+    </div>
+    <div id="top-toolbar" class="toolbar top tool dimmable">
+      <div class="filename-spacer">
+        <!-- Change this to use paper-input after ChromeVox supports shadow DOM. -->
+        <paper-input-container id="rename-input" no-label-float>
+          <input spellcheck="false"></input>
+        </paper-input-container>
       </div>
       <div class="button-spacer">
-        <button class="button mode"></button>
-        <button class="button slideshow"></button>
-        <button class="button edit"></button>
-        <button class="button print"></button>
-        <button class="delete"></button>
-        <button class="share"></button>
+        <!-- Use button element for edit button to implement toggle button with
+          -- custom ripple effect. -->
+        <button class="edit icon-button" i18n-values="title:GALLERY_EDIT"
+                disabled>
+          <div class="icon"></div>
+          <files-toggle-ripple></files-toggle-ripple>
+        </button>
+        <paper-button class="print icon-button"
+                      i18n-values="title:GALLERY_PRINT"
+                      disabled></paper-button>
+        <paper-button class="delete icon-button"
+                      i18n-values="title:GALLERY_DELETE"
+                      disabled></paper-button>
+        <!-- Use button element for mode button to implement toggle switch
+          -- button. -->
+        <button class="mode icon-button" disabled>
+          <div class="icon slide-mode" i18n-values="title:GALLERY_SLIDE"></div>
+          <div class="icon thumbnail-mode"
+               i18n-values="title:GALLERY_THUMBNAIL"></div>
+          <paper-ripple></paper-ripple>
+        </button>
+        <paper-button class="slideshow icon-button"
+                      i18n-values="title:GALLERY_SLIDESHOW"
+                      disabled></paper-button>
+        <paper-button class="share icon-button"
+                      i18n-values="title:GALLERY_SHARE"
+                      disabled></paper-button>
+      </div>
+    </div>
+    <div id="bottom-toolbar" class="toolbar bottom tool dimmable">
+      <div class="slide-mode-toolbar">
+        <div class="ribbon-spacer"></div>
+      </div>
+      <div class="edit-mode-toolbar">
+        <div class="options">
+          <paper-checkbox class="overwrite-original"
+                          i18n-content="GALLERY_OVERWRITE_ORIGINAL">
+          </paper-checkbox>
+          <div class="saved" i18n-content="GALLERY_SAVED" hidden></div>
+        </div>
+        <div class="edit-bar-spacer"></div>
+        <div class="exit-button-spacer">
+          <paper-button class="exit" i18n-content="GALLERY_EXIT"></paper-button>
+        </div>
+      </div>
+      <div class="bubble" hidden>
+        <div class="content"></div>
+        <span class="pointer bottom"></span>
+        <div class="close-x"></div>
       </div>
     </div>
     <div class="prompt-wrapper" pos="center">
       <div class="error-banner"></div>
+    </div>
+    <div class="toast-stage">
+      <files-toast></files-toast>
     </div>
   </div>
 </body>

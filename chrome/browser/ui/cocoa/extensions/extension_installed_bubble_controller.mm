@@ -157,7 +157,7 @@ bool ExtensionInstalledBubbleBridge::MaybeShowNow() {
 - (BOOL)showSyncPromo {
   if (type_ == extension_installed_bubble::kBundle)
     return false;
-  return extensions::sync_helper::IsSyncableExtension([self extension]) &&
+  return extensions::sync_helper::IsSyncable([self extension]) &&
       SyncPromoUI::ShouldShowSyncPromo(browser_->profile());
 }
 
@@ -167,6 +167,7 @@ bool ExtensionInstalledBubbleBridge::MaybeShowNow() {
   [self removePageActionPreviewIfNecessary];
   browser_ = NULL;
   [closeButton_ setTrackingEnabled:NO];
+  [promo_ setDelegate:nil];
   [super windowWillClose:notification];
 }
 

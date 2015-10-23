@@ -32,23 +32,24 @@ namespace blink {
 
 using namespace WTF;
 
-CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemUnits)
+CSSParserValueList::CSSParserValueList(CSSParserTokenRange range)
 : m_current(0)
 {
-    usesRemUnits = false;
     Vector<CSSParserValueList*> stack;
     Vector<int> bracketCounts;
     stack.append(this);
     bracketCounts.append(0);
-    unsigned calcDepth = 0;
     while (!range.atEnd()) {
         ASSERT(stack.size() == bracketCounts.size());
         ASSERT(!stack.isEmpty());
-        const CSSParserToken& token = range.consume();
+        const CSSParserToken& token = range.peek();
+        if (token.type() != FunctionToken)
+            range.consume();
         CSSParserValue value;
         switch (token.type()) {
         case FunctionToken: {
             if (token.valueEqualsIgnoringCase("url")) {
+                range.consume();
                 const CSSParserToken& next = range.consumeIncludingWhitespace();
                 if (next.type() == BadStringToken || range.consume().type() != RightParenthesisToken) {
                     destroyAndClear();
@@ -57,39 +58,41 @@ CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemU
                 ASSERT(next.type() == StringToken);
                 value.id = CSSValueInvalid;
                 value.isInt = false;
-                value.unit = CSSPrimitiveValue::CSS_URI;
+                value.setUnit(CSSPrimitiveValue::UnitType::URI);
                 value.string = next.value();
                 break;
             }
 
+            value.id = CSSValueInvalid;
+            value.isInt = false;
+
+            CSSValueID id = cssValueKeywordID(token.value());
+            if (id == CSSValueCalc || id == CSSValueWebkitCalc) {
+                value.m_unit = CSSParserValue::CalcFunction;
+                value.calcFunction = new CSSParserCalcFunction(range.consumeBlock());
+                break;
+            }
+            range.consume();
+            value.m_unit = CSSParserValue::Function;
             CSSParserFunction* function = new CSSParserFunction;
-            function->id = cssValueKeywordID(token.value());
+            function->id = id;
             CSSParserValueList* list = new CSSParserValueList;
             function->args = adoptPtr(list);
 
-            value.id = CSSValueInvalid;
-            value.isInt = false;
-            value.unit = CSSParserValue::Function;
             value.function = function;
 
             stack.last()->addValue(value);
             stack.append(list);
             bracketCounts.append(0);
-            calcDepth += (function->id == CSSValueCalc || function->id == CSSValueWebkitCalc);
             continue;
         }
         case LeftParenthesisToken: {
-            if (calcDepth == 0) {
-                CSSParserValueList* list = new CSSParserValueList;
-                value.setFromValueList(adoptPtr(list));
-                stack.last()->addValue(value);
-                stack.append(list);
-                bracketCounts.append(0);
-                continue;
-            }
-            bracketCounts.last()++;
-            value.setFromOperator('(');
-            break;
+            CSSParserValueList* list = new CSSParserValueList;
+            value.setFromValueList(adoptPtr(list));
+            stack.last()->addValue(value);
+            stack.append(list);
+            bracketCounts.append(0);
+            continue;
         }
         case RightParenthesisToken: {
             if (bracketCounts.last() == 0) {
@@ -99,15 +102,8 @@ CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemU
                     destroyAndClear();
                     return;
                 }
-                CSSParserValueList* currentList = stack.last();
-                CSSParserValue* current = currentList->valueAt(currentList->size()-1);
-                if (current->unit == CSSParserValue::Function) {
-                    CSSValueID id = current->function->id;
-                    calcDepth -= (id == CSSValueCalc || id == CSSValueWebkitCalc);
-                }
                 continue;
             }
-            ASSERT(calcDepth > 0);
             bracketCounts.last()--;
             value.setFromOperator(')');
             break;
@@ -115,7 +111,7 @@ CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemU
         case IdentToken: {
             value.id = cssValueKeywordID(token.value());
             value.isInt = false;
-            value.unit = CSSPrimitiveValue::CSS_IDENT;
+            value.m_unit = CSSParserValue::Identifier;
             value.string = token.value();
             break;
         }
@@ -124,33 +120,25 @@ CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemU
                 destroyAndClear();
                 return;
             }
-            if (!token.unitType()) {
-                if (String(token.value()) == "__qem") {
-                    value.setFromNumber(token.numericValue(), CSSParserValue::Q_EMS);
-                    value.isInt = (token.numericValueType() == IntegerValueType);
-                    break;
-                }
-
+            if (token.unitType() == CSSPrimitiveValue::UnitType::Unknown) {
                 // Unknown dimensions are handled as a list of two values
-                value.unit = CSSParserValue::DimensionList;
+                value.m_unit = CSSParserValue::DimensionList;
                 CSSParserValueList* list = new CSSParserValueList;
                 value.valueList = list;
                 value.id = CSSValueInvalid;
 
                 CSSParserValue number;
-                number.setFromNumber(token.numericValue());
+                number.setFromNumber(token.numericValue(), CSSPrimitiveValue::UnitType::Number);
                 number.isInt = (token.numericValueType() == IntegerValueType);
                 list->addValue(number);
 
                 CSSParserValue unit;
                 unit.string = token.value();
-                unit.unit = CSSPrimitiveValue::CSS_IDENT;
+                unit.m_unit = CSSParserValue::Identifier;
                 list->addValue(unit);
 
                 break;
             }
-            if (token.unitType() == CSSPrimitiveValue::CSS_REMS)
-                usesRemUnits = true;
             // fallthrough
         case NumberToken:
         case PercentageToken:
@@ -161,39 +149,30 @@ CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemU
             value.setFromNumber(token.numericValue(), token.unitType());
             value.isInt = (token.numericValueType() == IntegerValueType);
             break;
+        case UnicodeRangeToken: {
+            value.id = CSSValueInvalid;
+            value.isInt = false;
+            value.m_unicodeRange.start = token.unicodeRangeStart();
+            value.m_unicodeRange.end = token.unicodeRangeEnd();
+            value.m_unit = CSSParserValue::UnicodeRange;
+            break;
+        }
         case HashToken:
-            // FIXME: Move this logic to the property parser
-            // This check prevents us from allowing #red and similar
-            for (size_t i = 0; i < token.value().length(); ++i) {
-                if (!isASCIIHexDigit(token.value()[i])) {
-                    destroyAndClear();
-                    return;
-                }
-            }
-            // fallthrough
         case StringToken:
-        case UnicodeRangeToken:
         case UrlToken: {
             value.id = CSSValueInvalid;
             value.isInt = false;
             if (token.type() == HashToken)
-                value.unit = CSSParserValue::HexColor;
+                value.m_unit = CSSParserValue::HexColor;
             else if (token.type() == StringToken)
-                value.unit = CSSPrimitiveValue::CSS_STRING;
-            else if (token.type() == UnicodeRangeToken)
-                value.unit = CSSPrimitiveValue::CSS_UNICODE_RANGE;
+                value.setUnit(CSSPrimitiveValue::UnitType::String);
             else
-                value.unit = CSSPrimitiveValue::CSS_URI;
+                value.setUnit(CSSPrimitiveValue::UnitType::URI);
             value.string = token.value();
             break;
         }
         case DelimiterToken:
             value.setFromOperator(token.delimiter());
-            if (calcDepth && token.delimiter() == '+' && (&token - 1)->type() != WhitespaceToken) {
-                // calc(1px+ 2px) is invalid
-                destroyAndClear();
-                return;
-            }
             break;
         case CommaToken:
             value.setFromOperator(',');
@@ -250,10 +229,12 @@ static void destroy(Vector<CSSParserValue, 4>& values)
 {
     size_t numValues = values.size();
     for (size_t i = 0; i < numValues; i++) {
-        if (values[i].unit == CSSParserValue::Function)
+        if (values[i].m_unit == CSSParserValue::Function)
             delete values[i].function;
-        else if (values[i].unit == CSSParserValue::ValueList
-            || values[i].unit == CSSParserValue::DimensionList)
+        else if (values[i].m_unit == CSSParserValue::CalcFunction)
+            delete values[i].calcFunction;
+        else if (values[i].m_unit == CSSParserValue::ValueList
+            || values[i].m_unit == CSSParserValue::DimensionList)
             delete values[i].valueList;
     }
 }
@@ -272,18 +253,6 @@ CSSParserValueList::~CSSParserValueList()
 void CSSParserValueList::addValue(const CSSParserValue& v)
 {
     m_values.append(v);
-}
-
-void CSSParserValueList::insertValueAt(unsigned i, const CSSParserValue& v)
-{
-    m_values.insert(i, v);
-}
-
-void CSSParserValueList::stealValues(CSSParserValueList& valueList)
-{
-    for (unsigned i = 0; i < valueList.size(); ++i)
-        m_values.append(*(valueList.valueAt(i)));
-    valueList.clearAndLeakValues();
 }
 
 CSSParserSelector::CSSParserSelector()
@@ -325,7 +294,7 @@ void CSSParserSelector::setSelectorList(PassOwnPtr<CSSSelectorList> selectorList
 
 bool CSSParserSelector::isSimple() const
 {
-    if (m_selector->selectorList() || m_selector->matchesPseudoElement())
+    if (m_selector->selectorList() || m_selector->match() == CSSSelector::PseudoElement)
         return false;
 
     if (!m_tagHistory)

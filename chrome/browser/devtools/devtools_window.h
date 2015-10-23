@@ -119,6 +119,9 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   // Forwards an unhandled keyboard event to the DevTools frontend.
   bool ForwardKeyboardEvent(const content::NativeWebKeyboardEvent& event);
 
+  // Reloads inspected web contents as if it was triggered from DevTools.
+  void ReloadInspectedWebContents(bool ignore_cache);
+
   // content::WebContentsDelegate overrides.
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
@@ -259,7 +262,7 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
                       bool* was_blocked) override;
   void WebContentsCreated(content::WebContents* source_contents,
                           int opener_render_frame_id,
-                          const base::string16& frame_name,
+                          const std::string& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) override;
   void CloseContents(content::WebContents* source) override;

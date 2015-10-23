@@ -9,19 +9,16 @@
 #include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "chrome/browser/chromeos/drive/change_list_loader.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
-#include "chrome/browser/chromeos/drive/file_change.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
 #include "chrome/browser/chromeos/drive/sync/entry_revert_performer.h"
 #include "chrome/browser/chromeos/drive/sync/remove_performer.h"
-#include "content/public/browser/browser_thread.h"
+#include "components/drive/drive.pb.h"
+#include "components/drive/file_cache.h"
+#include "components/drive/file_change.h"
+#include "components/drive/file_system_core_util.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/resource_metadata.h"
 #include "google_apis/drive/drive_api_parser.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace internal {
@@ -161,7 +158,8 @@ FileError FinishUpdate(ResourceMetadata* metadata,
         error = metadata->RemoveEntry(existing_local_id);
         if (error != FILE_ERROR_OK)
           return error;
-        changed_files->Update(existing_entry_path, entry, FileChange::DELETE);
+        changed_files->Update(existing_entry_path, entry,
+                              FileChange::CHANGE_TYPE_DELETE);
       }
       break;
     case FILE_ERROR_NOT_FOUND:
@@ -206,7 +204,8 @@ FileError FinishUpdate(ResourceMetadata* metadata,
   error = metadata->GetFilePath(local_state->entry.local_id(), &entry_path);
   if (error != FILE_ERROR_OK)
     return error;
-  changed_files->Update(entry_path, entry, FileChange::ADD_OR_UPDATE);
+  changed_files->Update(entry_path, entry,
+                        FileChange::CHANGE_TYPE_ADD_OR_UPDATE);
 
   // Clear dirty bit unless the file has been edited during update.
   if (entry.file_specific_info().cache_state().is_dirty() &&
@@ -243,17 +242,16 @@ EntryUpdatePerformer::EntryUpdatePerformer(
                                                        scheduler,
                                                        metadata)),
       weak_ptr_factory_(this) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 EntryUpdatePerformer::~EntryUpdatePerformer() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 void EntryUpdatePerformer::UpdateEntry(const std::string& local_id,
                                        const ClientContext& context,
                                        const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   scoped_ptr<LocalState> local_state(new LocalState);
@@ -272,7 +270,7 @@ void EntryUpdatePerformer::UpdateEntryAfterPrepare(
     const FileOperationCallback& callback,
     scoped_ptr<LocalState> local_state,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -411,7 +409,7 @@ void EntryUpdatePerformer::UpdateEntryAfterUpdateResource(
     scoped_ptr<base::ScopedClosureRunner> loader_lock,
     google_apis::DriveApiErrorCode status,
     scoped_ptr<google_apis::FileResource> entry) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (status == google_apis::HTTP_FORBIDDEN) {
@@ -441,7 +439,7 @@ void EntryUpdatePerformer::UpdateEntryAfterFinish(
     const FileOperationCallback& callback,
     const FileChange* changed_files,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   delegate_->OnFileChangedByOperation(*changed_files);

@@ -7,6 +7,7 @@
 
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/test/views_test_base.h"
+#include "ui/views/widget/widget_delegate.h"
 
 #if defined(USE_AURA)
 #include "ui/views/widget/native_widget_aura.h"
@@ -18,6 +19,9 @@
 #endif
 
 namespace ui {
+namespace internal {
+class InputMethodDelegate;
+}
 class EventProcessor;
 }
 
@@ -105,8 +109,14 @@ class WidgetTest : public ViewsTestBase {
 
   View* GetGestureHandler(internal::RootView* root_view);
 
-  // Simulate a OS-level destruction of the native widget held by |widget|.
+  // Simulate an OS-level destruction of the native window held by |widget|.
   static void SimulateNativeDestroy(Widget* widget);
+
+  // Simulate an activation of the native window held by |widget|, as if it was
+  // clicked by the user. This is a synchronous method for use in
+  // non-interactive tests that do not spin a RunLoop in the test body (since
+  // that may cause real focus changes to flakily manifest).
+  static void SimulateNativeActivate(Widget* widget);
 
   // Return true if |window| is visible according to the native platform.
   static bool IsNativeWindowVisible(gfx::NativeWindow window);
@@ -124,12 +134,55 @@ class WidgetTest : public ViewsTestBase {
   // processor.
   static ui::EventProcessor* GetEventProcessor(Widget* widget);
 
+  // Get the InputMethodDelegate, for setting on a Mock InputMethod in tests.
+  static ui::internal::InputMethodDelegate* GetInputMethodDelegateForWidget(
+      Widget* widget);
+
 #if defined(OS_MACOSX)
   static scoped_ptr<FakeActivation> FakeWidgetIsActiveAlways();
 #endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WidgetTest);
+};
+
+// A helper WidgetDelegate for tests that require hooks into WidgetDelegate
+// calls, and removes some of the boilerplate for initializing a Widget. Calls
+// Widget::CloseNow() when destroyed if it hasn't already been done.
+class TestDesktopWidgetDelegate : public WidgetDelegate {
+ public:
+  TestDesktopWidgetDelegate();
+  ~TestDesktopWidgetDelegate() override;
+
+  // Initialize the Widget, adding some meaningful default InitParams.
+  void InitWidget(Widget::InitParams init_params);
+
+  // Set the contents view to be used during Widget initialization. For Widgets
+  // that use non-client views, this will be the contents_view used to
+  // initialize the ClientView in WidgetDelegate::CreateClientView(). Otherwise,
+  // it is the ContentsView of the Widget's RootView. Ownership passes to the
+  // view hierarchy during InitWidget().
+  void set_contents_view(View* contents_view) {
+    contents_view_ = contents_view;
+  }
+
+  int window_closing_count() const { return window_closing_count_; }
+  const gfx::Rect& initial_bounds() { return initial_bounds_; }
+
+  // WidgetDelegate overrides:
+  void WindowClosing() override;
+  Widget* GetWidget() override;
+  const Widget* GetWidget() const override;
+  View* GetContentsView() override;
+  bool ShouldAdvanceFocusToTopLevelWidget() const override;
+
+ private:
+  Widget* widget_;
+  View* contents_view_ = nullptr;
+  int window_closing_count_ = 0;
+  gfx::Rect initial_bounds_ = gfx::Rect(100, 100, 200, 200);
+
+  DISALLOW_COPY_AND_ASSIGN(TestDesktopWidgetDelegate);
 };
 
 }  // namespace test

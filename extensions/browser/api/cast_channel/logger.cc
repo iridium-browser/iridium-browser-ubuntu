@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/strings/string_util.h"
-#include "base/time/tick_clock.h"
+#include "base/time/clock.h"
 #include "extensions/browser/api/cast_channel/cast_auth_util.h"
 #include "extensions/browser/api/cast_channel/cast_socket.h"
 #include "extensions/browser/api/cast_channel/logger_util.h"
@@ -15,7 +15,7 @@
 #include "third_party/zlib/zlib.h"
 
 namespace extensions {
-namespace core_api {
+namespace api {
 namespace cast_channel {
 
 using net::IPEndPoint;
@@ -129,9 +129,8 @@ Logger::AggregatedSocketEventLog::AggregatedSocketEventLog() {
 Logger::AggregatedSocketEventLog::~AggregatedSocketEventLog() {
 }
 
-Logger::Logger(scoped_ptr<base::TickClock> clock,
-               base::TimeTicks unix_epoch_time_ticks)
-    : clock_(clock.Pass()), unix_epoch_time_ticks_(unix_epoch_time_ticks) {
+Logger::Logger(scoped_ptr<base::Clock> clock, base::Time unix_epoch_time)
+    : clock_(clock.Pass()), unix_epoch_time_(unix_epoch_time) {
   DCHECK(clock_);
 
   // Logger may not be necessarily be created on the IO thread, but logging
@@ -251,7 +250,8 @@ void Logger::LogSocketEventForMessage(int channel_id,
   DCHECK(thread_checker_.CalledOnValidThread());
 
   SocketEvent event = CreateEvent(event_type);
-  if (StartsWithASCII(message_namespace, kInternalNamespacePrefix, false))
+  if (base::StartsWith(message_namespace, kInternalNamespacePrefix,
+                       base::CompareCase::INSENSITIVE_ASCII))
     event.set_message_namespace(message_namespace);
   event.set_details(details);
 
@@ -274,8 +274,8 @@ void Logger::LogSocketChallengeReplyEvent(int channel_id,
 SocketEvent Logger::CreateEvent(EventType event_type) {
   SocketEvent event;
   event.set_type(event_type);
-  event.set_timestamp_micros(clock_->NowTicks().ToInternalValue() -
-                             unix_epoch_time_ticks_.ToInternalValue());
+  event.set_timestamp_micros(
+      (clock_->Now() - unix_epoch_time_).InMicroseconds());
   return event;
 }
 
@@ -368,5 +368,5 @@ LastErrors Logger::GetLastErrors(int channel_id) const {
 }
 
 }  // namespace cast_channel
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions

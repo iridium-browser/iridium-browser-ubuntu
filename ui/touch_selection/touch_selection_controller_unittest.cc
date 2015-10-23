@@ -9,6 +9,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/test/motion_event_test_utils.h"
+#include "ui/touch_selection/touch_selection_controller_test_api.h"
 
 using testing::ElementsAre;
 using testing::IsEmpty;
@@ -59,15 +60,7 @@ class TouchSelectionControllerTest : public testing::Test,
   // testing::Test implementation.
 
   void SetUp() override {
-    // Default touch selection controller is created with
-    // |show_on_tap_for_empty_editable| flag set to false. Use
-    // |AllowShowingOnTapForEmptyEditable()| function to override it.
-    bool show_on_tap_for_empty_editable = false;
-    controller_.reset(new TouchSelectionController(
-        this,
-        base::TimeDelta::FromMilliseconds(kDefaultTapTimeoutMs),
-        kDefaulTapSlop,
-        show_on_tap_for_empty_editable));
+    controller_.reset(new TouchSelectionController(this, DefaultConfig()));
   }
 
   void TearDown() override { controller_.reset(); }
@@ -109,12 +102,15 @@ class TouchSelectionControllerTest : public testing::Test,
   }
 
   void AllowShowingOnTapForEmptyEditable() {
-    bool show_on_tap_for_empty_editable = true;
-    controller_.reset(new TouchSelectionController(
-        this,
-        base::TimeDelta::FromMilliseconds(kDefaultTapTimeoutMs),
-        kDefaulTapSlop,
-        show_on_tap_for_empty_editable));
+    TouchSelectionController::Config config = DefaultConfig();
+    config.show_on_tap_for_empty_editable = true;
+    controller_.reset(new TouchSelectionController(this, config));
+  }
+
+  void EnableLongPressDragSelection() {
+    TouchSelectionController::Config config = DefaultConfig();
+    config.enable_longpress_drag_selection = true;
+    controller_.reset(new TouchSelectionController(this, config));
   }
 
   void SetAnimationEnabled(bool enabled) { animation_enabled_ = enabled; }
@@ -150,7 +146,8 @@ class TouchSelectionControllerTest : public testing::Test,
   }
 
   void OnLongPressEvent() {
-    ASSERT_FALSE(controller().WillHandleLongPressEvent(kIgnoredPoint));
+    ASSERT_FALSE(controller().WillHandleLongPressEvent(base::TimeTicks(),
+                                                       kIgnoredPoint));
   }
 
   void OnTapEvent() {
@@ -207,6 +204,19 @@ class TouchSelectionControllerTest : public testing::Test,
   TouchSelectionController& controller() { return *controller_; }
 
  private:
+  TouchSelectionController::Config DefaultConfig() {
+    // Both |show_on_tap_for_empty_editable| and
+    // |enable_longpress_drag_selection| are set to false by default, and should
+    // be overriden for explicit testing.
+    TouchSelectionController::Config config;
+    config.max_tap_duration =
+        base::TimeDelta::FromMilliseconds(kDefaultTapTimeoutMs);
+    config.tap_slop = kDefaulTapSlop;
+    config.show_on_tap_for_empty_editable = false;
+    config.enable_longpress_drag_selection = false;
+    return config;
+  }
+
   gfx::PointF last_event_start_;
   gfx::PointF last_event_end_;
   gfx::PointF caret_position_;
@@ -229,13 +239,14 @@ TEST_F(TouchSelectionControllerTest, InsertionBasic) {
   gfx::RectF insertion_rect(5, 5, 0, 10);
   bool visible = true;
 
-  // Insertion events are ignored until automatic showing is enabled.
+  // Insertion handles are not shown until automatic showing is enabled.
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_ESTABLISHED));
   EXPECT_EQ(gfx::PointF(), GetLastEventStart());
   OnTapEvent();
 
-  // Insertion events are ignored until the selection region is marked editable.
+  // Insertion handles are not shown until the selection region is
+  // marked editable.
   ChangeInsertion(insertion_rect, visible);
   EXPECT_THAT(GetAndResetEvents(), IsEmpty());
   EXPECT_EQ(gfx::PointF(), GetLastEventStart());
@@ -243,21 +254,22 @@ TEST_F(TouchSelectionControllerTest, InsertionBasic) {
   OnTapEvent();
   controller().OnSelectionEditable(true);
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 
   insertion_rect.Offset(1, 0);
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_MOVED));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 
   insertion_rect.Offset(0, 1);
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_MOVED));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 
   ClearInsertion();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, INSERTION_HANDLE_CLEARED));
 }
 
 TEST_F(TouchSelectionControllerTest, InsertionClearedWhenNoLongerEditable) {
@@ -267,11 +279,12 @@ TEST_F(TouchSelectionControllerTest, InsertionClearedWhenNoLongerEditable) {
   controller().OnSelectionEditable(true);
 
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 
   controller().OnSelectionEditable(false);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_CLEARED));
 }
 
 TEST_F(TouchSelectionControllerTest, InsertionWithNoShowOnTapForEmptyEditable) {
@@ -290,24 +303,25 @@ TEST_F(TouchSelectionControllerTest, InsertionWithNoShowOnTapForEmptyEditable) {
   OnTapEvent();
   controller().OnSelectionEmpty(false);
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 
   // Reset the selection.
   controller().HideAndDisallowShowingAutomatically();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_CLEARED));
 
   // Long-pressing should show the handle even if the editable region is empty.
   insertion_rect.Offset(2, -2);
   OnLongPressEvent();
   controller().OnSelectionEmpty(true);
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 
   // Single Tap on an empty edit field should clear insertion handle.
   OnTapEvent();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_CLEARED));
 }
 
 TEST_F(TouchSelectionControllerTest, InsertionWithShowOnTapForEmptyEditable) {
@@ -322,7 +336,8 @@ TEST_F(TouchSelectionControllerTest, InsertionWithShowOnTapForEmptyEditable) {
   OnTapEvent();
   controller().OnSelectionEmpty(true);
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 
   // Additional taps should not hide the insertion handle in this case.
@@ -352,7 +367,8 @@ TEST_F(TouchSelectionControllerTest, InsertionAppearsAfterTapFollowingTyping) {
   // entry, the handle should appear.
   OnTapEvent();
   ChangeInsertion(insertion_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 }
 
@@ -365,25 +381,26 @@ TEST_F(TouchSelectionControllerTest, InsertionToSelectionTransition) {
   bool visible = true;
 
   ChangeInsertion(start_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED,
-                                               SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(INSERTION_HANDLE_CLEARED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   ChangeInsertion(end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_CLEARED,
-                                               INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_HANDLES_CLEARED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(end_rect.bottom_left(), GetLastEventStart());
 
   controller().HideAndDisallowShowingAutomatically();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_CLEARED));
 
   OnTapEvent();
   ChangeInsertion(end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(end_rect.bottom_left(), GetLastEventStart());
 }
 
@@ -400,7 +417,8 @@ TEST_F(TouchSelectionControllerTest, InsertionDragged) {
   gfx::RectF start_rect(10, 0, 0, line_height);
   bool visible = true;
   ChangeInsertion(start_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   // The touch sequence should be handled only if the drawable reports a hit.
@@ -408,7 +426,7 @@ TEST_F(TouchSelectionControllerTest, InsertionDragged) {
   SetDraggingEnabled(true);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
   EXPECT_FALSE(GetAndResetCaretMoved());
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STARTED));
 
   // The MoveCaret() result should reflect the movement.
   // The reported position is offset from the center of |start_rect|.
@@ -431,7 +449,7 @@ TEST_F(TouchSelectionControllerTest, InsertionDragged) {
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 10, 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
   EXPECT_FALSE(GetAndResetCaretMoved());
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STOPPED));
 
   // Once the drag is complete, no more touch events should be consumed until
   // the next ACTION_DOWN.
@@ -447,23 +465,25 @@ TEST_F(TouchSelectionControllerTest, InsertionTapped) {
   gfx::RectF start_rect(10, 0, 0, 10);
   bool visible = true;
   ChangeInsertion(start_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
 
   MockMotionEvent event(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STARTED));
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_TAPPED,
-                                               INSERTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_TAPPED,
+                                               INSERTION_HANDLE_DRAG_STOPPED));
 
   // Reset the insertion.
   ClearInsertion();
   OnTapEvent();
   ChangeInsertion(start_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED,
-                                               INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, INSERTION_HANDLE_CLEARED,
+                          SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
 
   // No tap should be signalled if the time between DOWN and UP was too long.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
@@ -473,15 +493,16 @@ TEST_F(TouchSelectionControllerTest, InsertionTapped) {
                           0,
                           0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STARTED,
-                                               INSERTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STARTED,
+                                               INSERTION_HANDLE_DRAG_STOPPED));
 
   // Reset the insertion.
   ClearInsertion();
   OnTapEvent();
   ChangeInsertion(start_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED,
-                                               INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, INSERTION_HANDLE_CLEARED,
+                          SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
 
   // No tap should be signalled if the drag was too long.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
@@ -490,23 +511,24 @@ TEST_F(TouchSelectionControllerTest, InsertionTapped) {
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 100, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STARTED,
-                                               INSERTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STARTED,
+                                               INSERTION_HANDLE_DRAG_STOPPED));
 
   // Reset the insertion.
   ClearInsertion();
   OnTapEvent();
   ChangeInsertion(start_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_CLEARED,
-                                               INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, INSERTION_HANDLE_CLEARED,
+                          SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
 
   // No tap should be signalled if the touch sequence is cancelled.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
   event = MockMotionEvent(MockMotionEvent::ACTION_CANCEL, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STARTED,
-                                               INSERTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STARTED,
+                                               INSERTION_HANDLE_DRAG_STOPPED));
 }
 
 TEST_F(TouchSelectionControllerTest, InsertionNotResetByRepeatedTapOrPress) {
@@ -518,25 +540,26 @@ TEST_F(TouchSelectionControllerTest, InsertionNotResetByRepeatedTapOrPress) {
   gfx::RectF anchor_rect(10, 0, 0, 10);
   bool visible = true;
   ChangeInsertion(anchor_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(anchor_rect.bottom_left(), GetLastEventStart());
 
   // Tapping again shouldn't reset the active insertion point.
   OnTapEvent();
   MockMotionEvent event(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STARTED));
   EXPECT_EQ(anchor_rect.bottom_left(), GetLastEventStart());
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_TAPPED,
-                                               INSERTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_TAPPED,
+                                               INSERTION_HANDLE_DRAG_STOPPED));
   EXPECT_EQ(anchor_rect.bottom_left(), GetLastEventStart());
 
   anchor_rect.Offset(5, 15);
   ChangeInsertion(anchor_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_MOVED));
   EXPECT_EQ(anchor_rect.bottom_left(), GetLastEventStart());
 
   // Pressing shouldn't reset the active insertion point.
@@ -544,13 +567,13 @@ TEST_F(TouchSelectionControllerTest, InsertionNotResetByRepeatedTapOrPress) {
   controller().OnSelectionEmpty(true);
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_DRAG_STARTED));
   EXPECT_EQ(anchor_rect.bottom_left(), GetLastEventStart());
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_TAPPED,
-                                               INSERTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_HANDLE_TAPPED,
+                                               INSERTION_HANDLE_DRAG_STOPPED));
   EXPECT_EQ(anchor_rect.bottom_left(), GetLastEventStart());
 }
 
@@ -565,18 +588,20 @@ TEST_F(TouchSelectionControllerTest, SelectionBasic) {
 
   OnLongPressEvent();
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   start_rect.Offset(1, 0);
   ChangeSelection(start_rect, visible, end_rect, visible);
   // Selection movement does not currently trigger a separate event.
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
   EXPECT_EQ(end_rect.bottom_left(), GetLastEventEnd());
 
   ClearSelection();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, SELECTION_HANDLES_CLEARED));
   EXPECT_EQ(gfx::PointF(), GetLastEventStart());
 }
 
@@ -598,7 +623,8 @@ TEST_F(TouchSelectionControllerTest, SelectionAllowsEmptyUpdateAfterLongPress) {
   EXPECT_THAT(GetAndResetEvents(), IsEmpty());
 
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
 }
 
 TEST_F(TouchSelectionControllerTest, SelectionRepeatedLongPress) {
@@ -608,16 +634,18 @@ TEST_F(TouchSelectionControllerTest, SelectionRepeatedLongPress) {
 
   OnLongPressEvent();
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
   EXPECT_EQ(end_rect.bottom_left(), GetLastEventEnd());
 
-  // A long press triggering a new selection should re-send the SELECTION_SHOWN
+  // A long press triggering a new selection should re-send the
+  // SELECTION_HANDLES_SHOWN
   // event notification.
   start_rect.Offset(10, 10);
   OnLongPressEvent();
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
   EXPECT_EQ(end_rect.bottom_left(), GetLastEventEnd());
 }
@@ -635,7 +663,8 @@ TEST_F(TouchSelectionControllerTest, SelectionDragged) {
   gfx::RectF end_rect(50, 0, 0, line_height);
   bool visible = true;
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   // The touch sequence should be handled only if the drawable reports a hit.
@@ -653,7 +682,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDragged) {
   gfx::PointF start_offset = start_rect.CenterPoint();
   event = MockMotionEvent(MockMotionEvent::ACTION_MOVE, event_time, 0, 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
   EXPECT_TRUE(GetAndResetSelectionMoved());
   EXPECT_EQ(fixed_offset, GetLastSelectionStart());
   EXPECT_EQ(start_offset + gfx::Vector2dF(0, 5), GetLastSelectionEnd());
@@ -672,7 +701,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDragged) {
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 10, 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STOPPED));
   EXPECT_FALSE(GetAndResetSelectionMoved());
 
   // Once the drag is complete, no more touch events should be consumed until
@@ -689,7 +718,8 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedWithOverlap) {
   gfx::RectF end_rect(50, 0, 0, line_height);
   bool visible = true;
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   // The ACTION_DOWN should lock to the closest handle.
@@ -700,7 +730,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedWithOverlap) {
       MockMotionEvent::ACTION_DOWN, event_time, touch_down_x, 0);
   SetDraggingEnabled(true);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
   EXPECT_FALSE(GetAndResetSelectionMoved());
 
   // Even though the ACTION_MOVE is over the start handle, it should continue
@@ -714,7 +744,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedWithOverlap) {
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 0, 0);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STOPPED));
   EXPECT_FALSE(GetAndResetSelectionMoved());
 }
 
@@ -727,7 +757,8 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
   gfx::RectF end_rect(100, line_height, 0, line_height);
   bool visible = true;
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   SetDraggingEnabled(true);
@@ -744,7 +775,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
   event = MockMotionEvent(MockMotionEvent::ACTION_MOVE, event_time,
                           end_rect.x(), end_rect.bottom() + 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
   EXPECT_TRUE(GetAndResetSelectionMoved());
   EXPECT_FALSE(GetAndResetSelectionPointsSwapped());
   EXPECT_EQ(base_offset, GetLastSelectionStart());
@@ -752,12 +783,12 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 10, 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STOPPED));
   EXPECT_FALSE(GetAndResetSelectionMoved());
 
   end_rect += gfx::Vector2dF(0, 5);
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
 
   // Move the base, triggering a swap of points.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time,
@@ -771,7 +802,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
   event = MockMotionEvent(MockMotionEvent::ACTION_MOVE, event_time,
                           start_rect.x(), start_rect.bottom() + 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
   EXPECT_TRUE(GetAndResetSelectionMoved());
   EXPECT_FALSE(GetAndResetSelectionPointsSwapped());
   EXPECT_EQ(base_offset, GetLastSelectionStart());
@@ -779,12 +810,12 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 10, 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STOPPED));
   EXPECT_FALSE(GetAndResetSelectionMoved());
 
   start_rect += gfx::Vector2dF(0, 5);
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
 
   // Move the same point again, not triggering a swap of points.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time,
@@ -798,7 +829,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
   event = MockMotionEvent(MockMotionEvent::ACTION_MOVE, event_time,
                           start_rect.x(), start_rect.bottom() + 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
   EXPECT_TRUE(GetAndResetSelectionMoved());
   EXPECT_FALSE(GetAndResetSelectionPointsSwapped());
   EXPECT_EQ(base_offset, GetLastSelectionStart());
@@ -806,12 +837,12 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 10, 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STOPPED));
   EXPECT_FALSE(GetAndResetSelectionMoved());
 
   start_rect += gfx::Vector2dF(0, 5);
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
 
   // Move the base, triggering a swap of points.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time,
@@ -825,7 +856,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
   event = MockMotionEvent(MockMotionEvent::ACTION_MOVE, event_time,
                           end_rect.x(), end_rect.bottom() + 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
   EXPECT_TRUE(GetAndResetSelectionMoved());
   EXPECT_FALSE(GetAndResetSelectionPointsSwapped());
   EXPECT_EQ(base_offset, GetLastSelectionStart());
@@ -833,7 +864,7 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
 
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 10, 5);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STOPPED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STOPPED));
   EXPECT_FALSE(GetAndResetSelectionMoved());
 }
 
@@ -847,7 +878,8 @@ TEST_F(TouchSelectionControllerTest, SelectionDragExtremeLineSize) {
   gfx::RectF large_line_rect(50, 50, 0, large_line_height);
   bool visible = true;
   ChangeSelection(small_line_rect, visible, large_line_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(small_line_rect.bottom_left(), GetLastEventStart());
 
   // Start dragging the handle on the small line.
@@ -855,12 +887,12 @@ TEST_F(TouchSelectionControllerTest, SelectionDragExtremeLineSize) {
                         small_line_rect.x(), small_line_rect.y());
   SetDraggingEnabled(true);
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_DRAG_STARTED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
   // The drag coordinate for large lines should be capped to a reasonable
   // offset, allowing seamless transition to neighboring lines with different
   // sizes. The drag coordinate for small lines should have an offset
   // commensurate with the small line size.
-  EXPECT_EQ(large_line_rect.bottom_left() - gfx::Vector2dF(0, 5.f),
+  EXPECT_EQ(large_line_rect.bottom_left() - gfx::Vector2dF(0, 8.f),
             GetLastSelectionStart());
   EXPECT_EQ(small_line_rect.CenterPoint(), GetLastSelectionEnd());
 
@@ -903,6 +935,8 @@ TEST_F(TouchSelectionControllerTest, Animation) {
 }
 
 TEST_F(TouchSelectionControllerTest, TemporarilyHidden) {
+  TouchSelectionControllerTestApi test_controller(&controller());
+
   OnTapEvent();
   controller().OnSelectionEditable(true);
 
@@ -911,20 +945,27 @@ TEST_F(TouchSelectionControllerTest, TemporarilyHidden) {
   bool visible = true;
   ChangeInsertion(insertion_rect, visible);
   EXPECT_FALSE(GetAndResetNeedsAnimate());
+  EXPECT_TRUE(test_controller.GetStartVisible());
+  EXPECT_TRUE(test_controller.GetEndVisible());
 
   controller().SetTemporarilyHidden(true);
   EXPECT_TRUE(GetAndResetNeedsAnimate());
+  EXPECT_FALSE(test_controller.GetStartVisible());
+  EXPECT_FALSE(test_controller.GetEndVisible());
 
   visible = false;
   ChangeInsertion(insertion_rect, visible);
   EXPECT_FALSE(GetAndResetNeedsAnimate());
+  EXPECT_FALSE(test_controller.GetStartVisible());
 
   visible = true;
   ChangeInsertion(insertion_rect, visible);
   EXPECT_FALSE(GetAndResetNeedsAnimate());
+  EXPECT_FALSE(test_controller.GetStartVisible());
 
   controller().SetTemporarilyHidden(false);
   EXPECT_TRUE(GetAndResetNeedsAnimate());
+  EXPECT_TRUE(test_controller.GetStartVisible());
 }
 
 TEST_F(TouchSelectionControllerTest, SelectionClearOnTap) {
@@ -934,7 +975,8 @@ TEST_F(TouchSelectionControllerTest, SelectionClearOnTap) {
 
   OnLongPressEvent();
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
 
   // Selection should not be cleared if the selection bounds have not changed.
   OnTapEvent();
@@ -943,7 +985,8 @@ TEST_F(TouchSelectionControllerTest, SelectionClearOnTap) {
 
   OnTapEvent();
   ClearSelection();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, SELECTION_HANDLES_CLEARED));
   EXPECT_EQ(gfx::PointF(), GetLastEventStart());
 }
 
@@ -956,20 +999,21 @@ TEST_F(TouchSelectionControllerTest, NoSelectionAfterLongpressThenTap) {
   OnLongPressEvent();
   OnTapEvent();
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_ESTABLISHED));
 
   // Subsequent longpress selections will be allowed.
   OnLongPressEvent();
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_SHOWN));
 
   // Tapping again shouldn't have any effect on subsequent selection events.
   OnTapEvent();
   end_rect.Offset(10, 10);
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
   ClearSelection();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, SELECTION_HANDLES_CLEARED));
 }
 
 TEST_F(TouchSelectionControllerTest, AllowShowingFromCurrentSelection) {
@@ -986,7 +1030,8 @@ TEST_F(TouchSelectionControllerTest, AllowShowingFromCurrentSelection) {
 
   // Now explicitly allow showing from the previously supplied bounds.
   controller().AllowShowingFromCurrentSelection();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
 
   // Repeated calls to show from the current selection should be ignored.
@@ -996,7 +1041,8 @@ TEST_F(TouchSelectionControllerTest, AllowShowingFromCurrentSelection) {
 
   // Trying to show from an empty selection will have no result.
   ClearSelection();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_CLEARED));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, SELECTION_HANDLES_CLEARED));
   controller().AllowShowingFromCurrentSelection();
   EXPECT_THAT(GetAndResetEvents(), IsEmpty());
 
@@ -1007,7 +1053,8 @@ TEST_F(TouchSelectionControllerTest, AllowShowingFromCurrentSelection) {
   gfx::RectF insertion_rect(5, 5, 0, 10);
   ChangeInsertion(insertion_rect, visible);
   controller().AllowShowingFromCurrentSelection();
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(INSERTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, INSERTION_HANDLE_SHOWN));
   EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventStart());
 }
 
@@ -1020,7 +1067,7 @@ TEST_F(TouchSelectionControllerTest, HandlesShowOnTapInsideRect) {
 
   // Establish a selection without handles from 5 to 50 with height 10.
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_ESTABLISHED));
 
   // A point outside the rect should not be handled.
   EXPECT_FALSE(controller().WillHandleTapEvent(outer_point));
@@ -1028,7 +1075,7 @@ TEST_F(TouchSelectionControllerTest, HandlesShowOnTapInsideRect) {
 
   // A point inside the rect should be handled.
   EXPECT_TRUE(controller().WillHandleTapEvent(inner_point));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_SHOWN));
 }
 
 TEST_F(TouchSelectionControllerTest, HandlesShowOnLongPressInsideRect) {
@@ -1040,15 +1087,152 @@ TEST_F(TouchSelectionControllerTest, HandlesShowOnLongPressInsideRect) {
 
   // Establish a selection without handles from 5 to 50 with height 10.
   ChangeSelection(start_rect, visible, end_rect, visible);
-  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_ESTABLISHED));
 
   // A point outside the rect should not be handled.
-  EXPECT_FALSE(controller().WillHandleLongPressEvent(outer_point));
+  EXPECT_FALSE(
+      controller().WillHandleLongPressEvent(base::TimeTicks(), outer_point));
   EXPECT_THAT(GetAndResetEvents(), IsEmpty());
 
   // A point inside the rect should be handled.
-  EXPECT_TRUE(controller().WillHandleLongPressEvent(inner_point));
-  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  EXPECT_TRUE(
+      controller().WillHandleLongPressEvent(base::TimeTicks(), inner_point));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_SHOWN));
+}
+
+TEST_F(TouchSelectionControllerTest, LongPressDrag) {
+  EnableLongPressDragSelection();
+  TouchSelectionControllerTestApi test_controller(&controller());
+
+  gfx::RectF start_rect(-50, 0, 0, 10);
+  gfx::RectF end_rect(50, 0, 0, 10);
+  bool visible = true;
+
+  // Start a touch sequence.
+  MockMotionEvent event;
+  EXPECT_FALSE(controller().WillHandleTouchEvent(event.PressPoint(0, 0)));
+
+  // Activate a longpress-triggered selection.
+  OnLongPressEvent();
+  ChangeSelection(start_rect, visible, end_rect, visible);
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
+  EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
+
+  // The handles should remain invisible while the touch release and longpress
+  // drag gesture are pending.
+  EXPECT_FALSE(test_controller.GetStartVisible());
+  EXPECT_FALSE(test_controller.GetEndVisible());
+
+  // The selection coordinates should reflect the drag movement.
+  gfx::PointF fixed_offset = start_rect.CenterPoint();
+  gfx::PointF end_offset = end_rect.CenterPoint();
+  EXPECT_TRUE(controller().WillHandleTouchEvent(event.MovePoint(0, 0, 0)));
+  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+
+  EXPECT_TRUE(
+      controller().WillHandleTouchEvent(event.MovePoint(0, 0, kDefaulTapSlop)));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STARTED));
+  EXPECT_EQ(fixed_offset, GetLastSelectionStart());
+  EXPECT_EQ(end_offset, GetLastSelectionEnd());
+
+  // Movement after the start of drag will be relative to the moved endpoint.
+  EXPECT_TRUE(controller().WillHandleTouchEvent(
+      event.MovePoint(0, 0, 2 * kDefaulTapSlop)));
+  EXPECT_TRUE(GetAndResetSelectionMoved());
+  EXPECT_EQ(end_offset + gfx::Vector2dF(0, kDefaulTapSlop),
+            GetLastSelectionEnd());
+
+  EXPECT_TRUE(controller().WillHandleTouchEvent(
+      event.MovePoint(0, kDefaulTapSlop, 2 * kDefaulTapSlop)));
+  EXPECT_TRUE(GetAndResetSelectionMoved());
+  EXPECT_EQ(end_offset + gfx::Vector2dF(kDefaulTapSlop, kDefaulTapSlop),
+            GetLastSelectionEnd());
+
+  EXPECT_TRUE(controller().WillHandleTouchEvent(
+      event.MovePoint(0, 2 * kDefaulTapSlop, 2 * kDefaulTapSlop)));
+  EXPECT_TRUE(GetAndResetSelectionMoved());
+  EXPECT_EQ(end_offset + gfx::Vector2dF(2 * kDefaulTapSlop, kDefaulTapSlop),
+            GetLastSelectionEnd());
+
+  // The handles should still be hidden.
+  EXPECT_FALSE(test_controller.GetStartVisible());
+  EXPECT_FALSE(test_controller.GetEndVisible());
+
+  // Releasing the touch sequence should end the drag and show the handles.
+  EXPECT_FALSE(controller().WillHandleTouchEvent(event.ReleasePoint()));
+  EXPECT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLE_DRAG_STOPPED));
+  EXPECT_TRUE(test_controller.GetStartVisible());
+  EXPECT_TRUE(test_controller.GetEndVisible());
+}
+
+TEST_F(TouchSelectionControllerTest, LongPressNoDrag) {
+  EnableLongPressDragSelection();
+  TouchSelectionControllerTestApi test_controller(&controller());
+
+  gfx::RectF start_rect(-50, 0, 0, 10);
+  gfx::RectF end_rect(50, 0, 0, 10);
+  bool visible = true;
+
+  // Start a touch sequence.
+  MockMotionEvent event;
+  EXPECT_FALSE(controller().WillHandleTouchEvent(event.PressPoint(0, 0)));
+
+  // Activate a longpress-triggered selection.
+  OnLongPressEvent();
+  ChangeSelection(start_rect, visible, end_rect, visible);
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
+  EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
+
+  // The handles should remain invisible while the touch release and longpress
+  // drag gesture are pending.
+  EXPECT_FALSE(test_controller.GetStartVisible());
+  EXPECT_FALSE(test_controller.GetEndVisible());
+
+  // If no drag movement occurs, the handles should reappear after the touch
+  // is released.
+  EXPECT_FALSE(controller().WillHandleTouchEvent(event.ReleasePoint()));
+  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+  EXPECT_TRUE(test_controller.GetStartVisible());
+  EXPECT_TRUE(test_controller.GetEndVisible());
+}
+
+TEST_F(TouchSelectionControllerTest, NoLongPressDragIfDisabled) {
+  // The TouchSelectionController disables longpress drag selection by default.
+  TouchSelectionControllerTestApi test_controller(&controller());
+
+  gfx::RectF start_rect(-50, 0, 0, 10);
+  gfx::RectF end_rect(50, 0, 0, 10);
+  bool visible = true;
+
+  // Start a touch sequence.
+  MockMotionEvent event;
+  EXPECT_FALSE(controller().WillHandleTouchEvent(event.PressPoint(0, 0)));
+
+  // Activate a longpress-triggered selection.
+  OnLongPressEvent();
+  ChangeSelection(start_rect, visible, end_rect, visible);
+  EXPECT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
+  EXPECT_EQ(start_rect.bottom_left(), GetLastEventStart());
+  EXPECT_TRUE(test_controller.GetStartVisible());
+  EXPECT_TRUE(test_controller.GetEndVisible());
+
+  // Subsequent motion of the same touch sequence after longpress shouldn't
+  // trigger drag selection.
+  EXPECT_FALSE(controller().WillHandleTouchEvent(event.MovePoint(0, 0, 0)));
+  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+
+  EXPECT_FALSE(controller().WillHandleTouchEvent(
+      event.MovePoint(0, 0, kDefaulTapSlop * 10)));
+  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+
+  // Releasing the touch sequence should have no effect.
+  EXPECT_FALSE(controller().WillHandleTouchEvent(event.ReleasePoint()));
+  EXPECT_THAT(GetAndResetEvents(), IsEmpty());
+  EXPECT_TRUE(test_controller.GetStartVisible());
+  EXPECT_TRUE(test_controller.GetEndVisible());
 }
 
 TEST_F(TouchSelectionControllerTest, RectBetweenBounds) {
@@ -1060,7 +1244,8 @@ TEST_F(TouchSelectionControllerTest, RectBetweenBounds) {
 
   OnLongPressEvent();
   ChangeSelection(start_rect, visible, end_rect, visible);
-  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_SHOWN));
+  ASSERT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_ESTABLISHED, SELECTION_HANDLES_SHOWN));
   EXPECT_EQ(gfx::RectF(5, 5, 45, 10), controller().GetRectBetweenBounds());
 
   // The result of |GetRectBetweenBounds| should be available within the
@@ -1069,30 +1254,31 @@ TEST_F(TouchSelectionControllerTest, RectBetweenBounds) {
 
   start_rect.Offset(1, 0);
   ChangeSelection(start_rect, visible, end_rect, visible);
-  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
   EXPECT_EQ(gfx::RectF(6, 5, 44, 10), controller().GetRectBetweenBounds());
   EXPECT_EQ(GetLastEventBoundsRect(), controller().GetRectBetweenBounds());
 
   // If only one bound is visible, the selection bounding rect should reflect
   // only the visible bound.
   ChangeSelection(start_rect, visible, end_rect, false);
-  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
   EXPECT_EQ(start_rect, controller().GetRectBetweenBounds());
   EXPECT_EQ(GetLastEventBoundsRect(), controller().GetRectBetweenBounds());
 
   ChangeSelection(start_rect, false, end_rect, visible);
-  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
   EXPECT_EQ(end_rect, controller().GetRectBetweenBounds());
   EXPECT_EQ(GetLastEventBoundsRect(), controller().GetRectBetweenBounds());
 
   // If both bounds are visible, the full bounding rect should be returned.
   ChangeSelection(start_rect, false, end_rect, false);
-  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_MOVED));
+  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_HANDLES_MOVED));
   EXPECT_EQ(gfx::RectF(6, 5, 44, 10), controller().GetRectBetweenBounds());
   EXPECT_EQ(GetLastEventBoundsRect(), controller().GetRectBetweenBounds());
 
   ClearSelection();
-  ASSERT_THAT(GetAndResetEvents(), ElementsAre(SELECTION_CLEARED));
+  ASSERT_THAT(GetAndResetEvents(),
+              ElementsAre(SELECTION_DISSOLVED, SELECTION_HANDLES_CLEARED));
   EXPECT_EQ(gfx::RectF(), controller().GetRectBetweenBounds());
 }
 

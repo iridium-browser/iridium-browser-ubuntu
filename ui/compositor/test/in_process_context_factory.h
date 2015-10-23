@@ -6,6 +6,7 @@
 #define UI_COMPOSITOR_TEST_IN_PROCESS_CONTEXT_FACTORY_H_
 
 #include "cc/test/test_gpu_memory_buffer_manager.h"
+#include "cc/test/test_image_factory.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_task_graph_runner.h"
 #include "ui/compositor/compositor.h"
@@ -45,7 +46,8 @@ class InProcessContextFactory : public ContextFactory {
   scoped_refptr<cc::ContextProvider> SharedMainThreadContextProvider() override;
   void RemoveCompositor(Compositor* compositor) override;
   bool DoesCreateTestContexts() override;
-  uint32 GetImageTextureTarget() override;
+  uint32 GetImageTextureTarget(gfx::BufferFormat format,
+                               gfx::BufferUsage usage) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
@@ -57,6 +59,7 @@ class InProcessContextFactory : public ContextFactory {
   scoped_refptr<cc::ContextProvider> shared_main_thread_contexts_;
   cc::TestSharedBitmapManager shared_bitmap_manager_;
   cc::TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
+  cc::TestImageFactory image_factory_;
   cc::TestTaskGraphRunner task_graph_runner_;
   uint32_t next_surface_id_namespace_;
   bool use_test_surface_;

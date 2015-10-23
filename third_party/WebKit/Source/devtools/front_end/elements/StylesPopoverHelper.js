@@ -1,4 +1,4 @@
- // Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright (c) 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ WebInspector.StylesPopoverHelper = function()
 
     this._hideProxy = this.hide.bind(this, true);
     this._boundOnKeyDown = this._onKeyDown.bind(this);
-    this._repositionBound = this._reposition.bind(this);
+    this._repositionBound = this.reposition.bind(this);
     this._boundFocusOut = this._onFocusOut.bind(this);
 }
 
@@ -57,7 +57,7 @@ WebInspector.StylesPopoverHelper.prototype = {
         this._anchorElement = anchorElement;
         this._view = view;
         this._hiddenCallback = hiddenCallback;
-        this._reposition();
+        this.reposition();
 
         var document = this._popover.element.ownerDocument;
         document.addEventListener("mousedown", this._hideProxy, false);
@@ -72,7 +72,7 @@ WebInspector.StylesPopoverHelper.prototype = {
     /**
      * @param {!Event=} event
      */
-    _reposition: function(event)
+    reposition: function(event)
     {
         if (!this._previousFocusElement)
             this._previousFocusElement = WebInspector.currentFocusElement();
@@ -135,7 +135,7 @@ WebInspector.StylesPopoverHelper.prototype = {
 
 /**
  * @constructor
- * @param {!WebInspector.StylePropertyTreeElementBase} treeElement
+ * @param {!WebInspector.StylePropertyTreeElement} treeElement
  * @param {!WebInspector.StylesPopoverHelper} stylesPopoverHelper
  * @param {string} text
  */
@@ -163,6 +163,7 @@ WebInspector.BezierPopoverIcon.prototype = {
     _createDOM: function(text)
     {
         this._element = createElement("nobr");
+        this._element.title = WebInspector.UIString("Open cubic bezier editor");
 
         this._iconElement = this._element.createSVGChild("svg", "popover-icon bezier-icon");
         this._iconElement.setAttribute("height", 10);
@@ -223,21 +224,22 @@ WebInspector.BezierPopoverIcon.prototype = {
 
 /**
  * @constructor
- * @param {!WebInspector.StylePropertyTreeElementBase} treeElement
+ * @param {!WebInspector.StylePropertyTreeElement} treeElement
  * @param {!WebInspector.StylesPopoverHelper} stylesPopoverHelper
  * @param {string} colorText
  */
-WebInspector.ColowSwatchPopoverIcon = function(treeElement, stylesPopoverHelper, colorText)
+WebInspector.ColorSwatchPopoverIcon = function(treeElement, stylesPopoverHelper, colorText)
 {
     this._treeElement = treeElement;
     this._stylesPopoverHelper = stylesPopoverHelper;
 
     this._swatch = WebInspector.ColorSwatch.create();
     this._swatch.setColorText(colorText);
-    this._swatch.setFormat(WebInspector.ColowSwatchPopoverIcon._colorFormat(this._swatch.color()));
-    var shiftClickMessage = WebInspector.UIString("Shift-click to change color format.");
-    this._swatch.iconElement().title = String.sprintf("%s\n%s", WebInspector.UIString("Click to open a colorpicker."), shiftClickMessage);
+    this._swatch.setFormat(WebInspector.ColorSwatchPopoverIcon._colorFormat(this._swatch.color()));
+    var shiftClickMessage = WebInspector.UIString("Shift + Click to change color format.");
+    this._swatch.iconElement().title = WebInspector.UIString("Open color picker. %s", shiftClickMessage);
     this._swatch.iconElement().addEventListener("click", this._iconClick.bind(this));
+    this._contrastColor = null;
 
     this._boundSpectrumChanged = this._spectrumChanged.bind(this);
 }
@@ -246,7 +248,7 @@ WebInspector.ColowSwatchPopoverIcon = function(treeElement, stylesPopoverHelper,
  * @param {!WebInspector.Color} color
  * @return {!WebInspector.Color.Format}
  */
-WebInspector.ColowSwatchPopoverIcon._colorFormat = function(color)
+WebInspector.ColorSwatchPopoverIcon._colorFormat = function(color)
 {
     const cf = WebInspector.Color.Format;
     var format;
@@ -265,13 +267,23 @@ WebInspector.ColowSwatchPopoverIcon._colorFormat = function(color)
     return format;
 }
 
-WebInspector.ColowSwatchPopoverIcon.prototype = {
+WebInspector.ColorSwatchPopoverIcon.prototype = {
     /**
      * @return {!Element}
      */
     element: function()
     {
         return this._swatch;
+    },
+
+    /**
+     * @param {!WebInspector.Color} color
+     */
+    setContrastColor: function(color)
+    {
+        this._contrastColor = color;
+        if (this._spectrum)
+            this._spectrum.setContrastColor(this._contrastColor);
     },
 
     /**
@@ -285,22 +297,29 @@ WebInspector.ColowSwatchPopoverIcon.prototype = {
             return;
         }
 
-        WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.ColorPicked, this._colorPicked, this);
-        for (var target of WebInspector.targetManager.targets())
-            target.pageAgent().setColorPickerEnabled(true);
-
         var color = this._swatch.color();
         var format = this._swatch.format();
         if (format === WebInspector.Color.Format.Original)
             format = color.format();
         this._spectrum = new WebInspector.Spectrum();
-        this._spectrum.setColor(color);
-        this._spectrum.setColorFormat(format);
+        this._spectrum.setColor(color, format);
+        if (this._contrastColor)
+            this._spectrum.setContrastColor(this._contrastColor);
+
+        this._spectrum.addEventListener(WebInspector.Spectrum.Events.SizeChanged, this._spectrumResized, this);
         this._spectrum.addEventListener(WebInspector.Spectrum.Events.ColorChanged, this._boundSpectrumChanged);
         this._stylesPopoverHelper.show(this._spectrum, this._swatch.iconElement(), this._onPopoverHidden.bind(this));
 
         this._originalPropertyText = this._treeElement.property.propertyText;
         this._treeElement.parentPane().setEditingStyle(true);
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _spectrumResized: function(event)
+    {
+        this._stylesPopoverHelper.reposition();
     },
 
     /**
@@ -314,28 +333,10 @@ WebInspector.ColowSwatchPopoverIcon.prototype = {
     },
 
     /**
-     * @param {!WebInspector.Event} event
-     */
-    _colorPicked: function(event)
-    {
-        var rgbColor = /** @type {!DOMAgent.RGBA} */ (event.data);
-        var rgba = [rgbColor.r, rgbColor.g, rgbColor.b, (rgbColor.a / 2.55 | 0) / 100];
-        var color = WebInspector.Color.fromRGBA(rgba);
-        this._spectrum.setColor(color);
-        this._swatch.setColorText(this._spectrum.colorString());
-        this._treeElement.applyStyleText(this._treeElement.renderedPropertyText(), false);
-        InspectorFrontendHost.bringToFront();
-    },
-
-    /**
      * @param {boolean} commitEdit
      */
     _onPopoverHidden: function(commitEdit)
     {
-        for (var target of WebInspector.targetManager.targets())
-            target.pageAgent().setColorPickerEnabled(false);
-        WebInspector.targetManager.removeModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.ColorPicked, this._colorPicked, this);
-
         this._spectrum.removeEventListener(WebInspector.Spectrum.Events.ColorChanged, this._boundSpectrumChanged);
         delete this._spectrum;
 

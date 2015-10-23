@@ -173,6 +173,8 @@
 
   // The credentials TableView expands to fill available space.
   [column setMaxWidth:width];
+  [credentialsView
+      setFrameSize:NSMakeSize(width, NSHeight([credentialsView_ frame]))];
   [credentialsView_
       setFrameOrigin:NSMakePoint(password_manager::mac::ui::kFramePadding,
                                  NSMaxY([cancelButton_ frame]) +
@@ -199,7 +201,7 @@
 }
 
 - (void)onCancelClicked:(id)sender {
-  model_->OnNopeClicked();
+  model_->OnCancelClicked();
   [delegate_ viewShouldDismiss];
 }
 
@@ -224,8 +226,11 @@
     base::scoped_nsobject<CredentialItemView> item([[CredentialItemView alloc]
         initWithPasswordForm:*form
               credentialType:password_manager::CredentialType::
-                                 CREDENTIAL_TYPE_LOCAL
+                                 CREDENTIAL_TYPE_PASSWORD
+                       style:password_manager_mac::CredentialItemStyle::
+                                 ACCOUNT_CHOOSER
                     delegate:delegate]);
+    [item setAutoresizingMask:NSViewWidthSizable];
     [items addObject:item];
   }
   for (auto form : model->federated_credentials()) {
@@ -233,7 +238,10 @@
         initWithPasswordForm:*form
               credentialType:password_manager::CredentialType::
                                  CREDENTIAL_TYPE_FEDERATED
+                       style:password_manager_mac::CredentialItemStyle::
+                                 ACCOUNT_CHOOSER
                     delegate:delegate]);
+    [item setAutoresizingMask:NSViewWidthSizable];
     [items addObject:item];
   }
   return items.autorelease();

@@ -108,6 +108,7 @@ static const CSSPropertyID staticComputableProperties[] = {
     CSSPropertyFontVariantLigatures,
     CSSPropertyFontWeight,
     CSSPropertyHeight,
+    CSSPropertyImageOrientation,
     CSSPropertyImageRendering,
     CSSPropertyIsolation,
     CSSPropertyJustifyItems,
@@ -127,6 +128,9 @@ static const CSSPropertyID staticComputableProperties[] = {
     CSSPropertyMinHeight,
     CSSPropertyMinWidth,
     CSSPropertyMixBlendMode,
+    CSSPropertyMotionOffset,
+    CSSPropertyMotionPath,
+    CSSPropertyMotionRotation,
     CSSPropertyObjectFit,
     CSSPropertyObjectPosition,
     CSSPropertyOpacity,
@@ -150,7 +154,6 @@ static const CSSPropertyID staticComputableProperties[] = {
     CSSPropertyResize,
     CSSPropertyRight,
     CSSPropertyScrollBehavior,
-    CSSPropertyScrollBlocksOn,
     CSSPropertySpeak,
     CSSPropertyTableLayout,
     CSSPropertyTabSize,
@@ -329,7 +332,15 @@ static const CSSPropertyID staticComputableProperties[] = {
     CSSPropertyY,
     CSSPropertyR,
     CSSPropertyRx,
-    CSSPropertyRy
+    CSSPropertyRy,
+    CSSPropertyScrollSnapType,
+    CSSPropertyScrollSnapPointsX,
+    CSSPropertyScrollSnapPointsY,
+    CSSPropertyScrollSnapCoordinate,
+    CSSPropertyScrollSnapDestination,
+    CSSPropertyTranslate,
+    CSSPropertyRotate,
+    CSSPropertyScale,
 };
 
 static const Vector<CSSPropertyID>& computableProperties()
@@ -401,7 +412,7 @@ static CSSValueID cssIdentifierForFontSizeKeyword(int keywordSize)
 
 inline static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> zoomAdjustedPixelValue(double value, const ComputedStyle& style)
 {
-    return cssValuePool().createValue(adjustFloatForAbsoluteZoom(value, style), CSSPrimitiveValue::CSS_PX);
+    return cssValuePool().createValue(adjustFloatForAbsoluteZoom(value, style), CSSPrimitiveValue::UnitType::Pixels);
 }
 
 PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getFontSizeCSSValuePreferringKeyword() const
@@ -458,6 +469,9 @@ static bool isLayoutDependent(CSSPropertyID propertyID, const ComputedStyle* sty
     case CSSPropertyTop:
     case CSSPropertyPerspectiveOrigin:
     case CSSPropertyTransform:
+    case CSSPropertyTranslate:
+    case CSSPropertyRotate:
+    case CSSPropertyScale:
     case CSSPropertyTransformOrigin:
     case CSSPropertyMotionPath:
     case CSSPropertyMotionOffset:

@@ -106,18 +106,13 @@ struct CpuOveruseMetrics {
   CpuOveruseMetrics()
       : capture_jitter_ms(-1),
         avg_encode_time_ms(-1),
-        encode_usage_percent(-1),
-        capture_queue_delay_ms_per_s(-1) {}
+        encode_usage_percent(-1) {}
 
   int capture_jitter_ms;  // The current estimated jitter in ms based on
                           // incoming captured frames.
   int avg_encode_time_ms;   // The average encode time in ms.
   int encode_usage_percent; // The average encode time divided by the average
                             // time difference between incoming captured frames.
-  int capture_queue_delay_ms_per_s;  // The current time delay between an
-                                     // incoming captured frame until the frame
-                                     // is being processed. The delay is
-                                     // expressed in ms delay per second.
 };
 
 class CpuOveruseMetricsObserver {
@@ -129,11 +124,10 @@ class CpuOveruseMetricsObserver {
 // TODO(pbos): Move this somewhere appropriate.
 class Statistics {
  public:
-  Statistics();
+  explicit Statistics(const CpuOveruseOptions& options);
 
   void AddSample(float sample_ms);
   void Reset();
-  void SetOptions(const CpuOveruseOptions& options);
 
   float Mean() const;
   float StdDev() const;
@@ -145,7 +139,7 @@ class Statistics {
 
   float sum_;
   uint64_t count_;
-  CpuOveruseOptions options_;
+  const CpuOveruseOptions options_;
   rtc::scoped_ptr<rtc::ExpFilter> filtered_samples_;
   rtc::scoped_ptr<rtc::ExpFilter> filtered_variance_;
 };
@@ -154,21 +148,13 @@ class Statistics {
 class OveruseFrameDetector : public Module {
  public:
   OveruseFrameDetector(Clock* clock,
+                       const CpuOveruseOptions& options,
+                       CpuOveruseObserver* overuse_observer,
                        CpuOveruseMetricsObserver* metrics_observer);
   ~OveruseFrameDetector();
 
-  // Registers an observer receiving overuse and underuse callbacks. Set
-  // 'observer' to NULL to disable callbacks.
-  void SetObserver(CpuOveruseObserver* observer);
-
-  // Sets options for overuse detection.
-  void SetOptions(const CpuOveruseOptions& options);
-
   // Called for each captured frame.
   void FrameCaptured(int width, int height, int64_t capture_time_ms);
-
-  // Called when the processing of a captured frame is started.
-  void FrameProcessingStarted();
 
   // Called for each encoded frame.
   void FrameEncoded(int encode_time_ms);
@@ -177,7 +163,6 @@ class OveruseFrameDetector : public Module {
   void FrameSent(int64_t capture_time_ms);
 
   // Only public for testing.
-  int CaptureQueueDelayMsPerS() const;
   int LastProcessingTimeMs() const;
   int FramesInQueue() const;
 
@@ -188,7 +173,6 @@ class OveruseFrameDetector : public Module {
  private:
   class EncodeTimeAvg;
   class SendProcessingUsage;
-  class CaptureQueueDelay;
   class FrameQueue;
 
   void UpdateCpuOveruseMetrics() EXCLUSIVE_LOCKS_REQUIRED(crit_);
@@ -215,10 +199,10 @@ class OveruseFrameDetector : public Module {
   // processing contends with reading stats and the processing thread.
   mutable rtc::CriticalSection crit_;
 
-  // Observer getting overuse reports.
-  CpuOveruseObserver* observer_ GUARDED_BY(crit_);
+  const CpuOveruseOptions options_;
 
-  CpuOveruseOptions options_ GUARDED_BY(crit_);
+  // Observer getting overuse reports.
+  CpuOveruseObserver* const observer_;
 
   // Stats metrics.
   CpuOveruseMetricsObserver* const metrics_observer_;
@@ -252,9 +236,6 @@ class OveruseFrameDetector : public Module {
   const rtc::scoped_ptr<FrameQueue> frame_queue_ GUARDED_BY(crit_);
 
   int64_t last_sample_time_ms_;  // Only accessed by one thread.
-
-  const rtc::scoped_ptr<CaptureQueueDelay> capture_queue_delay_
-      GUARDED_BY(crit_);
 
   rtc::ThreadChecker processing_thread_;
 

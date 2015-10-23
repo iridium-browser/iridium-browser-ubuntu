@@ -9,7 +9,6 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
-#include "components/content_settings/core/common/permission_request_id.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -23,9 +22,7 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "ui/views/widget/widget.h"
-#elif defined(OS_ANDROID)
-#include "media/base/media_switches.h"
-#else
+#elif !defined(OS_ANDROID)
 #error This file currently only supports Chrome OS and Android.
 #endif
 
@@ -95,8 +92,6 @@ void ProtectedMediaIdentifierPermissionContext::RequestPermission(
   pending_requests_.insert(
       std::make_pair(web_contents, std::make_pair(widget, id)));
 #else
-  DCHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableInfobarForProtectedMediaIdentifier));
   PermissionContextBase::RequestPermission(web_contents, id, requesting_origin,
                                            user_gesture, callback);
 #endif
@@ -119,16 +114,6 @@ ContentSetting ProtectedMediaIdentifierPermissionContext::GetPermissionStatus(
          content_setting == CONTENT_SETTING_BLOCK ||
          content_setting == CONTENT_SETTING_ASK);
 
-#if defined(OS_ANDROID)
-  // When kDisableInfobarForProtectedMediaIdentifier is enabled, do not "ask"
-  // the user and always "allow".
-  if (content_setting == CONTENT_SETTING_ASK &&
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableInfobarForProtectedMediaIdentifier)) {
-    content_setting = CONTENT_SETTING_ALLOW;
-  }
-#endif
-
   return content_setting;
 }
 
@@ -139,7 +124,7 @@ void ProtectedMediaIdentifierPermissionContext::CancelPermissionRequest(
 
 #if defined(OS_CHROMEOS)
   PendingRequestMap::iterator request = pending_requests_.find(web_contents);
-  if (request == pending_requests_.end() || !request->second.second.Equals(id))
+  if (request == pending_requests_.end() || (request->second.second != id))
     return;
 
   views::Widget* widget = request->second.first;
@@ -165,12 +150,17 @@ void ProtectedMediaIdentifierPermissionContext::UpdateTabContext(
 
   // WebContents may have gone away.
   TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::Get(id.render_process_id(),
-                                      id.render_view_id());
+      TabSpecificContentSettings::GetForFrame(id.render_process_id(),
+                                              id.render_frame_id());
   if (content_settings) {
     content_settings->OnProtectedMediaIdentifierPermissionSet(
         requesting_frame.GetOrigin(), allowed);
   }
+}
+
+bool
+ProtectedMediaIdentifierPermissionContext::IsRestrictedToSecureOrigins() const {
+  return false;
 }
 
 // TODO(xhwang): We should consolidate the "protected content" related pref
@@ -222,7 +212,7 @@ void ProtectedMediaIdentifierPermissionContext::
   if (request == pending_requests_.end())
     return;
 
-  DCHECK(request->second.second.Equals(id));
+  DCHECK(request->second.second == id);
   pending_requests_.erase(request);
 
   ContentSetting content_setting = CONTENT_SETTING_ASK;

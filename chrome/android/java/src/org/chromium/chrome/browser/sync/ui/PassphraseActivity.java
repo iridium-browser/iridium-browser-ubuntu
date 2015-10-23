@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.sync.ui;
 import android.accounts.Account;
 import android.app.Dialog;
 import android.app.DialogFragment;
-import android.app.Fragment;
 import android.app.FragmentManager;
 import android.app.FragmentTransaction;
 import android.app.ProgressDialog;
@@ -17,20 +16,20 @@ import android.util.Log;
 
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromiumApplication;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.browser.sync.SyncController;
 import org.chromium.sync.signin.ChromeSigninController;
 
 /**
- * This activity is used for requesting a sync passphrase or password from the user. Typically,
+ * This activity is used for requesting a sync passphrase from the user. Typically,
  * this will be the target of an Android notification.
  */
 public class PassphraseActivity extends FragmentActivity implements
         PassphraseDialogFragment.Listener,
         FragmentManager.OnBackStackChangedListener {
 
-    public static final String FRAGMENT_PASSWORD = "password_fragment";
+    public static final String FRAGMENT_PASSPHRASE = "passphrase_fragment";
     public static final String FRAGMENT_SPINNER = "spinner_fragment";
     private static final String TAG = "PassphraseActivity";
 
@@ -44,11 +43,11 @@ public class PassphraseActivity extends FragmentActivity implements
         // During a normal user flow the ChromeTabbedActivity would start the Chrome browser
         // process and this wouldn't be necessary.
         try {
-            ((ChromiumApplication) getApplication())
+            ((ChromeApplication) getApplication())
                     .startBrowserProcessesAndLoadLibrariesSync(true);
         } catch (ProcessInitException e) {
             Log.e(TAG, "Failed to start browser process.", e);
-            ChromiumApplication.reportStartupErrorAndExit(e);
+            ChromeApplication.reportStartupErrorAndExit(e);
         }
         getFragmentManager().addOnBackStackChangedListener(this);
     }
@@ -62,9 +61,9 @@ public class PassphraseActivity extends FragmentActivity implements
             return;
         }
 
-        if (!isShowingDialog(FRAGMENT_PASSWORD)) {
+        if (!isShowingDialog(FRAGMENT_PASSPHRASE)) {
             if (ProfileSyncService.get(this).isSyncInitialized()) {
-                displayPasswordDialog();
+                displayPassphraseDialog();
             } else {
                 addSyncStateChangedListener();
                 displaySpinnerDialog();
@@ -89,7 +88,7 @@ public class PassphraseActivity extends FragmentActivity implements
             public void syncStateChanged() {
                 if (ProfileSyncService.get(getApplicationContext()).isSyncInitialized()) {
                     removeSyncStateChangedListener();
-                    displayPasswordDialog();
+                    displayPassphraseDialog();
                 }
             }
         };
@@ -107,12 +106,11 @@ public class PassphraseActivity extends FragmentActivity implements
         return getFragmentManager().findFragmentByTag(tag) != null;
     }
 
-    private void displayPasswordDialog() {
+    private void displayPassphraseDialog() {
         assert ProfileSyncService.get(this).isSyncInitialized();
-        boolean isGaia = !ProfileSyncService.get(this).isUsingSecondaryPassphrase();
         FragmentTransaction ft = getFragmentManager().beginTransaction();
         ft.addToBackStack(null);
-        PassphraseDialogFragment.newInstance(null, isGaia, false).show(ft, FRAGMENT_PASSWORD);
+        PassphraseDialogFragment.newInstance(null).show(ft, FRAGMENT_PASSPHRASE);
     }
 
     private void displaySpinnerDialog() {
@@ -122,24 +120,22 @@ public class PassphraseActivity extends FragmentActivity implements
         dialog.show(ft, FRAGMENT_SPINNER);
     }
 
+    /**
+     * Callback for PassphraseDialogFragment.Listener
+     */
     @Override
-    public boolean onPassphraseEntered(String password, boolean isGaia, boolean isUpdate) {
-        if (!password.isEmpty() && ProfileSyncService.get(this).setDecryptionPassphrase(password)) {
+    public boolean onPassphraseEntered(String passphrase) {
+        if (!passphrase.isEmpty()
+                && ProfileSyncService.get(this).setDecryptionPassphrase(passphrase)) {
             // The passphrase was correct - close this activity.
             finish();
             return true;
-        } else {
-            // Invalid passphrase - display an error.
-            Fragment fragment = getFragmentManager().findFragmentByTag(FRAGMENT_PASSWORD);
-            if (fragment instanceof PassphraseDialogFragment) {
-                ((PassphraseDialogFragment) fragment).invalidPassphrase();
-            }
-            return false;
         }
+        return false;
     }
 
     @Override
-    public void onPassphraseCanceled(boolean isGaia, boolean isUpdate) {
+    public void onPassphraseCanceled() {
         // Re add the notification.
         SyncController.get(this).getSyncNotificationController().syncStateChanged();
         finish();

@@ -105,14 +105,6 @@ const char *SSL_state_string_long(const SSL *s) {
       str = "SSL renegotiate ciphers";
       break;
 
-    case SSL_ST_BEFORE | SSL_ST_CONNECT:
-      str = "before/connect initialization";
-      break;
-
-    case SSL_ST_BEFORE | SSL_ST_ACCEPT:
-      str = "before/accept initialization";
-      break;
-
     /* SSLv3 additions */
     case SSL3_ST_CW_CLNT_HELLO_A:
       str = "SSLv3 write client hello A";
@@ -340,37 +332,6 @@ const char *SSL_state_string_long(const SSL *s) {
 
     case SSL3_ST_SR_CERT_VRFY_B:
       str = "SSLv3 read certificate verify B";
-      break;
-
-    /* SSLv2/v3 compatibility states */
-    /* client */
-    case SSL23_ST_CW_CLNT_HELLO_A:
-      str = "SSLv2/v3 write client hello A";
-      break;
-
-    case SSL23_ST_CW_CLNT_HELLO_B:
-      str = "SSLv2/v3 write client hello B";
-      break;
-
-    case SSL23_ST_CR_SRVR_HELLO_A:
-      str = "SSLv2/v3 read server hello A";
-      break;
-
-    case SSL23_ST_CR_SRVR_HELLO_B:
-      str = "SSLv2/v3 read server hello B";
-      break;
-
-    /* server */
-    case SSL23_ST_SR_CLNT_HELLO:
-      str = "SSLv2/v3 read client hello";
-      break;
-
-    case SSL23_ST_SR_V2_CLNT_HELLO:
-      str = "SSLv2/v3 read v2 client hello";
-      break;
-
-    case SSL23_ST_SR_SWITCH_VERSION:
-      str = "SSLv2/v3 switch version";
       break;
 
     /* DTLS */
@@ -641,37 +602,6 @@ const char *SSL_state_string(const SSL *s) {
 
     case SSL3_ST_SR_CERT_VRFY_B:
       str = "3RCV_B";
-      break;
-
-    /* SSLv2/v3 compatibility states */
-    /* client */
-    case SSL23_ST_CW_CLNT_HELLO_A:
-      str = "23WCHA";
-      break;
-
-    case SSL23_ST_CW_CLNT_HELLO_B:
-      str = "23WCHB";
-      break;
-
-    case SSL23_ST_CR_SRVR_HELLO_A:
-      str = "23RSHA";
-      break;
-
-    case SSL23_ST_CR_SRVR_HELLO_B:
-      str = "23RSHA";
-      break;
-
-    /* server */
-    case SSL23_ST_SR_CLNT_HELLO:
-      str = "23RCH_";
-      break;
-
-    case SSL23_ST_SR_V2_CLNT_HELLO:
-      str = "23R2CH";
-      break;
-
-    case SSL23_ST_SR_SWITCH_VERSION:
-      str = "23RSW_";
       break;
 
     /* DTLS */

@@ -41,18 +41,18 @@ class Event;
 
 class V8WorkerGlobalScopeEventListener final : public V8EventListener {
 public:
-    static PassRefPtr<V8WorkerGlobalScopeEventListener> create(v8::Local<v8::Object> listener, bool isInline, ScriptState* scriptState)
+    static PassRefPtrWillBeRawPtr<V8WorkerGlobalScopeEventListener> create(v8::Local<v8::Object> listener, bool isInline, ScriptState* scriptState)
     {
-        return adoptRef(new V8WorkerGlobalScopeEventListener(listener, isInline, scriptState));
+        return adoptRefWillBeNoop(new V8WorkerGlobalScopeEventListener(listener, isInline, scriptState));
     }
 
-    virtual void handleEvent(ScriptState*, Event*) override;
+    void handleEvent(ScriptState*, Event*) override;
 
 protected:
     V8WorkerGlobalScopeEventListener(v8::Local<v8::Object> listener, bool isInline, ScriptState*);
 
 private:
-    virtual v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*) override;
+    v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*) override;
     v8::Local<v8::Object> getReceiverObject(ScriptState*, Event*);
 };
 

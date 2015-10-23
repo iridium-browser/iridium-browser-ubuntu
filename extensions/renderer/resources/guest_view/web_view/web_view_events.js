@@ -9,6 +9,7 @@ var DeclarativeWebRequestSchema =
     requireNative('schema_registry').GetSchema('declarativeWebRequest');
 var EventBindings = require('event_bindings');
 var GuestViewEvents = require('guestViewEvents').GuestViewEvents;
+var GuestViewInternalNatives = requireNative('guest_view_internal');
 var IdGenerator = requireNative('id_generator');
 var WebRequestEvent = require('webRequestInternal').WebRequestEvent;
 var WebRequestSchema =
@@ -151,7 +152,7 @@ WebViewEvents.EVENTS = {
 WebViewEvents.prototype.setupWebRequestEvents = function() {
   var request = {};
   var createWebRequestEvent = function(webRequestEvent) {
-    return function() {
+    return this.weakWrapper(function() {
       if (!this[webRequestEvent.name]) {
         this[webRequestEvent.name] =
             new WebRequestEvent(
@@ -161,11 +162,11 @@ WebViewEvents.prototype.setupWebRequestEvents = function() {
                 this.view.viewInstanceId);
       }
       return this[webRequestEvent.name];
-    }.bind(this);
+    });
   }.bind(this);
 
   var createDeclarativeWebRequestEvent = function(webRequestEvent) {
-    return function() {
+    return this.weakWrapper(function() {
       if (!this[webRequestEvent.name]) {
         // The onMessage event gets a special event type because we want
         // the listener to fire only for messages targeted for this particular
@@ -180,7 +181,7 @@ WebViewEvents.prototype.setupWebRequestEvents = function() {
                 this.view.viewInstanceId);
       }
       return this[webRequestEvent.name];
-    }.bind(this);
+    });
   }.bind(this);
 
   for (var i = 0; i < DeclarativeWebRequestSchema.events.length; ++i) {
@@ -284,8 +285,11 @@ function DeclarativeWebRequestEvent(opt_eventName,
                            opt_eventOptions,
                            opt_webViewInstanceId);
 
-  // TODO(lazyboy): When do we dispose this listener?
-  WebRequestMessageEvent.addListener(function() {
+  var view = GuestViewInternalNatives.GetViewFromID(opt_webViewInstanceId || 0);
+  if (!view) {
+    return;
+  }
+  view.events.addScopedListener(WebRequestMessageEvent, function() {
     // Re-dispatch to subEvent's listeners.
     $Function.apply(this.dispatch, this, $Array.slice(arguments));
   }.bind(this), {instanceId: opt_webViewInstanceId || 0});

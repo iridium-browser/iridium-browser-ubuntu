@@ -43,6 +43,7 @@ template <typename T>
 class SkAtomic : SkNoncopyable {
 public:
     SkAtomic() {}
+    explicit SkAtomic(const T& val) : fVal(val) {}
 
     // It is essential we return by value rather than by const&.  fVal may change at any time.
     T load(sk_memory_order mo = sk_memory_order_seq_cst) const {
@@ -51,6 +52,10 @@ public:
 
     void store(const T& val, sk_memory_order mo = sk_memory_order_seq_cst) {
         sk_atomic_store(&fVal, val, mo);
+    }
+
+    T fetch_add(const T& val, sk_memory_order mo = sk_memory_order_seq_cst) {
+        return sk_atomic_fetch_add(&fVal, val, mo);
     }
 
     bool compare_exchange(T* expected, const T& desired,
@@ -62,6 +67,7 @@ private:
     T fVal;
 };
 
+// IWYU pragma: begin_exports
 #if defined(_MSC_VER)
     #include "../ports/SkAtomics_std.h"
 #elif !defined(SK_BUILD_FOR_IOS) && defined(__ATOMIC_RELAXED)
@@ -69,6 +75,7 @@ private:
 #else
     #include "../ports/SkAtomics_sync.h"
 #endif
+// IWYU pragma: end_exports
 
 // From here down we have shims for our old atomics API, to be weaned off of.
 // We use the default sequentially-consistent memory order to make things simple

@@ -22,7 +22,10 @@ using base::TimeDelta;
 namespace {
 
 const char kChromeProxyHeader[] = "chrome-proxy";
+
 const char kActionValueDelimiter = '=';
+
+const char kChromeProxyLoFiDirective[] = "q=low";
 
 const char kChromeProxyActionBlockOnce[] = "block-once";
 const char kChromeProxyActionBlock[] = "block";
@@ -49,6 +52,14 @@ base::TimeDelta GetDefaultBypassDuration() {
 
 namespace data_reduction_proxy {
 
+const char* chrome_proxy_header() {
+  return kChromeProxyHeader;
+}
+
+const char* chrome_proxy_lo_fi_directive() {
+  return kChromeProxyLoFiDirective;
+}
+
 bool GetDataReductionProxyActionValue(
     const net::HttpResponseHeaders* headers,
     const std::string& action_prefix,
@@ -63,9 +74,8 @@ bool GetDataReductionProxyActionValue(
 
   while (headers->EnumerateHeader(&iter, kChromeProxyHeader, &value)) {
     if (value.size() > prefix.size()) {
-      if (LowerCaseEqualsASCII(value.begin(),
-                               value.begin() + prefix.size(),
-                               prefix.c_str())) {
+      if (base::StartsWith(value, prefix,
+                           base::CompareCase::INSENSITIVE_ASCII)) {
         if (action_value)
           *action_value = value.substr(prefix.size());
         return true;
@@ -88,9 +98,8 @@ bool ParseHeadersAndSetBypassDuration(const net::HttpResponseHeaders* headers,
 
   while (headers->EnumerateHeader(&iter, kChromeProxyHeader, &value)) {
     if (value.size() > prefix.size()) {
-      if (LowerCaseEqualsASCII(value.begin(),
-                               value.begin() + prefix.size(),
-                               prefix.c_str())) {
+      if (base::StartsWith(value, prefix,
+                           base::CompareCase::INSENSITIVE_ASCII)) {
         int64 seconds;
         if (!base::StringToInt64(
                 StringPiece(value.begin() + prefix.size(), value.end()),
@@ -294,10 +303,8 @@ void GetDataReductionProxyHeaderWithFingerprintRemoved(
   void* iter = NULL;
   while (headers->EnumerateHeader(&iter, kChromeProxyHeader, &value)) {
     if (value.size() > chrome_proxy_fingerprint_prefix.size()) {
-      if (LowerCaseEqualsASCII(
-          value.begin(),
-          value.begin() + chrome_proxy_fingerprint_prefix.size(),
-          chrome_proxy_fingerprint_prefix.c_str())) {
+      if (base::StartsWith(value, chrome_proxy_fingerprint_prefix,
+                           base::CompareCase::INSENSITIVE_ASCII)) {
         continue;
       }
     }

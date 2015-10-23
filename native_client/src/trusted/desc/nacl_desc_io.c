@@ -111,8 +111,7 @@ struct NaClDescIoDesc *NaClDescIoDescMake(struct NaClHostDesc *nhdp) {
   return ndp;
 }
 
-struct NaClDesc *NaClDescIoDescFromHandleAllocCtor(NaClHandle handle,
-                                                   int flags) {
+struct NaClDesc *NaClDescIoMakeFromHandle(NaClHandle handle, int flags) {
   int posix_d;
 
 #if NACL_WINDOWS
@@ -296,6 +295,32 @@ static int NaClDescIoDescFstat(struct NaClDesc         *vself,
   return NaClAbiStatHostDescStatXlateCtor(statbuf, &hstatbuf);
 }
 
+static int NaClDescIoDescFchmod(struct NaClDesc *vself,
+                                int             mode) {
+  struct NaClDescIoDesc *self = (struct NaClDescIoDesc *) vself;
+
+  return NaClHostDescFchmod(self->hd, mode);
+}
+
+static int NaClDescIoDescFsync(struct NaClDesc *vself) {
+  struct NaClDescIoDesc *self = (struct NaClDescIoDesc *) vself;
+
+  return NaClHostDescFsync(self->hd);
+}
+
+static int NaClDescIoDescFdatasync(struct NaClDesc *vself) {
+  struct NaClDescIoDesc *self = (struct NaClDescIoDesc *) vself;
+
+  return NaClHostDescFdatasync(self->hd);
+}
+
+static int NaClDescIoDescFtruncate(struct NaClDesc  *vself,
+                                   nacl_abi_off_t   length) {
+  struct NaClDescIoDesc *self = (struct NaClDescIoDesc *) vself;
+
+  return NaClHostDescFtruncate(self->hd, length);
+}
+
 static int32_t NaClDescIoIsatty(struct NaClDesc *vself) {
   struct NaClDescIoDesc *self = (struct NaClDescIoDesc *) vself;
 
@@ -358,6 +383,11 @@ static struct NaClDescVtbl const kNaClDescIoDescVtbl = {
   NaClDescIoDescPRead,
   NaClDescIoDescPWrite,
   NaClDescIoDescFstat,
+  NaClDescFchdirNotImplemented,
+  NaClDescIoDescFchmod,
+  NaClDescIoDescFsync,
+  NaClDescIoDescFdatasync,
+  NaClDescIoDescFtruncate,
   NaClDescGetdentsNotImplemented,
   NaClDescIoDescExternalizeSize,
   NaClDescIoDescExternalize,
@@ -387,8 +417,7 @@ static struct NaClDescVtbl const kNaClDescIoDescVtbl = {
 
 /* set *out_desc to struct NaClDescIo * output */
 int NaClDescIoInternalize(struct NaClDesc               **out_desc,
-                          struct NaClDescXferState      *xfer,
-                          struct NaClDescQuotaInterface *quota_interface) {
+                          struct NaClDescXferState      *xfer) {
   int                   rv;
   NaClHandle            h;
   int                   d;
@@ -396,7 +425,6 @@ int NaClDescIoInternalize(struct NaClDesc               **out_desc,
   struct NaClHostDesc   *nhdp;
   struct NaClDescIoDesc *ndidp;
 
-  UNREFERENCED_PARAMETER(quota_interface);
   rv = -NACL_ABI_EIO;  /* catch-all */
   h = NACL_INVALID_HANDLE;
   nhdp = NULL;

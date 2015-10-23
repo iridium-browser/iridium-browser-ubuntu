@@ -15,12 +15,12 @@
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/component_updater/supervised_user_whitelist_installer.h"
+#include "chrome/browser/net/file_downloader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/supervised_user/experimental/supervised_user_blacklist_downloader.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_filtering_switches.h"
 #include "chrome/browser/supervised_user/legacy/custodian_profile_downloader_service.h"
 #include "chrome/browser/supervised_user/legacy/custodian_profile_downloader_service_factory.h"
@@ -295,6 +295,7 @@ void SupervisedUserService::RegisterProfilePrefs(
   registry->RegisterIntegerPref(prefs::kDefaultSupervisedUserFilteringBehavior,
                                 SupervisedUserURLFilter::ALLOW);
   registry->RegisterBooleanPref(prefs::kSupervisedUserCreationAllowed, true);
+  registry->RegisterBooleanPref(prefs::kSupervisedUserSafeSites, true);
   for (const char* pref : kCustodianInfoPrefs) {
     registry->RegisterStringPref(pref, std::string());
   }
@@ -591,8 +592,6 @@ void SupervisedUserService::OnSupervisedUserIdChanged() {
 }
 
 void SupervisedUserService::OnDefaultFilteringBehaviorChanged() {
-  DCHECK(ProfileIsSupervised());
-
   int behavior_value = profile_->GetPrefs()->GetInteger(
       prefs::kDefaultSupervisedUserFilteringBehavior);
   SupervisedUserURLFilter::FilteringBehavior behavior =
@@ -633,7 +632,7 @@ void SupervisedUserService::OnBlacklistFileChecked(const base::FilePath& path,
   }
 
   DCHECK(!blacklist_downloader_);
-  blacklist_downloader_.reset(new SupervisedUserBlacklistDownloader(
+  blacklist_downloader_.reset(new FileDownloader(
       url,
       path,
       profile_->GetRequestContext(),
@@ -738,6 +737,7 @@ void SupervisedUserService::SetActive(bool active) {
 
   if (!delegate_ || !delegate_->SetActive(active_)) {
     if (active_) {
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
       SupervisedUserPrefMappingServiceFactory::GetForBrowserContext(profile_)
           ->Init();
 
@@ -762,6 +762,9 @@ void SupervisedUserService::SetActive(bool active) {
           profile_->GetPrefs()->GetString(prefs::kSupervisedUserId)));
 
       SetupSync();
+#else
+      NOTREACHED();
+#endif
     }
   }
 
@@ -806,14 +809,10 @@ void SupervisedUserService::SetActive(bool active) {
     whitelist_service_->Init();
     UpdateManualHosts();
     UpdateManualURLs();
-    if (profile_->IsChild() && delegate_ &&
-        supervised_users::IsSafeSitesBlacklistEnabled()) {
+    if (supervised_users::IsSafeSitesBlacklistEnabled(profile_))
       LoadBlacklist(GetBlacklistPath(), GURL(kBlacklistURL));
-    }
-    if (profile_->IsChild() && delegate_ &&
-        supervised_users::IsSafeSitesOnlineCheckEnabled()) {
+    if (supervised_users::IsSafeSitesOnlineCheckEnabled(profile_))
       url_filter_context_.InitAsyncURLChecker(profile_->GetRequestContext());
-    }
 
 #if !defined(OS_ANDROID)
     // TODO(bauerb): Get rid of the platform-specific #ifdef here.

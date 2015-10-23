@@ -43,7 +43,6 @@ namespace content {
 namespace {
 
 const wchar_t kWebPluginDelegateProperty[] = L"WebPluginDelegateProperty";
-const wchar_t kPluginFlashThrottle[] = L"FlashThrottle";
 
 // The fastest we are willing to process WM_USER+1 events for Flash.
 // Flash can easily exceed the limits of our CPU if we don't throttle it.
@@ -221,26 +220,25 @@ LRESULT CALLBACK WebPluginDelegateImpl::MouseHookProc(
   return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
-WebPluginDelegateImpl::WebPluginDelegateImpl(
-    WebPlugin* plugin,
-    PluginInstance* instance)
-    : instance_(instance),
-      quirks_(0),
-      plugin_(plugin),
-      windowless_(false),
-      windowed_handle_(NULL),
+WebPluginDelegateImpl::WebPluginDelegateImpl(WebPlugin* plugin,
+                                             PluginInstance* instance)
+    : windowed_handle_(NULL),
       windowed_did_set_window_(false),
+      windowless_(false),
+      plugin_(plugin),
+      instance_(instance),
       plugin_wnd_proc_(NULL),
       last_message_(0),
       is_calling_wndproc(false),
+      quirks_(0),
       dummy_window_for_activation_(NULL),
       dummy_window_parent_(NULL),
       old_dummy_window_proc_(NULL),
       handle_event_message_filter_hook_(NULL),
       handle_event_pump_messages_event_(NULL),
       user_gesture_message_posted_(false),
-      handle_event_depth_(0),
       mouse_hook_(NULL),
+      handle_event_depth_(0),
       first_set_window_call_(true),
       plugin_has_focus_(false),
       has_webkit_focus_(false),
@@ -250,8 +248,8 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
   memset(&window_, 0, sizeof(window_));
 
   const WebPluginInfo& plugin_info = instance_->plugin_lib()->plugin_info();
-  std::wstring filename =
-      base::StringToLowerASCII(plugin_info.path.BaseName().value());
+  base::string16 filename =
+      base::ToLowerASCII(plugin_info.path.BaseName().value());
 
   if (instance_->mime_type() == kFlashPluginSwfMimeType ||
       filename == kFlashPlugin) {
@@ -1094,8 +1092,8 @@ bool WebPluginDelegateImpl::PlatformSetPluginHasFocus(bool focused) {
 
 static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
                                      NPEvent* np_event) {
-  np_event->lParam = static_cast<uint32>(MAKELPARAM(event.windowX,
-                                                   event.windowY));
+  np_event->lParam =
+      static_cast<uint32>(MAKELPARAM(event.windowX, event.windowY));
   np_event->wParam = 0;
 
   if (event.modifiers & WebInputEvent::ControlKey)
@@ -1126,6 +1124,8 @@ static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
         case WebMouseEvent::ButtonRight:
           np_event->event = WM_RBUTTONDOWN;
           break;
+        case WebMouseEvent::ButtonNone:
+          break;
       }
       return true;
     case WebInputEvent::MouseUp:
@@ -1138,6 +1138,8 @@ static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
           break;
         case WebMouseEvent::ButtonRight:
           np_event->event = WM_RBUTTONUP;
+          break;
+        case WebMouseEvent::ButtonNone:
           break;
       }
       return true;

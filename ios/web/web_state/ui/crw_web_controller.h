@@ -9,9 +9,9 @@
 
 #include "base/memory/scoped_ptr.h"
 #import "ios/web/net/crw_request_tracker_delegate.h"
-#import "ios/web/public/web_state/crw_web_delegate.h"
 #import "ios/web/public/web_state/crw_web_user_interface_delegate.h"
 #import "ios/web/public/web_state/js/crw_js_injection_evaluator.h"
+#import "ios/web/public/web_state/ui/crw_web_delegate.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
 #import "ios/web/web_state/ui/crw_touch_tracking_recognizer.h"
 
@@ -42,8 +42,6 @@ enum PageDialogOpenPolicy {
   DIALOG_POLICY_SUPPRESS
 };
 
-extern NSString* const kPageChangedNotification;
-
 // The accessibility identifier of the top-level container view.
 extern NSString* const kContainerViewID;
 
@@ -54,6 +52,7 @@ extern NSString* const kContainerViewID;
 @protocol CRWNativeContentProvider;
 @protocol CRWSwipeRecognizerProvider;
 @protocol CRWWebControllerObserver;
+@class CRWWebViewContentView;
 @protocol CRWWebViewProxy;
 class GURL;
 
@@ -96,10 +95,8 @@ class WebStateImpl;
 @property(nonatomic, readonly) web::WebState* webState;
 @property(nonatomic, readonly) web::WebStateImpl* webStateImpl;
 
-// If on a regular webpage, the UIWebView responsible for rendering it. If
-// on an internal page, the native view implementing the functionality. If the
-// view has been purged due to low memory, this will re-create it. It is up
-// to the caller to size the view.
+// The container view used to display content.  If the view has been purged due
+// to low memory, this will recreate it.
 @property(nonatomic, readonly) UIView* view;
 
 // The web view proxy associated with this controller.
@@ -132,10 +129,12 @@ class WebStateImpl;
 // Return an image to use as replacement of a missing snapshot.
 + (UIImage*)defaultSnapshotImage;
 
-// Adds |interstitialView| to the content view, copying the current scroll
-// offsets to |scrollView|.
-- (void)displayInterstitialView:(UIView*)interstitialView
-                 withScrollView:(UIScrollView*)scrollView;
+// Replaces the currently displayed content with |contentView|.  The content
+// view will be dismissed for the next navigation.
+- (void)showTransientContentView:(CRWContentView*)contentView;
+
+// Clear the transient content view, if one is shown.
+- (void)clearTransientContentView;
 
 // Give the unload listeners a chance to fire. Returns YES if they complete
 // and the CRWWebController is in a state it may be closed.
@@ -316,9 +315,10 @@ class WebStateImpl;
 
 @interface CRWWebController (UsedOnlyForTesting)  // Testing or internal API.
 
-// Injects a web view for testing.  Takes ownership of the |webView|.
-- (void)injectWebView:(id)webView;
-- (void)resetInjectedWebView;
+// Injects a CRWWebViewContentView for testing.  Takes ownership of
+// |webViewContentView|.
+- (void)injectWebViewContentView:(CRWWebViewContentView*)webViewContentView;
+- (void)resetInjectedWebViewContentView;
 // Returns the number of observers registered for this CRWWebController.
 - (NSUInteger)observerCount;
 - (NSString*)windowId;

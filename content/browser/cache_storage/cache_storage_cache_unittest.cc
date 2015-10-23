@@ -6,9 +6,10 @@
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/strings/string_split.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
 #include "content/browser/fileapi/mock_url_request_delegate.h"
 #include "content/browser/quota/mock_quota_manager_proxy.h"
@@ -18,6 +19,7 @@
 #include "content/public/common/referrer.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "net/base/test_completion_callback.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_job_factory_impl.h"
@@ -38,10 +40,10 @@ const char kTestData[] = "Hello World";
 // the memory.
 storage::BlobProtocolHandler* CreateMockBlobProtocolHandler(
     storage::BlobStorageContext* blob_storage_context) {
-  // The FileSystemContext and MessageLoopProxy are not actually used but a
-  // MessageLoopProxy is needed to avoid a DCHECK in BlobURLRequestJob ctor.
+  // The FileSystemContext and thread task runner are not actually used but a
+  // task runner is needed to avoid a DCHECK in BlobURLRequestJob ctor.
   return new storage::BlobProtocolHandler(
-      blob_storage_context, NULL, base::MessageLoopProxy::current().get());
+      blob_storage_context, NULL, base::ThreadTaskRunnerHandle::Get().get());
 }
 
 // A disk_cache::Backend wrapper that can delay operations.
@@ -120,6 +122,72 @@ class DelayableBackend : public disk_cache::Backend {
   base::Closure open_entry_callback_;
 };
 
+void CopyBody(const storage::BlobDataHandle& blob_handle, std::string* output) {
+  *output = std::string();
+  scoped_ptr<storage::BlobDataSnapshot> data = blob_handle.CreateSnapshot();
+  const auto& items = data->items();
+  for (const auto& item : items) {
+    switch (item->type()) {
+      case storage::DataElement::TYPE_BYTES: {
+        output->append(item->bytes(), item->length());
+        break;
+      }
+      case storage::DataElement::TYPE_DISK_CACHE_ENTRY: {
+        disk_cache::Entry* entry = item->disk_cache_entry();
+        int32 body_size = entry->GetDataSize(item->disk_cache_stream_index());
+
+        scoped_refptr<net::IOBuffer> io_buffer = new net::IOBuffer(body_size);
+        net::TestCompletionCallback callback;
+        int rv =
+            entry->ReadData(item->disk_cache_stream_index(), 0, io_buffer.get(),
+                            body_size, callback.callback());
+        if (rv == net::ERR_IO_PENDING)
+          rv = callback.WaitForResult();
+        EXPECT_EQ(body_size, rv);
+        if (rv > 0)
+          output->append(io_buffer->data(), rv);
+        break;
+      }
+      default: { ADD_FAILURE() << "invalid response blob type"; } break;
+    }
+  }
+}
+
+bool ResponseMetadataEqual(const ServiceWorkerResponse& expected,
+                           const ServiceWorkerResponse& actual) {
+  EXPECT_EQ(expected.status_code, actual.status_code);
+  if (expected.status_code != actual.status_code)
+    return false;
+  EXPECT_EQ(expected.status_text, actual.status_text);
+  if (expected.status_text != actual.status_text)
+    return false;
+  EXPECT_EQ(expected.url, actual.url);
+  if (expected.url != actual.url)
+    return false;
+  EXPECT_EQ(expected.blob_size, actual.blob_size);
+  if (expected.blob_size != actual.blob_size)
+    return false;
+
+  if (expected.blob_size == 0) {
+    EXPECT_STREQ("", actual.blob_uuid.c_str());
+    if (!actual.blob_uuid.empty())
+      return false;
+  } else {
+    EXPECT_STRNE("", actual.blob_uuid.c_str());
+    if (actual.blob_uuid.empty())
+      return false;
+  }
+
+  return true;
+}
+
+bool ResponseBodiesEqual(const std::string& expected_body,
+                         const storage::BlobDataHandle& actual_body_handle) {
+  std::string actual_body;
+  CopyBody(actual_body_handle, &actual_body);
+  return expected_body == actual_body;
+}
+
 }  // namespace
 
 // A CacheStorageCache that can optionally delay during backend creation.
@@ -128,12 +196,12 @@ class TestCacheStorageCache : public CacheStorageCache {
   TestCacheStorageCache(
       const GURL& origin,
       const base::FilePath& path,
-      net::URLRequestContext* request_context,
+      const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
       const scoped_refptr<storage::QuotaManagerProxy>& quota_manager_proxy,
       base::WeakPtr<storage::BlobStorageContext> blob_context)
       : CacheStorageCache(origin,
                           path,
-                          request_context,
+                          request_context_getter,
                           quota_manager_proxy,
                           blob_context),
         delay_backend_creation_(false) {}
@@ -186,7 +254,7 @@ class CacheStorageCacheTest : public testing::Test {
     blob_storage_context_ = blob_storage_context->context();
 
     quota_manager_proxy_ = new MockQuotaManagerProxy(
-        nullptr, base::MessageLoopProxy::current().get());
+        nullptr, base::ThreadTaskRunnerHandle::Get().get());
 
     url_request_job_factory_.reset(new net::URLRequestJobFactoryImpl);
     url_request_job_factory_->SetProtocolHandler(
@@ -204,7 +272,7 @@ class CacheStorageCacheTest : public testing::Test {
     base::FilePath path = MemoryOnly() ? base::FilePath() : temp_dir_.path();
 
     cache_ = make_scoped_refptr(new TestCacheStorageCache(
-        GURL("http://example.com"), path, url_request_context,
+        GURL("http://example.com"), path, browser_context_.GetRequestContext(),
         quota_manager_proxy_, blob_storage_context->context()->AsWeakPtr()));
   }
 
@@ -238,11 +306,13 @@ class CacheStorageCacheTest : public testing::Test {
     body_response_ = ServiceWorkerResponse(
         GURL("http://example.com/body.html"), 200, "OK",
         blink::WebServiceWorkerResponseTypeDefault, headers,
-        blob_handle_->uuid(), expected_blob_data_.size(), GURL());
+        blob_handle_->uuid(), expected_blob_data_.size(), GURL(),
+        blink::WebServiceWorkerResponseErrorUnknown);
 
     no_body_response_ = ServiceWorkerResponse(
         GURL("http://example.com/no_body.html"), 200, "OK",
-        blink::WebServiceWorkerResponseTypeDefault, headers, "", 0, GURL());
+        blink::WebServiceWorkerResponseTypeDefault, headers, "", 0, GURL(),
+        blink::WebServiceWorkerResponseErrorUnknown);
   }
 
   scoped_ptr<ServiceWorkerFetchRequest> CopyFetchRequest(
@@ -261,8 +331,7 @@ class CacheStorageCacheTest : public testing::Test {
         base::Bind(&CacheStorageCacheTest::ErrorTypeCallback,
                    base::Unretained(this), base::Unretained(loop.get())));
     // TODO(jkarlin): These functions should use base::RunLoop().RunUntilIdle()
-    // once the cache uses a passed in MessageLoopProxy instead of the CACHE
-    // thread.
+    // once the cache uses a passed in task runner instead of the CACHE thread.
     loop->Run();
 
     return callback_error_;
@@ -289,6 +358,16 @@ class CacheStorageCacheTest : public testing::Test {
                    base::Unretained(this), base::Unretained(loop.get())));
     loop->Run();
 
+    return callback_error_ == CACHE_STORAGE_OK;
+  }
+
+  bool MatchAll(scoped_ptr<CacheStorageCache::Responses>* responses,
+                scoped_ptr<CacheStorageCache::BlobDataHandles>* body_handles) {
+    base::RunLoop loop;
+    cache_->MatchAll(base::Bind(
+        &CacheStorageCacheTest::ResponsesAndErrorCallback,
+        base::Unretained(this), loop.QuitClosure(), responses, body_handles));
+    loop.Run();
     return callback_error_ == CACHE_STORAGE_OK;
   }
 
@@ -367,19 +446,24 @@ class CacheStorageCacheTest : public testing::Test {
       run_loop->Quit();
   }
 
+  void ResponsesAndErrorCallback(
+      const base::Closure& quit_closure,
+      scoped_ptr<CacheStorageCache::Responses>* responses_out,
+      scoped_ptr<CacheStorageCache::BlobDataHandles>* body_handles_out,
+      CacheStorageError error,
+      scoped_ptr<CacheStorageCache::Responses> responses,
+      scoped_ptr<CacheStorageCache::BlobDataHandles> body_handles) {
+    callback_error_ = error;
+    responses_out->swap(responses);
+    body_handles_out->swap(body_handles);
+    quit_closure.Run();
+  }
+
   void CloseCallback(base::RunLoop* run_loop) {
     EXPECT_FALSE(callback_closed_);
     callback_closed_ = true;
     if (run_loop)
       run_loop->Quit();
-  }
-
-  void CopyBody(storage::BlobDataHandle* blob_handle, std::string* output) {
-    scoped_ptr<storage::BlobDataSnapshot> data = blob_handle->CreateSnapshot();
-    const auto& items = data->items();
-    for (const auto& item : items) {
-      output->append(item->bytes(), item->length());
-    }
   }
 
   bool VerifyKeys(const std::vector<std::string>& expected_keys) {
@@ -571,27 +655,85 @@ TEST_P(CacheStorageCacheTestP, PutReplcaceInBatch) {
 TEST_P(CacheStorageCacheTestP, MatchNoBody) {
   EXPECT_TRUE(Put(no_body_request_, no_body_response_));
   EXPECT_TRUE(Match(no_body_request_));
-  EXPECT_EQ(200, callback_response_->status_code);
-  EXPECT_STREQ("OK", callback_response_->status_text.c_str());
-  EXPECT_STREQ("http://example.com/no_body.html",
-               callback_response_->url.spec().c_str());
-  EXPECT_STREQ("", callback_response_->blob_uuid.c_str());
-  EXPECT_EQ(0u, callback_response_->blob_size);
+  EXPECT_TRUE(ResponseMetadataEqual(no_body_response_, *callback_response_));
+  EXPECT_FALSE(callback_response_data_);
 }
 
 TEST_P(CacheStorageCacheTestP, MatchBody) {
   EXPECT_TRUE(Put(body_request_, body_response_));
   EXPECT_TRUE(Match(body_request_));
-  EXPECT_EQ(200, callback_response_->status_code);
-  EXPECT_STREQ("OK", callback_response_->status_text.c_str());
-  EXPECT_STREQ("http://example.com/body.html",
-               callback_response_->url.spec().c_str());
-  EXPECT_STRNE("", callback_response_->blob_uuid.c_str());
-  EXPECT_EQ(expected_blob_data_.size(), callback_response_->blob_size);
+  EXPECT_TRUE(ResponseMetadataEqual(body_response_, *callback_response_));
+  EXPECT_TRUE(
+      ResponseBodiesEqual(expected_blob_data_, *callback_response_data_));
+}
 
-  std::string response_body;
-  CopyBody(callback_response_data_.get(), &response_body);
-  EXPECT_STREQ(expected_blob_data_.c_str(), response_body.c_str());
+TEST_P(CacheStorageCacheTestP, MatchAll_Empty) {
+  scoped_ptr<CacheStorageCache::Responses> responses;
+  scoped_ptr<CacheStorageCache::BlobDataHandles> body_handles;
+  EXPECT_TRUE(MatchAll(&responses, &body_handles));
+  EXPECT_TRUE(responses->empty());
+  EXPECT_TRUE(body_handles->empty());
+}
+
+TEST_P(CacheStorageCacheTestP, MatchAll_NoBody) {
+  EXPECT_TRUE(Put(no_body_request_, no_body_response_));
+
+  scoped_ptr<CacheStorageCache::Responses> responses;
+  scoped_ptr<CacheStorageCache::BlobDataHandles> body_handles;
+  EXPECT_TRUE(MatchAll(&responses, &body_handles));
+
+  ASSERT_EQ(1u, responses->size());
+  EXPECT_TRUE(ResponseMetadataEqual(no_body_response_, responses->at(0)));
+  EXPECT_TRUE(body_handles->empty());
+}
+
+TEST_P(CacheStorageCacheTestP, MatchAll_Body) {
+  EXPECT_TRUE(Put(body_request_, body_response_));
+
+  scoped_ptr<CacheStorageCache::Responses> responses;
+  scoped_ptr<CacheStorageCache::BlobDataHandles> body_handles;
+  EXPECT_TRUE(MatchAll(&responses, &body_handles));
+
+  ASSERT_EQ(1u, responses->size());
+  ASSERT_EQ(1u, body_handles->size());
+  EXPECT_TRUE(ResponseMetadataEqual(body_response_, responses->at(0)));
+  EXPECT_TRUE(ResponseBodiesEqual(expected_blob_data_, body_handles->at(0)));
+}
+
+TEST_P(CacheStorageCacheTestP, MatchAll_TwoResponsesThenOne) {
+  EXPECT_TRUE(Put(no_body_request_, no_body_response_));
+  EXPECT_TRUE(Put(body_request_, body_response_));
+
+  scoped_ptr<CacheStorageCache::Responses> responses;
+  scoped_ptr<CacheStorageCache::BlobDataHandles> body_handles;
+  EXPECT_TRUE(MatchAll(&responses, &body_handles));
+  ASSERT_EQ(2u, responses->size());
+  ASSERT_EQ(1u, body_handles->size());
+
+  // Order of returned responses is not guaranteed.
+  std::set<std::string> matched_set;
+  for (const ServiceWorkerResponse& response : *responses) {
+    if (response.url.spec() == "http://example.com/no_body.html") {
+      EXPECT_TRUE(ResponseMetadataEqual(no_body_response_, response));
+      matched_set.insert(response.url.spec());
+    } else if (response.url.spec() == "http://example.com/body.html") {
+      EXPECT_TRUE(ResponseMetadataEqual(body_response_, response));
+      EXPECT_TRUE(
+          ResponseBodiesEqual(expected_blob_data_, body_handles->at(0)));
+      matched_set.insert(response.url.spec());
+    }
+  }
+  EXPECT_EQ(2u, matched_set.size());
+
+  responses->clear();
+  body_handles->clear();
+
+  EXPECT_TRUE(Delete(body_request_));
+  EXPECT_TRUE(MatchAll(&responses, &body_handles));
+
+  ASSERT_EQ(1u, responses->size());
+  EXPECT_TRUE(ResponseMetadataEqual(no_body_response_, responses->at(0)));
+  EXPECT_TRUE(body_handles->empty());
 }
 
 TEST_P(CacheStorageCacheTestP, Vary) {
@@ -741,7 +883,8 @@ TEST_F(CacheStorageCacheTest, CaselessServiceWorkerResponseHeaders) {
   // headers so that it can quickly lookup vary headers.
   ServiceWorkerResponse response(GURL("http://www.example.com"), 200, "OK",
                                  blink::WebServiceWorkerResponseTypeDefault,
-                                 ServiceWorkerHeaderMap(), "", 0, GURL());
+                                 ServiceWorkerHeaderMap(), "", 0, GURL(),
+                                 blink::WebServiceWorkerResponseErrorUnknown);
   response.headers["content-type"] = "foo";
   response.headers["Content-Type"] = "bar";
   EXPECT_EQ("bar", response.headers["content-type"]);

@@ -43,6 +43,7 @@
 #include "webrtc/base/linked_ptr.h"
 #include "webrtc/base/scoped_ref_ptr.h"
 #include "webrtc/base/stringencode.h"
+#include "webrtc/base/thread_checker.h"
 
 namespace webrtc {
 
@@ -131,6 +132,7 @@ class StatsReport {
     kStatsValueNameTransportId,
 
     // Internal StatsValue names.
+    kStatsValueNameAccelerateRate,
     kStatsValueNameActualEncBitrate,
     kStatsValueNameAdaptationChanges,
     kStatsValueNameAvailableReceiveBandwidth,
@@ -197,6 +199,7 @@ class StatsReport {
     kStatsValueNameNacksSent,
     kStatsValueNamePlisReceived,
     kStatsValueNamePlisSent,
+    kStatsValueNamePreemptiveExpandRate,
     kStatsValueNamePreferredJitterBufferMs,
     kStatsValueNameRemoteAddress,
     kStatsValueNameRemoteCandidateId,
@@ -381,7 +384,6 @@ typedef std::vector<const StatsReport*> StatsReports;
 // A map from the report id to the report.
 // This class wraps an STL container and provides a limited set of
 // functionality in order to keep things simple.
-// TODO(tommi): Use a thread checker here (currently not in libjingle).
 class StatsCollection {
  public:
   StatsCollection();
@@ -407,6 +409,7 @@ class StatsCollection {
 
  private:
   Container list_;
+  rtc::ThreadChecker thread_checker_;
 };
 
 }  // namespace webrtc

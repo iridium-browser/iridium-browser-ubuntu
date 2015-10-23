@@ -23,12 +23,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://html.spec.whatwg.org/#time-ranges
+
 [
-    WillBeGarbageCollected,
+    GarbageCollected,
     RuntimeEnabled=Media
 ] interface TimeRanges {
     readonly attribute unsigned long length;
     [RaisesException] double start(unsigned long index);
     [RaisesException] double end(unsigned long index);
 };
-

@@ -16,7 +16,10 @@
 #include "mojo/public/cpp/bindings/interface_ptr_info.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/services/network/public/interfaces/network_service.mojom.h"
+#include "mojo/services/network/public/interfaces/url_loader_factory.mojom.h"
+#include "mojo/services/updater/updater.mojom.h"
 #include "mojo/shell/application_loader.h"
+#include "mojo/shell/capability_filter.h"
 #include "mojo/shell/fetcher.h"
 #include "mojo/shell/identity.h"
 #include "mojo/shell/native_runner.h"
@@ -30,7 +33,8 @@ class SequencedWorkerPool;
 namespace mojo {
 namespace shell {
 
-class ShellImpl;
+class ApplicationInstance;
+class ContentHandlerConnection;
 
 class ApplicationManager {
  public:
@@ -62,8 +66,8 @@ class ApplicationManager {
 
     // Returns true if the shared instance has been created.
     static bool HasCreatedInstance();
-    // Returns true if there is a ShellImpl for this URL.
-    bool HasFactoryForURL(const GURL& url) const;
+    // Returns true if there is a ApplicationInstance for this URL.
+    bool HasRunningInstanceForURL(const GURL& url) const;
 
    private:
     ApplicationManager* manager_;
@@ -75,12 +79,20 @@ class ApplicationManager {
   ~ApplicationManager();
 
   // Loads a service if necessary and establishes a new client connection.
-  void ConnectToApplication(const GURL& application_url,
+  // |originator| can be NULL (e.g. for the first application or in tests), but
+  // typically is non-NULL and identifies the instance initiating the
+  // connection.
+  void ConnectToApplication(ApplicationInstance* originator,
+                            URLRequestPtr requested_url,
+                            const std::string& qualifier,
                             const GURL& requestor_url,
                             InterfaceRequest<ServiceProvider> services,
                             ServiceProviderPtr exposed_services,
+                            const CapabilityFilter& capability_filter,
                             const base::Closure& on_application_end);
 
+  // Must only be used by shell internals and test code as it does not forward
+  // capability filters.
   template <typename Interface>
   inline void ConnectToService(const GURL& application_url,
                                InterfacePtr<Interface>* ptr) {
@@ -88,10 +100,6 @@ class ApplicationManager {
         ConnectToServiceByName(application_url, Interface::Name_);
     ptr->Bind(InterfacePtrInfo<Interface>(service_handle.Pass(), 0u));
   }
-
-  ScopedMessagePipeHandle ConnectToServiceByName(
-      const GURL& application_url,
-      const std::string& interface_name);
 
   void RegisterContentHandler(const std::string& mime_type,
                               const GURL& content_handler_url);
@@ -139,14 +147,19 @@ class ApplicationManager {
   // and have a chance to shutdown.
   void TerminateShellConnections();
 
-  // Removes a ShellImpl when it encounters an error.
-  void OnShellImplError(ShellImpl* shell_impl);
+  // Removes a ApplicationInstance when it encounters an error.
+  void OnApplicationInstanceError(ApplicationInstance* instance);
+
+  // Removes a ContentHandler when its connection is closed.
+  void OnContentHandlerConnectionClosed(
+      ContentHandlerConnection* content_handler);
+
+  ApplicationInstance* GetApplicationInstance(const Identity& identity) const;
 
  private:
-  class ContentHandlerConnection;
-
   using ApplicationPackagedAlias = std::map<GURL, std::pair<GURL, std::string>>;
-  using IdentityToShellImplMap = std::map<Identity, ShellImpl*>;
+  using IdentityToApplicationInstanceMap =
+      std::map<Identity, ApplicationInstance*>;
   using MimeTypeToURLMap = std::map<std::string, GURL>;
   using SchemeToLoaderMap = std::map<std::string, ApplicationLoader*>;
   using URLToContentHandlerMap =
@@ -154,71 +167,62 @@ class ApplicationManager {
   using URLToLoaderMap = std::map<GURL, ApplicationLoader*>;
   using URLToNativeOptionsMap = std::map<GURL, NativeRunnerFactory::Options>;
 
-  void ConnectToApplicationWithParameters(
-      const GURL& application_url,
-      const std::string& qualifier,
-      const GURL& requestor_url,
-      InterfaceRequest<ServiceProvider> services,
-      ServiceProviderPtr exposed_services,
-      const base::Closure& on_application_end,
-      const std::vector<std::string>& pre_redirect_parameters);
-
-  bool ConnectToRunningApplication(const GURL& resolved_url,
+  bool ConnectToRunningApplication(ApplicationInstance* originator,
+                                   const GURL& resolved_url,
                                    const std::string& qualifier,
                                    const GURL& requestor_url,
                                    InterfaceRequest<ServiceProvider>* services,
-                                   ServiceProviderPtr* exposed_services);
+                                   ServiceProviderPtr* exposed_services,
+                                   const CapabilityFilter& filter);
 
   bool ConnectToApplicationWithLoader(
+      ApplicationInstance* originator,
       const GURL& requested_url,
       const std::string& qualifier,
       const GURL& resolved_url,
       const GURL& requestor_url,
       InterfaceRequest<ServiceProvider>* services,
       ServiceProviderPtr* exposed_services,
+      const CapabilityFilter& filter,
       const base::Closure& on_application_end,
-      const std::vector<std::string>& parameters,
       ApplicationLoader* loader);
 
-  InterfaceRequest<Application> RegisterShell(
+  InterfaceRequest<Application> RegisterInstance(
+      ApplicationInstance* originator,
       const GURL& app_url,
       const std::string& qualifier,
       const GURL& requestor_url,
       InterfaceRequest<ServiceProvider> services,
       ServiceProviderPtr exposed_services,
-      const base::Closure& on_application_end,
-      const std::vector<std::string>& parameters);
-
-  ShellImpl* GetShellImpl(const GURL& url, const std::string& qualifier);
-
-  void ConnectToClient(ShellImpl* shell_impl,
-                       const GURL& resolved_url,
-                       const GURL& requestor_url,
-                       InterfaceRequest<ServiceProvider> services,
-                       ServiceProviderPtr exposed_services);
+      const CapabilityFilter& filter,
+      const base::Closure& on_application_end);
 
   // Called once |fetcher| has found app. |requested_url| is the url of the
   // requested application before any mappings/resolution have been applied.
-  void HandleFetchCallback(const GURL& requested_url,
+  void HandleFetchCallback(ApplicationInstance* originator,
+                           const GURL& requested_url,
                            const std::string& qualifier,
                            const GURL& requestor_url,
                            InterfaceRequest<ServiceProvider> services,
                            ServiceProviderPtr exposed_services,
+                           const CapabilityFilter& filter,
                            const base::Closure& on_application_end,
-                           const std::vector<std::string>& parameters,
                            NativeApplicationCleanup cleanup,
                            scoped_ptr<Fetcher> fetcher);
 
   void RunNativeApplication(InterfaceRequest<Application> application_request,
+                            bool start_sandboxed,
                             const NativeRunnerFactory::Options& options,
                             NativeApplicationCleanup cleanup,
                             scoped_ptr<Fetcher> fetcher,
                             const base::FilePath& file_path,
                             bool path_exists);
 
-  void LoadWithContentHandler(const GURL& content_handler_url,
+  void LoadWithContentHandler(ApplicationInstance* originator,
+                              const GURL& content_handler_url,
                               const GURL& requestor_url,
                               const std::string& qualifier,
+                              const CapabilityFilter& filter,
                               InterfaceRequest<Application> application_request,
                               URLResponsePtr url_response);
 
@@ -226,10 +230,11 @@ class ApplicationManager {
   // configured for the URL.
   ApplicationLoader* GetLoaderForURL(const GURL& url);
 
-  // Removes a ContentHandler when it encounters an error.
-  void OnContentHandlerError(ContentHandlerConnection* content_handler);
-
   void CleanupRunner(NativeRunner* runner);
+
+  ScopedMessagePipeHandle ConnectToServiceByName(
+      const GURL& application_url,
+      const std::string& interface_name);
 
   Delegate* const delegate_;
   // Loader management.
@@ -240,13 +245,15 @@ class ApplicationManager {
   scoped_ptr<NativeRunnerFactory> native_runner_factory_;
 
   ApplicationPackagedAlias application_package_alias_;
-  IdentityToShellImplMap identity_to_shell_impl_;
+  IdentityToApplicationInstanceMap identity_to_instance_;
   URLToContentHandlerMap url_to_content_handler_;
   // Note: The keys are URLs after mapping and resolving.
   URLToNativeOptionsMap url_to_native_options_;
 
   base::SequencedWorkerPool* blocking_pool_;
   NetworkServicePtr network_service_;
+  URLLoaderFactoryPtr url_loader_factory_;
+  updater::UpdaterPtr updater_;
   MimeTypeToURLMap mime_type_to_url_;
   ScopedVector<NativeRunner> native_runners_;
   bool disable_cache_;

@@ -15,24 +15,29 @@
 #include "chrome/browser/extensions/api/preference/chrome_direct_setting.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.h"
-#include "chrome/browser/extensions/chrome_app_sorting.h"
 #include "chrome/browser/extensions/chrome_component_extension_resource_manager.h"
 #include "chrome/browser/extensions/chrome_extension_host_delegate.h"
+#include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/chrome_mojo_service_registration.h"
 #include "chrome/browser/extensions/chrome_process_manager_delegate.h"
 #include "chrome/browser/extensions/chrome_url_request_util.h"
+#include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/task_management/web_contents_tags.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
+#include "components/version_info/version_info.h"
+#include "content/public/browser/render_process_host.h"
 #include "extensions/browser/api/generated_api_registration.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_prefs.h"
@@ -56,7 +61,7 @@ ChromeExtensionsBrowserClient::ChromeExtensionsBrowserClient() {
   api_client_.reset(new ChromeExtensionsAPIClient);
   // Only set if it hasn't already been set (e.g. by a test).
   if (GetCurrentChannel() == GetDefaultChannel())
-    SetCurrentChannel(chrome::VersionInfo::GetChannel());
+    SetCurrentChannel(chrome::GetChannel());
   resource_manager_.reset(new ChromeComponentExtensionResourceManager());
 }
 
@@ -124,7 +129,7 @@ bool ChromeExtensionsBrowserClient::IsExtensionIncognitoEnabled(
 }
 
 bool ChromeExtensionsBrowserClient::CanExtensionCrossIncognito(
-    const extensions::Extension* extension,
+    const Extension* extension,
     content::BrowserContext* context) const {
   return IsGuestSession(context)
       || util::CanCrossIncognito(extension, context);
@@ -201,8 +206,7 @@ bool ChromeExtensionsBrowserClient::DidVersionUpdate(
     last_version = base::Version(last_version_str);
   }
 
-  chrome::VersionInfo current_version_info;
-  std::string current_version = current_version_info.Version();
+  std::string current_version = version_info::GetVersionNumber();
   pref_service->SetString(pref_names::kLastChromeVersion,
                           current_version);
 
@@ -215,10 +219,6 @@ bool ChromeExtensionsBrowserClient::DidVersionUpdate(
 
 void ChromeExtensionsBrowserClient::PermitExternalProtocolHandler() {
   ExternalProtocolHandler::PermitLaunchUrl();
-}
-
-scoped_ptr<AppSorting> ChromeExtensionsBrowserClient::CreateAppSorting() {
-  return scoped_ptr<AppSorting>(new ChromeAppSorting());
 }
 
 bool ChromeExtensionsBrowserClient::IsRunningInForcedAppMode() {
@@ -239,23 +239,20 @@ ChromeExtensionsBrowserClient::GetExtensionSystemFactory() {
 void ChromeExtensionsBrowserClient::RegisterExtensionFunctions(
     ExtensionFunctionRegistry* registry) const {
   // Preferences.
-  registry->RegisterFunction<extensions::GetPreferenceFunction>();
-  registry->RegisterFunction<extensions::SetPreferenceFunction>();
-  registry->RegisterFunction<extensions::ClearPreferenceFunction>();
+  registry->RegisterFunction<GetPreferenceFunction>();
+  registry->RegisterFunction<SetPreferenceFunction>();
+  registry->RegisterFunction<ClearPreferenceFunction>();
 
   // Direct Preference Access for Component Extensions.
-  registry->RegisterFunction<
-      extensions::chromedirectsetting::GetDirectSettingFunction>();
-  registry->RegisterFunction<
-      extensions::chromedirectsetting::SetDirectSettingFunction>();
-  registry->RegisterFunction<
-      extensions::chromedirectsetting::ClearDirectSettingFunction>();
+  registry->RegisterFunction<chromedirectsetting::GetDirectSettingFunction>();
+  registry->RegisterFunction<chromedirectsetting::SetDirectSettingFunction>();
+  registry->RegisterFunction<chromedirectsetting::ClearDirectSettingFunction>();
 
   // Generated APIs from lower-level modules.
-  extensions::core_api::GeneratedFunctionRegistry::RegisterAll(registry);
+  api::GeneratedFunctionRegistry::RegisterAll(registry);
 
   // Generated APIs from Chrome.
-  extensions::api::GeneratedFunctionRegistry::RegisterAll(registry);
+  api::ChromeGeneratedFunctionRegistry::RegisterAll(registry);
 }
 
 void ChromeExtensionsBrowserClient::RegisterMojoServices(
@@ -265,11 +262,10 @@ void ChromeExtensionsBrowserClient::RegisterMojoServices(
   RegisterChromeServicesForFrame(render_frame_host, extension);
 }
 
-scoped_ptr<extensions::RuntimeAPIDelegate>
+scoped_ptr<RuntimeAPIDelegate>
 ChromeExtensionsBrowserClient::CreateRuntimeAPIDelegate(
     content::BrowserContext* context) const {
-  return scoped_ptr<extensions::RuntimeAPIDelegate>(
-      new ChromeRuntimeAPIDelegate(context));
+  return scoped_ptr<RuntimeAPIDelegate>(new ChromeRuntimeAPIDelegate(context));
 }
 
 const ComponentExtensionResourceManager*
@@ -278,10 +274,12 @@ ChromeExtensionsBrowserClient::GetComponentExtensionResourceManager() {
 }
 
 void ChromeExtensionsBrowserClient::BroadcastEventToRenderers(
+    events::HistogramValue histogram_value,
     const std::string& event_name,
     scoped_ptr<base::ListValue> args) {
   g_browser_process->extension_event_router_forwarder()
-      ->BroadcastEventToRenderers(event_name, args.Pass(), GURL());
+      ->BroadcastEventToRenderers(histogram_value, event_name, args.Pass(),
+                                  GURL());
 }
 
 net::NetLog* ChromeExtensionsBrowserClient::GetNetLog() {
@@ -307,14 +305,69 @@ bool ChromeExtensionsBrowserClient::IsBackgroundUpdateAllowed() {
 
 bool ChromeExtensionsBrowserClient::IsMinBrowserVersionSupported(
     const std::string& min_version) {
-  chrome::VersionInfo version_info;
-  base::Version browser_version = base::Version(version_info.Version());
+  base::Version browser_version =
+      base::Version(version_info::GetVersionNumber());
   Version browser_min_version(min_version);
   if (browser_version.IsValid() && browser_min_version.IsValid() &&
       browser_min_version.CompareTo(browser_version) > 0) {
     return false;
   }
   return true;
+}
+
+ExtensionWebContentsObserver*
+ChromeExtensionsBrowserClient::GetExtensionWebContentsObserver(
+    content::WebContents* web_contents) {
+  return ChromeExtensionWebContentsObserver::FromWebContents(web_contents);
+}
+
+void ChromeExtensionsBrowserClient::ReportError(
+    content::BrowserContext* context,
+    scoped_ptr<ExtensionError> error) {
+  ErrorConsole::Get(context)->ReportError(error.Pass());
+}
+
+void ChromeExtensionsBrowserClient::CleanUpWebView(
+    content::BrowserContext* browser_context,
+    int embedder_process_id,
+    int view_instance_id) {
+  // Clean up context menus for the WebView.
+  auto menu_manager =
+      MenuManager::Get(Profile::FromBrowserContext(browser_context));
+  menu_manager->RemoveAllContextItems(
+      MenuItem::ExtensionKey("", embedder_process_id, view_instance_id));
+}
+
+void ChromeExtensionsBrowserClient::AttachExtensionTaskManagerTag(
+    content::WebContents* web_contents,
+    ViewType view_type) {
+  switch (view_type) {
+    case VIEW_TYPE_APP_WINDOW:
+    case VIEW_TYPE_EXTENSION_BACKGROUND_PAGE:
+    case VIEW_TYPE_EXTENSION_DIALOG:
+    case VIEW_TYPE_EXTENSION_POPUP:
+    case VIEW_TYPE_LAUNCHER_PAGE:
+    case VIEW_TYPE_VIRTUAL_KEYBOARD:
+      // These are the only types that are tracked by the ExtensionTag.
+      task_management::WebContentsTags::CreateForExtension(web_contents,
+                                                           view_type);
+      return;
+
+    case VIEW_TYPE_BACKGROUND_CONTENTS:
+    case VIEW_TYPE_PANEL:
+    case VIEW_TYPE_TAB_CONTENTS:
+      // Those types are tracked by other tags:
+      // BACKGROUND_CONTENTS --> task_management::BackgroundContentsTag.
+      // PANEL --> task_management::PanelTag.
+      // TAB_CONTENTS --> task_management::TabContentsTag.
+      // These tags are created and attached to the web_contents in other
+      // locations, and they must be ignored here.
+      return;
+
+    case VIEW_TYPE_INVALID:
+      NOTREACHED();
+      return;
+  }
 }
 
 }  // namespace extensions

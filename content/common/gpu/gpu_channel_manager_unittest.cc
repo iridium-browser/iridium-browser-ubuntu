@@ -11,6 +11,7 @@
 #include "content/common/message_router.h"
 #include "gpu/command_buffer/common/value_state.h"
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/sync_point_manager.h"
 #include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "ipc/ipc_sync_channel.h"
 
@@ -57,7 +58,7 @@ class SimpleWorker : public Listener, public Sender {
   SyncChannel* CreateChannel() {
     scoped_ptr<SyncChannel> channel = SyncChannel::Create(
         channel_name_, mode_, this, ipc_thread_.task_runner().get(), true,
-        &shutdown_event_);
+        &shutdown_event_, nullptr);
     return channel.release();
   }
 
@@ -110,9 +111,10 @@ class SimpleGpuClient : public IPC::SimpleWorker {
 
   void Start() override {
     IPC::SimpleWorker::Start();
-    gpu_channel_manager_.reset(
-        new GpuChannelManager(&router_, NULL, ipc_thread().task_runner().get(),
-                              shutdown_event(), channel()));
+    sync_point_manager_.reset(new gpu::SyncPointManager(false));
+    gpu_channel_manager_.reset(new GpuChannelManager(
+        &router_, NULL, ipc_thread().task_runner().get(), shutdown_event(),
+        channel(), nullptr, sync_point_manager_.get(), nullptr));
   }
 
   void Shutdown() override {
@@ -139,6 +141,7 @@ class SimpleGpuClient : public IPC::SimpleWorker {
 
   SimpleMessageRouter router_;
 
+  scoped_ptr<gpu::SyncPointManager> sync_point_manager_;
   scoped_ptr<GpuChannelManager> gpu_channel_manager_;
 };
 
@@ -168,7 +171,9 @@ class GpuChannelManagerTest : public testing::Test {
 
 TEST_F(GpuChannelManagerTest, SecureValueStateForwarding) {
   const int kClientId1 = 111;
+  const uint64 kClientTracingId1 = 11111;
   const int kClientId2 = 222;
+  const uint64 kClientTracingId2 = 22222;
   ValueState value_state1;
   value_state1.int_value[0] = 1111;
   value_state1.int_value[1] = 0;
@@ -184,11 +189,11 @@ TEST_F(GpuChannelManagerTest, SecureValueStateForwarding) {
 
   // Initialize gpu channels
   simple_client_->gpu_channel_manager()->OnMessageReceived(
-      GpuMsg_EstablishChannel(kClientId1, false, false));
+      GpuMsg_EstablishChannel(kClientId1, kClientTracingId1, false, false));
   GpuChannel *channel1 =
       simple_client_->gpu_channel_manager()->LookupChannel(kClientId1);
   simple_client_->gpu_channel_manager()->OnMessageReceived(
-      GpuMsg_EstablishChannel(kClientId2, false, false));
+      GpuMsg_EstablishChannel(kClientId2, kClientTracingId2, false, false));
   GpuChannel *channel2 =
       simple_client_->gpu_channel_manager()->LookupChannel(kClientId2);
   ASSERT_TRUE(channel1 != NULL);

@@ -48,13 +48,15 @@ class GraphicsLayer;
 class Page;
 class Region;
 class ScrollableArea;
+class WebCompositorAnimationTimeline;
 
-class CORE_EXPORT ScrollingCoordinator {
+class CORE_EXPORT ScrollingCoordinator final : public NoBaseWillBeGarbageCollectedFinalized<ScrollingCoordinator> {
     WTF_MAKE_NONCOPYABLE(ScrollingCoordinator);
 public:
-    ~ScrollingCoordinator();
+    static PassOwnPtrWillBeRawPtr<ScrollingCoordinator> create(Page*);
 
-    static PassOwnPtr<ScrollingCoordinator> create(Page*);
+    ~ScrollingCoordinator();
+    DECLARE_TRACE();
 
     void willBeDestroyed();
 
@@ -126,7 +128,7 @@ protected:
     bool isForMainFrame(ScrollableArea*) const;
     bool isForViewport(ScrollableArea*) const;
 
-    Page* m_page;
+    RawPtrWillBeMember<Page> m_page;
 
     // Dirty flags used to idenfity what really needs to be computed after compositing is updated.
     bool m_scrollGestureRegionIsDirty;
@@ -150,7 +152,9 @@ private:
 
     bool frameViewIsDirty() const;
 
-    using ScrollbarMap = HashMap<ScrollableArea*, OwnPtr<WebScrollbarLayer>>;
+    OwnPtr<WebCompositorAnimationTimeline> m_programmaticScrollAnimatorTimeline;
+
+    using ScrollbarMap = WillBeHeapHashMap<RawPtrWillBeMember<ScrollableArea>, OwnPtr<WebScrollbarLayer>>;
     ScrollbarMap m_horizontalScrollbars;
     ScrollbarMap m_verticalScrollbars;
     HashSet<const DeprecatedPaintLayer*> m_layersWithTouchRects;

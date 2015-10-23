@@ -14,6 +14,7 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
 #include "google_apis/gaia/oauth2_mint_token_flow.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -176,7 +177,7 @@ class OAuth2MintTokenFlowTest : public testing::Test {
 
   // Helper to parse the given string to DictionaryValue.
   static base::DictionaryValue* ParseJson(const std::string& str) {
-    scoped_ptr<base::Value> value(base::JSONReader::Read(str));
+    scoped_ptr<base::Value> value = base::JSONReader::Read(str);
     EXPECT_TRUE(value.get());
     EXPECT_EQ(base::Value::TYPE_DICTIONARY, value->GetType());
     return static_cast<base::DictionaryValue*>(value.release());
@@ -241,7 +242,8 @@ TEST_F(OAuth2MintTokenFlowTest, CreateApiCallBody) {
         "&client_id=client1"
         "&origin=ext1"
         "&device_id=device_id1"
-        "&device_type=chrome");
+        "&device_type=chrome"
+        "&lib_ver=extension");
     EXPECT_EQ(expected_body, body);
   }
 }
@@ -351,14 +353,14 @@ TEST_F(OAuth2MintTokenFlowTest, ProcessApiCallSuccess) {
 TEST_F(OAuth2MintTokenFlowTest, ProcessApiCallFailure) {
   {  // Null delegate should work fine.
     TestURLFetcher url_fetcher(1, GURL("http://www.google.com"), NULL);
-    url_fetcher.set_status(URLRequestStatus(URLRequestStatus::FAILED, 101));
+    url_fetcher.set_status(URLRequestStatus::FromError(net::ERR_FAILED));
     CreateFlow(NULL, OAuth2MintTokenFlow::MODE_MINT_TOKEN_NO_FORCE, "");
     flow_->ProcessApiCallFailure(&url_fetcher);
   }
 
   {  // Non-null delegate.
     TestURLFetcher url_fetcher(1, GURL("http://www.google.com"), NULL);
-    url_fetcher.set_status(URLRequestStatus(URLRequestStatus::FAILED, 101));
+    url_fetcher.set_status(URLRequestStatus::FromError(net::ERR_FAILED));
     CreateFlow(OAuth2MintTokenFlow::MODE_MINT_TOKEN_NO_FORCE);
     EXPECT_CALL(delegate_, OnMintTokenFailure(_));
     flow_->ProcessApiCallFailure(&url_fetcher);

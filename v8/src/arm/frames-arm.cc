@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
-
 #if V8_TARGET_ARCH_ARM
 
 #include "src/assembler.h"
@@ -21,7 +19,7 @@ namespace internal {
 Register JavaScriptFrame::fp_register() { return v8::internal::fp; }
 Register JavaScriptFrame::context_register() { return cp; }
 Register JavaScriptFrame::constant_pool_pointer_register() {
-  DCHECK(FLAG_enable_ool_constant_pool);
+  DCHECK(FLAG_enable_embedded_constant_pool);
   return pp;
 }
 
@@ -29,18 +27,12 @@ Register JavaScriptFrame::constant_pool_pointer_register() {
 Register StubFailureTrampolineFrame::fp_register() { return v8::internal::fp; }
 Register StubFailureTrampolineFrame::context_register() { return cp; }
 Register StubFailureTrampolineFrame::constant_pool_pointer_register() {
-  DCHECK(FLAG_enable_ool_constant_pool);
+  DCHECK(FLAG_enable_embedded_constant_pool);
   return pp;
 }
 
 
-Object*& ExitFrame::constant_pool_slot() const {
-  DCHECK(FLAG_enable_ool_constant_pool);
-  const int offset = ExitFrameConstants::kConstantPoolOffset;
-  return Memory::Object_at(fp() + offset);
-}
-
-
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 #endif  // V8_TARGET_ARCH_ARM

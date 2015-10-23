@@ -10,36 +10,25 @@
 
 #include "GrTargetCommands.h"
 
-class GrInOrderDrawBuffer;
+class GrGpu;
+class GrResourceProvider;
+class GrBufferedDrawTarget;
 
 class GrCommandBuilder : ::SkNoncopyable {
 public:
-    typedef GrTargetCommands::Cmd Cmd;
-    typedef GrTargetCommands::State State;
+    typedef GrTargetCommands::Cmd               Cmd;
+    typedef GrTargetCommands::StateForPathDraw  State;
 
     static GrCommandBuilder* Create(GrGpu* gpu, bool reorder);
 
     virtual ~GrCommandBuilder() {}
 
     void reset() { fCommands.reset(); }
-    void flush(GrInOrderDrawBuffer* iodb) { fCommands.flush(iodb); }
+    void flush(GrGpu* gpu, GrResourceProvider* rp) { fCommands.flush(gpu, rp); }
 
-    virtual Cmd* recordClearStencilClip(const SkIRect& rect,
-                                        bool insideClip,
-                                        GrRenderTarget* renderTarget);
-    virtual Cmd* recordDiscard(GrRenderTarget*);
-    virtual Cmd* recordDrawBatch(State*, GrBatch*) = 0;
-    virtual Cmd* recordStencilPath(const GrPipelineBuilder&,
-                                   const GrPathProcessor*,
-                                   const GrPath*,
-                                   const GrScissorState&,
-                                   const GrStencilSettings&) = 0;
-    virtual Cmd* recordDrawPath(State*,
-                                const GrPathProcessor*,
-                                const GrPath*,
-                                const GrStencilSettings&) = 0;
+    virtual Cmd* recordDrawBatch(GrBatch*, const GrCaps&) = 0;
     virtual Cmd* recordDrawPaths(State*,
-                                 GrInOrderDrawBuffer*,
+                                 GrBufferedDrawTarget*,
                                  const GrPathProcessor*,
                                  const GrPathRange*,
                                  const void*,
@@ -48,32 +37,16 @@ public:
                                  GrDrawTarget::PathTransformType ,
                                  int,
                                  const GrStencilSettings&,
-                                 const GrDrawTarget::PipelineInfo&) = 0;
-    virtual Cmd* recordClear(const SkIRect* rect,
-                             GrColor,
-                             bool canIgnoreRect,
-                             GrRenderTarget*);
-    virtual Cmd* recordCopySurface(GrSurface* dst,
-                                   GrSurface* src,
-                                   const SkIRect& srcRect,
-                                   const SkIPoint& dstPoint);
-    virtual Cmd* recordXferBarrierIfNecessary(const GrPipeline&, const GrDrawTargetCaps&);
+                                 const GrPipelineOptimizations&) = 0;
 
 protected:
     typedef GrTargetCommands::DrawBatch DrawBatch;
-    typedef GrTargetCommands::StencilPath StencilPath;
     typedef GrTargetCommands::DrawPath DrawPath;
     typedef GrTargetCommands::DrawPaths DrawPaths;
-    typedef GrTargetCommands::Clear Clear;
-    typedef GrTargetCommands::ClearStencilClip ClearStencilClip;
-    typedef GrTargetCommands::CopySurface CopySurface;
-    typedef GrTargetCommands::XferBarrier XferBarrier;
 
-    GrCommandBuilder(GrGpu* gpu) : fCommands(gpu) {}
+    GrCommandBuilder() {}
 
     GrTargetCommands::CmdBuffer* cmdBuffer() { return fCommands.cmdBuffer(); }
-    GrBatchTarget* batchTarget() { return fCommands.batchTarget(); }
-
 private:
     GrTargetCommands fCommands;
 

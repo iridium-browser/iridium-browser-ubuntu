@@ -47,7 +47,8 @@ class FakeOnscreenDisplayClient : public OnscreenDisplayClient {
 class SurfaceDisplayOutputSurfaceTest : public testing::Test {
  public:
   SurfaceDisplayOutputSurfaceTest()
-      : task_runner_(new OrderedSimpleTaskRunner()),
+      : now_src_(new base::SimpleTestTickClock()),
+        task_runner_(new OrderedSimpleTaskRunner(now_src_.get(), true)),
         allocator_(0),
         display_size_(1920, 1080),
         display_rect_(display_size_),
@@ -59,7 +60,8 @@ class SurfaceDisplayOutputSurfaceTest : public testing::Test {
         context_provider_(TestContextProvider::Create()),
         surface_display_output_surface_(&surface_manager_,
                                         &allocator_,
-                                        context_provider_) {
+                                        context_provider_,
+                                        nullptr) {
     output_surface_ = display_client_.output_surface();
     display_client_.set_surface_output_surface(
         &surface_display_output_surface_);
@@ -98,6 +100,7 @@ class SurfaceDisplayOutputSurfaceTest : public testing::Test {
   }
 
  protected:
+  scoped_ptr<base::SimpleTestTickClock> now_src_;
   scoped_refptr<OrderedSimpleTaskRunner> task_runner_;
   SurfaceIdAllocator allocator_;
 
@@ -128,6 +131,21 @@ TEST_F(SurfaceDisplayOutputSurfaceTest, NoDamageDoesNotTriggerSwapBuffers) {
   EXPECT_EQ(1u, output_surface_->num_sent_frames());
   task_runner_->RunUntilIdle();
   EXPECT_EQ(1u, output_surface_->num_sent_frames());
+}
+
+TEST_F(SurfaceDisplayOutputSurfaceTest, SuspendedDoesNotTriggerSwapBuffers) {
+  SwapBuffersWithDamage(display_rect_);
+  EXPECT_EQ(1u, output_surface_->num_sent_frames());
+  output_surface_->set_suspended_for_recycle(true);
+  task_runner_->RunUntilIdle();
+  EXPECT_EQ(1u, output_surface_->num_sent_frames());
+  SwapBuffersWithDamage(display_rect_);
+  task_runner_->RunUntilIdle();
+  EXPECT_EQ(1u, output_surface_->num_sent_frames());
+  output_surface_->set_suspended_for_recycle(false);
+  SwapBuffersWithDamage(display_rect_);
+  task_runner_->RunUntilIdle();
+  EXPECT_EQ(2u, output_surface_->num_sent_frames());
 }
 
 TEST_F(SurfaceDisplayOutputSurfaceTest,

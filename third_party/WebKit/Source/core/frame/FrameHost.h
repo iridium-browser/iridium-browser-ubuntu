@@ -32,8 +32,9 @@
 #define FrameHost_h
 
 #include "core/CoreExport.h"
-#include "core/frame/PinchViewport.h"
+#include "core/frame/PageScaleConstraintsSet.h"
 #include "core/frame/TopControls.h"
+#include "core/frame/VisualViewport.h"
 #include "platform/heap/Handle.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/Noncopyable.h"
@@ -42,11 +43,11 @@
 
 namespace blink {
 
-class Chrome;
+class ChromeClient;
 class ConsoleMessageStorage;
 class EventHandlerRegistry;
 class Page;
-class PinchViewport;
+class PageScaleConstraintsSet;
 class Settings;
 class UseCounter;
 class Visitor;
@@ -69,7 +70,7 @@ public:
     // Careful: This function will eventually be removed.
     Page& page() const { return *m_page; }
     Settings& settings() const;
-    Chrome& chrome() const;
+    ChromeClient& chromeClient() const;
     UseCounter& useCounter() const;
 
     // Corresponds to pixel density of the device where this Page is
@@ -78,7 +79,8 @@ public:
     float deviceScaleFactor() const;
 
     TopControls& topControls() const;
-    PinchViewport& pinchViewport() const;
+    VisualViewport& visualViewport() const;
+    PageScaleConstraintsSet& pageScaleConstraintsSet() const;
     EventHandlerRegistry& eventHandlerRegistry() const;
 
     const AtomicString& overrideEncoding() const { return m_overrideEncoding; }
@@ -97,12 +99,16 @@ public:
     void decrementSubframeCount() { ASSERT(m_subframeCount); --m_subframeCount; }
     int subframeCount() const;
 
+    void setDefaultPageScaleLimits(float minScale, float maxScale);
+    void setUserAgentPageScaleConstraints(PageScaleConstraints newConstraints);
+
 private:
     explicit FrameHost(Page&);
 
     RawPtrWillBeMember<Page> m_page;
     const OwnPtrWillBeMember<TopControls> m_topControls;
-    const OwnPtr<PinchViewport> m_pinchViewport;
+    const OwnPtr<PageScaleConstraintsSet> m_pageScaleConstraintsSet;
+    const OwnPtrWillBeMember<VisualViewport> m_visualViewport;
     const OwnPtrWillBeMember<EventHandlerRegistry> m_eventHandlerRegistry;
     const OwnPtrWillBeMember<ConsoleMessageStorage> m_consoleMessageStorage;
 

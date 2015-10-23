@@ -6,77 +6,92 @@
 #define BodyStreamBuffer_h
 
 #include "core/dom/DOMException.h"
+#include "core/streams/ReadableByteStream.h"
+#include "core/streams/ReadableByteStreamReader.h"
+#include "core/streams/UnderlyingSource.h"
 #include "modules/ModulesExport.h"
-#include "platform/blob/BlobData.h"
-#include "platform/heap/Heap.h"
-#include "wtf/Deque.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/WTFString.h"
+#include "modules/fetch/FetchDataConsumerHandle.h"
+#include "modules/fetch/FetchDataLoader.h"
+#include "platform/heap/Handle.h"
+#include "public/platform/WebDataConsumerHandle.h"
+#include "wtf/OwnPtr.h"
+#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
-class DOMArrayBuffer;
+class ExecutionContext;
+class FormData;
 
-class MODULES_EXPORT BodyStreamBuffer final : public GarbageCollectedFinalized<BodyStreamBuffer> {
+// A BodyStreamBuffer constructed with a null handle is said to have null body.
+// One can observe if a buffer has null body by calling |hasBody| function.
+// |stream| function returns a non-null stream even when the buffer has null
+// body.
+class MODULES_EXPORT BodyStreamBuffer final : public GarbageCollectedFinalized<BodyStreamBuffer>, public UnderlyingSource, public WebDataConsumerHandle::Client {
+    WTF_MAKE_NONCOPYABLE(BodyStreamBuffer);
+    USING_GARBAGE_COLLECTED_MIXIN(BodyStreamBuffer);
 public:
-    class Observer : public GarbageCollectedFinalized<Observer> {
-    public:
-        virtual ~Observer() { }
-        virtual void onWrite() = 0;
-        virtual void onClose() = 0;
-        virtual void onError() = 0;
-        DEFINE_INLINE_VIRTUAL_TRACE() { }
-    };
+    BodyStreamBuffer() : BodyStreamBuffer(nullptr) {}
+    // |handle| can be null, but cannot be locked.
+    explicit BodyStreamBuffer(PassOwnPtr<FetchDataConsumerHandle> /* handle */);
 
-    class Canceller : public GarbageCollected<Canceller> {
-    public:
-        virtual void cancel() = 0;
-        DEFINE_INLINE_VIRTUAL_TRACE() { }
-    };
+    ReadableByteStream* stream() { return m_stream; }
 
-    class BlobHandleCreatorClient : public GarbageCollectedFinalized<BlobHandleCreatorClient> {
-    public:
-        virtual ~BlobHandleCreatorClient() { }
-        virtual void didCreateBlobHandle(PassRefPtr<BlobDataHandle>) = 0;
-        virtual void didFail(DOMException*) = 0;
-        DEFINE_INLINE_VIRTUAL_TRACE() { }
-    };
-    explicit BodyStreamBuffer(Canceller*);
-    ~BodyStreamBuffer() { }
+    // Callable only when not locked.
+    PassRefPtr<BlobDataHandle> drainAsBlobDataHandle(FetchDataConsumerHandle::Reader::BlobSizePolicy);
+    PassRefPtr<FormData> drainAsFormData();
 
-    PassRefPtr<DOMArrayBuffer> read();
-    bool isClosed() const { return m_isClosed; }
-    bool hasError() const { return m_exception; }
-    DOMException* exception() const { return m_exception; }
+    // Callable only when not locked. Returns a non-null handle even when
+    // having null body.
+    // Note: There is a case that calling |lock| doesn't make the buffer
+    // locked. |unlock| should be called even in such cases when a user finishes
+    // to use the returned handle, in order to maintain hasPendingActivity().
+    PassOwnPtr<FetchDataConsumerHandle> lock(ExecutionContext*);
 
-    // Can't call after close() or error() was called.
-    void write(PassRefPtr<DOMArrayBuffer>);
-    // Can't call after close() or error() was called.
-    void close();
-    // Can't call after close() or error() was called.
-    void error(DOMException*);
-    void cancel() { m_canceller->cancel(); }
+    // This function will lock |this| object. |client| cannot be null.
+    void startLoading(ExecutionContext*, FetchDataLoader*, FetchDataLoader::Client* /* client */);
 
-    // This function registers an observer so it fails and returns false when an
-    // observer was already registered.
-    bool readAllAndCreateBlobHandle(const String& contentType, BlobHandleCreatorClient*);
+    bool isLocked() const { return m_stream->isLocked(); }
+    bool hasBody() const { return m_hasBody; }
+    bool hasPendingActivity() const { return isLocked() || m_lockLevel > 0; }
 
-    // This function registers an observer so it fails and returns false when an
-    // observer was already registered.
-    bool startTee(BodyStreamBuffer* out1, BodyStreamBuffer* out2);
+    // UnderlyingSource
+    void pullSource() override;
+    ScriptPromise cancelSource(ScriptState*, ScriptValue reason) override;
 
-    // When an observer was registered this function fails and returns false.
-    bool registerObserver(Observer*);
-    void unregisterObserver();
-    bool isObserverRegistered() const { return m_observer.get(); }
-    DECLARE_TRACE();
+    // WebDataConsumerHandle::Client
+    void didGetReadable() override;
+
+    DEFINE_INLINE_TRACE()
+    {
+        visitor->trace(m_stream);
+        visitor->trace(m_streamReader);
+        visitor->trace(m_loaders);
+        UnderlyingSource::trace(visitor);
+    }
 
 private:
-    Deque<RefPtr<DOMArrayBuffer>> m_queue;
-    bool m_isClosed;
-    Member<DOMException> m_exception;
-    Member<Observer> m_observer;
-    Member<Canceller> m_canceller;
+    class LoaderHolder;
+    enum EndLoadingMode {
+        EndLoadingDone,
+        EndLoadingErrored,
+    };
+    void close();
+    void error();
+    void processData();
+    void unlock();
+    void endLoading(FetchDataLoader::Client*, EndLoadingMode);
+
+    OwnPtr<FetchDataConsumerHandle> m_handle;
+    OwnPtr<FetchDataConsumerHandle::Reader> m_reader;
+    Member<ReadableByteStream> m_stream;
+    Member<ReadableByteStreamReader> m_streamReader;
+    HeapHashSet<Member<FetchDataLoader::Client>> m_loaders;
+    // We need this variable because we cannot lock closed or erroed stream
+    // although we should return true for hasPendingActivity() when someone
+    // calls |startLoading| but the loding is not yet done.
+    unsigned m_lockLevel;
+    const bool m_hasBody;
+    bool m_streamNeedsMore;
 };
 
 } // namespace blink

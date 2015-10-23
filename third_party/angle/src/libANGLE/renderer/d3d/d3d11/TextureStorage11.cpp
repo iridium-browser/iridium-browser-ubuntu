@@ -62,8 +62,6 @@ bool TextureStorage11::SRVKey::operator<(const SRVKey &rhs) const
 
 TextureStorage11::TextureStorage11(Renderer11 *renderer, UINT bindFlags, UINT miscFlags)
     : mRenderer(renderer),
-      mBindFlags(bindFlags),
-      mMiscFlags(miscFlags),
       mTopLevel(0),
       mMipLevels(0),
       mInternalFormat(GL_NONE),
@@ -73,7 +71,9 @@ TextureStorage11::TextureStorage11(Renderer11 *renderer, UINT bindFlags, UINT mi
       mDepthStencilFormat(DXGI_FORMAT_UNKNOWN),
       mTextureWidth(0),
       mTextureHeight(0),
-      mTextureDepth(0)
+      mTextureDepth(0),
+      mBindFlags(bindFlags),
+      mMiscFlags(miscFlags)
 {
     for (unsigned int i = 0; i < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS; i++)
     {
@@ -123,7 +123,7 @@ DWORD TextureStorage11::GetTextureMiscFlags(GLenum internalFormat, const Rendere
     const d3d11::TextureFormat &formatInfo = d3d11::GetTextureFormatInfo(internalFormat, renderer11DeviceCaps);
     if (renderTarget && levels > 1)
     {
-        const d3d11::DXGIFormat &dxgiFormatInfo = d3d11::GetDXGIFormatInfo(formatInfo.srvFormat);
+        const d3d11::DXGIFormat &dxgiFormatInfo = d3d11::GetDXGIFormatInfo(formatInfo.texFormat);
 
         if (dxgiFormatInfo.nativeMipmapSupport(renderer11DeviceCaps.featureLevel))
         {
@@ -628,7 +628,7 @@ gl::Error TextureStorage11::setData(const gl::ImageIndex &index, ImageD3D *image
 
     size_t outputPixelSize = dxgiFormatInfo.pixelBytes;
 
-    UINT bufferRowPitch = outputPixelSize * width;
+    UINT bufferRowPitch   = static_cast<unsigned int>(outputPixelSize) * width;
     UINT bufferDepthPitch = bufferRowPitch * height;
 
     size_t neededSize = bufferDepthPitch * depth;
@@ -676,10 +676,10 @@ gl::Error TextureStorage11::setData(const gl::ImageIndex &index, ImageD3D *image
 TextureStorage11_2D::TextureStorage11_2D(Renderer11 *renderer, SwapChain11 *swapchain)
     : TextureStorage11(renderer, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, 0),
       mTexture(swapchain->getOffscreenTexture()),
-      mSwizzleTexture(NULL),
       mLevelZeroTexture(NULL),
       mLevelZeroRenderTarget(NULL),
-      mUseLevelZeroTexture(false)
+      mUseLevelZeroTexture(false),
+      mSwizzleTexture(NULL)
 {
     mTexture->AddRef();
 
@@ -698,7 +698,7 @@ TextureStorage11_2D::TextureStorage11_2D(Renderer11 *renderer, SwapChain11 *swap
     mTextureHeight = texDesc.Height;
     mTextureDepth = 1;
 
-    mInternalFormat = swapchain->GetBackBufferInternalFormat();
+    mInternalFormat = swapchain->GetRenderTargetInternalFormat();
 
     ID3D11ShaderResourceView *srv = swapchain->getRenderTargetShaderResource();
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
@@ -717,8 +717,6 @@ TextureStorage11_2D::TextureStorage11_2D(Renderer11 *renderer, SwapChain11 *swap
     mSwizzleRenderTargetFormat = formatInfo.swizzleRTVFormat;
 
     mDepthStencilFormat = DXGI_FORMAT_UNKNOWN;
-
-    initializeSerials(1, 1);
 }
 
 TextureStorage11_2D::TextureStorage11_2D(Renderer11 *renderer, GLenum internalformat, bool renderTarget, GLsizei width, GLsizei height, int levels, bool hintLevelZeroOnly)
@@ -726,10 +724,10 @@ TextureStorage11_2D::TextureStorage11_2D(Renderer11 *renderer, GLenum internalfo
                        GetTextureBindFlags(internalformat, renderer->getRenderer11DeviceCaps(), renderTarget),
                        GetTextureMiscFlags(internalformat, renderer->getRenderer11DeviceCaps(), renderTarget, levels)),
       mTexture(NULL),
-      mSwizzleTexture(NULL),
       mLevelZeroTexture(NULL),
       mLevelZeroRenderTarget(NULL),
-      mUseLevelZeroTexture(false)
+      mUseLevelZeroTexture(false),
+      mSwizzleTexture(NULL)
 {
     for (unsigned int i = 0; i < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS; i++)
     {
@@ -761,8 +759,6 @@ TextureStorage11_2D::TextureStorage11_2D(Renderer11 *renderer, GLenum internalfo
         ASSERT(mRenderer->getWorkarounds().zeroMaxLodWorkaround);
         mUseLevelZeroTexture = true;
     }
-
-    initializeSerials(getLevelCount(), 1);
 }
 
 TextureStorage11_2D::~TextureStorage11_2D()
@@ -1360,8 +1356,6 @@ TextureStorage11_Cube::TextureStorage11_Cube(Renderer11 *renderer, GLenum intern
         ASSERT(mRenderer->getWorkarounds().zeroMaxLodWorkaround);
         mUseLevelZeroTexture = true;
     }
-
-    initializeSerials(getLevelCount() * CUBE_FACE_COUNT, CUBE_FACE_COUNT);
 }
 
 TextureStorage11_Cube::~TextureStorage11_Cube()
@@ -2027,8 +2021,6 @@ TextureStorage11_3D::TextureStorage11_3D(Renderer11 *renderer, GLenum internalfo
     mTextureWidth = width;
     mTextureHeight = height;
     mTextureDepth = depth;
-
-    initializeSerials(getLevelCount() * depth, depth);
 }
 
 TextureStorage11_3D::~TextureStorage11_3D()
@@ -2407,8 +2399,6 @@ TextureStorage11_2DArray::TextureStorage11_2DArray(Renderer11 *renderer, GLenum 
     mTextureWidth = width;
     mTextureHeight = height;
     mTextureDepth = depth;
-
-    initializeSerials(getLevelCount() * depth, depth);
 }
 
 TextureStorage11_2DArray::~TextureStorage11_2DArray()

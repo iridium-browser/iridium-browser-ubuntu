@@ -9,6 +9,8 @@
 
 namespace blink {
 
+class CSSKeyframeRule;
+
 class KeyframeStyleRuleCSSStyleDeclaration final : public StyleRuleCSSStyleDeclaration {
 public:
     static PassRefPtrWillBeRawPtr<KeyframeStyleRuleCSSStyleDeclaration> create(MutableStylePropertySet& propertySet, CSSKeyframeRule* parentRule)
@@ -19,7 +21,7 @@ public:
 private:
     KeyframeStyleRuleCSSStyleDeclaration(MutableStylePropertySet&, CSSKeyframeRule*);
 
-    virtual void didMutate(MutationType) override;
+    void didMutate(MutationType) override;
 };
 
 } // namespace blink

@@ -2,17 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var $iteratorCreateResultObject;
 var $arrayValues;
 
-(function(global, shared, exports) {
+(function(global, utils) {
 
 "use strict";
 
 %CheckIsBootstrapping();
 
 var GlobalArray = global.Array;
-var GlobalObject = global.Object;
 
 macro TYPED_ARRAYS(FUNCTION)
   FUNCTION(Uint8Array)
@@ -47,7 +45,7 @@ function ArrayIterator() {}
 
 // 15.4.5.1 CreateArrayIterator Abstract Operation
 function CreateArrayIterator(array, kind) {
-  var object = $toObject(array);
+  var object = TO_OBJECT(array);
   var iterator = new ArrayIterator;
   SET_PRIVATE(iterator, arrayIteratorObjectSymbol, object);
   SET_PRIVATE(iterator, arrayIteratorNextIndexSymbol, 0);
@@ -70,7 +68,7 @@ function ArrayIteratorIterator() {
 
 // 15.4.5.2.2 ArrayIterator.prototype.next( )
 function ArrayIteratorNext() {
-  var iterator = $toObject(this);
+  var iterator = TO_OBJECT(this);
 
   if (!HAS_DEFINED_PRIVATE(iterator, arrayIteratorNextIndexSymbol)) {
     throw MakeTypeError(kIncompatibleMethodReceiver,
@@ -122,23 +120,27 @@ function ArrayKeys() {
 }
 
 
-%FunctionSetPrototype(ArrayIterator, new GlobalObject());
+%FunctionSetPrototype(ArrayIterator, {__proto__: $iteratorPrototype});
 %FunctionSetInstanceClassName(ArrayIterator, 'Array Iterator');
 
-$installFunctions(ArrayIterator.prototype, DONT_ENUM, [
+utils.InstallFunctions(ArrayIterator.prototype, DONT_ENUM, [
   'next', ArrayIteratorNext
 ]);
-$setFunctionName(ArrayIteratorIterator, symbolIterator);
+utils.SetFunctionName(ArrayIteratorIterator, symbolIterator);
 %AddNamedProperty(ArrayIterator.prototype, symbolIterator,
                   ArrayIteratorIterator, DONT_ENUM);
 %AddNamedProperty(ArrayIterator.prototype, symbolToStringTag,
                   "Array Iterator", READ_ONLY | DONT_ENUM);
 
-$installFunctions(GlobalArray.prototype, DONT_ENUM, [
+utils.InstallFunctions(GlobalArray.prototype, DONT_ENUM, [
   // No 'values' since it breaks webcompat: http://crbug.com/409858
   'entries', ArrayEntries,
   'keys', ArrayKeys
 ]);
+
+// TODO(adam): Remove this call once 'values' is in the above
+// InstallFunctions block, as it'll be redundant.
+utils.SetFunctionName(ArrayValues, 'values');
 
 %AddNamedProperty(GlobalArray.prototype, symbolIterator, ArrayValues,
                   DONT_ENUM);
@@ -153,7 +155,17 @@ endmacro
 
 TYPED_ARRAYS(EXTEND_TYPED_ARRAY)
 
-$iteratorCreateResultObject = CreateIteratorResultObject;
+// -------------------------------------------------------------------
+// Exports
+
+utils.Export(function(to) {
+  to.ArrayIteratorCreateResultObject = CreateIteratorResultObject;
+});
+
 $arrayValues = ArrayValues;
+
+utils.ExportToRuntime(function(to) {
+  to.ArrayValues = ArrayValues;
+});
 
 })

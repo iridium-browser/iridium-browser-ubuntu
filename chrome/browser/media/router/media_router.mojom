@@ -10,6 +10,8 @@ struct MediaSink {
   string sink_id;
   // The human-readable name, e.g. "Janet's Chromecast".
   string name;
+  // True if a route is being created to this sink.
+  bool is_launching;
 };
 
 // Should be kept in sync with media_route.h.
@@ -26,6 +28,10 @@ struct MediaRoute {
   string description;
   // Specifies that the route is requested locally.
   bool is_local;
+  // An optional path to an HTML page bundled bundled with the media router
+  // component extension. When set, the route can have custom route detail as
+  // well as its own route controls in the media router dialog.
+  string? custom_controller_path;
 };
 
 // Notifications or an actionable events to be shown to the user.
@@ -80,23 +86,64 @@ struct Issue {
   string? help_url;
 };
 
+struct RouteMessage {
+  enum Type {
+    TEXT,
+    BINARY
+  };
+  // The type of this message.
+  Type type;
+  // Used when the |type| is TEXT.
+  string? message;
+  // Used when the |type| is BINARY.
+  array<uint8>? data;
+};
+
 // Modeled after the MediaRouter interface defined in
 // chrome/browser/media/router/media_router.h
-interface MediaRouter {
+interface MediaRouteProvider {
   // Initiates a media route from |media_source| to |sink_id|.
+  // The presentation ID of the route created will be |presentation_id|, but it
+  // may be overridden by a provider implementation. The presentation ID will
+  // be used by the presentation API to refer to the created route.
+  // |origin| and |tab_id| may be passed in for enforcing same-origin and/or
+  // same-tab scopes.
+  // Since int types cannot be made optional, use -1 as |tab_id| in cases where
+  // it is not applicable.
   // If the operation was successful, |route| will be defined and
   //     |error_text| will be null.
   // If the operation failed, |route| will be null and |error_text|
   //     will be set.
-  CreateRoute(string media_source, string sink_id) =>
-      (MediaRoute? route, string? error_text);
+  CreateRoute(string media_source,
+              string sink_id,
+              string original_presentation_id,
+              string origin,
+              int32 tab_id) => (MediaRoute? route, string? error_text);
+
+  // Joins an established route given by |presentation_id|
+  // with |media_source|.
+  // |origin| and |tab_id| are used for validating same-origin/tab scopes.
+  // (See CreateRoute for additional documentation)
+  // If the operation was successful, |route| will be defined and
+  //     |error_text| will be null.
+  // If the operation failed, |route| will be null and |error_text|
+  //     will be set.
+  JoinRoute(string media_source,
+            string presentation_id,
+            string origin,
+            int32 tab_id) => (MediaRoute? route, string? error_text);
 
   // Closes the route specified by |route_id|.
   CloseRoute(string route_id);
 
-  // Sends |message| with optional |extra_info_json| via the media route
-  // |media_route_id|.
-  PostMessage(string media_route_id, string message);
+  // Sends |message| via the media route |media_route_id|.
+  // If the operation was successful, |sent| is true; otherwise it is false.
+  SendRouteMessage(string media_route_id, string message) => (bool sent);
+
+  // Sends |data| via the media route |media_route_id|.
+  // If the operation was successful, |sent| is true; otherwise it is false.
+  SendRouteBinaryMessage(string media_route_id, array<uint8> data)
+      => (bool sent);
 
   // Starts querying for sinks capable of displaying |media_source|.
   StartObservingMediaSinks(string media_source);
@@ -114,23 +161,37 @@ interface MediaRouter {
 
   // "Clears" an issue after it is addressed.
   ClearIssue(string issue_id);
+
+  // Called when the MediaRouter is ready to get the next batch of messages
+  // associated with |route_id|.
+  // |messages| returned will contain the batch of messages.
+  // |messages| will be empty if |StopListeningForRouteMessages| was invoked.
+  // |error| indicates if a permanent error occurred. If true, then subsequent
+  // calls will also return with |error| being true.
+  ListenForRouteMessages(string route_id) =>
+      (array<RouteMessage> messages, bool error);
+
+  // Called when there are no more listeners for messages for |route_id|.
+  // Calling this will resolve the pending |ListenForRouteMessages| callback
+  // with an empty list.
+  StopListeningForRouteMessages(string route_id);
+
+  // Indicates that the presentation session that was connected to route
+  // |route_id| is no longer connected to it.
+  OnPresentationSessionDetached(string route_id);
 };
 
 // Interface for a service which observes state changes across media
 // sources, sinks, and issues.
-interface MediaRouterObserver {
-  // Registers MediaRouter functionality with the remote end.
-  // Allows the browser-side MediaRouter to dispatch MediaRouter methods
-  // to providers.
+interface MediaRouter {
+  // Registers a MediaRouteProvider with the MediaRouter.
   // Returns a string that uniquely identifies the Media Router browser
   // process.
-  ProvideMediaRouter(MediaRouter media_router) => (string instance_id);
+  RegisterMediaRouteProvider(MediaRouteProvider media_router_provider) =>
+      (string instance_id);
 
   // Called when the Media Route Manager receives a new list of sinks.
   OnSinksReceived(string media_source, array<MediaSink> sinks);
-
-  // Called when the Media Route Manager receives a route message.
-  OnMessage(string media_source, string message);
 
   // Called when issues are reported for media routes.
   OnIssue(Issue issue);

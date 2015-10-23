@@ -138,6 +138,13 @@ bool TargetContainsFile(const Target* target, const SourceFile& file) {
       return true;
   }
   for (const auto& cur_file : target->data()) {
+    if (cur_file == file.value())
+      return true;
+  }
+
+  std::vector<SourceFile> outputs;
+  target->action_values().GetOutputsAsSourceFiles(target, &outputs);
+  for (const auto& cur_file : outputs) {
     if (cur_file == file)
       return true;
   }
@@ -286,9 +293,9 @@ const char kRefs_Help[] =
     "     \"gn help label_pattern\" for details.\n"
     "\n"
     "   - File name: The result will be which targets list the given file in\n"
-    "     its \"inputs\", \"sources\", \"public\", or \"data\". Any input\n"
-    "     that does not contain wildcards and does not match a target or a\n"
-    "     config will be treated as a file.\n"
+    "     its \"inputs\", \"sources\", \"public\", \"data\", or \"outputs\".\n"
+    "     Any input that does not contain wildcards and does not match a\n"
+    "     target or a config will be treated as a file.\n"
     "\n"
     "   - Response file: If the input starts with an \"@\", it will be\n"
     "     interpreted as a path to a file containing a list of labels or\n"
@@ -368,7 +375,7 @@ const char kRefs_Help[] =
     "      Display a reverse dependency tree to get to the given file. This\n"
     "      will show how dependencies will reference that file.\n"
     "\n"
-    "  gn refs out/Debug //base/macros.h //base/basictypes.h --all\n"
+    "  gn refs out/Debug //base/macros.h //base/at_exit.h --all\n"
     "      Display all unique targets with some dependency path to a target\n"
     "      containing either of the given files as a source.\n"
     "\n"
@@ -391,7 +398,7 @@ int RunRefs(const std::vector<std::string>& args) {
   bool all_toolchains = cmdline->HasSwitch("all-toolchains");
 
   Setup* setup = new Setup;
-  setup->set_check_for_bad_items(false);
+  setup->build_settings().set_check_for_bad_items(false);
   if (!setup->DoSetup(args[0], false) || !setup->Run())
     return 1;
 
@@ -401,7 +408,6 @@ int RunRefs(const std::vector<std::string>& args) {
     if (args[i][0] == '@') {
       // The argument is as a path to a response file.
       std::string contents;
-      std::vector<std::string> lines;
       bool ret = base::ReadFileToString(UTF8ToFilePath(args[i].substr(1)),
                                         &contents);
       if (!ret) {
@@ -409,8 +415,8 @@ int RunRefs(const std::vector<std::string>& args) {
             .PrintToStdout();
         return 1;
       }
-      base::SplitString(contents, '\n', &lines);
-      for (const auto& line : lines) {
+      for (const std::string& line : base::SplitString(
+               contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
         if (!line.empty())
           inputs.push_back(line);
       }

@@ -78,10 +78,10 @@ void FetchAvatars(
     int index,
     net::URLRequestContextGetter* request_context) {
   for (auto password_form : password_forms) {
-    if (!password_form->avatar_url.is_valid())
+    if (!password_form->icon_url.is_valid())
       continue;
     // Fetcher deletes itself once fetching is finished.
-    auto fetcher = new AvatarFetcherAndroid(password_form->avatar_url, index,
+    auto fetcher = new AvatarFetcherAndroid(password_form->icon_url, index,
                                             java_infobar);
     fetcher->Start(request_context);
     ++index;
@@ -107,7 +107,7 @@ AccountChooserInfoBar::CreateRenderInfoBar(JNIEnv* env) {
       CreateNativeCredentialArray(env, credential_array_size);
   AddElementsToJavaCredentialArray(
       env, java_credentials_array, GetDelegate()->local_credentials_forms(),
-      password_manager::CredentialType::CREDENTIAL_TYPE_LOCAL);
+      password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
   AddElementsToJavaCredentialArray(
       env, java_credentials_array, GetDelegate()->federated_credentials_forms(),
       password_manager::CredentialType::CREDENTIAL_TYPE_FEDERATED,

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/files/file_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
@@ -20,6 +21,7 @@
 #include "chrome/test/base/test_browser_window.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/test/test_web_contents_factory.h"
+#include "extensions/browser/event_router_factory.h"
 #include "extensions/browser/extension_error_test_util.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -37,8 +39,13 @@ namespace extensions {
 
 namespace {
 
-KeyedService* BuildAPI(content::BrowserContext* context) {
-  return new DeveloperPrivateAPI(context);
+scoped_ptr<KeyedService> BuildAPI(content::BrowserContext* context) {
+  return make_scoped_ptr(new DeveloperPrivateAPI(context));
+}
+
+scoped_ptr<KeyedService> BuildEventRouter(content::BrowserContext* profile) {
+  return make_scoped_ptr(
+      new EventRouter(profile, ExtensionPrefs::Get(profile)));
 }
 
 }  // namespace
@@ -221,9 +228,9 @@ void DeveloperPrivateApiUnitTest::SetUp() {
   browser_.reset(new Browser(params));
 
   // Allow the API to be created.
-  static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile()))->
-      SetEventRouter(make_scoped_ptr(
-          new EventRouter(profile(), ExtensionPrefs::Get(profile()))));
+  EventRouterFactory::GetInstance()->SetTestingFactory(profile(),
+                                                       &BuildEventRouter);
+
   DeveloperPrivateAPI::GetFactoryInstance()->SetTestingFactory(
       profile(), &BuildAPI);
 }
@@ -329,7 +336,7 @@ TEST_F(DeveloperPrivateApiUnitTest, DeveloperPrivateChoosePath) {
   choose_args.AppendString("LOAD");
   scoped_refptr<UIThreadExtensionFunction> function(
       new api::DeveloperPrivateChoosePathFunction());
-  function->SetRenderViewHost(web_contents->GetRenderViewHost());
+  function->SetRenderFrameHost(web_contents->GetMainFrame());
   EXPECT_TRUE(RunFunction(function, choose_args)) << function->GetError();
   std::string path;
   EXPECT_TRUE(function->GetResultList() &&
@@ -344,7 +351,7 @@ TEST_F(DeveloperPrivateApiUnitTest, DeveloperPrivateChoosePath) {
   choose_args.AppendString("FILE");
   choose_args.AppendString("PEM");
   function = new api::DeveloperPrivateChoosePathFunction();
-  function->SetRenderViewHost(web_contents->GetRenderViewHost());
+  function->SetRenderFrameHost(web_contents->GetMainFrame());
   EXPECT_TRUE(RunFunction(function, choose_args)) << function->GetError();
   EXPECT_TRUE(function->GetResultList() &&
               function->GetResultList()->GetString(0, &path));
@@ -353,7 +360,7 @@ TEST_F(DeveloperPrivateApiUnitTest, DeveloperPrivateChoosePath) {
   // Try canceling the file dialog.
   api::EntryPicker::SkipPickerAndAlwaysCancelForTest();
   function = new api::DeveloperPrivateChoosePathFunction();
-  function->SetRenderViewHost(web_contents->GetRenderViewHost());
+  function->SetRenderFrameHost(web_contents->GetMainFrame());
   EXPECT_FALSE(RunFunction(function, choose_args));
   EXPECT_EQ(std::string("File selection was canceled."), function->GetError());
 }
@@ -372,7 +379,7 @@ TEST_F(DeveloperPrivateApiUnitTest, DeveloperPrivateLoadUnpacked) {
   // be added).
   scoped_refptr<UIThreadExtensionFunction> function(
       new api::DeveloperPrivateLoadUnpackedFunction());
-  function->SetRenderViewHost(web_contents->GetRenderViewHost());
+  function->SetRenderFrameHost(web_contents->GetMainFrame());
   ExtensionIdSet current_ids = registry()->enabled_extensions().GetIDs();
   EXPECT_TRUE(RunFunction(function, base::ListValue())) << function->GetError();
   // We should have added one new extension.
@@ -389,7 +396,7 @@ TEST_F(DeveloperPrivateApiUnitTest, DeveloperPrivateLoadUnpacked) {
 
   // Try loading a bad extension (it should fail, and we should get an error).
   function = new api::DeveloperPrivateLoadUnpackedFunction();
-  function->SetRenderViewHost(web_contents->GetRenderViewHost());
+  function->SetRenderFrameHost(web_contents->GetMainFrame());
   base::ListValue unpacked_args;
   scoped_ptr<base::DictionaryValue> options(new base::DictionaryValue());
   options->SetBoolean("failQuietly", true);

@@ -202,15 +202,15 @@ void CastExtensionSession::OnCreateSessionDescription(
   peer_connection_->SetLocalDescription(
       CastSetSessionDescriptionObserver::Create(), desc);
 
-  scoped_ptr<base::DictionaryValue> json(new base::DictionaryValue());
-  json->SetString(kWebRtcSessionDescType, desc->type());
+  base::DictionaryValue json;
+  json.SetString(kWebRtcSessionDescType, desc->type());
   std::string subject =
       (desc->type() == "offer") ? kSubjectOffer : kSubjectAnswer;
   std::string desc_str;
   desc->ToString(&desc_str);
-  json->SetString(kWebRtcSessionDescSDP, desc_str);
+  json.SetString(kWebRtcSessionDescSDP, desc_str);
   std::string json_str;
-  if (!base::JSONWriter::Write(json.get(), &json_str)) {
+  if (!base::JSONWriter::Write(json, &json_str)) {
     LOG(ERROR) << "Failed to serialize sdp message.";
     return;
   }
@@ -266,7 +266,7 @@ bool CastExtensionSession::OnExtensionMessage(
     return false;
   }
 
-  scoped_ptr<base::Value> value(base::JSONReader::Read(message.data()));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(message.data());
   base::DictionaryValue* client_message;
   if (!(value && value->GetAsDictionary(&client_message))) {
     LOG(ERROR) << "Could not read cast extension message.";
@@ -389,7 +389,8 @@ bool CastExtensionSession::ParseAndAddICECandidate(
   }
 
   rtc::scoped_ptr<webrtc::IceCandidateInterface> candidate(
-      webrtc::CreateIceCandidate(sdp_mid, sdp_mlineindex, candidate_str));
+      webrtc::CreateIceCandidate(sdp_mid, sdp_mlineindex, candidate_str,
+                                 nullptr));
   if (!candidate.get()) {
     LOG(ERROR)
         << "Invalid Cast Extension Message (could not create candidate).";
@@ -420,7 +421,7 @@ bool CastExtensionSession::SendMessageToClient(const std::string& subject,
   message_dict.SetString(kTopLevelData, data);
   std::string message_json;
 
-  if (!base::JSONWriter::Write(&message_dict, &message_json)) {
+  if (!base::JSONWriter::Write(message_dict, &message_json)) {
     LOG(ERROR) << "Failed to serialize JSON message.";
     return false;
   }
@@ -647,12 +648,12 @@ void CastExtensionSession::OnIceCandidate(
     LOG(ERROR) << "PeerConnectionObserver: failed to serialize candidate.";
     return;
   }
-  scoped_ptr<base::DictionaryValue> json(new base::DictionaryValue());
-  json->SetString(kWebRtcSDPMid, candidate->sdp_mid());
-  json->SetInteger(kWebRtcSDPMLineIndex, candidate->sdp_mline_index());
-  json->SetString(kWebRtcCandidate, candidate_str);
+  base::DictionaryValue json;
+  json.SetString(kWebRtcSDPMid, candidate->sdp_mid());
+  json.SetInteger(kWebRtcSDPMLineIndex, candidate->sdp_mline_index());
+  json.SetString(kWebRtcCandidate, candidate_str);
   std::string json_str;
-  if (!base::JSONWriter::Write(json.get(), &json_str)) {
+  if (!base::JSONWriter::Write(json, &json_str)) {
     LOG(ERROR) << "Failed to serialize candidate message.";
     return;
   }

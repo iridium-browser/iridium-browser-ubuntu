@@ -69,7 +69,7 @@ QuicSentPacketManager::QuicSentPacketManager(
     CongestionControlType congestion_control_type,
     LossDetectionType loss_type,
     bool is_secure)
-    : unacked_packets_(),
+    : unacked_packets_(&ack_notifier_manager_),
       perspective_(perspective),
       clock_(clock),
       stats_(stats),
@@ -146,16 +146,16 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
   }
   EnablePacing();
 
-  if (HasClientSentConnectionOption(config, k1CON)) {
+  if (config.HasClientSentConnectionOption(k1CON, perspective_)) {
     send_algorithm_->SetNumEmulatedConnections(1);
   }
-  if (HasClientSentConnectionOption(config, kNCON)) {
+  if (config.HasClientSentConnectionOption(kNCON, perspective_)) {
     n_connection_simulation_ = true;
   }
-  if (HasClientSentConnectionOption(config, kNTLP)) {
+  if (config.HasClientSentConnectionOption(kNTLP, perspective_)) {
     max_tail_loss_probes_ = 0;
   }
-  if (HasClientSentConnectionOption(config, kNRTO)) {
+  if (config.HasClientSentConnectionOption(kNRTO, perspective_)) {
     use_new_rto_ = true;
   }
   if (config.HasReceivedConnectionOptions() &&
@@ -166,8 +166,15 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
     receive_buffer_bytes_ =
         max(kMinSocketReceiveBuffer,
             static_cast<QuicByteCount>(config.ReceivedSocketReceiveBuffer()));
-    send_algorithm_->SetMaxCongestionWindow(receive_buffer_bytes_ *
-                                            kUsableRecieveBufferFraction);
+    QuicByteCount max_cwnd_bytes = static_cast<QuicByteCount>(
+        receive_buffer_bytes_ * (FLAGS_quic_use_conservative_receive_buffer
+                                     ? kConservativeReceiveBufferFraction
+                                     : kUsableRecieveBufferFraction));
+    if (FLAGS_quic_limit_max_cwnd) {
+      max_cwnd_bytes =
+          min(max_cwnd_bytes, kMaxCongestionWindow * kDefaultTCPMSS);
+    }
+    send_algorithm_->SetMaxCongestionWindow(max_cwnd_bytes);
   }
   send_algorithm_->SetFromConfig(config, perspective_);
 
@@ -176,7 +183,7 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
   }
 }
 
-bool QuicSentPacketManager::ResumeConnectionState(
+void QuicSentPacketManager::ResumeConnectionState(
     const CachedNetworkParameters& cached_network_params,
     bool max_bandwidth_resumption) {
   if (cached_network_params.has_min_rtt_ms()) {
@@ -186,8 +193,8 @@ bool QuicSentPacketManager::ResumeConnectionState(
         max(kMinInitialRoundTripTimeUs,
             min(kMaxInitialRoundTripTimeUs, initial_rtt_us)));
   }
-  return send_algorithm_->ResumeConnectionState(cached_network_params,
-                                                max_bandwidth_resumption);
+  send_algorithm_->ResumeConnectionState(cached_network_params,
+                                         max_bandwidth_resumption);
 }
 
 void QuicSentPacketManager::SetNumOpenStreams(size_t num_streams) {
@@ -196,20 +203,6 @@ void QuicSentPacketManager::SetNumOpenStreams(size_t num_streams) {
     send_algorithm_->SetNumEmulatedConnections(
         min<size_t>(5, max<size_t>(1, num_streams)));
   }
-}
-
-bool QuicSentPacketManager::HasClientSentConnectionOption(
-    const QuicConfig& config, QuicTag tag) const {
-  if (perspective_ == Perspective::IS_SERVER) {
-    if (config.HasReceivedConnectionOptions() &&
-        ContainsQuicTag(config.ReceivedConnectionOptions(), tag)) {
-      return true;
-    }
-  } else if (config.HasSendConnectionOptions() &&
-             ContainsQuicTag(config.SendConnectionOptions(), tag)) {
-    return true;
-  }
-  return false;
 }
 
 void QuicSentPacketManager::OnIncomingAck(const QuicAckFrame& ack_frame,
@@ -240,7 +233,7 @@ void QuicSentPacketManager::OnIncomingAck(const QuicAckFrame& ack_frame,
 
   // If we have received a truncated ack, then we need to clear out some
   // previous transmissions to allow the peer to actually ACK new packets.
-  if (ack_frame.is_truncated) {
+  if (ack_frame.is_truncated && !FLAGS_quic_disable_truncated_ack_handling) {
     unacked_packets_.ClearAllPreviousRetransmissions();
   }
 
@@ -414,6 +407,14 @@ void QuicSentPacketManager::RecordSpuriousRetransmissions(
   for (SequenceNumberList::const_reverse_iterator it =
            all_transmissions.rbegin();
        it != all_transmissions.rend() && *it > acked_sequence_number; ++it) {
+    // ianswett: Prevents crash in b/20552846.
+    if (*it < unacked_packets_.GetLeastUnacked() ||
+        *it > unacked_packets_.largest_sent_packet()) {
+      LOG(DFATAL) << "Retransmission out of range:" << *it
+                  << " least unacked:" << unacked_packets_.GetLeastUnacked()
+                  << " largest sent:" << unacked_packets_.largest_sent_packet();
+      return;
+    }
     const TransmissionInfo& retransmit_info =
         unacked_packets_.GetTransmissionInfo(*it);
 
@@ -900,10 +901,6 @@ QuicBandwidth QuicSentPacketManager::BandwidthEstimate() const {
   return send_algorithm_->BandwidthEstimate();
 }
 
-bool QuicSentPacketManager::HasReliableBandwidthEstimate() const {
-  return send_algorithm_->HasReliableBandwidthEstimate();
-}
-
 const QuicSustainedBandwidthRecorder&
 QuicSentPacketManager::SustainedBandwidthRecorder() const {
   return sustained_bandwidth_recorder_;
@@ -916,6 +913,10 @@ QuicPacketCount QuicSentPacketManager::EstimateMaxPacketsInFlight(
 
 QuicPacketCount QuicSentPacketManager::GetCongestionWindowInTcpMss() const {
   return send_algorithm_->GetCongestionWindow() / kDefaultTCPMSS;
+}
+
+QuicByteCount QuicSentPacketManager::GetCongestionWindowInBytes() const {
+  return send_algorithm_->GetCongestionWindow();
 }
 
 QuicPacketCount QuicSentPacketManager::GetSlowStartThresholdInTcpMss() const {

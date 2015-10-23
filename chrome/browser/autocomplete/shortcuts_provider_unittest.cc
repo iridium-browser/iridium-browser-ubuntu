@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/autocomplete/shortcuts_provider.h"
+#include "components/omnibox/browser/shortcuts_provider.h"
 
 #include <math.h>
 
@@ -17,18 +17,19 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
-#include "chrome/browser/autocomplete/in_memory_url_index.h"
-#include "chrome/browser/autocomplete/shortcuts_backend.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/url_database.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_input.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/autocomplete_provider.h"
-#include "components/omnibox/autocomplete_result.h"
+#include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_provider.h"
+#include "components/omnibox/browser/autocomplete_result.h"
+#include "components/omnibox/browser/in_memory_url_index.h"
+#include "components/omnibox/browser/shortcuts_backend.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -288,6 +289,7 @@ class ShortcutsProviderTest : public testing::Test {
   content::TestBrowserThread file_thread_;
 
   TestingProfile profile_;
+  ChromeAutocompleteProviderClient client_;
 
   ACMatches ac_matches_;  // The resulting matches after running RunTest.
 
@@ -297,7 +299,8 @@ class ShortcutsProviderTest : public testing::Test {
 
 ShortcutsProviderTest::ShortcutsProviderTest()
     : ui_thread_(content::BrowserThread::UI, &message_loop_),
-      file_thread_(content::BrowserThread::FILE, &message_loop_) {
+      file_thread_(content::BrowserThread::FILE, &message_loop_),
+      client_(&profile_) {
 }
 
 void ShortcutsProviderTest::SetUp() {
@@ -306,7 +309,7 @@ void ShortcutsProviderTest::SetUp() {
   backend_ = ShortcutsBackendFactory::GetForProfile(&profile_);
   ASSERT_TRUE(backend_.get());
   ASSERT_TRUE(profile_.CreateHistoryService(true, false));
-  provider_ = new ShortcutsProvider(&profile_);
+  provider_ = new ShortcutsProvider(&client_);
   FillData(shortcut_test_db, arraysize(shortcut_test_db));
 }
 
@@ -359,9 +362,9 @@ void ShortcutsProviderTest::RunTest(
   base::MessageLoop::current()->RunUntilIdle();
   AutocompleteInput input(text, base::string16::npos, std::string(), GURL(),
                           metrics::OmniboxEventProto::INVALID_SPEC,
-                          prevent_inline_autocomplete, false, true, true,
+                          prevent_inline_autocomplete, false, true, true, false,
                           ChromeAutocompleteSchemeClassifier(&profile_));
-  provider_->Start(input, false, false);
+  provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
 
   ac_matches_ = provider_->matches();
@@ -823,12 +826,11 @@ TEST_F(ShortcutsProviderTest, DeleteMatch) {
 }
 
 TEST_F(ShortcutsProviderTest, DoesNotProvideOnFocus) {
-  AutocompleteInput input(ASCIIToUTF16("about:o"), base::string16::npos,
-                          std::string(), GURL(),
-                          metrics::OmniboxEventProto::INVALID_SPEC,
-                          false, false, true, true,
-                          ChromeAutocompleteSchemeClassifier(&profile_));
-  provider_->Start(input, false, true);
+  AutocompleteInput input(
+      ASCIIToUTF16("about:o"), base::string16::npos, std::string(), GURL(),
+      metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true, true,
+      ChromeAutocompleteSchemeClassifier(&profile_));
+  provider_->Start(input, false);
   EXPECT_TRUE(provider_->matches().empty());
 }
 

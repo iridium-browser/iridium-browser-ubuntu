@@ -94,6 +94,7 @@
       ],
       'include_dirs': [
         '../include/gpu',
+        '../include/private',
         '../src/core',
         '../src/gpu',
         '../src/image/',
@@ -111,27 +112,9 @@
         [ 'skia_gpu_extra_dependency_path', {
           'dependencies' : [
               '<(skia_gpu_extra_dependency_path):*',
-          ]
-        }],
-        [ 'skia_stroke_path_rendering', {
-          'sources': [
-            '../experimental/StrokePathRenderer/GrStrokePathRenderer.h',
-            '../experimental/StrokePathRenderer/GrStrokePathRenderer.cpp',
           ],
-          'defines': [
-            'GR_STROKE_PATH_RENDERING=1',
-          ],
-        }],
-        [ 'skia_android_path_rendering', {
-          'sources': [
-            '../experimental/AndroidPathRenderer/GrAndroidPathRenderer.cpp',
-            '../experimental/AndroidPathRenderer/GrAndroidPathRenderer.h',
-            '../experimental/AndroidPathRenderer/AndroidPathRenderer.cpp',
-            '../experimental/AndroidPathRenderer/AndroidPathRenderer.h',
-            '../experimental/AndroidPathRenderer/Vertex.h',
-          ],
-          'defines': [
-            'GR_ANDROID_PATH_RENDERING=1',
+          'export_dependent_settings': [
+            '<(skia_gpu_extra_dependency_path):*',
           ],
         }],
         [ 'skia_chrome_utils', {

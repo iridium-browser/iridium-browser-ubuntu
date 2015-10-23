@@ -5,12 +5,16 @@
 #include "chrome/browser/ui/views/autofill/card_unmask_prompt_views.h"
 
 #include "base/basictypes.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
-#include "chrome/browser/ui/autofill/card_unmask_prompt_controller.h"
+#include "chrome/browser/ui/autofill/create_card_unmask_prompt_view.h"
 #include "chrome/browser/ui/views/autofill/decorated_textfield.h"
 #include "chrome/browser/ui/views/autofill/tooltip_icon.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/autofill/core/browser/ui/card_unmask_prompt_controller.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -22,6 +26,8 @@
 #include "ui/compositor/compositing_recorder.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
+#include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/vector_icons_public2.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/combobox/combobox.h"
@@ -41,18 +47,19 @@ const int kEdgePadding = 19;
 
 SkColor kGreyTextColor = SkColorSetRGB(0x64, 0x64, 0x64);
 
-// static
-CardUnmaskPromptView* CardUnmaskPromptView::CreateAndShow(
-    CardUnmaskPromptController* controller) {
-  CardUnmaskPromptViews* view = new CardUnmaskPromptViews(controller);
-  view->Show();
-  return view;
+CardUnmaskPromptView* CreateCardUnmaskPromptView(
+    CardUnmaskPromptController* controller,
+    content::WebContents* web_contents) {
+  return new CardUnmaskPromptViews(controller, web_contents);
 }
 
 CardUnmaskPromptViews::CardUnmaskPromptViews(
-    CardUnmaskPromptController* controller)
+    CardUnmaskPromptController* controller,
+    content::WebContents* web_contents)
     : controller_(controller),
+      web_contents_(web_contents),
       main_contents_(nullptr),
+      instructions_(nullptr),
       permanent_error_label_(nullptr),
       input_row_(nullptr),
       cvc_input_(nullptr),
@@ -76,8 +83,7 @@ CardUnmaskPromptViews::~CardUnmaskPromptViews() {
 }
 
 void CardUnmaskPromptViews::Show() {
-  constrained_window::ShowWebModalDialogViews(this,
-                                              controller_->GetWebContents());
+  constrained_window::ShowWebModalDialogViews(this, web_contents_);
 }
 
 void CardUnmaskPromptViews::ControllerGone() {
@@ -103,7 +109,7 @@ void CardUnmaskPromptViews::GotVerificationResult(
     progress_label_->SetText(l10n_util::GetStringUTF16(
         IDS_AUTOFILL_CARD_UNMASK_VERIFICATION_SUCCESS));
     progress_throbber_->SetChecked(true);
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, base::Bind(&CardUnmaskPromptViews::ClosePrompt,
                               weak_ptr_factory_.GetWeakPtr()),
         controller_->GetSuccessMessageDuration());
@@ -153,6 +159,7 @@ void CardUnmaskPromptViews::LinkClicked(views::Link* source, int event_flags) {
   cvc_input_->SetText(base::string16());
   GetDialogClientView()->UpdateDialogButtons();
   GetWidget()->UpdateWindowTitle();
+  instructions_->SetText(controller_->GetInstructionsMessage());
   SetRetriableErrorMessage(base::string16());
 }
 
@@ -169,12 +176,12 @@ void CardUnmaskPromptViews::SetRetriableErrorMessage(
   }
 
   // Update the dialog's size.
-  if (GetWidget() && controller_->GetWebContents()) {
+  if (GetWidget() && web_contents_) {
     constrained_window::UpdateWebContentsModalDialogPosition(
-        GetWidget(), web_modal::WebContentsModalDialogManager::FromWebContents(
-                         controller_->GetWebContents())
-                         ->delegate()
-                         ->GetWebContentsModalDialogHost());
+        GetWidget(),
+        web_modal::WebContentsModalDialogManager::FromWebContents(web_contents_)
+            ->delegate()
+            ->GetWebContentsModalDialogHost());
   }
 
   Layout();
@@ -398,13 +405,12 @@ void CardUnmaskPromptViews::InitIfNecessary() {
       new views::BoxLayout(views::BoxLayout::kVertical, kEdgePadding, 0, 0));
   main_contents_->AddChildView(controls_container);
 
-  views::Label* instructions =
-      new views::Label(controller_->GetInstructionsMessage());
-  instructions->SetEnabledColor(kGreyTextColor);
-  instructions->SetMultiLine(true);
-  instructions->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  instructions->SetBorder(views::Border::CreateEmptyBorder(0, 0, 16, 0));
-  controls_container->AddChildView(instructions);
+  instructions_ = new views::Label(controller_->GetInstructionsMessage());
+  instructions_->SetEnabledColor(kGreyTextColor);
+  instructions_->SetMultiLine(true);
+  instructions_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  instructions_->SetBorder(views::Border::CreateEmptyBorder(0, 0, 16, 0));
+  controls_container->AddChildView(instructions_);
 
   input_row_ = new views::View();
   input_row_->SetLayoutManager(
@@ -449,9 +455,9 @@ void CardUnmaskPromptViews::InitIfNecessary() {
 
   error_icon_ = new views::ImageView();
   error_icon_->SetVisible(false);
-  error_icon_->SetImage(ui::ResourceBundle::GetSharedInstance()
-                            .GetImageNamed(IDR_ALERT_RED)
-                            .ToImageSkia());
+  // TODO(estade): revisit this color.
+  error_icon_->SetImage(gfx::CreateVectorIcon(gfx::VectorIconId::WARNING, 16,
+                                              SkColorSetRGB(0xDB, 0x44, 0x37)));
   temporary_error->AddChildView(error_icon_);
 
   // Reserve vertical space for the error label, assuming it's one line.

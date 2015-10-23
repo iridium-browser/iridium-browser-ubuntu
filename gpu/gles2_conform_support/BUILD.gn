@@ -2,6 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+declare_args() {
+  # Set to true to compile with the OpenGL ES 2.0 conformance tests.
+  internal_gles2_conform_tests = false
+}
+
 import("//build/config/allocator.gni")
 import("//testing/test.gni")
 
@@ -72,6 +77,7 @@ if (internal_gles2_conform_tests) {
       "//gpu/gles2_conform_support/native:windowless",
       "//gpu/command_buffer/client:gles2_c_libnocheck",
     ]
+    configs += [ "//build/compiler:no_incompatible_pointer_warnings" ]
     if (is_linux) {
       if (!is_chromeos) {
         deps += [ "//build/linux/system/gtk" ]
@@ -80,7 +86,6 @@ if (internal_gles2_conform_tests) {
           cflags = [
             "-Wno-array-bounds",
             "-Wno-implicit-function-declaration",
-            "-Wno-incompatible-pointer-types",
             "-Wno-parentheses-equality",
             "-Wno-pointer-sign",
             "-Wno-return-type",
@@ -153,6 +158,15 @@ if (internal_gles2_conform_tests) {
   }
 }
 
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("gles2_conform_test_run") {
+  testonly = true
+  deps = [
+    ":gles2_conform_test",
+  ]
+}
+
 test("gles2_conform_test") {
   sources = [
     "gles2_conform_test.cc",
@@ -162,7 +176,14 @@ test("gles2_conform_test") {
     "//gpu/config",
     "//testing/gtest",
   ]
+
+  data = [
+    "gles2_conform_test_expectations.txt",
+  ]
+
   if (internal_gles2_conform_tests) {
     deps += [ "gles2_conform_test_windowless" ]
+
+    data_deps = [ "//third_party/gles2_conform/GTF_ES/" ]
   }
 }

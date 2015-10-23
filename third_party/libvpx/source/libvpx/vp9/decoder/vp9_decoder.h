@@ -14,13 +14,14 @@
 #include "./vpx_config.h"
 
 #include "vpx/vpx_codec.h"
+#include "vpx_dsp/bitreader.h"
 #include "vpx_scale/yv12config.h"
+#include "vpx_util/vpx_thread.h"
+
 #include "vp9/common/vp9_thread_common.h"
 #include "vp9/common/vp9_onyxc_int.h"
 #include "vp9/common/vp9_ppflags.h"
-#include "vp9/common/vp9_thread.h"
 #include "vp9/decoder/vp9_dthread.h"
-#include "vp9/decoder/vp9_reader.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,15 +30,19 @@ extern "C" {
 // TODO(hkuang): combine this with TileWorkerData.
 typedef struct TileData {
   VP9_COMMON *cm;
-  vp9_reader bit_reader;
+  vpx_reader bit_reader;
   DECLARE_ALIGNED(16, MACROBLOCKD, xd);
+  /* dqcoeff are shared by all the planes. So planes must be decoded serially */
+  DECLARE_ALIGNED(16, tran_low_t, dqcoeff[32 * 32]);
 } TileData;
 
 typedef struct TileWorkerData {
   struct VP9Decoder *pbi;
-  vp9_reader bit_reader;
+  vpx_reader bit_reader;
   FRAME_COUNTS counts;
   DECLARE_ALIGNED(16, MACROBLOCKD, xd);
+  /* dqcoeff are shared by all the planes. So planes must be decoded serially */
+  DECLARE_ALIGNED(16, tran_low_t, dqcoeff[32 * 32]);
   struct vpx_internal_error_info error_info;
 } TileWorkerData;
 
@@ -56,9 +61,9 @@ typedef struct VP9Decoder {
   // the same.
   RefCntBuffer *cur_buf;   //  Current decoding frame buffer.
 
-  VP9Worker *frame_worker_owner;   // frame_worker that owns this pbi.
-  VP9Worker lf_worker;
-  VP9Worker *tile_workers;
+  VPxWorker *frame_worker_owner;   // frame_worker that owns this pbi.
+  VPxWorker lf_worker;
+  VPxWorker *tile_workers;
   TileWorkerData *tile_worker_data;
   TileInfo *tile_worker_info;
   int num_tile_workers;

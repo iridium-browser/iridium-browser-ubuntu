@@ -8,15 +8,8 @@
             "className": "WebInspector.SourcesPanelFactory"
         },
         {
-            "type": "drawer-view",
-            "name": "sources.search",
-            "title": "Search",
-            "order": "1",
-            "className": "WebInspector.AdvancedSearchView"
-        },
-        {
             "type": "@WebInspector.ContextMenu.Provider",
-            "contextTypes": ["WebInspector.UISourceCode", "WebInspector.RemoteObject", "WebInspector.NetworkRequest"],
+            "contextTypes": ["WebInspector.UISourceCode", "WebInspector.UILocation", "WebInspector.RemoteObject", "WebInspector.NetworkRequest"],
             "className": "WebInspector.SourcesPanel.ContextMenuProvider"
         },
         {
@@ -130,6 +123,12 @@
                     "shortcut": "Ctrl+Shift+F"
                 }
             ]
+        },
+        {
+            "type": "context-menu-item",
+            "location": "mainMenu/navigate",
+            "title": "Search all files",
+            "actionId": "sources.search.toggle"
         },
         {
             "type": "@WebInspector.Revealer",
@@ -249,10 +248,15 @@
         {
             "type": "setting",
             "category": "Sources",
-            "title": "Show whitespace characters",
+            "title": "Show whitespace characters:",
             "settingName": "showWhitespacesInEditor",
-            "settingType": "boolean",
-            "defaultValue": false
+            "settingType": "enum",
+            "defaultValue": "original",
+            "options": [
+                ["None", "none"],
+                ["All", "all"],
+                ["Trailing", "trailing"]
+            ]
         },
         {
             "type": "setting",
@@ -280,6 +284,7 @@
         }
     ],
     "dependencies": [
+        "components",
         "source_frame",
         "snippets",
         "extensions"
@@ -318,7 +323,8 @@
         "SourcesPanel.js",
         "WorkspaceMappingTip.js",
         "XHRBreakpointsSidebarPane.js",
-        "JavaScriptCompiler.js"
+        "JavaScriptCompiler.js",
+        "ObjectEventListenersSidebarPane.js"
     ],
     "skip_compilation": [
         "jsdifflib.js"

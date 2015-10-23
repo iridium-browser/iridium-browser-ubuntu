@@ -14,6 +14,25 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 
+namespace {
+
+class StringData final : public content::RequestPeer::ReceivedData {
+ public:
+  explicit StringData(const std::string& data) : data_(data) {}
+  void Append(const char* data, int length) { data_.append(data, length); }
+
+  const char* payload() const override { return data_.data(); }
+  int length() const override { return data_.size(); }
+  int encoded_length() const override { return -1; }
+
+ private:
+  std::string data_;
+
+  DISALLOW_COPY_AND_ASSIGN(StringData);
+};
+
+}  // namespace
+
 ExtensionLocalizationPeer::ExtensionLocalizationPeer(
     content::RequestPeer* peer,
     IPC::Sender* message_sender,
@@ -36,8 +55,10 @@ ExtensionLocalizationPeer::CreateExtensionLocalizationPeer(
   // Return NULL if content is not text/css or it doesn't belong to extension
   // scheme.
   return (request_url.SchemeIs(extensions::kExtensionScheme) &&
-          StartsWithASCII(mime_type, "text/css", false)) ?
-      new ExtensionLocalizationPeer(peer, message_sender, request_url) : NULL;
+          base::StartsWith(mime_type, "text/css",
+                           base::CompareCase::INSENSITIVE_ASCII))
+             ? new ExtensionLocalizationPeer(peer, message_sender, request_url)
+             : NULL;
 }
 
 void ExtensionLocalizationPeer::OnUploadProgress(
@@ -57,10 +78,8 @@ void ExtensionLocalizationPeer::OnReceivedResponse(
   response_info_ = info;
 }
 
-void ExtensionLocalizationPeer::OnReceivedData(const char* data,
-                                               int data_length,
-                                               int encoded_data_length) {
-  data_.append(data, data_length);
+void ExtensionLocalizationPeer::OnReceivedData(scoped_ptr<ReceivedData> data) {
+  data_.append(data->payload(), data->length());
 }
 
 void ExtensionLocalizationPeer::OnCompletedRequest(
@@ -76,25 +95,23 @@ void ExtensionLocalizationPeer::OnCompletedRequest(
   if (error_code != net::OK) {
     // We failed to load the resource.
     original_peer_->OnReceivedCompletedResponse(
-        response_info_, nullptr, 0, -1, net::ERR_ABORTED, false,
-        stale_copy_in_cache, security_info, completion_time,
-        total_transfer_size);
+        response_info_, nullptr, net::ERR_ABORTED, false, stale_copy_in_cache,
+        security_info, completion_time, total_transfer_size);
     return;
   }
 
   ReplaceMessages();
 
+  scoped_ptr<StringData> data_to_pass(data_.empty() ? nullptr
+                                                    : new StringData(data_));
   original_peer_->OnReceivedCompletedResponse(
-      response_info_, data_.data(), static_cast<int>(data_.size()), -1,
-      error_code, was_ignored_by_handler, stale_copy_in_cache, security_info,
-      completion_time, total_transfer_size);
+      response_info_, data_to_pass.Pass(), error_code, was_ignored_by_handler,
+      stale_copy_in_cache, security_info, completion_time, total_transfer_size);
 }
 
 void ExtensionLocalizationPeer::OnReceivedCompletedResponse(
     const content::ResourceResponseInfo& info,
-    const char* data,
-    int data_length,
-    int encoded_data_length,
+    scoped_ptr<ReceivedData> data,
     int error_code,
     bool was_ignored_by_handler,
     bool stale_copy_in_cache,
@@ -104,9 +121,8 @@ void ExtensionLocalizationPeer::OnReceivedCompletedResponse(
   // Make sure we delete ourselves at the end of this call.
   scoped_ptr<ExtensionLocalizationPeer> this_deleter(this);
   original_peer_->OnReceivedCompletedResponse(
-      info, data, data_length, encoded_data_length, error_code,
-      was_ignored_by_handler, stale_copy_in_cache, security_info,
-      completion_time, total_transfer_size);
+      info, data.Pass(), error_code, was_ignored_by_handler,
+      stale_copy_in_cache, security_info, completion_time, total_transfer_size);
 }
 
 void ExtensionLocalizationPeer::ReplaceMessages() {

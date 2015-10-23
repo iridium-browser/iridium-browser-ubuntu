@@ -67,7 +67,6 @@
 #include "talk/media/base/videocapturer.h"
 #include "talk/media/base/videorenderer.h"
 #include "talk/media/devices/videorendererfactory.h"
-#include "talk/media/webrtc/webrtcvideocapturer.h"
 #include "talk/media/webrtc/webrtcvideodecoderfactory.h"
 #include "talk/media/webrtc/webrtcvideoencoderfactory.h"
 #include "webrtc/base/bind.h"
@@ -248,6 +247,14 @@ class PCOJava : public PeerConnectionObserver {
     jobject new_state_enum = JavaEnumFromIndex(
         jni(), "PeerConnection$IceConnectionState", new_state);
     jni()->CallVoidMethod(*j_observer_global_, m, new_state_enum);
+    CHECK_EXCEPTION(jni()) << "error during CallVoidMethod";
+  }
+
+  void OnIceConnectionReceivingChange(bool receiving) override {
+    ScopedLocalRefFrame local_ref_frame(jni());
+    jmethodID m = GetMethodID(
+        jni(), *j_observer_class_, "onIceConnectionReceivingChange", "(Z)V");
+    jni()->CallVoidMethod(*j_observer_global_, m, receiving);
     CHECK_EXCEPTION(jni()) << "error during CallVoidMethod";
   }
 
@@ -560,15 +567,23 @@ class DataChannelObserverWrapper : public DataChannelObserver {
       : j_observer_global_(jni, j_observer),
         j_observer_class_(jni, GetObjectClass(jni, j_observer)),
         j_buffer_class_(jni, FindClass(jni, "org/webrtc/DataChannel$Buffer")),
-        j_on_state_change_mid_(GetMethodID(jni, *j_observer_class_,
-                                           "onStateChange", "()V")),
+        j_on_buffered_amount_change_mid_(GetMethodID(
+            jni, *j_observer_class_, "onBufferedAmountChange", "(J)V")),
+        j_on_state_change_mid_(
+            GetMethodID(jni, *j_observer_class_, "onStateChange", "()V")),
         j_on_message_mid_(GetMethodID(jni, *j_observer_class_, "onMessage",
                                       "(Lorg/webrtc/DataChannel$Buffer;)V")),
-        j_buffer_ctor_(GetMethodID(jni, *j_buffer_class_,
-                                   "<init>", "(Ljava/nio/ByteBuffer;Z)V")) {
-  }
+        j_buffer_ctor_(GetMethodID(jni, *j_buffer_class_, "<init>",
+                                   "(Ljava/nio/ByteBuffer;Z)V")) {}
 
   virtual ~DataChannelObserverWrapper() {}
+
+  void OnBufferedAmountChange(uint64 previous_amount) override {
+    ScopedLocalRefFrame local_ref_frame(jni());
+    jni()->CallVoidMethod(*j_observer_global_, j_on_buffered_amount_change_mid_,
+                          previous_amount);
+    CHECK_EXCEPTION(jni()) << "error during CallVoidMethod";
+  }
 
   void OnStateChange() override {
     ScopedLocalRefFrame local_ref_frame(jni());
@@ -594,6 +609,7 @@ class DataChannelObserverWrapper : public DataChannelObserver {
   const ScopedGlobalRef<jobject> j_observer_global_;
   const ScopedGlobalRef<jclass> j_observer_class_;
   const ScopedGlobalRef<jclass> j_buffer_class_;
+  const jmethodID j_on_buffered_amount_change_mid_;
   const jmethodID j_on_state_change_mid_;
   const jmethodID j_on_message_mid_;
   const jmethodID j_buffer_ctor_;
@@ -907,7 +923,10 @@ JOW(void, Logging_nativeEnableTracing)(
     }
 #endif
   }
-  rtc::LogMessage::LogToDebug(nativeSeverity);
+  if (nativeSeverity >= rtc::LS_SENSITIVE && nativeSeverity <= rtc::LS_ERROR) {
+    rtc::LogMessage::LogToDebug(
+        static_cast<rtc::LoggingSeverity>(nativeSeverity));
+  }
 }
 
 JOW(void, PeerConnection_freePeerConnection)(JNIEnv*, jclass, jlong j_p) {
@@ -1155,11 +1174,18 @@ JOW(void, PeerConnectionFactory_nativeSetOptions)(
       jni->GetFieldID(options_class, "networkIgnoreMask", "I");
   int network_ignore_mask =
       jni->GetIntField(options, network_ignore_mask_field);
+
+  jfieldID disable_encryption_field =
+      jni->GetFieldID(options_class, "disableEncryption", "Z");
+  bool disable_encryption =
+      jni->GetBooleanField(options, disable_encryption_field);
+
   PeerConnectionFactoryInterface::Options options_to_set;
 
   // This doesn't necessarily match the c++ version of this struct; feel free
   // to add more parameters as necessary.
   options_to_set.network_ignore_mask = network_ignore_mask;
+  options_to_set.disable_encryption = disable_encryption;
   factory->SetOptions(options_to_set);
 }
 
@@ -1214,6 +1240,22 @@ JavaBundlePolicyToNativeType(JNIEnv* jni, jobject j_bundle_policy) {
 
   CHECK(false) << "Unexpected BundlePolicy enum_name " << enum_name;
   return PeerConnectionInterface::kBundlePolicyBalanced;
+}
+
+static PeerConnectionInterface::RtcpMuxPolicy
+JavaRtcpMuxPolicyToNativeType(JNIEnv* jni, jobject j_rtcp_mux_policy) {
+  std::string enum_name = GetJavaEnumName(
+      jni, "org/webrtc/PeerConnection$RtcpMuxPolicy",
+      j_rtcp_mux_policy);
+
+  if (enum_name == "NEGOTIATE")
+    return PeerConnectionInterface::kRtcpMuxPolicyNegotiate;
+
+  if (enum_name == "REQUIRE")
+    return PeerConnectionInterface::kRtcpMuxPolicyRequire;
+
+  CHECK(false) << "Unexpected RtcpMuxPolicy enum_name " << enum_name;
+  return PeerConnectionInterface::kRtcpMuxPolicyNegotiate;
 }
 
 static PeerConnectionInterface::TcpCandidatePolicy
@@ -1292,6 +1334,12 @@ JOW(jlong, PeerConnectionFactory_nativeCreatePeerConnection)(
   jobject j_bundle_policy = GetObjectField(
       jni, j_rtc_config, j_bundle_policy_id);
 
+  jfieldID j_rtcp_mux_policy_id = GetFieldID(
+      jni, j_rtc_config_class, "rtcpMuxPolicy",
+      "Lorg/webrtc/PeerConnection$RtcpMuxPolicy;");
+  jobject j_rtcp_mux_policy = GetObjectField(
+      jni, j_rtc_config, j_rtcp_mux_policy_id);
+
   jfieldID j_tcp_candidate_policy_id = GetFieldID(
       jni, j_rtc_config_class, "tcpCandidatePolicy",
       "Lorg/webrtc/PeerConnection$TcpCandidatePolicy;");
@@ -1306,16 +1354,22 @@ JOW(jlong, PeerConnectionFactory_nativeCreatePeerConnection)(
   jfieldID j_audio_jitter_buffer_max_packets_id = GetFieldID(
       jni, j_rtc_config_class, "audioJitterBufferMaxPackets",
       "I");
+  jfieldID j_audio_jitter_buffer_fast_accelerate_id = GetFieldID(
+      jni, j_rtc_config_class, "audioJitterBufferFastAccelerate", "Z");
   PeerConnectionInterface::RTCConfiguration rtc_config;
 
   rtc_config.type =
       JavaIceTransportsTypeToNativeType(jni, j_ice_transports_type);
   rtc_config.bundle_policy = JavaBundlePolicyToNativeType(jni, j_bundle_policy);
+  rtc_config.rtcp_mux_policy =
+      JavaRtcpMuxPolicyToNativeType(jni, j_rtcp_mux_policy);
   rtc_config.tcp_candidate_policy =
       JavaTcpCandidatePolicyToNativeType(jni, j_tcp_candidate_policy);
   JavaIceServersToJsepIceServers(jni, j_ice_servers, &rtc_config.servers);
   rtc_config.audio_jitter_buffer_max_packets =
       GetIntField(jni, j_rtc_config, j_audio_jitter_buffer_max_packets_id);
+  rtc_config.audio_jitter_buffer_fast_accelerate = GetBooleanField(
+      jni, j_rtc_config, j_audio_jitter_buffer_fast_accelerate_id);
 
   PCOJava* observer = reinterpret_cast<PCOJava*>(observer_p);
   observer->SetConstraints(new ConstraintsWrapper(jni, j_constraints));
@@ -1430,6 +1484,13 @@ JOW(void, PeerConnection_setRemoteDescription)(
           jni, j_observer, reinterpret_cast<ConstraintsWrapper*>(NULL)));
   ExtractNativePC(jni, j_pc)->SetRemoteDescription(
       observer, JavaSdpToNativeSdp(jni, j_sdp));
+}
+
+JOW(void, PeerConnection_setIceConnectionReceivingTimeout)(JNIEnv* jni,
+                                                           jobject j_pc,
+                                                           jint timeout_ms) {
+  return ExtractNativePC(jni, j_pc)
+      ->SetIceConnectionReceivingTimeout(timeout_ms);
 }
 
 JOW(jboolean, PeerConnection_updateIce)(

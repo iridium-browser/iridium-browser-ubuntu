@@ -6,12 +6,14 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/translate/content/common/translate_messages.h"
 #include "components/translate/content/renderer/renderer_cld_data_provider.h"
 #include "components/translate/content/renderer/renderer_cld_data_provider_factory.h"
@@ -79,6 +81,46 @@ scoped_ptr<translate::RendererCldDataProvider> CreateDataProvider(
   return scoped_ptr<translate::RendererCldDataProvider>(
       translate::RendererCldDataProviderFactory::Get()->
       CreateRendererCldDataProvider(render_view_observer));
+}
+
+// Returns whether the page associated with |document| is a candidate for
+// translation.  Some pages can explictly specify (via a meta-tag) that they
+// should not be translated.
+bool HasNoTranslateMeta(WebDocument* document) {
+  WebElement head = document->head();
+  if (head.isNull() || !head.hasChildNodes())
+    return false;
+
+  const WebString meta(ASCIIToUTF16("meta"));
+  const WebString name(ASCIIToUTF16("name"));
+  const WebString google(ASCIIToUTF16("google"));
+  const WebString value(ASCIIToUTF16("value"));
+  const WebString content(ASCIIToUTF16("content"));
+
+  WebNodeList children = head.childNodes();
+  for (size_t i = 0; i < children.length(); ++i) {
+    WebNode node = children.item(i);
+    if (!node.isElementNode())
+      continue;
+    WebElement element = node.to<WebElement>();
+    // Check if a tag is <meta>.
+    if (!element.hasHTMLTagName(meta))
+      continue;
+    // Check if the tag contains name="google".
+    WebString attribute = element.getAttribute(name);
+    if (attribute.isNull() || attribute != google)
+      continue;
+    // Check if the tag contains value="notranslate", or content="notranslate".
+    attribute = element.getAttribute(value);
+    if (attribute.isNull())
+      attribute = element.getAttribute(content);
+    if (attribute.isNull())
+      continue;
+    if (base::LowerCaseEqualsASCII(base::StringPiece16(attribute),
+                                   "notranslate"))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -204,6 +246,7 @@ void TranslateHelper::PageCapturedImpl(int page_seq_no,
   details.content_language = content_language;
   details.cld_language = cld_language;
   details.is_cld_reliable = is_cld_reliable;
+  details.has_notranslate = HasNoTranslateMeta(&document);
   details.html_root_language = html_lang;
   details.adopted_language = language;
 
@@ -214,7 +257,7 @@ void TranslateHelper::PageCapturedImpl(int page_seq_no,
   Send(new ChromeViewHostMsg_TranslateLanguageDetermined(
       routing_id(),
       details,
-      IsTranslationAllowed(&document) && !language.empty()));
+      !details.has_notranslate && !language.empty()));
 }
 
 void TranslateHelper::CancelPendingTranslation() {
@@ -339,44 +382,6 @@ double TranslateHelper::ExecuteScriptAndGetDoubleResult(
 ////////////////////////////////////////////////////////////////////////////////
 // TranslateHelper, private:
 //
-
-// static
-bool TranslateHelper::IsTranslationAllowed(WebDocument* document) {
-  WebElement head = document->head();
-  if (head.isNull() || !head.hasChildNodes())
-    return true;
-
-  const WebString meta(ASCIIToUTF16("meta"));
-  const WebString name(ASCIIToUTF16("name"));
-  const WebString google(ASCIIToUTF16("google"));
-  const WebString value(ASCIIToUTF16("value"));
-  const WebString content(ASCIIToUTF16("content"));
-
-  WebNodeList children = head.childNodes();
-  for (size_t i = 0; i < children.length(); ++i) {
-    WebNode node = children.item(i);
-    if (!node.isElementNode())
-      continue;
-    WebElement element = node.to<WebElement>();
-    // Check if a tag is <meta>.
-    if (!element.hasHTMLTagName(meta))
-      continue;
-    // Check if the tag contains name="google".
-    WebString attribute = element.getAttribute(name);
-    if (attribute.isNull() || attribute != google)
-      continue;
-    // Check if the tag contains value="notranslate", or content="notranslate".
-    attribute = element.getAttribute(value);
-    if (attribute.isNull())
-      attribute = element.getAttribute(content);
-    if (attribute.isNull())
-      continue;
-    if (LowerCaseEqualsASCII(attribute, "notranslate"))
-      return false;
-  }
-  return true;
-}
-
 bool TranslateHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(TranslateHelper, message)
@@ -506,10 +511,9 @@ void TranslateHelper::CheckTranslateStatus(int page_seq_no) {
   }
 
   // The translation is still pending, check again later.
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&TranslateHelper::CheckTranslateStatus,
-                 weak_method_factory_.GetWeakPtr(), page_seq_no),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&TranslateHelper::CheckTranslateStatus,
+                            weak_method_factory_.GetWeakPtr(), page_seq_no),
       AdjustDelay(kTranslateStatusCheckDelayMs));
 }
 
@@ -525,11 +529,10 @@ void TranslateHelper::TranslatePageImpl(int page_seq_no, int count) {
       NotifyBrowserTranslationFailed(TranslateErrors::INITIALIZATION_ERROR);
       return;
     }
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&TranslateHelper::TranslatePageImpl,
-                   weak_method_factory_.GetWeakPtr(),
-                   page_seq_no, count),
+                   weak_method_factory_.GetWeakPtr(), page_seq_no, count),
         AdjustDelay(count * kTranslateInitCheckDelayMs));
     return;
   }
@@ -546,10 +549,9 @@ void TranslateHelper::TranslatePageImpl(int page_seq_no, int count) {
     return;
   }
   // Check the status of the translation.
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&TranslateHelper::CheckTranslateStatus,
-                 weak_method_factory_.GetWeakPtr(), page_seq_no),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&TranslateHelper::CheckTranslateStatus,
+                            weak_method_factory_.GetWeakPtr(), page_seq_no),
       AdjustDelay(kTranslateStatusCheckDelayMs));
 }
 
@@ -618,12 +620,10 @@ void TranslateHelper::SendCldDataRequest(const int delay_millis,
   // It's only while downloading the file that this will chain for a
   // nontrivial amount of time.
   // Use a weak pointer to avoid keeping this helper object around forever.
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&TranslateHelper::SendCldDataRequest,
-                 weak_method_factory_.GetWeakPtr(),
-                 next_delay_millis,
-                 next_delay_millis * 2),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&TranslateHelper::SendCldDataRequest,
+                            weak_method_factory_.GetWeakPtr(),
+                            next_delay_millis, next_delay_millis * 2),
       base::TimeDelta::FromMilliseconds(delay_millis));
 }
 

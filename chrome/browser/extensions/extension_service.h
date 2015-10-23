@@ -115,7 +115,7 @@ class ExtensionServiceInterface
   // Looks up an extension by ID, regardless of whether it's enabled,
   // disabled, blacklisted, or terminated. Use instead:
   //
-  //   ExtensionRegistry::GetExtensionById(id, ExtensionRegistry::EVERYTHING).
+  // ExtensionRegistry::GetInstalledExtension(id).
   virtual const extensions::Extension* GetInstalledExtension(
       const std::string& id) const = 0;
 
@@ -279,11 +279,12 @@ class ExtensionService
   // nothing.
   virtual void EnableExtension(const std::string& extension_id);
 
-  // Disables the extension.  If the extension is already disabled, or
-  // cannot be disabled, does nothing.
-  virtual void DisableExtension(
-      const std::string& extension_id,
-      extensions::Extension::DisableReason disable_reason);
+  // Disables the extension. If the extension is already disabled, just adds
+  // the |disable_reasons| (a bitmask of Extension::DisableReason - there can
+  // be multiple DisableReasons e.g. when an extension comes in disabled from
+  // Sync). If the extension cannot be disabled (due to policy), does nothing.
+  virtual void DisableExtension(const std::string& extension_id,
+                                int disable_reasons);
 
   // Disable non-default and non-managed extensions with ids not in
   // |except_ids|. Default extensions are those from the Web Store with
@@ -403,11 +404,6 @@ class ExtensionService
   }
 
   Profile* profile() { return profile_; }
-
-  void set_extension_sync_service(
-      ExtensionSyncService* extension_sync_service) {
-    extension_sync_service_ = extension_sync_service;
-  }
 
   // Note that this may return NULL if autoupdate is not turned on.
   extensions::ExtensionUpdater* updater() { return updater_.get(); }
@@ -544,6 +540,11 @@ class ExtensionService
   // Handles sending notification that |extension| was loaded.
   void NotifyExtensionLoaded(const extensions::Extension* extension);
 
+  // Completes extension loading after URLRequestContexts have been updated
+  // on the IO thread.
+  void OnExtensionRegisteredWithRequestContexts(
+      scoped_refptr<const extensions::Extension> extension);
+
   // Handles sending notification that |extension| was unloaded.
   void NotifyExtensionUnloaded(
       const extensions::Extension* extension,
@@ -617,9 +618,6 @@ class ExtensionService
 
   // Blacklist for the owning profile.
   extensions::Blacklist* blacklist_;
-
-  // The ExtensionSyncService that is used by this ExtensionService.
-  ExtensionSyncService* extension_sync_service_;
 
   // Sets of enabled/disabled/terminated/blacklisted extensions. Not owned.
   extensions::ExtensionRegistry* registry_;
@@ -739,7 +737,7 @@ class ExtensionService
   // The SharedModuleService used to check for import dependencies.
   scoped_ptr<extensions::SharedModuleService> shared_module_service_;
 
-  ObserverList<extensions::UpdateObserver, true> update_observers_;
+  base::ObserverList<extensions::UpdateObserver, true> update_observers_;
 
   // Migrates app data when upgrading a legacy packaged app to a platform app
   scoped_ptr<extensions::AppDataMigrator> app_data_migrator_;

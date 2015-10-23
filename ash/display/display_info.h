@@ -86,14 +86,14 @@ class ASH_EXPORT DisplayInfo {
   static DisplayInfo CreateFromSpecWithID(const std::string& spec,
                                           int64 id);
 
-  DisplayInfo();
-  DisplayInfo(int64 id, const std::string& name, bool has_overscan);
-  ~DisplayInfo();
-
   // When this is set to true on the device whose internal display has
   // 1.25 dsf, Chrome uses 1.0f as a default scale factor, and uses
   // dsf 1.25 when UI scaling is set to 0.8f.
-  static void SetUse125DSFForUIScaling(bool enable);
+  static void SetUse125DSFForUIScalingForTest(bool enable);
+
+  DisplayInfo();
+  DisplayInfo(int64 id, const std::string& name, bool has_overscan);
+  ~DisplayInfo();
 
   int64 id() const { return id_; }
 
@@ -109,8 +109,14 @@ class ASH_EXPORT DisplayInfo {
   }
   gfx::Display::TouchSupport touch_support() const { return touch_support_; }
 
-  void set_touch_device_id(int id) { touch_device_id_ = id; }
-  int touch_device_id() const { return touch_device_id_; }
+  // Associate the input device with identifier |id| with this display.
+  void AddInputDevice(int id);
+
+  // Clear the list of input devices associated with this display.
+  void ClearInputDevices();
+
+  // The input device ids that are associated with this display.
+  std::vector<int> input_devices() const { return input_devices_; }
 
   // Gets/Sets the device scale factor of the display.
   float device_scale_factor() const { return device_scale_factor_; }
@@ -235,7 +241,7 @@ class ASH_EXPORT DisplayInfo {
  private:
   // Returns true if this display should use DSF=1.25 for UI scaling; i.e.
   // SetUse125DSFForUIScaling(true) is called and this is the internal display.
-  bool Use125DSFRorUIScaling() const;
+  bool Use125DSFForUIScaling() const;
 
   int64 id_;
   std::string name_;
@@ -243,9 +249,8 @@ class ASH_EXPORT DisplayInfo {
   std::map<gfx::Display::RotationSource, gfx::Display::Rotation> rotations_;
   gfx::Display::TouchSupport touch_support_;
 
-  // If the display is also a touch device, it will have a positive
-  // |touch_device_id_|. Otherwise |touch_device_id_| is 0.
-  int touch_device_id_;
+  // The set of input devices associated with this display.
+  std::vector<int> input_devices_;
 
   // This specifies the device's pixel density. (For example, a
   // display whose DPI is higher than the threshold is considered to have
@@ -291,6 +296,10 @@ class ASH_EXPORT DisplayInfo {
 
   // If you add a new member, you need to update Copy().
 };
+
+// Resets the synthesized display id for testing. This
+// is necessary to avoid overflowing the output index.
+ASH_EXPORT void ResetDisplayIdForTest();
 
 }  // namespace ash
 

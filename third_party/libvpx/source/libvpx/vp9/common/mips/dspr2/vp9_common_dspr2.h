@@ -15,15 +15,15 @@
 
 #include "./vpx_config.h"
 #include "vpx/vpx_integer.h"
-#include "vp9/common/vp9_common.h"
+#include "vpx_dsp/mips/common_dspr2.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #if HAVE_DSPR2
-#define CROP_WIDTH 512
-extern uint8_t *vp9_ff_cropTbl;
+
+extern uint8_t *vpx_ff_cropTbl;
 
 #define DCT_CONST_ROUND_SHIFT_TWICE_COSPI_16_64(input)                    ({   \
                                                                                \
@@ -51,71 +51,8 @@ extern uint8_t *vp9_ff_cropTbl;
    );                                                                          \
   out;                                                                    })
 
-static INLINE void vp9_prefetch_load(const unsigned char *src) {
-  __asm__ __volatile__ (
-      "pref   0,  0(%[src])   \n\t"
-      :
-      : [src] "r" (src)
-  );
-}
-
-/* prefetch data for store */
-static INLINE void vp9_prefetch_store(unsigned char *dst) {
-  __asm__ __volatile__ (
-      "pref   1,  0(%[dst])   \n\t"
-      :
-      : [dst] "r" (dst)
-  );
-}
-
-static INLINE void vp9_prefetch_load_streamed(const unsigned char *src) {
-  __asm__ __volatile__ (
-      "pref   4,  0(%[src])   \n\t"
-      :
-      : [src] "r" (src)
-  );
-}
-
-/* prefetch data for store */
-static INLINE void vp9_prefetch_store_streamed(unsigned char *dst) {
-  __asm__ __volatile__ (
-      "pref   5,  0(%[dst])   \n\t"
-      :
-      : [dst] "r" (dst)
-  );
-}
-
 void vp9_idct32_cols_add_blk_dspr2(int16_t *input, uint8_t *dest,
                                    int dest_stride);
-
-void vp9_convolve2_horiz_dspr2(const uint8_t *src, ptrdiff_t src_stride,
-                               uint8_t *dst, ptrdiff_t dst_stride,
-                               const int16_t *filter_x, int x_step_q4,
-                               const int16_t *filter_y, int y_step_q4,
-                               int w, int h);
-
-void vp9_convolve2_avg_horiz_dspr2(const uint8_t *src, ptrdiff_t src_stride,
-                                   uint8_t *dst, ptrdiff_t dst_stride,
-                                   const int16_t *filter_x, int x_step_q4,
-                                   const int16_t *filter_y, int y_step_q4,
-                                   int w, int h);
-
-void vp9_convolve2_avg_vert_dspr2(const uint8_t *src, ptrdiff_t src_stride,
-                                  uint8_t *dst, ptrdiff_t dst_stride,
-                                  const int16_t *filter_x, int x_step_q4,
-                                  const int16_t *filter_y, int y_step_q4,
-                                  int w, int h);
-
-void vp9_convolve2_dspr2(const uint8_t *src, ptrdiff_t src_stride,
-                         uint8_t *dst, ptrdiff_t dst_stride,
-                         const int16_t *filter,
-                         int w, int h);
-
-void vp9_convolve2_vert_dspr2(const uint8_t *src, ptrdiff_t src_stride,
-                              uint8_t *dst, ptrdiff_t dst_stride,
-                              const int16_t *filter_x, int x_step_q4,
-                              const int16_t *filter_y, int y_step_q4,
-                              int w, int h);
 
 #endif  // #if HAVE_DSPR2
 #ifdef __cplusplus

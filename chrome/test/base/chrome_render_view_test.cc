@@ -8,7 +8,6 @@
 #include "base/run_loop.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/common/chrome_content_client.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/test/base/chrome_unit_test_suite.h"
@@ -19,6 +18,7 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/renderer/render_view.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -45,6 +45,34 @@ using blink::WebScriptController;
 using blink::WebScriptSource;
 using blink::WebString;
 using blink::WebURLRequest;
+using content::RenderFrame;
+using testing::NiceMock;
+using testing::Return;
+using testing::_;
+
+namespace {
+
+// An autofill agent that treats all typing as user gesture.
+class MockAutofillAgent : public AutofillAgent {
+ public:
+  MockAutofillAgent(RenderFrame* render_frame,
+                    PasswordAutofillAgent* password_autofill_agent,
+                    PasswordGenerationAgent* password_generation_agent)
+      : AutofillAgent(render_frame,
+                      password_autofill_agent,
+                      password_generation_agent) {
+    ON_CALL(*this, IsUserGesture()).WillByDefault(Return(true));
+  }
+
+  ~MockAutofillAgent() override {}
+
+  MOCK_CONST_METHOD0(IsUserGesture, bool());
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockAutofillAgent);
+};
+
+}  // namespace
 
 ChromeRenderViewTest::ChromeRenderViewTest()
     : password_autofill_agent_(NULL),
@@ -73,9 +101,9 @@ void ChromeRenderViewTest::SetUp() {
   password_generation_ =
       new autofill::TestPasswordGenerationAgent(view_->GetMainRenderFrame(),
                                                 password_autofill_agent_);
-  autofill_agent_ =
-      new AutofillAgent(view_->GetMainRenderFrame(), password_autofill_agent_,
-                        password_generation_);
+  autofill_agent_ = new NiceMock<MockAutofillAgent>(view_->GetMainRenderFrame(),
+                                                    password_autofill_agent_,
+                                                    password_generation_);
 }
 
 void ChromeRenderViewTest::TearDown() {
@@ -99,12 +127,12 @@ content::ContentClient* ChromeRenderViewTest::CreateContentClient() {
 }
 
 content::ContentBrowserClient*
-    ChromeRenderViewTest::CreateContentBrowserClient() {
+ChromeRenderViewTest::CreateContentBrowserClient() {
   return new chrome::ChromeContentBrowserClient();
 }
 
 content::ContentRendererClient*
-    ChromeRenderViewTest::CreateContentRendererClient() {
+ChromeRenderViewTest::CreateContentRendererClient() {
   ChromeContentRendererClient* client = new ChromeContentRendererClient();
 #if defined(ENABLE_EXTENSIONS)
   extension_dispatcher_delegate_.reset(
@@ -116,4 +144,14 @@ content::ContentRendererClient*
   client->SetSpellcheck(new SpellCheck());
 #endif
   return client;
+}
+
+void ChromeRenderViewTest::EnableUserGestureSimulationForAutofill() {
+  EXPECT_CALL(*(static_cast<MockAutofillAgent*>(autofill_agent_)),
+              IsUserGesture()).WillRepeatedly(Return(true));
+}
+
+void ChromeRenderViewTest::DisableUserGestureSimulationForAutofill() {
+  EXPECT_CALL(*(static_cast<MockAutofillAgent*>(autofill_agent_)),
+              IsUserGesture()).WillRepeatedly(Return(false));
 }

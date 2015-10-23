@@ -12,13 +12,11 @@ import android.text.Html;
 import android.text.TextUtils;
 import android.util.Patterns;
 
-import org.chromium.base.CalledByNative;
+import org.chromium.base.ContentUriUtils;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.sync.signin.AccountManagerHelper;
 
 import java.io.File;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * Helper for issuing intents to the android framework.
@@ -29,7 +27,8 @@ public abstract class IntentHelper {
 
     /**
      * Triggers a send email intent.  If no application has registered to receive these intents,
-     * this will fail silently.
+     * this will fail silently.  If an email is not specified and the device has exactly one
+     * account and the account name matches the email format, the email is set to the account name.
      *
      * @param context The context for issuing the intent.
      * @param email The email address to send to.
@@ -41,31 +40,31 @@ public abstract class IntentHelper {
     @CalledByNative
     static void sendEmail(Context context, String email, String subject, String body,
             String chooserTitle, String fileToAttach) {
-        Set<String> possibleEmails = new HashSet<String>();
-
-        if (!TextUtils.isEmpty(email)) {
-            possibleEmails.add(email);
-        } else {
-            Pattern emailPattern = Patterns.EMAIL_ADDRESS;
+        if (TextUtils.isEmpty(email)) {
             Account[] accounts = AccountManagerHelper.get(context).getGoogleAccounts();
-            for (Account account : accounts) {
-                if (emailPattern.matcher(account.name).matches()) {
-                    possibleEmails.add(account.name);
-                }
+            if (accounts != null && accounts.length == 1
+                    && Patterns.EMAIL_ADDRESS.matcher(accounts[0].name).matches()) {
+                email = accounts[0].name;
             }
         }
 
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("message/rfc822");
-        if (possibleEmails.size() != 0) {
-            send.putExtra(Intent.EXTRA_EMAIL,
-                    possibleEmails.toArray(new String[possibleEmails.size()]));
-        }
+        if (!TextUtils.isEmpty(email)) send.putExtra(Intent.EXTRA_EMAIL, new String[] { email });
         send.putExtra(Intent.EXTRA_SUBJECT, subject);
         send.putExtra(Intent.EXTRA_TEXT, Html.fromHtml(body));
         if (!TextUtils.isEmpty(fileToAttach)) {
             File fileIn = new File(fileToAttach);
-            send.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(fileIn));
+            Uri fileUri;
+            // Attempt to use a content Uri, for greater compatibility.  If the path isn't set
+            // up to be shared that way with a <paths> meta-data element, just use a file Uri
+            // instead.
+            try {
+                fileUri = ContentUriUtils.getContentUriFromFile(context, fileIn);
+            } catch (IllegalArgumentException ex) {
+                fileUri = Uri.fromFile(fileIn);
+            }
+            send.putExtra(Intent.EXTRA_STREAM, fileUri);
         }
 
         try {

@@ -17,12 +17,15 @@
 #include "url/url_util.h"
 
 #if !defined(OS_IOS)
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
 #endif
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
-#include "components/invalidation/android/component_jni_registrar.h"
+#include "components/invalidation/impl/android/component_jni_registrar.h"
+#include "components/policy/core/browser/android/component_jni_registrar.h"
+#include "components/safe_json/android/component_jni_registrar.h"
+#include "components/signin/core/browser/android/component_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
 #include "ui/gfx/android/gfx_jni_registrar.h"
 #endif
@@ -43,14 +46,17 @@ class ComponentsTestSuite : public base::TestSuite {
     base::StatisticsRecorder::Initialize();
 
 #if !defined(OS_IOS)
-    gfx::GLSurface::InitializeOneOffForTests();
+    gfx::GLSurfaceTestSupport::InitializeOneOff();
 #endif
 #if defined(OS_ANDROID)
     // Register JNI bindings for android.
     JNIEnv* env = base::android::AttachCurrentThread();
-    gfx::android::RegisterJni(env);
-    ui::android::RegisterJni(env);
-    invalidation::android::RegisterInvalidationJni(env);
+    ASSERT_TRUE(gfx::android::RegisterJni(env));
+    ASSERT_TRUE(ui::android::RegisterJni(env));
+    ASSERT_TRUE(invalidation::android::RegisterInvalidationJni(env));
+    ASSERT_TRUE(policy::android::RegisterPolicy(env));
+    ASSERT_TRUE(safe_json::android::RegisterSafeJsonJni(env));
+    ASSERT_TRUE(signin::android::RegisterSigninJni(env));
 #endif
 
     ui::RegisterPathProvider();
@@ -72,10 +78,10 @@ class ComponentsTestSuite : public base::TestSuite {
 
     // These schemes need to be added globally to pass tests of
     // autocomplete_input_unittest.cc and content_settings_pattern*
-    url::AddStandardScheme("chrome");
-    url::AddStandardScheme("chrome-extension");
-    url::AddStandardScheme("chrome-devtools");
-    url::AddStandardScheme("chrome-search");
+    url::AddStandardScheme("chrome", url::SCHEME_WITHOUT_PORT);
+    url::AddStandardScheme("chrome-extension", url::SCHEME_WITHOUT_PORT);
+    url::AddStandardScheme("chrome-devtools", url::SCHEME_WITHOUT_PORT);
+    url::AddStandardScheme("chrome-search", url::SCHEME_WITHOUT_PORT);
 
     // Not using kExtensionScheme to avoid the dependency to extensions.
     ContentSettingsPattern::SetNonWildcardDomainNonPortScheme(

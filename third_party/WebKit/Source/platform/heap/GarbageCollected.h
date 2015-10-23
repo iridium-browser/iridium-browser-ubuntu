@@ -6,6 +6,7 @@
 #define GarbageCollected_h
 
 #include "platform/heap/ThreadState.h"
+#include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
 #include "wtf/ListHashSet.h"
 #include "wtf/TypeTraits.h"
@@ -25,8 +26,18 @@ template<typename T, typename Traits> class HeapVectorBacking;
 template<typename Table> class HeapHashTableBacking;
 template<typename ValueArg, size_t inlineCapacity> class HeapListHashSetAllocator;
 class InlinedGlobalMarkingVisitor;
-template<ThreadAffinity affinity> class ThreadLocalPersistents;
-template<typename T, typename RootsAccessor = ThreadLocalPersistents<ThreadingTrait<T>::Affinity>> class Persistent;
+template<typename T> class Persistent;
+
+// GC_PLUGIN_IGNORE is used to make the plugin ignore a particular class or
+// field when checking for proper usage.  When using GC_PLUGIN_IGNORE
+// a bug-number should be provided as an argument where the bug describes
+// what needs to happen to remove the GC_PLUGIN_IGNORE again.
+#if COMPILER(CLANG)
+#define GC_PLUGIN_IGNORE(bug)                           \
+    __attribute__((annotate("blink_gc_plugin_ignore")))
+#else
+#define GC_PLUGIN_IGNORE(bug)
+#endif
 
 // Template to determine if a class is a GarbageCollectedMixin by checking if it
 // has IsGarbageCollectedMixinMarker
@@ -112,16 +123,15 @@ class PLATFORM_EXPORT GarbageCollectedMixin {
 public:
     typedef int IsGarbageCollectedMixinMarker;
     virtual void adjustAndMark(Visitor*) const = 0;
-    virtual bool isHeapObjectAlive(Visitor*) const = 0;
     virtual void trace(Visitor*) { }
     virtual void adjustAndMark(InlinedGlobalMarkingVisitor) const = 0;
-    virtual bool isHeapObjectAlive(InlinedGlobalMarkingVisitor) const = 0;
     virtual void trace(InlinedGlobalMarkingVisitor);
+    virtual bool isHeapObjectAlive() const = 0;
 };
 
 #define DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(VISITOR, TYPE)           \
     public:                                                             \
-    virtual void adjustAndMark(VISITOR visitor) const override          \
+    void adjustAndMark(VISITOR visitor) const override                  \
     {                                                                   \
         typedef WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<TYPE>::Type, blink::GarbageCollected> IsSubclassOfGarbageCollected; \
         static_assert(IsSubclassOfGarbageCollected::value, "only garbage collected objects can have garbage collected mixins"); \
@@ -132,11 +142,7 @@ public:
         }                                                               \
         visitor->mark(static_cast<const TYPE*>(this), &blink::TraceTrait<TYPE>::trace); \
     }                                                                   \
-    virtual bool isHeapObjectAlive(VISITOR visitor) const override      \
-    {                                                                   \
-        return visitor->isHeapObjectAlive(this);                        \
-    }                                                                   \
-private:
+    private:
 
 // A C++ object's vptr will be initialized to its leftmost base's vtable after
 // the constructors of all its subclasses have run, so if a subclass constructor
@@ -157,24 +163,18 @@ private:
 //    GarbageCollectedMixinConstructorMarker's constructor takes care of
 //    this and the field is declared by way of USING_GARBAGE_COLLECTED_MIXIN().
 
-// TODO(inferno): Remove forbidGCDuringConstruction() function once UBSan VPTR supports
-// function attribute level blacklisting. See crbug.com/476073.
-#define DEFINE_GARBAGE_COLLECTED_MIXIN_CONSTRUCTOR_MARKER(TYPE)                         \
-public:                                                                                 \
-    ALWAYS_INLINE static void forbidGCDuringConstruction(void* object)                  \
-    {                                                                                   \
+#define DEFINE_GARBAGE_COLLECTED_MIXIN_CONSTRUCTOR_MARKER(TYPE)         \
+    public:                                                             \
+    GC_PLUGIN_IGNORE("crbug.com/456823") NO_SANITIZE_UNRELATED_CAST     \
+    void* operator new(size_t size)                                     \
+{                                                                       \
+        void* object = TYPE::allocateObject(size, IsEagerlyFinalizedType<TYPE>::value); \
         ThreadState* state = ThreadStateFor<ThreadingTrait<TYPE>::Affinity>::state();   \
         state->enterGCForbiddenScopeIfNeeded(&(reinterpret_cast<TYPE*>(object)->m_mixinConstructorMarker)); \
-    }                                                                                   \
-    GC_PLUGIN_IGNORE("crbug.com/456823")                                                \
-    void* operator new(size_t size)                                                     \
-    {                                                                                   \
-        void* object = TYPE::allocateObject(size);                                      \
-        forbidGCDuringConstruction(object);                                             \
-        return object;                                                                  \
-    }                                                                                   \
-    GarbageCollectedMixinConstructorMarker m_mixinConstructorMarker;                    \
-private:
+        return object;                                                  \
+    }                                                                   \
+    GarbageCollectedMixinConstructorMarker m_mixinConstructorMarker;    \
+    private:
 
 // Mixins that wrap/nest others requires extra handling:
 //
@@ -195,10 +195,16 @@ private:
 // when the "operator new" for B runs, and leaving the forbidden GC scope
 // when the constructor of the recorded GarbageCollectedMixinConstructorMarker
 // runs.
-#define USING_GARBAGE_COLLECTED_MIXIN(TYPE)                       \
-    DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(blink::Visitor*, TYPE) \
+#define USING_GARBAGE_COLLECTED_MIXIN(TYPE)                             \
+    DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(blink::Visitor*, TYPE)       \
     DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(blink::InlinedGlobalMarkingVisitor, TYPE) \
-    DEFINE_GARBAGE_COLLECTED_MIXIN_CONSTRUCTOR_MARKER(TYPE)
+    DEFINE_GARBAGE_COLLECTED_MIXIN_CONSTRUCTOR_MARKER(TYPE)             \
+public:                                                                 \
+    bool isHeapObjectAlive() const override                             \
+    {                                                                   \
+        return Heap::isHeapObjectAlive(this);                           \
+    }                                                                   \
+private:
 
 #if ENABLE(OILPAN)
 #define WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(TYPE) USING_GARBAGE_COLLECTED_MIXIN(TYPE)
@@ -351,63 +357,38 @@ private:
     Persistent<T>* m_keepAlive;
 };
 
-// Classes that contain heap references but aren't themselves heap allocated,
-// have some extra macros available which allows their use to be restricted to
-// cases where the garbage collector is able to discover their heap references.
-//
-// STACK_ALLOCATED(): Use if the object is only stack allocated.  Heap objects
-// should be in Members but you do not need the trace method as they are on the
-// stack.  (Down the line these might turn in to raw pointers, but for now
-// Members indicates that we have thought about them and explicitly taken care
-// of them.)
-//
-// DISALLOW_ALLOCATION(): Cannot be allocated with new operators but can be a
-// part object.  If it has Members you need a trace method and the containing
-// object needs to call that trace method.
-//
-// ALLOW_ONLY_INLINE_ALLOCATION(): Allows only placement new operator.  This
-// disallows general allocation of this object but allows to put the object as a
-// value object in collections.  If these have Members you need to have a trace
-// method. That trace method will be called automatically by the Heap
-// collections.
-//
-#define DISALLOW_ALLOCATION()                                   \
-    private:                                                    \
-        void* operator new(size_t) = delete;                    \
-        void* operator new(size_t, NotNullTag, void*) = delete; \
-        void* operator new(size_t, void*) = delete;
+template<typename T, bool = WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, GarbageCollected>::value> class NeedsAdjustAndMark;
 
-#define ALLOW_ONLY_INLINE_ALLOCATION()                                              \
-    public:                                                                         \
-        void* operator new(size_t, NotNullTag, void* location) { return location; } \
-        void* operator new(size_t, void* location) { return location; }             \
-    private:                                                                        \
-        void* operator new(size_t) = delete;
+template<typename T>
+class NeedsAdjustAndMark<T, true> {
+    static_assert(sizeof(T), "T must be fully defined");
+public:
+    static const bool value = false;
+};
+template <typename T> const bool NeedsAdjustAndMark<T, true>::value;
 
-#define STATIC_ONLY(Type) \
-    private:              \
-        Type() = delete;
+template<typename T>
+class NeedsAdjustAndMark<T, false> {
+    static_assert(sizeof(T), "T must be fully defined");
+public:
+    static const bool value = IsGarbageCollectedMixin<typename WTF::RemoveConst<T>::Type>::value;
+};
+template <typename T> const bool NeedsAdjustAndMark<T, false>::value;
 
-// These macros insert annotations that the Blink GC plugin for clang uses for
-// verification.  STACK_ALLOCATED is used to declare that objects of this type
-// are always stack allocated.  GC_PLUGIN_IGNORE is used to make the plugin
-// ignore a particular class or field when checking for proper usage.  When
-// using GC_PLUGIN_IGNORE a bug-number should be provided as an argument where
-// the bug describes what needs to happen to remove the GC_PLUGIN_IGNORE again.
-#if COMPILER(CLANG)
-#define STACK_ALLOCATED()                                       \
-    private:                                                    \
-        __attribute__((annotate("blink_stack_allocated")))      \
-        void* operator new(size_t) = delete;                    \
-        void* operator new(size_t, NotNullTag, void*) = delete; \
-        void* operator new(size_t, void*) = delete;
+// TODO(sof): migrate to wtf/TypeTraits.h
+template<typename T>
+class IsFullyDefined {
+    using TrueType = char;
+    struct FalseType {
+        char dummy[2];
+    };
 
-#define GC_PLUGIN_IGNORE(bug)                           \
-    __attribute__((annotate("blink_gc_plugin_ignore")))
-#else
-#define STACK_ALLOCATED() DISALLOW_ALLOCATION()
-#define GC_PLUGIN_IGNORE(bug)
-#endif
+    template<typename U, size_t sz = sizeof(U)> static TrueType isSizeofKnown(U*);
+    static FalseType isSizeofKnown(...);
+    static T& t;
+public:
+    static const bool value = sizeof(TrueType) == sizeof(isSizeofKnown(&t));
+};
 
 } // namespace blink
 

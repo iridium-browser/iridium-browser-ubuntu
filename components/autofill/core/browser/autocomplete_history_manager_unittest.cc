@@ -5,12 +5,12 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
 #include "components/autofill/core/browser/autofill_external_delegate.h"
 #include "components/autofill/core/browser/autofill_manager.h"
@@ -34,8 +34,8 @@ namespace {
 class MockWebDataService : public AutofillWebDataService {
  public:
   MockWebDataService()
-      : AutofillWebDataService(base::MessageLoopProxy::current(),
-                               base::MessageLoopProxy::current()) {}
+      : AutofillWebDataService(base::ThreadTaskRunnerHandle::Get(),
+                               base::ThreadTaskRunnerHandle::Get()) {}
 
   MOCK_METHOD1(AddFormFields, void(const std::vector<FormFieldData>&));
 
@@ -90,7 +90,6 @@ TEST_F(AutocompleteHistoryManagerTest, CreditCardNumberValue) {
   form.name = ASCIIToUTF16("MyForm");
   form.origin = GURL("http://myform.com/form.html");
   form.action = GURL("http://myform.com/submit.html");
-  form.user_submitted = true;
 
   // Valid Visa credit card number pulled from the paypal help site.
   FormFieldData valid_cc;
@@ -101,7 +100,7 @@ TEST_F(AutocompleteHistoryManagerTest, CreditCardNumberValue) {
   form.fields.push_back(valid_cc);
 
   EXPECT_CALL(*web_data_service_.get(), AddFormFields(_)).Times(0);
-  autocomplete_manager_->OnFormSubmitted(form);
+  autocomplete_manager_->OnWillSubmitForm(form);
 }
 
 // Contrary test to AutocompleteHistoryManagerTest.CreditCardNumberValue.  The
@@ -112,7 +111,6 @@ TEST_F(AutocompleteHistoryManagerTest, NonCreditCardNumberValue) {
   form.name = ASCIIToUTF16("MyForm");
   form.origin = GURL("http://myform.com/form.html");
   form.action = GURL("http://myform.com/submit.html");
-  form.user_submitted = true;
 
   // Invalid credit card number.
   FormFieldData invalid_cc;
@@ -123,7 +121,7 @@ TEST_F(AutocompleteHistoryManagerTest, NonCreditCardNumberValue) {
   form.fields.push_back(invalid_cc);
 
   EXPECT_CALL(*(web_data_service_.get()), AddFormFields(_)).Times(1);
-  autocomplete_manager_->OnFormSubmitted(form);
+  autocomplete_manager_->OnWillSubmitForm(form);
 }
 
 // Tests that SSNs are not sent to the WebDatabase to be saved.
@@ -132,7 +130,6 @@ TEST_F(AutocompleteHistoryManagerTest, SSNValue) {
   form.name = ASCIIToUTF16("MyForm");
   form.origin = GURL("http://myform.com/form.html");
   form.action = GURL("http://myform.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData ssn;
   ssn.label = ASCIIToUTF16("Social Security Number");
@@ -142,7 +139,7 @@ TEST_F(AutocompleteHistoryManagerTest, SSNValue) {
   form.fields.push_back(ssn);
 
   EXPECT_CALL(*web_data_service_.get(), AddFormFields(_)).Times(0);
-  autocomplete_manager_->OnFormSubmitted(form);
+  autocomplete_manager_->OnWillSubmitForm(form);
 }
 
 // Verify that autocomplete text is saved for search fields.
@@ -151,7 +148,6 @@ TEST_F(AutocompleteHistoryManagerTest, SearchField) {
   form.name = ASCIIToUTF16("MyForm");
   form.origin = GURL("http://myform.com/form.html");
   form.action = GURL("http://myform.com/submit.html");
-  form.user_submitted = true;
 
   // Search field.
   FormFieldData search_field;
@@ -162,7 +158,7 @@ TEST_F(AutocompleteHistoryManagerTest, SearchField) {
   form.fields.push_back(search_field);
 
   EXPECT_CALL(*(web_data_service_.get()), AddFormFields(_)).Times(1);
-  autocomplete_manager_->OnFormSubmitted(form);
+  autocomplete_manager_->OnWillSubmitForm(form);
 }
 
 // Tests that text entered into fields specifying autocomplete="off" is not sent
@@ -174,7 +170,6 @@ TEST_F(AutocompleteHistoryManagerTest, FieldWithAutocompleteOff) {
   form.name = ASCIIToUTF16("MyForm");
   form.origin = GURL("http://myform.com/form.html");
   form.action = GURL("http://myform.com/submit.html");
-  form.user_submitted = true;
 
   // Field specifying autocomplete="off".
   FormFieldData field;
@@ -186,7 +181,7 @@ TEST_F(AutocompleteHistoryManagerTest, FieldWithAutocompleteOff) {
   form.fields.push_back(field);
 
   EXPECT_CALL(*web_data_service_.get(), AddFormFields(_)).Times(0);
-  autocomplete_manager_->OnFormSubmitted(form);
+  autocomplete_manager_->OnWillSubmitForm(form);
 }
 
 namespace {
@@ -260,7 +255,6 @@ TEST_F(AutocompleteHistoryManagerTest, NoAutocompleteSuggestionsForTextarea) {
   form.name = ASCIIToUTF16("MyForm");
   form.origin = GURL("http://myform.com/form.html");
   form.action = GURL("http://myform.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   test::CreateTestFormField("Address", "address", "", "textarea", &field);

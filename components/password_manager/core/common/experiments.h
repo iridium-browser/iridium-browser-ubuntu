@@ -8,8 +8,11 @@
 namespace password_manager {
 
 // Returns true if a link to the management website should be shown in
-// settings.
+// settings. Default is enabled.
 bool ManageAccountLinkExperimentEnabled();
+
+// True iff the force-saving of passwords is enabled.
+bool ForceSavingExperimentEnabled();
 
 }  // namespace password_manager
 

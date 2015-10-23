@@ -83,7 +83,7 @@ bool AreAbsoluteWindowsPathsEqual(const base::StringPiece& a,
     return false;
 
   // For now, just do a case-insensitive ASCII comparison. We could convert to
-  // UTF-16 and use ICU if necessary. Or maybe base::strcasecmp is good enough?
+  // UTF-16 and use ICU if necessary.
   for (size_t i = 0; i < a.size(); i++) {
     if (NormalizeWindowsPathChar(a[i]) != NormalizeWindowsPathChar(b[i]))
       return false;
@@ -100,7 +100,7 @@ bool DoesBeginWindowsDriveLetter(const base::StringPiece& path) {
     return false;
 
   // Check drive letter.
-  if (!IsAsciiAlpha(path[0]))
+  if (!base::IsAsciiAlpha(path[0]))
     return false;
 
   if (!IsSlash(path[2]))
@@ -310,14 +310,18 @@ base::StringPiece FindLastDirComponent(const SourceDir& dir) {
   return base::StringPiece(&dir_string[0], end);
 }
 
-bool EnsureStringIsInOutputDir(const SourceDir& dir,
+bool IsStringInOutputDir(const SourceDir& output_dir, const std::string& str) {
+  // This check will be wrong for all proper prefixes "e.g. "/output" will
+  // match "/out" but we don't really care since this is just a sanity check.
+  const std::string& dir_str = output_dir.value();
+  return str.compare(0, dir_str.length(), dir_str) == 0;
+}
+
+bool EnsureStringIsInOutputDir(const SourceDir& output_dir,
                                const std::string& str,
                                const ParseNode* origin,
                                Err* err) {
-  // This check will be wrong for all proper prefixes "e.g. "/output" will
-  // match "/out" but we don't really care since this is just a sanity check.
-  const std::string& dir_str = dir.value();
-  if (str.compare(0, dir_str.length(), dir_str) == 0)
+  if (IsStringInOutputDir(output_dir, str))
     return true;  // Output directory is hardcoded.
 
   *err = Err(origin, "File is not inside output directory.",
@@ -740,11 +744,12 @@ OutputFile GetOutputDirForSourceDirAsOutputFile(const Settings* settings,
     result.value().append(&source_dir.value()[2],
                           source_dir.value().size() - 2);
   } else {
-    // system-absolute
+    // System-absolute.
     const std::string& build_dir =
         settings->build_settings()->build_dir().value();
 
-    if (StartsWithASCII(source_dir.value(), build_dir, true)) {
+    if (base::StartsWith(source_dir.value(), build_dir,
+                         base::CompareCase::SENSITIVE)) {
       size_t build_dir_size = build_dir.size();
       result.value().append(&source_dir.value()[build_dir_size],
                             source_dir.value().size() - build_dir_size);

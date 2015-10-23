@@ -8,7 +8,12 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_ptr.h"
 #import "ui/base/cocoa/tracking_area.h"
+
+namespace ui {
+struct NinePartImageIds;
+}
 
 // Sent when a user-initiated drag to resize the container is initiated.
 extern NSString* const kBrowserActionGrippyDragStartedNotification;
@@ -31,6 +36,22 @@ extern NSString* const kBrowserActionsContainerAnimationEnded;
 
 // Key which is used to notify the translation with delta.
 extern NSString* const kTranslationWithDelta;
+
+// Sent when the container receives a key event that should be processed.
+// The userInfo contains a single entry with the key event.
+extern NSString* const kBrowserActionsContainerReceivedKeyEvent;
+
+// The key into the userInfo dictionary to retrieve the key event (stored as an
+// integer).
+extern NSString* const kBrowserActionsContainerKeyEventKey;
+
+// The possible key actions to process.
+enum BrowserActionsContainerKeyAction {
+  BROWSER_ACTIONS_INCREMENT_FOCUS = 0,
+  BROWSER_ACTIONS_DECREMENT_FOCUS = 1,
+  BROWSER_ACTIONS_EXECUTE_CURRENT = 2,
+  BROWSER_ACTIONS_INVALID_KEY_ACTION = 3,
+};
 
 class BrowserActionsContainerViewSizeDelegate {
  public:
@@ -56,10 +77,15 @@ class BrowserActionsContainerViewSizeDelegate {
   // Whether the container is currently being resized by the user.
   BOOL userIsResizing_;
 
-  // Whether the user can resize this at all. Resizing is disabled in incognito
-  // mode since any changes done in incognito mode are not saved anyway, and
-  // also to avoid a crash. http://crbug.com/42848
+  // Whether the user can resize the container; this is disabled for overflow
+  // (where it would make no sense) and during highlighting, since this is a
+  // temporary and entirely browser-driven sequence in order to warn the user
+  // about potentially dangerous items.
   BOOL resizable_;
+
+  // Whether or not the container is the overflow container, and is shown in the
+  // wrench menu.
+  BOOL isOverflow_;
 
   // Whether the user is allowed to drag the grippy to the left. NO if all
   // extensions are shown or the location bar has hit its minimum width (handled
@@ -76,9 +102,8 @@ class BrowserActionsContainerViewSizeDelegate {
   // to large.
   BOOL grippyPinned_;
 
-  // Whether the toolbar is currently highlighting its actions (in which case it
-  // is drawn with an orange background).
-  BOOL isHighlighting_;
+  // The nine-grid of the highlight to paint, if any.
+  scoped_ptr<ui::NinePartImageIds> highlight_;
 
   // A tracking area to receive mouseEntered events, if tracking is enabled.
   ui::ScopedCrTrackingArea trackingArea_;
@@ -93,8 +118,11 @@ class BrowserActionsContainerViewSizeDelegate {
 // Sets whether or not tracking (for mouseEntered events) is enabled.
 - (void)setTrackingEnabled:(BOOL)enabled;
 
+// Sets whether or not the container is the overflow container.
+- (void)setIsOverflow:(BOOL)isOverflow;
+
 // Sets whether or not the container is highlighting.
-- (void)setIsHighlighting:(BOOL)isHighlighting;
+- (void)setHighlight:(scoped_ptr<ui::NinePartImageIds>)highlight;
 
 // Resizes the container to the given ideal width, optionally animating.
 - (void)resizeToWidth:(CGFloat)width animate:(BOOL)animate;
@@ -112,7 +140,6 @@ class BrowserActionsContainerViewSizeDelegate {
 @property(nonatomic) BOOL canDragLeft;
 @property(nonatomic) BOOL canDragRight;
 @property(nonatomic) BOOL grippyPinned;
-@property(nonatomic,getter=isResizable) BOOL resizable;
 @property(nonatomic) CGFloat maxDesiredWidth;
 @property(readonly, nonatomic) BOOL userIsResizing;
 @property(nonatomic) BrowserActionsContainerViewSizeDelegate* delegate;

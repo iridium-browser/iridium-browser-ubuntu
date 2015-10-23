@@ -158,6 +158,7 @@ const struct EnglishToResouceId {
   { "xkb:latam::spa", IDS_STATUSBAR_LAYOUT_LATIN_AMERICAN },
   { "xkb:lt::lit", IDS_STATUSBAR_LAYOUT_LITHUANIA },
   { "xkb:lv:apostrophe:lav", IDS_STATUSBAR_LAYOUT_LATVIA },
+  { "xkb:mk::mkd", IDS_STATUSBAR_LAYOUT_MACEDONIAN },
   { "xkb:mn::mon", IDS_STATUSBAR_LAYOUT_MONGOLIAN },
   { "xkb:nl::nld", IDS_STATUSBAR_LAYOUT_NETHERLANDS },
   { "xkb:no::nob", IDS_STATUSBAR_LAYOUT_NORWAY },
@@ -263,6 +264,7 @@ const struct InputMethodNameMap {
     {"__MSG_KEYBOARD_LATIN_AMERICAN__", IDS_IME_NAME_KEYBOARD_LATIN_AMERICAN},
     {"__MSG_KEYBOARD_LATVIAN__", IDS_IME_NAME_KEYBOARD_LATVIAN},
     {"__MSG_KEYBOARD_LITHUANIAN__", IDS_IME_NAME_KEYBOARD_LITHUANIAN},
+    {"__MSG_KEYBOARD_MACEDONIAN__", IDS_IME_NAME_KEYBOARD_MACEDONIAN},
     {"__MSG_KEYBOARD_MALAYALAM_PHONETIC__",
      IDS_IME_NAME_KEYBOARD_MALAYALAM_PHONETIC},
     {"__MSG_KEYBOARD_MALTESE__", IDS_IME_NAME_KEYBOARD_MALTESE},
@@ -378,7 +380,7 @@ std::string InputMethodUtil::GetLocalizedDisplayName(
   if (disp.find("__MSG_") == 0) {
     const InputMethodNameMap* map = kInputMethodNameMap;
     size_t map_size = arraysize(kInputMethodNameMap);
-    std::string name = StringToUpperASCII(disp);
+    std::string name = base::ToUpperASCII(disp);
     const InputMethodNameMap map_key = {name.c_str(), 0};
     const InputMethodNameMap* p =
         std::lower_bound(map, map + map_size, map_key);
@@ -429,8 +431,9 @@ bool InputMethodUtil::IsValidInputMethodId(
 
 // static
 bool InputMethodUtil::IsKeyboardLayout(const std::string& input_method_id) {
-  return StartsWithASCII(input_method_id, "xkb:", false) ||
-      extension_ime_util::IsKeyboardLayoutExtension(input_method_id);
+  return base::StartsWith(input_method_id, "xkb:",
+                          base::CompareCase::INSENSITIVE_ASCII) ||
+         extension_ime_util::IsKeyboardLayoutExtension(input_method_id);
 }
 
 std::string InputMethodUtil::GetKeyboardLayoutName(
@@ -565,15 +568,16 @@ bool InputMethodUtil::GetInputMethodIdsFromLanguageCodeInternal(
 
 void InputMethodUtil::GetFirstLoginInputMethodIds(
     const std::string& language_code,
-    const InputMethodDescriptor& current_input_method,
+    const InputMethodDescriptor& preferred_input_method,
     std::vector<std::string>* out_input_method_ids) const {
   out_input_method_ids->clear();
 
-  // First, add the current keyboard layout (one used on the login screen).
-  out_input_method_ids->push_back(current_input_method.id());
+  // First, add the preferred keyboard layout (e.g. one used on the login
+  // screen or set in UserContext when starting a public session).
+  out_input_method_ids->push_back(preferred_input_method.id());
 
   const std::string current_layout
-      = current_input_method.GetPreferredKeyboardLayout();
+      = preferred_input_method.GetPreferredKeyboardLayout();
   for (size_t i = 0; i < arraysize(kDefaultInputMethodRecommendation);
        ++i) {
     if (kDefaultInputMethodRecommendation[i].locale == language_code && (
@@ -591,7 +595,7 @@ void InputMethodUtil::GetFirstLoginInputMethodIds(
       language_code, kAllInputMethods, &input_method_ids);
   // Uses the first input method as the most popular one.
   if (input_method_ids.size() > 0 &&
-      current_input_method.id() != input_method_ids[0]) {
+      preferred_input_method.id() != input_method_ids[0]) {
     out_input_method_ids->push_back(input_method_ids[0]);
   }
 }
@@ -682,9 +686,11 @@ void InputMethodUtil::UpdateHardwareLayoutCache() {
   DCHECK(thread_checker_.CalledOnValidThread());
   hardware_layouts_.clear();
   hardware_login_layouts_.clear();
-  if (cached_hardware_layouts_.empty())
-    Tokenize(delegate_->GetHardwareKeyboardLayouts(), ",",
-             &cached_hardware_layouts_);
+  if (cached_hardware_layouts_.empty()) {
+    cached_hardware_layouts_ =
+        base::SplitString(delegate_->GetHardwareKeyboardLayouts(), ",",
+                          base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  }
   hardware_layouts_ = cached_hardware_layouts_;
   MigrateInputMethods(&hardware_layouts_);
 

@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/shelf/shelf_delegate.h"
 #include "ash/shelf/shelf_item_delegate.h"
 #include "ash/shelf/shelf_item_delegate_manager.h"
@@ -68,22 +68,12 @@ namespace ui {
 class BaseWindow;
 }
 
+#if defined(OS_CHROMEOS)
+class ChromeLauncherControllerUserSwitchObserver;
+#endif
+
 // A list of the elements which makes up a simple menu description.
 typedef ScopedVector<ChromeLauncherAppMenuItem> ChromeLauncherAppMenuItems;
-
-// A class which needs to be overwritten dependent on the used OS to moitor
-// user switching.
-// TODO(oshima): move this to .cc
-class ChromeLauncherControllerUserSwitchObserver {
- public:
-  ChromeLauncherControllerUserSwitchObserver() {}
-  virtual ~ChromeLauncherControllerUserSwitchObserver() {}
-
-  virtual void OnUserProfileReadyToSwitch(Profile* profile) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChromeLauncherControllerUserSwitchObserver);
-};
 
 // ChromeLauncherController manages the launcher items needed for content
 // windows. Launcher items have a type, an optional app id, and a controller.
@@ -96,7 +86,7 @@ class ChromeLauncherControllerUserSwitchObserver {
 class ChromeLauncherController : public ash::ShelfDelegate,
                                  public ash::ShelfModelObserver,
                                  public ash::ShellObserver,
-                                 public ash::DisplayController::Observer,
+                                 public ash::WindowTreeHostManager::Observer,
                                  public extensions::ExtensionRegistryObserver,
                                  public extensions::AppIconLoader::Delegate,
                                  public PrefServiceSyncableObserver,
@@ -184,14 +174,6 @@ class ChromeLauncherController : public ash::ShelfDelegate,
   // Returns true if the specified item can be pinned or unpinned. Only apps can
   // be pinned.
   bool IsPinnable(ash::ShelfID id) const;
-
-  // Installs the specified id. Only valid if the id corresponds to an ephemeral
-  // app.
-  void Install(ash::ShelfID id);
-
-  // Returns true if the specified item can be installed. Only true for
-  // ephemeral apps.
-  bool CanInstall(ash::ShelfID id);
 
   // If there is no shelf item in the shelf for application |app_id|, one
   // gets created. The (existing or created) shelf items get then locked
@@ -325,7 +307,7 @@ class ChromeLauncherController : public ash::ShelfDelegate,
   // ash::ShellObserver:
   void OnShelfAlignmentChanged(aura::Window* root_window) override;
 
-  // ash::DisplayController::Observer:
+  // ash::WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanged() override;
 
   // ExtensionRegistryObserver:
@@ -607,8 +589,10 @@ class ChromeLauncherController : public ash::ShelfDelegate,
   // The owned browser status monitor.
   scoped_ptr<BrowserStatusMonitor> browser_status_monitor_;
 
+#if defined(OS_CHROMEOS)
   // A special observer class to detect user switches.
   scoped_ptr<ChromeLauncherControllerUserSwitchObserver> user_switch_observer_;
+#endif
 
   // If true, incoming pinned state changes should be ignored.
   bool ignore_persist_pinned_state_change_;

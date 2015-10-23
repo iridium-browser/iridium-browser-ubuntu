@@ -32,9 +32,9 @@
 
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/PageScaleConstraints.h"
 #include "core/frame/Settings.h"
 #include "core/page/Page.h"
-#include "core/page/PageScaleConstraints.h"
 #include "platform/Length.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/geometry/IntRect.h"
@@ -51,14 +51,12 @@
 #include "public/web/WebViewClient.h"
 #include "web/tests/FrameTestHelpers.h"
 #include <gtest/gtest.h>
-
 #include <vector>
 
-namespace {
+namespace blink {
 
 using blink::FrameTestHelpers::UseMockScrollbarSettings;
 using blink::testing::runPendingTasks;
-using namespace blink;
 
 class ViewportTest : public ::testing::Test {
 protected:
@@ -68,7 +66,7 @@ protected:
     {
     }
 
-    virtual ~ViewportTest()
+    ~ViewportTest() override
     {
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
@@ -3156,4 +3154,4 @@ TEST_F(ViewportTest, viewportWarnings7)
     EXPECT_EQ(0U, webFrameClient.messages.size());
 }
 
-} // namespace
+} // namespace blink

@@ -3,10 +3,11 @@
 // found in the LICENSE file.
 
 #include "components/view_manager/test_server_view_delegate.h"
+#include "components/view_manager/server_view.h"
 
 namespace view_manager {
 
-TestServerViewDelegate::TestServerViewDelegate() {
+TestServerViewDelegate::TestServerViewDelegate() : root_view_(nullptr) {
 }
 
 TestServerViewDelegate::~TestServerViewDelegate() {
@@ -25,6 +26,11 @@ void TestServerViewDelegate::PrepareToChangeViewVisibility(ServerView* view) {
 }
 
 void TestServerViewDelegate::OnScheduleViewPaint(const ServerView* view) {
+}
+
+const ServerView* TestServerViewDelegate::GetRootView(
+    const ServerView* view) const {
+  return root_view_;
 }
 
 }  // namespace view_manager

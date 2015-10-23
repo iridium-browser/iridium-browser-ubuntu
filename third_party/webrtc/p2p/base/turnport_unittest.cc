@@ -627,6 +627,28 @@ TEST_F(TurnPortTest, TestTurnTcpAllocateMismatch) {
   EXPECT_NE(first_addr, turn_port_->socket()->GetLocalAddress());
 }
 
+// Test that CreateConnection will return null if port becomes disconnected.
+TEST_F(TurnPortTest, TestCreateConnectionWhenSocketClosed) {
+  turn_server_.AddInternalSocket(kTurnTcpIntAddr, cricket::PROTO_TCP);
+  CreateTurnPort(kTurnUsername, kTurnPassword, kTurnTcpProtoAddr);
+  turn_port_->PrepareAddress();
+  ASSERT_TRUE_WAIT(turn_ready_, kTimeout);
+
+  CreateUdpPort();
+  udp_port_->PrepareAddress();
+  ASSERT_TRUE_WAIT(udp_ready_, kTimeout);
+  // Create a connection.
+  Connection* conn1 = turn_port_->CreateConnection(udp_port_->Candidates()[0],
+                                                   Port::ORIGIN_MESSAGE);
+  ASSERT_TRUE(conn1 != NULL);
+
+  // Close the socket and create a connection again.
+  turn_port_->OnSocketClose(turn_port_->socket(), 1);
+  conn1 = turn_port_->CreateConnection(udp_port_->Candidates()[0],
+                                       Port::ORIGIN_MESSAGE);
+  ASSERT_TRUE(conn1 == NULL);
+}
+
 // Test try-alternate-server feature.
 TEST_F(TurnPortTest, TestTurnAlternateServerUDP) {
   TestTurnAlternateServer(cricket::PROTO_UDP);
@@ -712,6 +734,8 @@ TEST_F(TurnPortTest, TestTurnSendDataTurnUdpToUdp) {
   // Create ports and prepare addresses.
   CreateTurnPort(kTurnUsername, kTurnPassword, kTurnUdpProtoAddr);
   TestTurnSendData();
+  EXPECT_EQ(turn_port_->Candidates()[0].relay_protocol(),
+            cricket::UDP_PROTOCOL_NAME);
 }
 
 // Do a TURN allocation, establish a TCP connection, and send some data.
@@ -720,6 +744,8 @@ TEST_F(TurnPortTest, TestTurnSendDataTurnTcpToUdp) {
   // Create ports and prepare addresses.
   CreateTurnPort(kTurnUsername, kTurnPassword, kTurnTcpProtoAddr);
   TestTurnSendData();
+  EXPECT_EQ(turn_port_->Candidates()[0].relay_protocol(),
+            cricket::TCP_PROTOCOL_NAME);
 }
 
 // Test TURN fails to make a connection from IPv6 address to a server which has

@@ -48,14 +48,17 @@ public:
     static SkImageGenerator* create(SkData*);
 
     DecodingImageGenerator(PassRefPtr<ImageFrameGenerator>, const SkImageInfo&, size_t index);
-    virtual ~DecodingImageGenerator();
+    ~DecodingImageGenerator() override;
 
     void setGenerationId(size_t id) { m_generationId = id; }
 
 protected:
-    virtual SkData* onRefEncodedData() override;
-    virtual Result onGetPixels(const SkImageInfo&, void* pixels, size_t rowBytes, SkPMColor ctable[], int* ctableCount) override;
-    virtual bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3], SkYUVColorSpace*) override;
+    SkData* onRefEncodedData() override;
+
+    bool onGetPixels(const SkImageInfo&, void* pixels, size_t rowBytes,
+        SkPMColor ctable[], int* ctableCount) override;
+
+    bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3], SkYUVColorSpace*) override;
 
 private:
     RefPtr<ImageFrameGenerator> m_frameGenerator;

@@ -25,14 +25,14 @@ class PermissionStatus final
     : public RefCountedGarbageCollectedEventTargetWithInlineData<PermissionStatus>
     , public ActiveDOMObject
     , public WebPermissionObserver {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<PermissionStatus>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(PermissionStatus);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PermissionStatus);
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PermissionStatus* take(ScriptPromiseResolver*, WebPermissionStatus*, WebPermissionType);
     static void dispose(WebPermissionStatus*);
 
-    static PermissionStatus* create(ExecutionContext*, WebPermissionStatus, WebPermissionType);
+    static PermissionStatus* createAndListen(ExecutionContext*, WebPermissionStatus, WebPermissionType);
     ~PermissionStatus() override;
 
     // EventTarget implementation.

@@ -8,8 +8,9 @@
 
 namespace cc {
 
-FakePictureLayer::FakePictureLayer(ContentLayerClient* client)
-    : PictureLayer(client),
+FakePictureLayer::FakePictureLayer(const LayerSettings& settings,
+                                   ContentLayerClient* client)
+    : PictureLayer(settings, client),
       update_count_(0),
       push_properties_count_(0),
       output_surface_created_count_(0),
@@ -19,9 +20,10 @@ FakePictureLayer::FakePictureLayer(ContentLayerClient* client)
   SetIsDrawable(true);
 }
 
-FakePictureLayer::FakePictureLayer(ContentLayerClient* client,
+FakePictureLayer::FakePictureLayer(const LayerSettings& settings,
+                                   ContentLayerClient* client,
                                    scoped_ptr<RecordingSource> source)
-    : PictureLayer(client, source.Pass()),
+    : PictureLayer(settings, client, source.Pass()),
       update_count_(0),
       push_properties_count_(0),
       output_surface_created_count_(0),
@@ -40,11 +42,10 @@ scoped_ptr<LayerImpl> FakePictureLayer::CreateLayerImpl(
   return FakePictureLayerImpl::Create(tree_impl, layer_id_);
 }
 
-bool FakePictureLayer::Update(ResourceUpdateQueue* queue,
-                              const OcclusionTracker<Layer>* occlusion) {
+bool FakePictureLayer::Update() {
   if (disable_lcd_text_)
     draw_properties().can_use_lcd_text = false;
-  bool updated = PictureLayer::Update(queue, occlusion);
+  bool updated = PictureLayer::Update();
   update_count_++;
   return updated || always_update_resources_;
 }

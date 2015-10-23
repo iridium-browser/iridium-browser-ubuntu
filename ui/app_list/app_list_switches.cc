@@ -21,6 +21,9 @@ const char kDisableAppListDismissOnBlur[] = "disable-app-list-dismiss-on-blur";
 // If set, Drive apps will not be shown side-by-side with Chrome apps.
 const char kDisableDriveAppsInAppList[] = "disable-drive-apps-in-app-list";
 
+// If set, the app list will be enabled as if enabled from CWS.
+const char kEnableAppList[] = "enable-app-list";
+
 // If set, the app list will be centered and wide instead of tall.
 const char kEnableCenteredAppList[] = "enable-centered-app-list";
 
@@ -33,14 +36,21 @@ const char kDisableExperimentalAppList[] = "disable-experimental-app-list";
 const char kEnableSyncAppList[] = "enable-sync-app-list";
 const char kDisableSyncAppList[] = "disable-sync-app-list";
 
-// Enables launcher search provider api.
-const char kEnableLauncherSearchProviderApi[] =
-    "enable-launcher-search-provider-api";
+// Enable/disable drive search in chrome launcher.
+const char kEnableDriveSearchInChromeLauncher[] =
+    "enable-drive-search-in-app-launcher";
+const char kDisableDriveSearchInChromeLauncher[] =
+    "disable-drive-search-in-app-launcher";
 
 // Enable/disable the new "blended" algorithm in app_list::Mixer. This is just
 // forcing the AppListMixer/Blended field trial.
 const char kEnableNewAppListMixer[] = "enable-new-app-list-mixer";
 const char kDisableNewAppListMixer[] = "disable-new-app-list-mixer";
+
+// If set, the app list will forget it has been installed on startup. Note this
+// doesn't prevent the app list from running, it just makes Chrome think the app
+// list hasn't been enabled (as in kEnableAppList) yet.
+const char kResetAppListInstallState[] = "reset-app-list-install-state";
 
 #if defined(OS_MACOSX)
 // Enables use of the toolkit-views app list on Mac.
@@ -52,7 +62,7 @@ bool IsAppListSyncEnabled() {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(kEnableSyncAppList))
     return true;
 
-  if (!IsMacViewsAppListListEnabled())
+  if (!IsMacViewsAppListEnabled())
     return false;
 #endif
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -110,17 +120,24 @@ bool IsDriveAppsInAppListEnabled() {
 #endif
 }
 
-bool IsLauncherSearchProviderApiEnabled() {
+bool IsDriveSearchInChromeLauncherEnabled() {
 #if defined(OS_CHROMEOS)
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      kEnableLauncherSearchProviderApi);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kEnableDriveSearchInChromeLauncher))
+    return true;
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kDisableDriveSearchInChromeLauncher))
+    return false;
+
+  return true;
 #else
   return false;
 #endif
 }
 
 #if defined(OS_MACOSX)
-bool IsMacViewsAppListListEnabled() {
+bool IsMacViewsAppListEnabled() {
 #if defined(TOOLKIT_VIEWS)
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       kEnableMacViewsAppList);

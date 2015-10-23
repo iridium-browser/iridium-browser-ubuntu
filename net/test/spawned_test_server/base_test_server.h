@@ -11,6 +11,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/host_port_pair.h"
 #include "net/ssl/ssl_client_cert_type.h"
@@ -25,6 +26,7 @@ namespace net {
 
 class AddressList;
 class ScopedPortException;
+class X509Certificate;
 
 // The base class of Test server implementation.
 class BaseTestServer {
@@ -65,6 +67,10 @@ class BaseTestServer {
       // Causes the testserver to use a hostname that is a domain
       // instead of an IP.
       CERT_COMMON_NAME_IS_DOMAIN,
+
+      // A certificate with invalid notBefore and notAfter times. Windows'
+      // certificate library will not parse this certificate.
+      CERT_BAD_VALIDITY,
     };
 
     // OCSPStatus enumerates the types of OCSP response that the testserver
@@ -270,6 +276,9 @@ class BaseTestServer {
   // Marks the root certificate of an HTTPS test server as trusted for
   // the duration of tests.
   bool LoadTestRootCert() const WARN_UNUSED_RESULT;
+
+  // Returns the certificate that the server is using.
+  scoped_refptr<X509Certificate> GetCertificate() const;
 
  protected:
   virtual ~BaseTestServer();

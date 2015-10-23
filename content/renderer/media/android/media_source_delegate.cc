@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/renderer/media/android/renderer_demuxer_android.h"
 #include "media/base/android/demuxer_stream_player_params.h"
 #include "media/base/bind_to_current_loop.h"
@@ -57,7 +57,7 @@ MediaSourceDelegate::MediaSourceDelegate(
       browser_seek_time_(media::kNoTimestamp()),
       expecting_regular_seek_(false),
       access_unit_size_(0),
-      main_task_runner_(base::MessageLoopProxy::current()),
+      main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       media_task_runner_(media_task_runner),
       main_weak_factory_(this),
       media_weak_factory_(this) {
@@ -165,8 +165,7 @@ void MediaSourceDelegate::InitializeMediaSource(
           base::Bind(&MediaSourceDelegate::OnDemuxerOpened, main_weak_this_)),
       media::BindToCurrentLoop(base::Bind(
           &MediaSourceDelegate::OnEncryptedMediaInitData, main_weak_this_)),
-      base::Bind(&media::MediaLog::AddLogEvent, media_log_), media_log_,
-      false));
+      media_log_, false));
 
   // |this| will be retained until StopDemuxer() is posted, so Unretained() is
   // safe here.
@@ -520,7 +519,7 @@ void MediaSourceDelegate::InitAudioDecryptingDemuxerStream() {
   DCHECK(!set_decryptor_ready_cb_.is_null());
 
   audio_decrypting_demuxer_stream_.reset(new media::DecryptingDemuxerStream(
-      media_task_runner_, set_decryptor_ready_cb_,
+      media_task_runner_, media_log_, set_decryptor_ready_cb_,
       waiting_for_decryption_key_cb_));
   audio_decrypting_demuxer_stream_->Initialize(
       audio_stream_,
@@ -534,7 +533,7 @@ void MediaSourceDelegate::InitVideoDecryptingDemuxerStream() {
   DCHECK(!set_decryptor_ready_cb_.is_null());
 
   video_decrypting_demuxer_stream_.reset(new media::DecryptingDemuxerStream(
-      media_task_runner_, set_decryptor_ready_cb_,
+      media_task_runner_, media_log_, set_decryptor_ready_cb_,
       waiting_for_decryption_key_cb_));
   video_decrypting_demuxer_stream_->Initialize(
       video_stream_,
@@ -656,7 +655,7 @@ base::TimeDelta MediaSourceDelegate::GetDuration() const {
   if (duration == std::numeric_limits<double>::infinity())
     return media::kInfiniteDuration();
 
-  return media::ConvertSecondsToTimestamp(duration);
+  return base::TimeDelta::FromSecondsD(duration);
 }
 
 void MediaSourceDelegate::OnDemuxerOpened() {
@@ -664,9 +663,8 @@ void MediaSourceDelegate::OnDemuxerOpened() {
   if (media_source_opened_cb_.is_null())
     return;
 
-  media_source_opened_cb_.Run(new media::WebMediaSourceImpl(
-      chunk_demuxer_.get(),
-      base::Bind(&media::MediaLog::AddLogEvent, media_log_)));
+  media_source_opened_cb_.Run(
+      new media::WebMediaSourceImpl(chunk_demuxer_.get(), media_log_));
 }
 
 void MediaSourceDelegate::OnEncryptedMediaInitData(

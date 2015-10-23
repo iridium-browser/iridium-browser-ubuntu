@@ -23,4 +23,7 @@ public interface AccountManagerDelegate {
     void invalidateAuthToken(String accountType, String authToken);
 
     AuthenticatorDescription[] getAuthenticatorTypes();
+
+    AccountManagerFuture<Boolean> hasFeatures(Account account, String[] features,
+            AccountManagerCallback<Boolean> callback, Handler handler);
 }

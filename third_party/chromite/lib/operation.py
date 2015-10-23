@@ -24,6 +24,7 @@ except ImportError:
   # pylint: disable=import-error
   import queue as Queue
 import re
+import shutil
 import struct
 import sys
 import termios
@@ -32,8 +33,12 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import workspace_lib
 from chromite.lib.terminal import Color
 
+# Define filenames for captured stdout and stderr.
+STDOUT_FILE = 'stdout'
+STDERR_FILE = 'stderr'
 
 _TerminalSize = collections.namedtuple('_TerminalSize', ('lines', 'columns'))
 
@@ -71,6 +76,8 @@ class ProgressBarOperation(object):
     self._stdout_path = None
     self._stderr_path = None
     self._progress_bar_displayed = False
+    self._workspace_path = workspace_lib.WorkspacePath()
+    self._isatty = os.isatty(sys.stdout.fileno())
 
   def _GetTerminalSize(self, fd=pty.STDOUT_FILENO):
     """Return a terminal size object for |fd|.
@@ -85,10 +92,14 @@ class ProgressBarOperation(object):
   def ProgressBar(self, progress):
     """This method creates and displays a progress bar.
 
+    If not in a terminal, we do not display a progress bar.
+
     Args:
       progress: a float between 0 and 1 that represents the fraction of the
         current progress.
     """
+    if not self._isatty:
+      return
     self._progress_bar_displayed = True
     progress = max(0.0, min(1.0, progress))
     width = max(1, self._GetTerminalSize().columns -
@@ -161,13 +172,27 @@ class ProgressBarOperation(object):
     restore_log_level = logging.getLogger().getEffectiveLevel()
     logging.getLogger().setLevel(log_level)
     try:
-      with cros_build_lib.OutputCapturer(stdout_path=self._stdout_path,
-                                         stderr_path=self._stderr_path):
+      with cros_build_lib.OutputCapturer(
+          stdout_path=self._stdout_path, stderr_path=self._stderr_path,
+          quiet_fail=self._workspace_path is not None):
         func(*args, **kwargs)
     finally:
       self._queue.put(_BackgroundTaskComplete())
       logging.getLogger().setLevel(restore_log_level)
 
+  def MoveStdoutStderrFiles(self):
+    """On failure, move stdout/stderr files to workspace/WORKSPACE_LOGS_DIR."""
+    path = os.path.join(self._workspace_path, workspace_lib.WORKSPACE_LOGS_DIR)
+    # TODO(ralphnathan): Not sure if we need this because it should be done when
+    # we store the log file for brillo commands.
+    osutils.SafeMakedirs(path)
+    osutils.SafeUnlink(os.path.join(path, STDOUT_FILE))
+    shutil.move(self._stdout_path, path)
+    osutils.SafeUnlink(os.path.join(path, STDERR_FILE))
+    shutil.move(self._stderr_path, path)
+    logging.warning('Please look at %s for more information.', path)
+
+  # TODO (ralphnathan): Store PID of spawned process.
   def Run(self, func, *args, **kwargs):
     """Run func, parse its output, and update the progress bar.
 
@@ -182,28 +207,39 @@ class ProgressBarOperation(object):
 
     # If we are not running in a terminal device, do not display the progress
     # bar.
-    if not os.isatty(sys.stdout.fileno()):
+    if not self._isatty:
       func(*args, **kwargs)
       return
 
     with osutils.TempDir() as tempdir:
-      self._stdout_path = os.path.join(tempdir, 'stdout')
-      self._stderr_path = os.path.join(tempdir, 'stderr')
+      self._stdout_path = os.path.join(tempdir, STDOUT_FILE)
+      self._stderr_path = os.path.join(tempdir, STDERR_FILE)
       osutils.Touch(self._stdout_path)
       osutils.Touch(self._stderr_path)
-      with parallel.BackgroundTaskRunner(
-          self.CaptureOutputInBackground, func, *args, **kwargs) as queue:
-        queue.put([])
-        self.OpenStdoutStderr()
-        while True:
-          self.ParseOutput()
-          if self.WaitUntilComplete(update_period):
-            break
-      # Before we exit, parse the output again to update progress bar.
-      self.ParseOutput()
-      # Final sanity check to update the progress bar to 100% if it was used by
-      # ParseOutput
-      self.Cleanup()
+      try:
+        with parallel.BackgroundTaskRunner(
+            self.CaptureOutputInBackground, func, *args, **kwargs) as queue:
+          queue.put([])
+          self.OpenStdoutStderr()
+          while True:
+            self.ParseOutput()
+            if self.WaitUntilComplete(update_period):
+              break
+        # Before we exit, parse the output again to update progress bar.
+        self.ParseOutput()
+        # Final sanity check to update the progress bar to 100% if it was used
+        # by ParseOutput
+        self.Cleanup()
+      except:
+        # Add a blank line before the logging message so the message isn't
+        # touching the progress bar.
+        sys.stdout.write('\n')
+        logging.error('Oops. Something went wrong.')
+        # Move the stdout/stderr files to a location that the user can access.
+        if self._workspace_path is not None:
+          self.MoveStdoutStderrFiles()
+        # Raise the exception so it can be caught again.
+        raise
 
 
 class ParallelEmergeOperation(ProgressBarOperation):

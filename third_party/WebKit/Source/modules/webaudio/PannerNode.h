@@ -36,6 +36,8 @@
 
 namespace blink {
 
+class AbstractAudioContext;
+
 // PannerNode is an AudioNode with one input and one output.
 // It positions a sound in 3D space, with the exact effect dependent on the panning model.
 // It has a position and an orientation in 3D space which is relative to the position and orientation of the context's AudioListener.
@@ -53,12 +55,12 @@ public:
     };
 
     static PassRefPtr<PannerHandler> create(AudioNode&, float sampleRate);
-    virtual ~PannerHandler();
+    ~PannerHandler() override;
 
     // AudioHandler
-    virtual void process(size_t framesToProcess) override;
-    virtual void initialize() override;
-    virtual void uninitialize() override;
+    void process(size_t framesToProcess) override;
+    void initialize() override;
+    void uninitialize() override;
 
     // Panning model
     String panningModel() const;
@@ -97,15 +99,15 @@ public:
     // It must be called on audio thread, currently called only process() in AudioBufferSourceNode.
     double dopplerRate();
 
-    virtual double tailTime() const override { return m_panner ? m_panner->tailTime() : 0; }
-    virtual double latencyTime() const override { return m_panner ? m_panner->latencyTime() : 0; }
+    double tailTime() const override { return m_panner ? m_panner->tailTime() : 0; }
+    double latencyTime() const override { return m_panner ? m_panner->latencyTime() : 0; }
 
-    virtual void setChannelCount(unsigned long, ExceptionState&) final;
-    virtual void setChannelCountMode(const String&, ExceptionState&) final;
+    void setChannelCount(unsigned long, ExceptionState&) final;
+    void setChannelCountMode(const String&, ExceptionState&) final;
 
 private:
     PannerHandler(AudioNode&, float sampleRate);
-    // AudioContext's listener
+    // AbstractAudioContext's listener
     AudioListener* listener();
 
     bool setPanningModel(unsigned); // Returns true on success.
@@ -156,7 +158,7 @@ private:
 class PannerNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PannerNode* create(AudioContext&, float sampleRate);
+    static PannerNode* create(AbstractAudioContext&, float sampleRate);
     PannerHandler& pannerHandler() const;
 
     String panningModel() const;
@@ -180,7 +182,7 @@ public:
     void setConeOuterGain(double);
 
 private:
-    PannerNode(AudioContext&, float sampleRate);
+    PannerNode(AbstractAudioContext&, float sampleRate);
 };
 
 } // namespace blink

@@ -8,27 +8,20 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
+#include "components/dom_distiller/core/experiments.h"
 #include "components/dom_distiller/core/task_tracker.h"
-#include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/core/viewer.h"
-#include "content/public/browser/navigation_details.h"
-#include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/url_data_source.h"
-#include "net/base/url_util.h"
-#include "net/url_request/url_request.h"
+#include "grit/components_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace dom_distiller {
 
 DomDistillerRequestViewBase::DomDistillerRequestViewBase(
-    scoped_ptr<DistillerDataCallback> callback,
     DistilledPagePrefs* distilled_page_prefs)
-    : callback_(callback.Pass()),
-      page_count_(0),
+    : page_count_(0),
       distilled_page_prefs_(distilled_page_prefs),
       is_error_page_(false) {
 }
@@ -37,11 +30,18 @@ DomDistillerRequestViewBase::~DomDistillerRequestViewBase() {
 }
 
 void DomDistillerRequestViewBase::FlagAsErrorPage() {
+  // Viewer handle is not passed to this in the case of error pages
+  // so send all JavaScript now.
+  SendJavaScript(viewer::GetJavaScript());
+  SendJavaScript(viewer::GetErrorPageJs());
+
+  std::string title(l10n_util::GetStringUTF8(
+      IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_CONTENT));
+  SendJavaScript(viewer::GetSetTitleJs(title));
+
+  SendJavaScript(viewer::GetSetTextDirectionJs(std::string("auto")));
+  SendJavaScript(viewer::GetShowFeedbackFormJs());
   is_error_page_ = true;
-  std::string error_page_html =
-      viewer::GetErrorPageHtml(distilled_page_prefs_->GetTheme(),
-                               distilled_page_prefs_->GetFontFamily());
-  callback_->RunCallback(error_page_html);
 }
 
 bool DomDistillerRequestViewBase::IsErrorPage() {
@@ -51,23 +51,20 @@ bool DomDistillerRequestViewBase::IsErrorPage() {
 void DomDistillerRequestViewBase::OnArticleReady(
     const DistilledArticleProto* article_proto) {
   if (page_count_ == 0) {
-    const DistilledPageProto* cur_page;
-    if (article_proto->pages().size() < 1) {
-      cur_page = new DistilledPageProto();
+    std::string text_direction;
+    if (article_proto->pages().size() > 0) {
+      text_direction = article_proto->pages(0).text_direction();
     } else {
-      cur_page = &article_proto->pages(0);
+      text_direction = "auto";
     }
-    std::string unsafe_page_html = viewer::GetUnsafeArticleTemplateHtml(
-        cur_page, distilled_page_prefs_->GetTheme(),
-        distilled_page_prefs_->GetFontFamily());
-    callback_->RunCallback(unsafe_page_html);
-    // Send first page to client.
+    // Send first page, title, and text direction to client.
+    SendJavaScript(viewer::GetSetTitleJs(article_proto->title()));
+    SendJavaScript(viewer::GetSetTextDirectionJs(text_direction));
     SendJavaScript(viewer::GetUnsafeArticleContentJs(article_proto));
     // If any content was loaded, show the feedback form.
-    SendJavaScript(viewer::GetShowFeedbackFormJs());
-  } else if (page_count_ == article_proto->pages_size()) {
-    // We may still be showing the "Loading" indicator.
-    SendJavaScript(viewer::GetToggleLoadingIndicatorJs(true));
+    if (ShouldShowFeedbackForm()) {
+      SendJavaScript(viewer::GetShowFeedbackFormJs());
+    }
   } else {
     // It's possible that we didn't get some incremental updates from the
     // distiller. Ensure all remaining pages are flushed to the viewer.
@@ -77,6 +74,8 @@ void DomDistillerRequestViewBase::OnArticleReady(
           &page, page_count_ == article_proto->pages_size()));
     }
   }
+  // We may still be showing the "Loading" indicator.
+  SendJavaScript(viewer::GetToggleLoadingIndicatorJs(true));
   // No need to hold on to the ViewerHandle now that distillation is complete.
   viewer_handle_.reset();
 }
@@ -89,16 +88,18 @@ void DomDistillerRequestViewBase::OnArticleUpdated(
         article_update.GetDistilledPage(page_count_);
     // Send the page content to the client. This will execute after the page is
     // ready.
-    SendJavaScript(viewer::GetUnsafeIncrementalDistilledPageJs(&page, false));
+    SendJavaScript(viewer::GetUnsafeIncrementalDistilledPageJs(
+        &page, !article_update.HasNextPage()));
 
     if (page_count_ == 0) {
-      // This is the first page, so send Viewer page scaffolding too.
-      std::string unsafe_page_html = viewer::GetUnsafeArticleTemplateHtml(
-          &page, distilled_page_prefs_->GetTheme(),
-          distilled_page_prefs_->GetFontFamily());
-      callback_->RunCallback(unsafe_page_html);
+      // This is the first page, so send the title and text direction to the
+      // client.
+      SendJavaScript(viewer::GetSetTitleJs(page.title()));
+      SendJavaScript(viewer::GetSetTextDirectionJs(page.text_direction()));
       // If any content was loaded, show the feedback form.
-      SendJavaScript(viewer::GetShowFeedbackFormJs());
+      if (ShouldShowFeedbackForm()) {
+        SendJavaScript(viewer::GetShowFeedbackFormJs());
+      }
     }
   }
 }
@@ -116,6 +117,10 @@ void DomDistillerRequestViewBase::OnChangeFontFamily(
 void DomDistillerRequestViewBase::TakeViewerHandle(
     scoped_ptr<ViewerHandle> viewer_handle) {
   viewer_handle_ = viewer_handle.Pass();
+  // Getting the viewer handle means this is not an error page, send
+  // the viewer JavaScript and show the loading indicator.
+  SendJavaScript(viewer::GetJavaScript());
+  SendJavaScript(viewer::GetToggleLoadingIndicatorJs(false));
 }
 
 }  // namespace dom_distiller

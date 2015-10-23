@@ -40,15 +40,15 @@ namespace blink {
 
 class InbandTextTrack final : public TextTrack, public WebInbandTextTrackClient {
 public:
-    static PassRefPtrWillBeRawPtr<InbandTextTrack> create(WebInbandTextTrack*);
-    virtual ~InbandTextTrack();
+    static InbandTextTrack* create(WebInbandTextTrack*);
+    ~InbandTextTrack() override;
 
-    virtual void setTrackList(TextTrackList*) override;
+    void setTrackList(TextTrackList*) override;
 
 private:
     InbandTextTrack(WebInbandTextTrack*);
 
-    virtual void addWebVTTCue(double, double, const WebString&, const WebString&, const WebString&) override;
+    void addWebVTTCue(double, double, const WebString&, const WebString&, const WebString&) override;
 
     WebInbandTextTrack* m_webTrack;
 };

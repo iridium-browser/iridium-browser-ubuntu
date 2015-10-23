@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/observer_list.h"
-#include "components/surfaces/public/interfaces/surface_id.mojom.h"
 #include "components/view_manager/public/cpp/types.h"
+#include "components/view_manager/public/interfaces/surface_id.mojom.h"
 #include "components/view_manager/public/interfaces/view_manager.mojom.h"
 #include "components/view_manager/public/interfaces/view_manager_constants.mojom.h"
 #include "mojo/application/public/interfaces/service_provider.mojom.h"
@@ -29,7 +29,9 @@ class ViewObserver;
 template <typename T>
 struct ViewProperty;
 
-// Views are owned by the ViewManager.
+// Views are owned by the ViewManager. See ViewManagerDelegate for details on
+// ownership.
+//
 // TODO(beng): Right now, you'll have to implement a ViewObserver to track
 //             destruction and NULL any pointers you have.
 //             Investigate some kind of smart pointer or weak pointer for these.
@@ -38,7 +40,10 @@ class View {
   using Children = std::vector<View*>;
   using SharedProperties = std::map<std::string, std::vector<uint8_t>>;
 
-  // Destroys this view and all its children.
+  // Destroys this view and all its children. Destruction is allowed for views
+  // that were created by this connection. For views from other connections
+  // (such as the root) Destroy() does nothing. If the destruction is allowed
+  // observers are notified and the View is immediately deleted.
   void Destroy();
 
   ViewManager* view_manager() { return manager_; }
@@ -120,15 +125,16 @@ class View {
 
   void SetSurfaceId(SurfaceIdPtr id);
 
+  void SetTextInputState(TextInputStatePtr state);
+  void SetImeVisibility(bool visible, TextInputStatePtr state);
+
   // Focus.
   void SetFocus();
+  bool HasFocus() const;
 
   // Embedding. See view_manager.mojom for details.
-  void Embed(const String& url);
-  void Embed(const String& url,
-             InterfaceRequest<ServiceProvider> services,
-             ServiceProviderPtr exposed_services);
   void Embed(ViewManagerClientPtr client);
+  void EmbedAllowingReembed(mojo::URLRequestPtr request);
 
  protected:
   // This class is subclassed only by test classes that provide a public ctor.
@@ -173,12 +179,16 @@ class View {
   // Notifies this view and its parent hierarchy.
   void NotifyViewVisibilityChangedUp(View* target);
 
+  // Returns true if embed is allowed for this node. If embedding is allowed all
+  // the children are removed.
+  bool PrepareForEmbed();
+
   ViewManager* manager_;
   Id id_;
   View* parent_;
   Children children_;
 
-  ObserverList<ViewObserver> observers_;
+  base::ObserverList<ViewObserver> observers_;
 
   Rect bounds_;
   ViewportMetricsPtr viewport_metrics_;

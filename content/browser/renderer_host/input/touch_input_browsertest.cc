@@ -4,7 +4,10 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -27,10 +30,8 @@ namespace {
 
 void GiveItSomeTime() {
   base::RunLoop run_loop;
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      run_loop.QuitClosure(),
-      base::TimeDelta::FromMilliseconds(10));
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), base::TimeDelta::FromMilliseconds(10));
   run_loop.Run();
 }
 
@@ -117,8 +118,8 @@ class InputEventMessageFilter : public BrowserMessageFilter {
     if (message.type() == InputHostMsg_HandleInputEvent_ACK::ID) {
       InputHostMsg_HandleInputEvent_ACK::Param params;
       InputHostMsg_HandleInputEvent_ACK::Read(&message, &params);
-      WebInputEvent::Type type = get<0>(params).type;
-      InputEventAckState ack = get<0>(params).state;
+      WebInputEvent::Type type = base::get<0>(params).type;
+      InputEventAckState ack = base::get<0>(params).state;
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
           base::Bind(&InputEventMessageFilter::ReceivedEventAck,
                      this, type, ack));
@@ -198,7 +199,13 @@ IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, MAYBE_TouchNoHandler) {
   touch.ResetPoints();
 }
 
-IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchHandlerNoConsume) {
+#if defined(OS_CHROMEOS)
+// crbug.com/514456
+#define MAYBE_TouchHandlerNoConsume DISABLED_TouchHandlerNoConsume
+#else
+#define MAYBE_TouchHandlerNoConsume TouchHandlerNoConsume
+#endif
+IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, MAYBE_TouchHandlerNoConsume) {
   LoadURLAndAddFilter();
   SyntheticWebTouchEvent touch;
 
@@ -215,7 +222,13 @@ IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchHandlerNoConsume) {
   touch.ResetPoints();
 }
 
-IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchHandlerConsume) {
+#if defined(OS_CHROMEOS)
+// crbug.com/514456
+#define MAYBE_TouchHandlerConsume DISABLED_TouchHandlerConsume
+#else
+#define MAYBE_TouchHandlerConsume TouchHandlerConsume
+#endif
+IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, MAYBE_TouchHandlerConsume) {
   LoadURLAndAddFilter();
   SyntheticWebTouchEvent touch;
 
@@ -231,7 +244,10 @@ IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchHandlerConsume) {
   filter()->WaitForAck(WebInputEvent::TouchEnd);
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_CHROMEOS)
+// crbug.com/514456
+#define MAYBE_MultiPointTouchPress DISABLED_MultiPointTouchPress
+#elif defined(OS_MACOSX)
 // TODO(ccameron): Failing on mac: crbug.com/346363
 #define MAYBE_MultiPointTouchPress DISABLED_MultiPointTouchPress
 #else

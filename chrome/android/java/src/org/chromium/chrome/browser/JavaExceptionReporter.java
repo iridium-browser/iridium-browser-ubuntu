@@ -4,10 +4,8 @@
 
 package org.chromium.chrome.browser;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
-
-import java.lang.Throwable;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 /**
  * This UncaughtExceptionHandler will create a breakpad minidump when there is an uncaught

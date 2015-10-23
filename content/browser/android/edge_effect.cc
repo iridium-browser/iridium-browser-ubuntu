@@ -7,6 +7,7 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/ui_resource_layer.h"
 #include "content/browser/android/animation_utils.h"
+#include "content/public/browser/android/compositor.h"
 #include "ui/android/resources/resource_manager.h"
 #include "ui/android/resources/system_ui_resource_type.h"
 
@@ -63,7 +64,8 @@ class EdgeEffect::EffectLayer {
  public:
   EffectLayer(ui::SystemUIResourceType resource_type,
               ui::ResourceManager* resource_manager)
-      : ui_resource_layer_(cc::UIResourceLayer::Create()),
+      : ui_resource_layer_(
+            cc::UIResourceLayer::Create(Compositor::LayerSettings())),
         resource_type_(resource_type),
         resource_manager_(resource_manager) {}
 
@@ -309,18 +311,22 @@ float EdgeEffect::GetAlpha() const {
   return IsFinished() ? 0.f : std::max(glow_alpha_, edge_alpha_);
 }
 
-void EdgeEffect::ApplyToLayers(const gfx::SizeF& size,
-                               const gfx::Transform& transform) {
+void EdgeEffect::ApplyToLayers(Edge edge,
+                               const gfx::SizeF& viewport_size,
+                               float offset) {
   if (IsFinished())
     return;
 
   // An empty window size, while meaningless, is also relatively harmless, and
   // will simply prevent any drawing of the layers.
-  if (size.IsEmpty()) {
+  if (viewport_size.IsEmpty()) {
     edge_->Disable();
     glow_->Disable();
     return;
   }
+
+  gfx::SizeF size = ComputeOrientedSize(edge, viewport_size);
+  gfx::Transform transform = ComputeTransform(edge, viewport_size, offset);
 
   // Glow
   const int scaled_glow_height = static_cast<int>(

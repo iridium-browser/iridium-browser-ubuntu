@@ -15,6 +15,7 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/overlay_transform.h"
+#include "ui/gfx/swap_result.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_implementation.h"
 
@@ -39,10 +40,6 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // Destroys the surface.
   virtual void Destroy() = 0;
 
-  // Destroys the surface and terminates its underlying display. This must be
-  // the last surface which uses the display.
-  virtual void DestroyAndTerminateDisplay();
-
   virtual bool Resize(const gfx::Size& size);
 
   // Recreate the surface without changing the size.
@@ -58,7 +55,7 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
 
   // Swaps front and back buffers. This has no effect for off-screen
   // contexts.
-  virtual bool SwapBuffers() = 0;
+  virtual gfx::SwapResult SwapBuffers() = 0;
 
   // Get the size of the surface.
   virtual gfx::Size GetSize() = 0;
@@ -73,7 +70,7 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // FBO. Otherwise returns 0.
   virtual unsigned int GetBackingFrameBufferObject();
 
-  typedef base::Callback<void()> SwapCompletionCallback;
+  typedef base::Callback<void(SwapResult)> SwapCompletionCallback;
   // Swaps front and back buffers. This has no effect for off-screen
   // contexts. On some platforms, we want to send SwapBufferAck only after the
   // surface is displayed on screen. The callback can be used to delay sending
@@ -82,7 +79,7 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   virtual bool SwapBuffersAsync(const SwapCompletionCallback& callback);
 
   // Copy part of the backbuffer to the frontbuffer.
-  virtual bool PostSubBuffer(int x, int y, int width, int height);
+  virtual gfx::SwapResult PostSubBuffer(int x, int y, int width, int height);
 
   // Copy part of the backbuffer to the frontbuffer. On some platforms, we want
   // to send SwapBufferAck only after the surface is displayed on screen. The
@@ -97,12 +94,6 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
 
   // Initialize GL bindings.
   static bool InitializeOneOff();
-
-  // Unit tests should call these instead of InitializeOneOff() to set up
-  // GL bindings appropriate for tests.
-  static void InitializeOneOffForTests();
-  static void InitializeOneOffWithMockBindingsForTests();
-  static void InitializeDynamicMockBindingsForTests(GLContext* context);
 
   // Called after a context is made current with this surface. Returns false
   // on error.
@@ -188,6 +179,7 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
  private:
   friend class base::RefCounted<GLSurface>;
   friend class GLContext;
+  friend class GLSurfaceTestSupport;
 
   DISALLOW_COPY_AND_ASSIGN(GLSurface);
 };
@@ -204,9 +196,9 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   bool Recreate() override;
   bool DeferDraws() override;
   bool IsOffscreen() override;
-  bool SwapBuffers() override;
+  gfx::SwapResult SwapBuffers() override;
   bool SwapBuffersAsync(const SwapCompletionCallback& callback) override;
-  bool PostSubBuffer(int x, int y, int width, int height) override;
+  gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
   bool PostSubBufferAsync(int x,
                           int y,
                           int width,

@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.page import page_test
 from telemetry.timeline.model import TimelineModel
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 from telemetry.util import statistics
 from telemetry.value import scalar
 
@@ -41,6 +41,10 @@ class V8GCTimes(page_test.PageTest):
     timeline_model = TimelineModel(trace_data)
     renderer_process = timeline_model.GetRendererProcessFromTabId(tab.id)
     self._AddV8MetricsToResults(renderer_process, results)
+
+  def DidRunPage(self, platform):
+    if platform.tracing_controller.is_tracing_running:
+      platform.tracing_controller.Stop()
 
   def _AddV8MetricsToResults(self, process, results):
     if process is None:

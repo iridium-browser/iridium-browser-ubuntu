@@ -30,6 +30,7 @@
 #include "core/dom/Range.h"
 #include "core/editing/Caret.h"
 #include "core/editing/EditingStyle.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/layout/ScrollAlignment.h"
 #include "platform/Timer.h"
@@ -67,8 +68,7 @@ public:
     virtual ~FrameSelection();
 
     enum EAlteration { AlterationMove, AlterationExtend };
-    enum CursorAlignOnScroll { AlignCursorOnScrollIfNeeded,
-                               AlignCursorOnScrollAlways };
+    enum CursorAlignOnScroll { AlignCursorOnScrollIfNeeded, AlignCursorOnScrollAlways };
     enum SetSelectionOption {
         // 1 << 0 is reserved for EUserTriggered
         CloseTyping = 1 << 1,
@@ -84,7 +84,7 @@ public:
         return static_cast<EUserTriggered>(options & UserTriggered);
     }
 
-    enum DirectoinalOption {
+    enum DirectionalOption {
         NonDirectional,
         Directional
     };
@@ -103,12 +103,15 @@ public:
 
     void moveTo(const VisiblePosition&, EUserTriggered = NotUserTriggered, CursorAlignOnScroll = AlignCursorOnScrollIfNeeded);
     void moveTo(const VisiblePosition&, const VisiblePosition&, EUserTriggered = NotUserTriggered);
-    void moveTo(const Position&, EAffinity, EUserTriggered = NotUserTriggered);
+    void moveTo(const Position&, TextAffinity, EUserTriggered = NotUserTriggered);
 
     const VisibleSelection& selection() const { return m_selection; }
     void setSelection(const VisibleSelection&, SetSelectionOptions = CloseTyping | ClearTypingStyle, CursorAlignOnScroll = AlignCursorOnScrollIfNeeded, TextGranularity = CharacterGranularity);
     void setSelection(const VisibleSelection& selection, TextGranularity granularity) { setSelection(selection, CloseTyping | ClearTypingStyle, AlignCursorOnScrollIfNeeded, granularity); }
-    bool setSelectedRange(Range*, EAffinity, DirectoinalOption directional = NonDirectional, SetSelectionOptions = CloseTyping | ClearTypingStyle);
+    // TODO(yosin) We should get rid of |Range| version of |setSelectedRagne()|
+    // for Oilpan.
+    bool setSelectedRange(Range*, TextAffinity, DirectionalOption = NonDirectional, SetSelectionOptions = CloseTyping | ClearTypingStyle);
+    bool setSelectedRange(const EphemeralRange&, TextAffinity, DirectionalOption = NonDirectional, SetSelectionOptions = CloseTyping | ClearTypingStyle);
     void selectAll();
     void clear();
     void prepareForDestruction();
@@ -120,7 +123,7 @@ public:
 
     SelectionType selectionType() const { return m_selection.selectionType(); }
 
-    EAffinity affinity() const { return m_selection.affinity(); }
+    TextAffinity affinity() const { return m_selection.affinity(); }
 
     bool modify(EAlteration, SelectionDirection, TextGranularity, EUserTriggered = NotUserTriggered);
     enum VerticalDirection { DirectionUp, DirectionDown };
@@ -228,14 +231,21 @@ public:
     void setShouldShowBlockCursor(bool);
 
     // VisibleSelection::ChangeObserver interface.
-    virtual void didChangeVisibleSelection() override;
+    void didChangeVisibleSelection() override;
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit FrameSelection(LocalFrame*);
 
-    enum EPositionType { START, END, BASE, EXTENT };
+    // TODO(yosin) We should use capitalized name for |EPositionType|.
+    enum EPositionType { START, END, BASE, EXTENT }; // NOLINT
+
+    template <typename Strategy>
+    bool containsAlgorithm(const LayoutPoint&);
+
+    template <typename Strategy>
+    void setNonDirectionalSelectionIfNeededAlgorithm(const VisibleSelection&, TextGranularity, EndPointsAdjustmentMode);
 
     void respondToNodeModification(Node&, bool baseRemoved, bool extentRemoved, bool startRemoved, bool endRemoved);
     TextDirection directionOfEnclosingBlock();
@@ -259,6 +269,7 @@ private:
 
     void notifyAccessibilityForSelectionChange();
     void notifyCompositorForSelectionChange();
+    void notifyEventHandlerForSelectionChange();
 
     void focusedOrActiveStateChanged();
 
@@ -296,6 +307,7 @@ private:
 
     RefPtrWillBeMember<Node> m_previousCaretNode; // The last node which painted the caret. Retained for clearing the old caret when it moves.
     LayoutRect m_previousCaretRect;
+    CaretVisibility m_previousCaretVisibility;
 
     RefPtrWillBeMember<EditingStyle> m_typingStyle;
 

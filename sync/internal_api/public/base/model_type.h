@@ -34,6 +34,8 @@ namespace syncer {
 // TODO(akalin): Move the non-exported functions in this file to a
 // private header.
 
+// A Java counterpart will be generated for this enum.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.sync
 enum ModelType {
   // Object type unknown.  Objects may transition through
   // the unknown state during their initial creation, before
@@ -67,6 +69,9 @@ enum ModelType {
   // Credit cards and addresses synced from the user's account. These are
   // read-only on the client.
   AUTOFILL_WALLET_DATA,
+  // Usage counts and last use dates for Wallet cards and addresses. This data
+  // is both readable and writable.
+  AUTOFILL_WALLET_METADATA,
   // A themes object.
   THEMES,
   // A typed_url object.
@@ -335,6 +340,12 @@ SYNC_EXPORT bool IsTypeWithServerGeneratedRoot(ModelType model_type);
 // Returns true if root folder for |model_type| is created on the client when
 // that type is initially synced.
 SYNC_EXPORT bool IsTypeWithClientGeneratedRoot(ModelType model_type);
+
+// Returns true if |model_type| supports parent-child hierarchy or entries.
+SYNC_EXPORT bool TypeSupportsHierarchy(ModelType model_type);
+
+// Returns true if |model_type| supports ordering of sibling entries.
+SYNC_EXPORT bool TypeSupportsOrdering(ModelType model_type);
 
 // Returns set of model types that should be backed up before first sync.
 SYNC_EXPORT ModelTypeSet BackupTypes();

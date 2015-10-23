@@ -7,28 +7,26 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "content/common/content_export.h"
-#include "content/public/common/signed_certificate_timestamp_id_and_status.h"
-#include "net/cert/cert_status_flags.h"
+#include "content/public/common/ssl_status.h"
 
 namespace content {
 
-// Convenience methods for serializing/deserializing the security info.
-CONTENT_EXPORT std::string SerializeSecurityInfo(
-    int cert_id,
-    net::CertStatus cert_status,
-    int security_bits,
-    int connection_status,
-    const SignedCertificateTimestampIDStatusList&
-        signed_certificate_timestamp_ids);
+// Serializes the given security info. Does NOT include
+// |ssl_status.content_status| in the serialized info.
+CONTENT_EXPORT std::string SerializeSecurityInfo(const SSLStatus& ssl_status);
 
-bool DeserializeSecurityInfo(
-    const std::string& state,
-    int* cert_id,
-    net::CertStatus* cert_status,
-    int* security_bits,
-    int* connection_status,
-    SignedCertificateTimestampIDStatusList* signed_certificate_timestamp_ids);
+// Deserializes the given security info into |ssl_status|. Note that
+// this returns the |content_status| field with its default
+// value. Returns true on success and false if the state couldn't be
+// deserialized. If false, all fields in |ssl_status| will be set to
+// their default values. Note that this function does not validate that
+// the deserialized SSLStatus is internally consistent (e.g. that the
+// |security_style| matches up with the rest of the fields).
+bool CONTENT_EXPORT
+DeserializeSecurityInfo(const std::string& state,
+                        SSLStatus* ssl_status) WARN_UNUSED_RESULT;
 
 }  // namespace content
 

@@ -20,15 +20,24 @@
  * Boston, MA 02110-1301, USA.
  */
 
+// http://www.w3.org/TR/SVG2/types.html#InterfaceSVGElement
+
 interface SVGElement : Element {
-    readonly attribute SVGSVGElement? ownerSVGElement;
-    readonly attribute SVGElement? viewportElement;
-
     [RuntimeEnabled=SVG1DOM, MeasureAs=SVGClassName] readonly attribute SVGAnimatedString className;
-
     readonly attribute CSSStyleDeclaration style;
 
+    readonly attribute SVGSVGElement? ownerSVGElement;
+    readonly attribute SVGElement? viewportElement;
     [CustomElementCallbacks] attribute long tabIndex;
+    void focus();
+    void blur();
+
+    // TODO(tanay.c): SVGElement.offset* are non-standard. crbug.com/463116
+    [Measure, PerWorldBindings] readonly attribute Element? offsetParent;
+    [Measure] readonly attribute long offsetTop;
+    [Measure] readonly attribute long offsetLeft;
+    [Measure] readonly attribute long offsetWidth;
+    [Measure] readonly attribute long offsetHeight;
 };
 
 SVGElement implements GlobalEventHandlers;

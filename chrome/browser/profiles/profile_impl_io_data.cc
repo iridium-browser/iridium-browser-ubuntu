@@ -44,6 +44,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_store_impl.h"
 #include "components/domain_reliability/monitor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -74,9 +75,9 @@ net::BackendType ChooseCacheBackendType() {
   if (command_line.HasSwitch(switches::kUseSimpleCacheBackend)) {
     const std::string opt_value =
         command_line.GetSwitchValueASCII(switches::kUseSimpleCacheBackend);
-    if (LowerCaseEqualsASCII(opt_value, "off"))
+    if (base::LowerCaseEqualsASCII(opt_value, "off"))
       return net::CACHE_BACKEND_BLOCKFILE;
-    if (opt_value.empty() || LowerCaseEqualsASCII(opt_value, "on"))
+    if (opt_value.empty() || base::LowerCaseEqualsASCII(opt_value, "on"))
       return net::CACHE_BACKEND_SIMPLE;
   }
   const std::string experiment_name =
@@ -198,11 +199,19 @@ void ProfileImplIOData::Handle::Init(
           enable_quic_for_data_reduction_proxy)
           .Pass());
 
-  DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile_)->
-      InitDataReductionProxySettings(
+  base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
+  scoped_refptr<base::SequencedTaskRunner> db_task_runner =
+      pool->GetSequencedTaskRunnerWithShutdownBehavior(
+          pool->GetSequenceToken(),
+          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+  scoped_ptr<data_reduction_proxy::DataStore> store(
+      new data_reduction_proxy::DataStoreImpl(profile_path));
+  DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile_)
+      ->InitDataReductionProxySettings(
           io_data_->data_reduction_proxy_io_data(), profile_->GetPrefs(),
-          profile_->GetRequestContext(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI));
+          profile_->GetRequestContext(), store.Pass(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+          db_task_runner);
 }
 
 content::ResourceContext*
@@ -336,10 +345,10 @@ ProfileImplIOData::Handle::GetIsolatedMediaRequestContextGetter(
   return context;
 }
 
-DevToolsNetworkController*
-ProfileImplIOData::Handle::GetDevToolsNetworkController() const {
+DevToolsNetworkControllerHandle*
+ProfileImplIOData::Handle::GetDevToolsNetworkControllerHandle() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return io_data_->network_controller();
+  return io_data_->network_controller_handle();
 }
 
 void ProfileImplIOData::Handle::ClearNetworkingHistorySince(
@@ -487,13 +496,9 @@ void ProfileImplIOData::InitializeInternal(
   main_context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
 
-  main_context->set_fraudulent_certificate_reporter(
-      fraudulent_certificate_reporter());
-
-  main_context->set_throttler_manager(
-      io_thread_globals->throttler_manager.get());
-
   main_context->set_proxy_service(proxy_service());
+  main_context->set_backoff_manager(
+      io_thread_globals->url_request_backoff_manager.get());
 
   scoped_refptr<net::CookieStore> cookie_store = NULL;
   net::ChannelIDService* channel_id_service = NULL;
@@ -571,6 +576,8 @@ void ProfileImplIOData::InitializeInternal(
       main_context->network_delegate(),
       ftp_factory_.get());
   main_context->set_job_factory(main_job_factory_.get());
+  main_context->set_network_quality_estimator(
+      io_thread_globals->network_quality_estimator.get());
 
 #if defined(ENABLE_EXTENSIONS)
   InitializeExtensionsRequestContext(profile_params);
@@ -604,9 +611,6 @@ void ProfileImplIOData::
 
   extensions_context->set_net_log(io_thread->net_log());
 
-  extensions_context->set_throttler_manager(
-      io_thread_globals->throttler_manager.get());
-
   content::CookieStoreConfig cookie_config(
       lazy_params_->extensions_cookie_path,
       lazy_params_->session_cookie_mode,
@@ -639,6 +643,8 @@ void ProfileImplIOData::
       NULL,
       ftp_factory_.get());
   extensions_context->set_job_factory(extensions_job_factory_.get());
+  extensions_context->set_backoff_manager(
+      io_thread_globals->url_request_backoff_manager.get());
 }
 
 net::URLRequestContext* ProfileImplIOData::InitializeAppRequestContext(

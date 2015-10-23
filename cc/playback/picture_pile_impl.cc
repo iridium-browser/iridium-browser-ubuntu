@@ -100,12 +100,14 @@ void PicturePileImpl::RasterForAnalysis(skia::AnalysisCanvas* canvas,
 }
 
 void PicturePileImpl::PlaybackToCanvas(SkCanvas* canvas,
-                                       const gfx::Rect& canvas_rect,
+                                       const gfx::Rect& canvas_bitmap_rect,
+                                       const gfx::Rect& canvas_playback_rect,
                                        float contents_scale) const {
   RasterSourceHelper::PrepareForPlaybackToCanvas(
-      canvas, canvas_rect, gfx::Rect(tiling_.tiling_size()), contents_scale,
-      background_color_, clear_canvas_with_debug_color_, requires_clear_);
-  RasterCommon(canvas, NULL, canvas_rect, contents_scale);
+      canvas, canvas_bitmap_rect, canvas_bitmap_rect,
+      gfx::Rect(tiling_.tiling_size()), contents_scale, background_color_,
+      clear_canvas_with_debug_color_, requires_clear_);
+  RasterCommon(canvas, NULL, canvas_bitmap_rect, contents_scale);
 }
 
 void PicturePileImpl::CoalesceRasters(const gfx::Rect& canvas_rect,
@@ -202,7 +204,7 @@ void PicturePileImpl::CoalesceRasters(const gfx::Rect& canvas_rect,
 }
 
 void PicturePileImpl::RasterCommon(SkCanvas* canvas,
-                                   SkDrawPictureCallback* callback,
+                                   SkPicture::AbortCallback* callback,
                                    const gfx::Rect& canvas_rect,
                                    float contents_scale) const {
   DCHECK(contents_scale >= min_contents_scale_);
@@ -241,7 +243,7 @@ void PicturePileImpl::RasterCommon(SkCanvas* canvas,
 
     int repeat_count = std::max(1, slow_down_raster_scale_factor_for_debug_);
 
-    for (int j = 0; j < repeat_count; ++j)
+    for (int i = 0; i < repeat_count; ++i)
       picture->Raster(canvas, callback, negated_clip_region, contents_scale);
   }
 
@@ -266,7 +268,7 @@ skia::RefPtr<SkPicture> PicturePileImpl::GetFlattenedPicture() {
   SkCanvas* canvas =
       recorder.beginRecording(tiling_rect.width(), tiling_rect.height());
   if (!tiling_rect.IsEmpty())
-    PlaybackToCanvas(canvas, tiling_rect, 1.0);
+    PlaybackToCanvas(canvas, tiling_rect, tiling_rect, 1.0);
   skia::RefPtr<SkPicture> picture =
       skia::AdoptRef(recorder.endRecordingAsPicture());
 
@@ -299,7 +301,7 @@ void PicturePileImpl::PerformSolidColorAnalysis(
 void PicturePileImpl::GatherPixelRefs(
     const gfx::Rect& content_rect,
     float contents_scale,
-    std::vector<SkPixelRef*>* pixel_refs) const {
+    std::vector<skia::PositionPixelRef>* pixel_refs) const {
   DCHECK_EQ(0u, pixel_refs->size());
   for (PixelRefIterator iter(content_rect, contents_scale, this); iter;
        ++iter) {

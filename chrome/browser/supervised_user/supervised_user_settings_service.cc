@@ -44,7 +44,8 @@ const char kSplitSettings[] = "split_settings";
 namespace {
 
 bool SettingShouldApplyToPrefs(const std::string& name) {
-  return !StartsWithASCII(name, kSupervisedUserInternalItemPrefix, false);
+  return !base::StartsWith(name, kSupervisedUserInternalItemPrefix,
+                           base::CompareCase::INSENSITIVE_ASCII);
 }
 
 }  // namespace
@@ -163,7 +164,7 @@ SyncData SupervisedUserSettingsService::CreateSyncDataForSetting(
     const std::string& name,
     const base::Value& value) {
   std::string json_value;
-  base::JSONWriter::Write(&value, &json_value);
+  base::JSONWriter::Write(value, &json_value);
   ::sync_pb::EntitySpecifics specifics;
   specifics.mutable_managed_user_setting()->set_name(name);
   specifics.mutable_managed_user_setting()->set_value(json_value);
@@ -190,7 +191,7 @@ SyncMergeResult SupervisedUserSettingsService::MergeDataAndStartSyncing(
     const ::sync_pb::ManagedUserSettingSpecifics& supervised_user_setting =
         sync_data.GetSpecifics().managed_user_setting();
     scoped_ptr<base::Value> value(
-        JSONReader::Read(supervised_user_setting.value()));
+        JSONReader::DeprecatedRead(supervised_user_setting.value()));
     std::string name_suffix = supervised_user_setting.name();
     base::DictionaryValue* dict = GetDictionaryAndSplitKey(&name_suffix);
     dict->SetWithoutPathExpansion(name_suffix, value.release());
@@ -274,7 +275,7 @@ SyncError SupervisedUserSettingsService::ProcessSyncChanges(
       case SyncChange::ACTION_ADD:
       case SyncChange::ACTION_UPDATE: {
         scoped_ptr<base::Value> value(
-            JSONReader::Read(supervised_user_setting.value()));
+            JSONReader::DeprecatedRead(supervised_user_setting.value()));
         if (dict->HasKey(key)) {
           DLOG_IF(WARNING, change_type == SyncChange::ACTION_ADD)
               << "Value for key " << key << " already exists";
@@ -334,7 +335,8 @@ base::DictionaryValue* SupervisedUserSettingsService::GetOrCreateDictionary(
     DCHECK(success);
   } else {
     dict = new base::DictionaryValue;
-    store_->SetValue(key, dict, WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+    store_->SetValue(key, make_scoped_ptr(dict),
+                     WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 
   return dict;

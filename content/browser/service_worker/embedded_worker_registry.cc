@@ -143,16 +143,6 @@ void EmbeddedWorkerRegistry::OnWorkerStopped(
   found->second->OnStopped();
 }
 
-void EmbeddedWorkerRegistry::OnPausedAfterDownload(
-    int process_id, int embedded_worker_id) {
-  WorkerInstanceMap::iterator found = worker_map_.find(embedded_worker_id);
-  DCHECK(found != worker_map_.end());
-  DCHECK_EQ(found->second->process_id(), process_id);
-  if (found == worker_map_.end() || found->second->process_id() != process_id)
-    return;
-  found->second->OnPausedAfterDownload();
-}
-
 void EmbeddedWorkerRegistry::OnReportException(
     int embedded_worker_id,
     const base::string16& error_message,
@@ -286,7 +276,11 @@ void EmbeddedWorkerRegistry::RemoveWorker(int process_id,
                                           int embedded_worker_id) {
   DCHECK(ContainsKey(worker_map_, embedded_worker_id));
   worker_map_.erase(embedded_worker_id);
-  worker_process_map_.erase(process_id);
+  if (!ContainsKey(worker_process_map_, process_id))
+    return;
+  worker_process_map_[process_id].erase(embedded_worker_id);
+  if (worker_process_map_[process_id].empty())
+    worker_process_map_.erase(process_id);
 }
 
 }  // namespace content

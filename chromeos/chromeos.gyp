@@ -174,8 +174,6 @@
       'dbus/fake_image_burner_client.h',
       'dbus/fake_introspectable_client.cc',
       'dbus/fake_introspectable_client.h',
-      'dbus/fake_leadership_daemon_manager_client.cc',
-      'dbus/fake_leadership_daemon_manager_client.h',
       'dbus/fake_lorgnette_manager_client.cc',
       'dbus/fake_lorgnette_manager_client.h',
       'dbus/fake_modem_messaging_client.cc',
@@ -194,6 +192,8 @@
       'dbus/fake_peer_daemon_manager_client.h',
       'dbus/fake_permission_broker_client.cc',
       'dbus/fake_permission_broker_client.h',
+      'dbus/fake_power_manager_client.cc',
+      'dbus/fake_power_manager_client.h',
       'dbus/fake_privet_daemon_manager_client.cc',
       'dbus/fake_privet_daemon_manager_client.h',
       'dbus/fake_shill_device_client.cc',
@@ -218,12 +218,8 @@
       'dbus/image_burner_client.h',
       'dbus/introspectable_client.cc',
       'dbus/introspectable_client.h',
-      'dbus/leadership_daemon_manager_client.cc',
-      'dbus/leadership_daemon_manager_client.h',
       'dbus/lorgnette_manager_client.cc',
       'dbus/lorgnette_manager_client.h',
-      'dbus/metronome_client.cc',
-      'dbus/metronome_client.h',
       'dbus/modem_messaging_client.cc',
       'dbus/modem_messaging_client.h',
       'dbus/nfc_adapter_client.cc',
@@ -288,6 +284,8 @@
       'dbus/volume_state.h',
       'disks/disk_mount_manager.cc',
       'disks/disk_mount_manager.h',
+      'disks/suspend_unmount_manager.cc',
+      'disks/suspend_unmount_manager.h',
       'geolocation/geoposition.cc',
       'geolocation/geoposition.h',
       'geolocation/simple_geolocation_provider.cc',
@@ -312,10 +310,6 @@
       'login/auth/key.h',
       'login/auth/login_performer.cc',
       'login/auth/login_performer.h',
-      'login/auth/online_attempt.cc',
-      'login/auth/online_attempt.h',
-      'login/auth/online_attempt_host.cc',
-      'login/auth/online_attempt_host.h',
       'login/auth/stub_authenticator.cc',
       'login/auth/stub_authenticator.h',
       'login/auth/test_attempt_state.cc',
@@ -443,6 +437,8 @@
       'settings/timezone_settings.h',
       'settings/timezone_settings_helper.cc',
       'settings/timezone_settings_helper.h',
+      'system/devicetype.cc',
+      'system/devicetype.h',
       'system/name_value_pairs_parser.cc',
       'system/name_value_pairs_parser.h',
       'system/statistics_provider.cc',
@@ -474,6 +470,7 @@
       'dbus/cros_disks_client_unittest.cc',
       'dbus/dbus_client_bundle_unittest.cc',
       'dbus/fake_easy_unlock_client_unittest.cc',
+      'dbus/fake_power_manager_client_unittest.cc',
       'dbus/gsm_sms_client_unittest.cc',
       'dbus/introspectable_client_unittest.cc',
       'dbus/modem_messaging_client_unittest.cc',
@@ -491,6 +488,7 @@
       'dbus/shill_service_client_unittest.cc',
       'dbus/shill_third_party_vpn_driver_client_unittest.cc',
       'disks/disk_mount_manager_unittest.cc',
+      'disks/suspend_unmount_manager_unittest.cc',
       'geolocation/simple_geolocation_unittest.cc',
       'login/auth/key_unittest.cc',
       'login/login_state_unittest.cc',
@@ -546,6 +544,7 @@
         '../components/components.gyp:cloud_policy_proto',
         '../components/components.gyp:device_event_log_component',
         '../components/components.gyp:onc_component',
+        '../components/components.gyp:proxy_config',
         '../crypto/crypto.gyp:crypto',
         '../dbus/dbus.gyp:dbus',
         '../google_apis/google_apis.gyp:google_apis',
@@ -570,6 +569,7 @@
       'type': 'static_library',
       'dependencies': [
         '../build/linux/system.gyp:dbus',
+	'../google_apis/google_apis.gyp:google_apis_test_support',
         '../testing/gmock.gyp:gmock',
         'chromeos',
         'chromeos_test_support_without_gmock',
@@ -630,7 +630,6 @@
       'target_name': 'chromeos_test_support_without_gmock',
       'type': 'static_library',
       'export_dependent_settings': [
-        # fake_power_manager_client.h includes pb.h files.
         'power_manager_proto',
       ],
       'dependencies': [
@@ -643,8 +642,6 @@
       ],
       # If you edit the file list of this target, please edit BUILD.gn as well.
       'sources': [
-        'dbus/fake_power_manager_client.cc',
-        'dbus/fake_power_manager_client.h',
         'dbus/fake_session_manager_client.cc',
         'dbus/fake_session_manager_client.h',
         'dbus/fake_shill_manager_client.cc',
@@ -667,6 +664,7 @@
         '../build/linux/system.gyp:dbus',
         '../build/linux/system.gyp:ssl',
         '../components/components.gyp:onc_component',
+        '../components/components.gyp:proxy_config',
         '../crypto/crypto.gyp:crypto',
         '../crypto/crypto.gyp:crypto_test_support',
         '../dbus/dbus.gyp:dbus_test_support',
@@ -742,5 +740,24 @@
       },
       'includes': ['../build/protoc.gypi'],
     },
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'chromeos_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'chromeos_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'chromeos_unittests.isolate',
+          ],
+        },
+      ],
+    }],
   ],
 }

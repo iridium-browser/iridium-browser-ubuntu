@@ -44,12 +44,8 @@
 namespace blink {
 
 class Blob;
-class CanvasRenderingContext2D;
 class EventTarget;
 class ExceptionState;
-class HTMLCanvasElement;
-class HTMLImageElement;
-class HTMLVideoElement;
 class ImageBitmap;
 class ImageData;
 class ExecutionContext;
@@ -58,14 +54,6 @@ class ImageBitmapFactories final : public NoBaseWillBeGarbageCollectedFinalized<
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ImageBitmapFactories);
 
 public:
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, HTMLImageElement*, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, HTMLImageElement*, int sx, int sy, int sw, int sh, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, HTMLVideoElement*, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, HTMLVideoElement*, int sx, int sy, int sw, int sh, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, CanvasRenderingContext2D*, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, CanvasRenderingContext2D*, int sx, int sy, int sw, int sh, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, HTMLCanvasElement*, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, HTMLCanvasElement*, int sx, int sy, int sw, int sh, ExceptionState&);
     static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, Blob*, ExceptionState&);
     static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, Blob*, int sx, int sy, int sw, int sh, ExceptionState&);
     static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, ImageData*, ExceptionState&);
@@ -93,7 +81,7 @@ private:
 
         DECLARE_TRACE();
 
-        virtual ~ImageBitmapLoader() { }
+        ~ImageBitmapLoader() override { }
 
     private:
         ImageBitmapLoader(ImageBitmapFactories&, const IntRect&, ScriptState*);
@@ -101,14 +89,14 @@ private:
         void rejectPromise();
 
         // FileReaderLoaderClient
-        virtual void didStartLoading() override { }
-        virtual void didReceiveData() override { }
-        virtual void didFinishLoading() override;
-        virtual void didFail(FileError::ErrorCode) override;
+        void didStartLoading() override { }
+        void didReceiveData() override { }
+        void didFinishLoading() override;
+        void didFail(FileError::ErrorCode) override;
 
         FileReaderLoader m_loader;
         RawPtrWillBeMember<ImageBitmapFactories> m_factory;
-        RefPtrWillBeMember<ScriptPromiseResolver> m_resolver;
+        Member<ScriptPromiseResolver> m_resolver;
         IntRect m_cropRect;
     };
 

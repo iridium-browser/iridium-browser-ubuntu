@@ -24,10 +24,11 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
 import android.provider.Settings;
-import android.util.Log;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.SuppressFBWarnings;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,7 +36,7 @@ import java.util.List;
 
 @JNINamespace("media")
 class AudioManagerAndroid {
-    private static final String TAG = "AudioManagerAndroid";
+    private static final String TAG = "cr.media";
 
     // Set to true to enable debug logs. Avoid in production builds.
     // NOTE: always check in as false.
@@ -334,6 +335,10 @@ class AudioManagerAndroid {
             }
 
             stopObservingVolumeChanges();
+            stopBluetoothSco();
+            synchronized (mLock) {
+                mRequestedAudioDevice = DEVICE_INVALID;
+            }
 
             // Restore previously stored audio states.
             setMicrophoneMute(mSavedIsMicrophoneMute);
@@ -405,6 +410,7 @@ class AudioManagerAndroid {
      * Required permissions: android.Manifest.permission.MODIFY_AUDIO_SETTINGS
      * and android.Manifest.permission.RECORD_AUDIO.
      */
+    @SuppressFBWarnings("UC_USELESS_OBJECT")
     @CalledByNative
     private AudioDeviceName[] getAudioInputDeviceNames() {
         if (DEBUG) logd("getAudioInputDeviceNames");
@@ -790,11 +796,7 @@ class AudioManagerAndroid {
                         break;
                 }
 
-                // Update the existing device selection, but only if a specific
-                // device has already been selected explicitly.
-                if (deviceHasBeenRequested()) {
-                    updateDeviceActivation();
-                } else if (DEBUG) {
+                if (DEBUG) {
                     reportUpdate();
                 }
             }
@@ -834,6 +836,14 @@ class AudioManagerAndroid {
                         mBluetoothScoState = STATE_BLUETOOTH_SCO_ON;
                         break;
                     case AudioManager.SCO_AUDIO_STATE_DISCONNECTED:
+                        if (mBluetoothScoState != STATE_BLUETOOTH_SCO_TURNING_OFF) {
+                            // Bluetooth is probably powered off during the call.
+                            // Update the existing device selection, but only if a specific
+                            // device has already been selected explicitly.
+                            if (deviceHasBeenRequested()) {
+                                updateDeviceActivation();
+                            }
+                        }
                         mBluetoothScoState = STATE_BLUETOOTH_SCO_OFF;
                         break;
                     case AudioManager.SCO_AUDIO_STATE_CONNECTING:
@@ -892,6 +902,7 @@ class AudioManagerAndroid {
         if (!mAudioManager.isBluetoothScoOn()) {
             // TODO(henrika): can we do anything else than logging here?
             loge("Unable to stop BT SCO since it is already disabled");
+            mBluetoothScoState = STATE_BLUETOOTH_SCO_OFF;
             return;
         }
 
@@ -1004,12 +1015,12 @@ class AudioManagerAndroid {
      * TODO(henrika): add support for state change listener.
      */
     private void reportUpdate() {
-        synchronized (mLock) {
-            List<String> devices = new ArrayList<String>();
-            for (int i = 0; i < DEVICE_COUNT; ++i) {
-                if (mAudioDevices[i]) devices.add(DEVICE_NAMES[i]);
-            }
-            if (DEBUG) {
+        if (DEBUG) {
+            synchronized (mLock) {
+                List<String> devices = new ArrayList<String>();
+                for (int i = 0; i < DEVICE_COUNT; ++i) {
+                    if (mAudioDevices[i]) devices.add(DEVICE_NAMES[i]);
+                }
                 logd("reportUpdate: requested=" + mRequestedAudioDevice
                         + ", btSco=" + mBluetoothScoState
                         + ", devices=" + devices);
@@ -1055,11 +1066,15 @@ class AudioManagerAndroid {
                     if (DEBUG) logd("SettingsObserver.onChange: " + selfChange);
                     super.onChange(selfChange);
 
+                    /**
+                     * According to https://crbug.com/488332, on some Samsung devices we may
+                     * fail to verify the mode is MODE_IN_COMMUNICATION as we set previously.
+                     * Disable the check as a temporary fix until we understand what's going on.
                     // Ensure that the observer is activated during communication mode.
                     if (mAudioManager.getMode() != AudioManager.MODE_IN_COMMUNICATION) {
                         throw new IllegalStateException(
                                 "Only enable SettingsObserver in COMM mode");
-                    }
+                    }*/
 
                     // Get stream volume for the voice stream and deliver callback if
                     // the volume index is zero. It is not possible to move the volume

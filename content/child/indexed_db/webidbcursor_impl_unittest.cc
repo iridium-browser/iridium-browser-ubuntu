@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "content/child/indexed_db/indexed_db_dispatcher.h"
 #include "content/child/indexed_db/indexed_db_key_builders.h"
@@ -114,15 +115,23 @@ class MockContinueCallbacks : public WebIDBCallbacks {
   WebVector<WebBlobInfo>* web_blob_info_;
 };
 
+class MockSyncMessageFilter : public IPC::SyncMessageFilter {
+ public:
+  MockSyncMessageFilter()
+      : SyncMessageFilter(nullptr, false /* is_channel_send_thread_safe */) {}
+
+ private:
+  ~MockSyncMessageFilter() override {}
+};
+
 }  // namespace
 
 class WebIDBCursorImplTest : public testing::Test {
  public:
   WebIDBCursorImplTest() {
     null_key_.assignNull();
-    sync_message_filter_ = new IPC::SyncMessageFilter(NULL);
     thread_safe_sender_ = new ThreadSafeSender(
-        base::MessageLoopProxy::current(), sync_message_filter_.get());
+        base::ThreadTaskRunnerHandle::Get(), new MockSyncMessageFilter);
     dispatcher_ =
         make_scoped_ptr(new MockDispatcher(thread_safe_sender_.get()));
   }
@@ -134,8 +143,6 @@ class WebIDBCursorImplTest : public testing::Test {
   scoped_ptr<MockDispatcher> dispatcher_;
 
  private:
-  scoped_refptr<IPC::SyncMessageFilter> sync_message_filter_;
-
   DISALLOW_COPY_AND_ASSIGN(WebIDBCursorImplTest);
 };
 

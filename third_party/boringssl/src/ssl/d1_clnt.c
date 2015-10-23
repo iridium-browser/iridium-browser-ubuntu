@@ -155,12 +155,7 @@ int dtls1_connect(SSL *s) {
     state = s->state;
 
     switch (s->state) {
-      case SSL_ST_RENEGOTIATE:
-        s->renegotiate = 1;
-        s->state = SSL_ST_CONNECT;
-      /* break */
       case SSL_ST_CONNECT:
-      case SSL_ST_BEFORE | SSL_ST_CONNECT:
         if (cb != NULL) {
           cb(s, SSL_CB_HANDSHAKE_START, 1);
         }
@@ -193,9 +188,8 @@ int dtls1_connect(SSL *s) {
       case SSL3_ST_CW_CLNT_HELLO_B:
         s->shutdown = 0;
 
-        /* every DTLS ClientHello resets Finished MAC */
-        if (!ssl3_init_finished_mac(s)) {
-          OPENSSL_PUT_ERROR(SSL, dtls1_connect, ERR_R_INTERNAL_ERROR);
+        if (!ssl3_init_handshake_buffer(s)) {
+          OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
           ret = -1;
           goto end;
         }
@@ -283,13 +277,6 @@ int dtls1_connect(SSL *s) {
         }
         s->state = SSL3_ST_CR_CERT_REQ_A;
         s->init_num = 0;
-
-        /* at this point we check that we have the
-         * required stuff from the server */
-        if (!ssl3_check_cert_and_algorithm(s)) {
-          ret = -1;
-          goto end;
-        }
         break;
 
       case SSL3_ST_CR_CERT_REQ_A:
@@ -472,7 +459,6 @@ int dtls1_connect(SSL *s) {
         ssl_free_wbio_buffer(s);
 
         s->init_num = 0;
-        s->renegotiate = 0;
         s->s3->initial_handshake_complete = 1;
 
         ssl_update_cache(s, SSL_SESS_CACHE_CLIENT);
@@ -489,7 +475,7 @@ int dtls1_connect(SSL *s) {
         goto end;
 
       default:
-        OPENSSL_PUT_ERROR(SSL, dtls1_connect, SSL_R_UNKNOWN_STATE);
+        OPENSSL_PUT_ERROR(SSL, SSL_R_UNKNOWN_STATE);
         ret = -1;
         goto end;
     }
@@ -544,7 +530,7 @@ static int dtls1_get_hello_verify(SSL *s) {
       !CBS_get_u8_length_prefixed(&hello_verify_request, &cookie) ||
       CBS_len(&hello_verify_request) != 0) {
     al = SSL_AD_DECODE_ERROR;
-    OPENSSL_PUT_ERROR(SSL, dtls1_get_hello_verify, SSL_R_DECODE_ERROR);
+    OPENSSL_PUT_ERROR(SSL, SSL_R_DECODE_ERROR);
     goto f_err;
   }
 

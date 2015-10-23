@@ -12,6 +12,7 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/password_manager/core/browser/mock_password_store.h"
 #include "sync/api/sync_change_processor.h"
@@ -50,7 +51,7 @@ namespace {
 // PasswordForm values for tests.
 const autofill::PasswordForm::Type kArbitraryType =
     autofill::PasswordForm::TYPE_GENERATED;
-const char kAvatarUrl[] = "https://fb.com/Avatar";
+const char kIconUrl[] = "https://fb.com/Icon";
 const char kDisplayName[] = "Agent Smith";
 const char kFederationUrl[] = "https://fb.com/federation_url";
 const char kPassword[] = "abcdef";
@@ -132,7 +133,7 @@ SyncData CreateSyncData(const std::string& signon_realm) {
   password_specifics->set_type(autofill::PasswordForm::TYPE_GENERATED);
   password_specifics->set_times_used(3);
   password_specifics->set_display_name("Mr. X");
-  password_specifics->set_avatar_url("https://accounts.google.com/Avatar");
+  password_specifics->set_avatar_url("https://accounts.google.com/Icon");
   password_specifics->set_federation_url("https://google.com/federation");
   password_specifics->set_username_value("kingkong");
   password_specifics->set_password_value("sicrit");
@@ -223,6 +224,7 @@ class PasswordSyncableServiceTest : public testing::Test {
   MockPasswordSyncableService* service() { return wrapper_.service(); }
 
  protected:
+  base::MessageLoop message_loop_;
   scoped_ptr<MockSyncChangeProcessor> processor_;
 
  private:
@@ -280,7 +282,7 @@ TEST_F(PasswordSyncableServiceTest, AdditionOnlyInPasswordStore) {
   form.times_used = kTimesUsed;
   form.type = kArbitraryType;
   form.display_name = base::ASCIIToUTF16(kDisplayName);
-  form.avatar_url = GURL(kAvatarUrl);
+  form.icon_url = GURL(kIconUrl);
   form.federation_url = GURL(kFederationUrl);
   form.username_value = base::ASCIIToUTF16(kUsername);
   form.password_value = base::ASCIIToUTF16(kPassword);
@@ -420,7 +422,7 @@ TEST_F(PasswordSyncableServiceTest, GetAllSyncData) {
   form1.times_used = kTimesUsed;
   form1.type = kArbitraryType;
   form1.display_name = base::ASCIIToUTF16(kDisplayName);
-  form1.avatar_url = GURL(kAvatarUrl);
+  form1.icon_url = GURL(kIconUrl);
   form1.federation_url = GURL(kFederationUrl);
   form1.username_value = base::ASCIIToUTF16(kUsername);
   form1.password_value = base::ASCIIToUTF16(kPassword);

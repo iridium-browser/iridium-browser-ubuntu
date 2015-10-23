@@ -10,19 +10,18 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkDraw.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
 #include "third_party/skia/include/core/SkRRect.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "third_party/skia/include/core/SkTextBlob.h"
 #include "third_party/skia/include/utils/SkNoSaveLayerCanvas.h"
 #include "third_party/skia/src/core/SkRasterClip.h"
 
 namespace skia {
 
 namespace {
-
-// URI label for a discardable SkPixelRef.
-const char kLabelDiscardable[] = "discardable";
 
 class DiscardablePixelRefSet {
  public:
@@ -34,16 +33,16 @@ class DiscardablePixelRefSet {
            const SkRect& rect,
            const SkMatrix& matrix,
            SkFilterQuality filter_quality) {
-    // Only save discardable pixel refs.
-    if (pixel_ref->getURI() &&
-        !strcmp(pixel_ref->getURI(), kLabelDiscardable)) {
-      PixelRefUtils::PositionPixelRef position_pixel_ref;
-      position_pixel_ref.pixel_ref = pixel_ref;
-      position_pixel_ref.pixel_ref_rect = rect;
-      position_pixel_ref.matrix = matrix;
-      position_pixel_ref.filter_quality = filter_quality;
-      pixel_refs_->push_back(position_pixel_ref);
-    }
+    // We should only be saving discardable pixel refs.
+    SkASSERT(pixel_ref);
+    SkASSERT(pixel_ref->isLazyGenerated());
+
+    PixelRefUtils::PositionPixelRef position_pixel_ref;
+    position_pixel_ref.pixel_ref = pixel_ref;
+    position_pixel_ref.pixel_ref_rect = rect;
+    position_pixel_ref.matrix = matrix;
+    position_pixel_ref.filter_quality = filter_quality;
+    pixel_refs_->push_back(position_pixel_ref);
   }
 
  private:
@@ -98,7 +97,7 @@ class GatherPixelRefDevice : public SkBitmapDevice {
     if (GetBitmapFromPaint(paint, &bitmap)) {
       SkRect mapped_rect;
       draw.fMatrix->mapRect(&mapped_rect, rect);
-      if (mapped_rect.intersect(SkRect::Make(draw.fRC->getBounds()))) {
+      if (mapped_rect.intersects(SkRect::Make(draw.fRC->getBounds()))) {
         AddBitmap(bitmap, mapped_rect, *draw.fMatrix, paint.getFilterQuality());
       }
     }
@@ -154,7 +153,7 @@ class GatherPixelRefDevice : public SkBitmapDevice {
                       const SkRect* src_or_null,
                       const SkRect& dst,
                       const SkPaint& paint,
-                      SkCanvas::DrawBitmapRectFlags flags) override {
+                      SkCanvas::SrcRectConstraint) override {
     SkRect bitmap_rect = SkRect::MakeWH(bitmap.width(), bitmap.height());
     SkMatrix matrix;
     matrix.setRectToRect(bitmap_rect, dst, SkMatrix::kFill_ScaleToFit);
@@ -180,6 +179,27 @@ class GatherPixelRefDevice : public SkBitmapDevice {
     SkBitmap paint_bitmap;
     if (GetBitmapFromPaint(paint, &paint_bitmap))
       AddBitmap(paint_bitmap, mapped_rect, identity, paint.getFilterQuality());
+  }
+  void drawImage(const SkDraw& draw,
+                 const SkImage* image,
+                 SkScalar x,
+                 SkScalar y,
+                 const SkPaint& paint) override {
+    const SkMatrix image_matrix = SkMatrix::MakeTrans(x, y);
+    DrawImageInternal(draw, image, image_matrix, paint);
+  }
+  void drawImageRect(const SkDraw& draw,
+                     const SkImage* image,
+                     const SkRect* src_or_null,
+                     const SkRect& dst,
+                     const SkPaint& paint,
+                     SkCanvas::SrcRectConstraint) override {
+    const SkRect src = src_or_null
+        ? *src_or_null
+        : SkRect::MakeIWH(image->width(), image->height());
+    const SkMatrix image_matrix =
+        SkMatrix::MakeRectToRect(src, dst, SkMatrix::kFill_ScaleToFit);
+    DrawImageInternal(draw, image, image_matrix, paint);
   }
   void drawText(const SkDraw& draw,
                 const void* text,
@@ -296,6 +316,19 @@ class GatherPixelRefDevice : public SkBitmapDevice {
 
     GatherPixelRefDevice::drawRect(draw, bounds, paint);
   }
+  void drawTextBlob(const SkDraw& draw,
+                    const SkTextBlob* blob,
+                    SkScalar x, SkScalar y,
+                    const SkPaint& paint,
+                    SkDrawFilter*) override {
+    SkBitmap bitmap;
+    if (!GetBitmapFromPaint(paint, &bitmap))
+      return;
+
+    const SkRect bounds = blob->bounds().makeOffset(x, y);
+    GatherPixelRefDevice::drawRect(draw, bounds, paint);
+  }
+
   void drawVertices(const SkDraw& draw,
                     SkCanvas::VertexMode,
                     int vertex_count,
@@ -339,11 +372,22 @@ class GatherPixelRefDevice : public SkBitmapDevice {
                  const SkRect& rect,
                  const SkMatrix& matrix,
                  SkFilterQuality filter_quality) {
-    SkRect canvas_rect = SkRect::MakeWH(width(), height());
-    SkRect paint_rect = SkRect::MakeEmpty();
-    if (paint_rect.intersect(rect, canvas_rect)) {
-      pixel_ref_set_->Add(bm.pixelRef(), paint_rect, matrix,
-                          filter_quality);
+    const SkRect canvas_rect = SkRect::Make(imageInfo().bounds());
+    if (rect.intersects(canvas_rect) && bm.pixelRef()->isLazyGenerated()) {
+      pixel_ref_set_->Add(bm.pixelRef(), rect, matrix, filter_quality);
+    }
+  }
+
+  void AddImage(const SkImage* image,
+                const SkRect& rect,
+                const SkMatrix& matrix,
+                SkFilterQuality filter_quality) {
+    const SkRect canvas_rect = SkRect::Make(imageInfo().bounds());
+    if (rect.intersects(canvas_rect) && image->isLazyGenerated()) {
+      SkBitmap bm;
+      if (image->asLegacyBitmap(&bm, SkImage::kRO_LegacyBitmapMode) && bm.pixelRef()) {
+        pixel_ref_set_->Add(bm.pixelRef(), rect, matrix, filter_quality);
+      }
     }
   }
 
@@ -356,6 +400,23 @@ class GatherPixelRefDevice : public SkBitmapDevice {
         return shader->asABitmap(bm, NULL, NULL);
     }
     return false;
+  }
+
+  void DrawImageInternal(const SkDraw& draw,
+                         const SkImage* image,
+                         const SkMatrix& matrix,
+                         const SkPaint& paint) {
+      const SkMatrix total_matrix = SkMatrix::Concat(*draw.fMatrix, matrix);
+      const SkRect image_rect = SkRect::MakeIWH(image->width(), image->height());
+      SkRect mapped_rect;
+      total_matrix.mapRect(&mapped_rect, image_rect);
+      AddImage(image, mapped_rect, total_matrix, paint.getFilterQuality());
+
+      SkBitmap paint_bitmap;
+      if (GetBitmapFromPaint(paint, &paint_bitmap)) {
+        AddBitmap(paint_bitmap, mapped_rect, total_matrix,
+                  paint.getFilterQuality());
+      }
   }
 };
 
@@ -370,14 +431,14 @@ void PixelRefUtils::GatherDiscardablePixelRefs(
   SkRect picture_bounds = picture->cullRect();
   SkIRect picture_ibounds = picture_bounds.roundOut();
   SkBitmap empty_bitmap;
-  empty_bitmap.setInfo(SkImageInfo::MakeUnknown(picture_ibounds.width(),
-                                                picture_ibounds.height()));
+  // Use right/bottom as the size so that we don't need a translate and, as a
+  // result, the information is returned relative to the picture's origin.
+  empty_bitmap.setInfo(SkImageInfo::MakeUnknown(picture_ibounds.right(),
+                                                picture_ibounds.bottom()));
 
   GatherPixelRefDevice device(empty_bitmap, &pixel_ref_set);
   SkNoSaveLayerCanvas canvas(&device);
 
-  // Draw the picture pinned against our top/left corner.
-  canvas.translate(-picture_bounds.left(), -picture_bounds.top());
   canvas.drawPicture(picture);
 }
 

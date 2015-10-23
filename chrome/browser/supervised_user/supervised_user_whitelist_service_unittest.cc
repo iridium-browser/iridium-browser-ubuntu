@@ -27,6 +27,10 @@
 #include "sync/protocol/sync.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if !defined(OS_ANDROID)
+#include "components/safe_json/testing_json_parser.h"
+#endif
+
 namespace {
 
 const char kClientId[] = "client-id";
@@ -90,11 +94,6 @@ class SupervisedUserWhitelistServiceTest : public testing::Test {
     service_->AddSiteListsChangedCallback(
         base::Bind(&SupervisedUserWhitelistServiceTest::OnSiteListsChanged,
                    base::Unretained(this)));
-    SupervisedUserSiteList::SetLoadInProcessForTesting(true);
-  }
-
-  ~SupervisedUserWhitelistServiceTest() override {
-    SupervisedUserSiteList::SetLoadInProcessForTesting(false);
   }
 
  protected:
@@ -155,6 +154,10 @@ class SupervisedUserWhitelistServiceTest : public testing::Test {
 
   content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
+
+#if !defined(OS_ANDROID)
+  safe_json::TestingJsonParser::ScopedFactoryOverride factory_override_;
+#endif
 
   scoped_ptr<MockSupervisedUserWhitelistInstaller> installer_;
   scoped_ptr<SupervisedUserWhitelistService> service_;

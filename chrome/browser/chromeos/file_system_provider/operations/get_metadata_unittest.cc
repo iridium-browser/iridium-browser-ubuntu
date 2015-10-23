@@ -43,8 +43,8 @@ void CreateRequestValueFromJSON(const std::string& json,
 
   int json_error_code;
   std::string json_error_msg;
-  scoped_ptr<base::Value> value(base::JSONReader::ReadAndReturnError(
-      json, base::JSON_PARSE_RFC, &json_error_code, &json_error_msg));
+  scoped_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
+      json, base::JSON_PARSE_RFC, &json_error_code, &json_error_msg);
   ASSERT_TRUE(value.get()) << json_error_msg;
 
   base::ListValue* value_as_list;
@@ -100,7 +100,8 @@ class FileSystemProviderOperationsGetMetadataTest : public testing::Test {
   void SetUp() override {
     file_system_info_ = ProvidedFileSystemInfo(
         kExtensionId, MountOptions(kFileSystemId, "" /* display_name */),
-        base::FilePath(), false /* configurable */, extensions::SOURCE_FILE);
+        base::FilePath(), false /* configurable */, true /* watchable */,
+        extensions::SOURCE_FILE);
   }
 
   ProvidedFileSystemInfo file_system_info_;

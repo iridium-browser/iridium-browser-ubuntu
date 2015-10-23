@@ -5,22 +5,23 @@
 #include "config.h"
 #include "core/paint/SVGInlineTextBoxPainter.h"
 
-#include "core/dom/DocumentMarkerController.h"
-#include "core/dom/RenderedDocumentMarker.h"
 #include "core/editing/Editor.h"
+#include "core/editing/markers/DocumentMarkerController.h"
+#include "core/editing/markers/RenderedDocumentMarker.h"
 #include "core/frame/LocalFrame.h"
-#include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutTheme.h"
+#include "core/layout/api/SelectionState.h"
+#include "core/layout/line/InlineFlowBox.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/layout/svg/line/SVGInlineTextBox.h"
-#include "core/paint/InlinePainter.h"
 #include "core/paint/InlineTextBoxPainter.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/SVGPaintContext.h"
 #include "core/style/ShadowList.h"
+#include "platform/graphics/GraphicsContextStateSaver.h"
 
 namespace blink {
 
@@ -31,10 +32,9 @@ static inline bool textShouldBePainted(LayoutSVGInlineText& textLayoutObject)
     return textLayoutObject.scaledFont().fontDescription().computedPixelSize();
 }
 
-bool SVGInlineTextBoxPainter::shouldPaintSelection() const
+bool SVGInlineTextBoxPainter::shouldPaintSelection(const PaintInfo& paintInfo) const
 {
-    bool isPrinting = m_svgInlineTextBox.layoutObject().document().printing();
-    return !isPrinting && m_svgInlineTextBox.selectionState() != LayoutObject::SelectionNone;
+    return !paintInfo.isPrinting() && m_svgInlineTextBox.selectionState() != SelectionNone;
 }
 
 void SVGInlineTextBoxPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -49,30 +49,26 @@ void SVGInlineTextBoxPainter::paint(const PaintInfo& paintInfo, const LayoutPoin
     // We're explicitly not supporting composition & custom underlines and custom highlighters -- unlike InlineTextBox.
     // If we ever need that for SVG, it's very easy to refactor and reuse the code.
 
-    if (paintInfo.phase == PaintPhaseSelection && !shouldPaintSelection())
+    if (paintInfo.phase == PaintPhaseSelection && !shouldPaintSelection(paintInfo))
         return;
 
     LayoutSVGInlineText& textLayoutObject = toLayoutSVGInlineText(m_svgInlineTextBox.layoutObject());
     if (!textShouldBePainted(textLayoutObject))
         return;
 
-    LayoutObject& parentLayoutObject = m_svgInlineTextBox.parent()->layoutObject();
-    const ComputedStyle& style = parentLayoutObject.styleRef();
+    DisplayItem::Type displayItemType = DisplayItem::paintPhaseToDrawingType(paintInfo.phase);
+    if (!DrawingRecorder::useCachedDrawingIfPossible(*paintInfo.context, m_svgInlineTextBox, displayItemType)) {
+        LayoutObject& parentLayoutObject = m_svgInlineTextBox.parent()->layoutObject();
+        const ComputedStyle& style = parentLayoutObject.styleRef();
 
-    {
-        DrawingRecorder recorder(*paintInfo.context, m_svgInlineTextBox, DisplayItem::paintPhaseToDrawingType(paintInfo.phase), paintInfo.rect);
-        if (!recorder.canUseCachedDrawing()) {
-            InlineTextBoxPainter(m_svgInlineTextBox).paintDocumentMarkers(
-                paintInfo.context, FloatPoint(paintOffset), style,
-                textLayoutObject.scaledFont(), true);
+        DrawingRecorder recorder(*paintInfo.context, m_svgInlineTextBox, displayItemType, paintInfo.rect);
+        InlineTextBoxPainter(m_svgInlineTextBox).paintDocumentMarkers(
+            paintInfo.context, paintOffset, style,
+            textLayoutObject.scaledFont(), true);
 
-            if (!m_svgInlineTextBox.textFragments().isEmpty())
-                paintTextFragments(paintInfo, parentLayoutObject);
-        }
+        if (!m_svgInlineTextBox.textFragments().isEmpty())
+            paintTextFragments(paintInfo, parentLayoutObject);
     }
-
-    if (style.hasOutline() && parentLayoutObject.isLayoutInline())
-        InlinePainter(toLayoutInline(parentLayoutObject)).paintOutline(paintInfo, paintOffset);
 }
 
 void SVGInlineTextBoxPainter::paintTextFragments(const PaintInfo& paintInfo, LayoutObject& parentLayoutObject)
@@ -84,7 +80,7 @@ void SVGInlineTextBoxPainter::paintTextFragments(const PaintInfo& paintInfo, Lay
     bool hasVisibleStroke = svgStyle.hasVisibleStroke();
 
     const ComputedStyle* selectionStyle = &style;
-    bool shouldPaintSelection = this->shouldPaintSelection();
+    bool shouldPaintSelection = this->shouldPaintSelection(paintInfo);
     if (shouldPaintSelection) {
         selectionStyle = parentLayoutObject.getCachedPseudoStyle(SELECTION);
         if (selectionStyle) {
@@ -153,9 +149,9 @@ void SVGInlineTextBoxPainter::paintSelectionBackground(const PaintInfo& paintInf
     if (m_svgInlineTextBox.layoutObject().style()->visibility() != VISIBLE)
         return;
 
-    ASSERT(!m_svgInlineTextBox.layoutObject().document().printing());
+    ASSERT(!paintInfo.isPrinting());
 
-    if (paintInfo.phase == PaintPhaseSelection || !shouldPaintSelection())
+    if (paintInfo.phase == PaintPhaseSelection || !shouldPaintSelection(paintInfo))
         return;
 
     Color backgroundColor = m_svgInlineTextBox.layoutObject().selectionBackgroundColor();
@@ -312,7 +308,7 @@ void SVGInlineTextBoxPainter::paintTextWithShadows(const PaintInfo& paintInfo, c
     GraphicsContext* context = paintInfo.context;
 
     // Text shadows are disabled when printing. http://crbug.com/258321
-    bool hasShadow = shadowList && !context->printing();
+    bool hasShadow = shadowList && !paintInfo.isPrinting();
 
     FloatPoint textOrigin(fragment.x, fragment.y);
     FloatSize textSize(fragment.width, fragment.height);
@@ -403,7 +399,7 @@ void SVGInlineTextBoxPainter::paintText(const PaintInfo& paintInfo, const Comput
         paintTextWithShadows(paintInfo, style, textRun, fragment, endPosition, fragment.length, resourceMode);
 }
 
-void SVGInlineTextBoxPainter::paintTextMatchMarker(GraphicsContext* context, const FloatPoint&, DocumentMarker* marker, const ComputedStyle& style, const Font& font)
+void SVGInlineTextBoxPainter::paintTextMatchMarker(GraphicsContext* context, const LayoutPoint&, DocumentMarker* marker, const ComputedStyle& style, const Font& font)
 {
     // SVG is only interested in the TextMatch markers.
     if (marker->type() != DocumentMarker::TextMatch)

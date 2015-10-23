@@ -4,10 +4,15 @@
 
 #include "chrome/common/chrome_content_client.h"
 
+#if defined(OS_LINUX)
+#include <fcntl.h>
+#endif  // defined(OS_LINUX)
+
 #include "base/command_line.h"
 #include "base/debug/crash_logging.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/memory/scoped_vector.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -20,14 +25,14 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pepper_flash.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/secure_origin_whitelist.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/common_resources.h"
+#include "components/data_reduction_proxy/content/common/data_reduction_proxy_messages.h"
 #include "components/dom_distiller/core/url_constants.h"
+#include "components/version_info/version_info.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
@@ -41,20 +46,27 @@
 
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
+#if defined(OS_LINUX)
+#include "chrome/common/component_flash_hint_file_linux.h"
+#endif  // defined(OS_LINUX)
+
 #if defined(OS_WIN)
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#elif defined(OS_MACOSX)
-#include "components/nacl/common/nacl_sandbox_type_mac.h"
 #endif
 
 #if !defined(DISABLE_NACL)
 #include "components/nacl/common/nacl_constants.h"
 #include "components/nacl/common/nacl_process_type.h"
+#include "components/nacl/common/nacl_sandbox_type.h"
+#endif
+
+#if defined(ENABLE_EXTENSIONS)
+#include "extensions/common/features/behavior_feature.h"
+#include "extensions/common/features/feature_provider.h"
 #endif
 
 #if defined(ENABLE_PLUGINS)
-#include "chrome/common/pepper_flash.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 #include "ppapi/shared_impl/ppapi_permissions.h"
@@ -78,32 +90,6 @@ const uint32 kPDFPluginPermissions = ppapi::PERMISSION_PRIVATE |
 content::PepperPluginInfo::GetInterfaceFunc g_pdf_get_interface;
 content::PepperPluginInfo::PPP_InitializeModuleFunc g_pdf_initialize_module;
 content::PepperPluginInfo::PPP_ShutdownModuleFunc g_pdf_shutdown_module;
-
-#if defined(ENABLE_REMOTING)
-
-content::PepperPluginInfo::GetInterfaceFunc g_remoting_get_interface;
-content::PepperPluginInfo::PPP_InitializeModuleFunc
-    g_remoting_initialize_module;
-content::PepperPluginInfo::PPP_ShutdownModuleFunc g_remoting_shutdown_module;
-
-#if defined(GOOGLE_CHROME_BUILD)
-const char kRemotingViewerPluginName[] = "Chrome Remote Desktop Viewer";
-#else
-const char kRemotingViewerPluginName[] = "Chromoting Viewer";
-#endif  // defined(GOOGLE_CHROME_BUILD)
-const char kRemotingViewerPluginDescription[] =
-    "This plugin allows you to securely access other computers that have been "
-    "shared with you. To use this plugin you must first install the "
-    "<a href=\"https://chrome.google.com/remotedesktop\">"
-    "Chrome Remote Desktop</a> webapp.";
-// Use a consistent MIME-type regardless of branding.
-const char kRemotingViewerPluginMimeType[] =
-    "application/vnd.chromium.remoting-viewer";
-const char kRemotingViewerPluginMimeExtension[] = "";
-const char kRemotingViewerPluginMimeDescription[] = "";
-const uint32 kRemotingViewerPluginPermissions = ppapi::PERMISSION_PRIVATE |
-                                                ppapi::PERMISSION_DEV;
-#endif  // defined(ENABLE_REMOTING)
 
 #if !defined(DISABLE_NACL)
 content::PepperPluginInfo::GetInterfaceFunc g_nacl_get_interface;
@@ -191,8 +177,8 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       codecs.push_back(kCdmSupportedCodecAac);
       codecs.push_back(kCdmSupportedCodecAvc1);
 #endif  // defined(USE_PROPRIETARY_CODECS)
-      std::string codec_string =
-          JoinString(codecs, kCdmSupportedCodecsValueDelimiter);
+      std::string codec_string = base::JoinString(
+          codecs, std::string(1, kCdmSupportedCodecsValueDelimiter));
       widevine_cdm_mime_type.additional_param_names.push_back(
           base::ASCIIToUTF16(kCdmSupportedCodecsParamName));
       widevine_cdm_mime_type.additional_param_values.push_back(
@@ -207,28 +193,6 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS) &&
         // !defined(WIDEVINE_CDM_IS_COMPONENT)
-
-  // The Remoting Viewer plugin is built-in.
-#if defined(ENABLE_REMOTING)
-  content::PepperPluginInfo info;
-  info.is_internal = true;
-  info.is_out_of_process = true;
-  info.name = kRemotingViewerPluginName;
-  info.description = kRemotingViewerPluginDescription;
-  info.path = base::FilePath::FromUTF8Unsafe(
-      ChromeContentClient::kRemotingViewerPluginPath);
-  content::WebPluginMimeType remoting_mime_type(
-      kRemotingViewerPluginMimeType,
-      kRemotingViewerPluginMimeExtension,
-      kRemotingViewerPluginMimeDescription);
-  info.mime_types.push_back(remoting_mime_type);
-  info.internal_entry_points.get_interface = g_remoting_get_interface;
-  info.internal_entry_points.initialize_module = g_remoting_initialize_module;
-  info.internal_entry_points.shutdown_module = g_remoting_shutdown_module;
-  info.permissions = kRemotingViewerPluginPermissions;
-
-  plugins->push_back(info);
-#endif
 }
 
 content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
@@ -240,13 +204,10 @@ content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
   plugin.path = path;
   plugin.permissions = chrome::kPepperFlashPermissions;
 
-  std::vector<std::string> flash_version_numbers;
-  base::SplitString(version, '.', &flash_version_numbers);
+  std::vector<std::string> flash_version_numbers = base::SplitString(
+      version, ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   if (flash_version_numbers.size() < 1)
     flash_version_numbers.push_back("11");
-  // |SplitString()| puts in an empty string given an empty string. :(
-  else if (flash_version_numbers[0].empty())
-    flash_version_numbers[0] = "11";
   if (flash_version_numbers.size() < 2)
     flash_version_numbers.push_back("2");
   if (flash_version_numbers.size() < 3)
@@ -256,7 +217,7 @@ content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
   // E.g., "Shockwave Flash 10.2 r154":
   plugin.description = plugin.name + " " + flash_version_numbers[0] + "." +
       flash_version_numbers[1] + " r" + flash_version_numbers[2];
-  plugin.version = JoinString(flash_version_numbers, '.');
+  plugin.version = base::JoinString(flash_version_numbers, ".");
   content::WebPluginMimeType swf_mime_type(content::kFlashPluginSwfMimeType,
                                            content::kFlashPluginSwfExtension,
                                            content::kFlashPluginSwfDescription);
@@ -287,6 +248,48 @@ void AddPepperFlashFromCommandLine(
       CreatePepperFlashInfo(base::FilePath(flash_path), flash_version));
 }
 
+#if defined(OS_LINUX)
+// This function tests if DIR_USER_DATA can be accessed, as a simple check to
+// see if the zygote has been sandboxed at this point.
+bool IsUserDataDirAvailable() {
+  base::FilePath user_data_dir;
+  return PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+}
+
+// This method is used on Linux only because of architectural differences in how
+// it loads the component updated flash plugin, and not because the other
+// platforms do not support component updated flash. On other platforms, the
+// component updater sends an IPC message to all threads, at undefined points in
+// time, with the URL of the component updated flash. Because the linux zygote
+// thread has no access to the file system after it warms up, it must preload
+// the component updated flash.
+bool GetComponentUpdatedPepperFlash(content::PepperPluginInfo* plugin) {
+#if defined(FLAPPER_AVAILABLE)
+  if (component_flash_hint_file::DoesHintFileExist()) {
+    base::FilePath flash_path;
+    std::string version;
+    if (component_flash_hint_file::VerifyAndReturnFlashLocation(&flash_path,
+                                                                &version)) {
+      // Test if the file can be mapped as executable. If the user's home
+      // directory is mounted noexec, the component flash plugin will not load.
+      // By testing for this, Chrome can fallback to the bundled flash plugin.
+      if (!component_flash_hint_file::TestExecutableMapping(flash_path)) {
+        LOG(WARNING) << "The component updated flash plugin could not be "
+                        "mapped as executable. Attempting to fallback to the "
+                        "bundled or system plugin.";
+        return false;
+      }
+      *plugin = CreatePepperFlashInfo(flash_path, version);
+      return true;
+    }
+    LOG(ERROR)
+        << "Failed to locate and load the component updated flash plugin.";
+  }
+#endif  // defined(FLAPPER_AVAILABLE)
+  return false;
+}
+#endif  // defined(OS_LINUX)
+
 bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 #if defined(FLAPPER_AVAILABLE)
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -312,23 +315,35 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 #endif  // FLAPPER_AVAILABLE
 }
 
+#if defined(FLAPPER_AVAILABLE)
+bool IsSystemFlashScriptDebuggerPresent() {
 #if defined(OS_WIN)
-const char kPepperFlashDLLBaseName[] =
-#if defined(ARCH_CPU_X86)
-    "pepflashplayer32_";
-#elif defined(ARCH_CPU_X86_64)
-    "pepflashplayer64_";
+  const wchar_t kFlashRegistryRoot[] =
+      L"SOFTWARE\\Macromedia\\FlashPlayerPepper";
+  const wchar_t kIsDebuggerValueName[] = L"isScriptDebugger";
+
+  base::win::RegKey path_key(HKEY_LOCAL_MACHINE, kFlashRegistryRoot, KEY_READ);
+  DWORD debug_value;
+  if (FAILED(path_key.ReadValueDW(kIsDebuggerValueName, &debug_value)))
+    return false;
+
+  return (debug_value == 1);
 #else
-#error Unsupported Windows CPU architecture.
-#endif  // defined(ARCH_CPU_X86)
-#endif  // defined(OS_WIN)
+  // TODO(wfh): implement this on OS X and Linux. crbug.com/497996.
+  return false;
+#endif
+}
+#endif
 
 bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+
 #if defined(FLAPPER_AVAILABLE)
-  // If flapper is available, only try system plugin if
-  // --disable-bundled-ppapi-flash is specified.
-  if (!command_line->HasSwitch(switches::kDisableBundledPpapiFlash))
+  // If flapper is available, only try the system plugin if either:
+  // --disable-bundled-ppapi-flash is specified, or the system debugger is the
+  // Flash Script Debugger.
+  if (!command_line->HasSwitch(switches::kDisableBundledPpapiFlash) &&
+      !IsSystemFlashScriptDebuggerPresent())
     return false;
 #endif  // defined(FLAPPER_AVAILABLE)
 
@@ -337,14 +352,16 @@ bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   if (command_line->HasSwitch(switches::kPpapiFlashPath))
     return false;
 
-  base::FilePath flash_path;
-  if (!PathService::Get(chrome::DIR_PEPPER_FLASH_SYSTEM_PLUGIN, &flash_path))
+  base::FilePath flash_filename;
+  if (!PathService::Get(chrome::FILE_PEPPER_FLASH_SYSTEM_PLUGIN,
+                        &flash_filename))
     return false;
 
-  if (!base::PathExists(flash_path))
+  if (!base::PathExists(flash_filename))
     return false;
 
-  base::FilePath manifest_path(flash_path.AppendASCII("manifest.json"));
+  base::FilePath manifest_path(
+      flash_filename.DirName().AppendASCII("manifest.json"));
 
   std::string manifest_data;
   if (!base::ReadFileToString(manifest_path, &manifest_data))
@@ -361,30 +378,13 @@ bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   if (!chrome::CheckPepperFlashManifest(*manifest, &version))
     return false;
 
-#if defined(OS_WIN)
-  // PepperFlash DLLs on Windows look like basename_v_x_y_z.dll.
-  std::string filename(kPepperFlashDLLBaseName);
-  filename.append(version.GetString());
-  base::ReplaceChars(filename, ".", "_", &filename);
-  filename.append(".dll");
-
-  base::FilePath path(flash_path.Append(base::ASCIIToUTF16(filename)));
-#else
-  // PepperFlash on OS X is called PepperFlashPlayer.plugin
-  base::FilePath path(flash_path.Append(chrome::kPepperFlashPluginFilename));
-#endif
-
-  if (!base::PathExists(path))
-    return false;
-
-  *plugin = CreatePepperFlashInfo(path, version.GetString());
+  *plugin = CreatePepperFlashInfo(flash_filename, version.GetString());
   return true;
 }
 #endif  //  defined(ENABLE_PLUGINS)
 
 std::string GetProduct() {
-  chrome::VersionInfo version_info;
-  return version_info.ProductNameAndVersionForUserAgent();
+  return version_info::GetProductNameAndVersionForUserAgent();
 }
 
 }  // namespace
@@ -405,19 +405,6 @@ std::string GetUserAgent() {
 #endif
   return content::BuildUserAgentFromProduct(product);
 }
-
-
-#if defined(ENABLE_REMOTING)
-
-void ChromeContentClient::SetRemotingEntryFunctions(
-    content::PepperPluginInfo::GetInterfaceFunc get_interface,
-    content::PepperPluginInfo::PPP_InitializeModuleFunc initialize_module,
-    content::PepperPluginInfo::PPP_ShutdownModuleFunc shutdown_module) {
-  g_remoting_get_interface = get_interface;
-  g_remoting_initialize_module = initialize_module;
-  g_remoting_shutdown_module = shutdown_module;
-}
-#endif
 
 #if !defined(DISABLE_NACL)
 void ChromeContentClient::SetNaClEntryFunctions(
@@ -467,35 +454,96 @@ void ChromeContentClient::SetGpuInfo(const gpu::GPUInfo& gpu_info) {
 #endif
 }
 
+#if defined(ENABLE_PLUGINS)
+// static
+content::PepperPluginInfo* ChromeContentClient::FindMostRecentPlugin(
+    const std::vector<content::PepperPluginInfo*>& plugins) {
+  auto it = std::max_element(
+      plugins.begin(), plugins.end(),
+      [](content::PepperPluginInfo* x, content::PepperPluginInfo* y) {
+        Version version_x(x->version);
+        DCHECK(version_x.IsValid());
+        return version_x.IsOlderThan(y->version);
+      });
+  return it != plugins.end() ? *it : nullptr;
+}
+#endif  // defined(ENABLE_PLUGINS)
+
 void ChromeContentClient::AddPepperPlugins(
     std::vector<content::PepperPluginInfo>* plugins) {
 #if defined(ENABLE_PLUGINS)
   ComputeBuiltInPlugins(plugins);
   AddPepperFlashFromCommandLine(plugins);
 
-  content::PepperPluginInfo plugin;
-  if (GetBundledPepperFlash(&plugin))
-    plugins->push_back(plugin);
-  if (GetSystemPepperFlash(&plugin))
-    plugins->push_back(plugin);
-#endif
+#if defined(OS_LINUX)
+  // Depending on the sandbox configurtion, the user data directory
+  // is not always available. If it is not available, do not try and load any
+  // flash plugin. The flash player, if any, preloaded before the sandbox
+  // initialization will continue to be used.
+  if (!IsUserDataDirAvailable()) {
+    return;
+  }
+#endif  // defined(OS_LINUX)
+
+  ScopedVector<content::PepperPluginInfo> flash_versions;
+
+#if defined(OS_LINUX)
+  scoped_ptr<content::PepperPluginInfo> component_flash(
+      new content::PepperPluginInfo);
+  if (GetComponentUpdatedPepperFlash(component_flash.get()))
+    flash_versions.push_back(component_flash.release());
+#endif  // defined(OS_LINUX)
+
+  scoped_ptr<content::PepperPluginInfo> bundled_flash(
+      new content::PepperPluginInfo);
+  if (GetBundledPepperFlash(bundled_flash.get()))
+    flash_versions.push_back(bundled_flash.release());
+
+  scoped_ptr<content::PepperPluginInfo> system_flash(
+      new content::PepperPluginInfo);
+  if (GetSystemPepperFlash(system_flash.get()))
+    flash_versions.push_back(system_flash.release());
+
+  // This function will return only the most recent version of the flash plugin.
+  content::PepperPluginInfo* max_flash =
+      FindMostRecentPlugin(flash_versions.get());
+  if (max_flash)
+    plugins->push_back(*max_flash);
+#endif  // defined(ENABLE_PLUGINS)
 }
 
-void ChromeContentClient::AddAdditionalSchemes(
-    std::vector<std::string>* standard_schemes,
-    std::vector<std::string>* savable_schemes) {
-  standard_schemes->push_back(extensions::kExtensionScheme);
-  savable_schemes->push_back(extensions::kExtensionScheme);
-  standard_schemes->push_back(chrome::kChromeNativeScheme);
-  standard_schemes->push_back(extensions::kExtensionResourceScheme);
-  savable_schemes->push_back(extensions::kExtensionResourceScheme);
-  standard_schemes->push_back(chrome::kChromeSearchScheme);
-  savable_schemes->push_back(chrome::kChromeSearchScheme);
-  standard_schemes->push_back(dom_distiller::kDomDistillerScheme);
-  savable_schemes->push_back(dom_distiller::kDomDistillerScheme);
 #if defined(OS_CHROMEOS)
-  standard_schemes->push_back(chrome::kCrosScheme);
+static const int kNumChromeStandardURLSchemes = 6;
+#else
+static const int kNumChromeStandardURLSchemes = 5;
 #endif
+static const url::SchemeWithType kChromeStandardURLSchemes[
+    kNumChromeStandardURLSchemes] = {
+  {extensions::kExtensionScheme, url::SCHEME_WITHOUT_PORT},
+  {chrome::kChromeNativeScheme, url::SCHEME_WITHOUT_PORT},
+  {extensions::kExtensionResourceScheme, url::SCHEME_WITHOUT_PORT},
+  {chrome::kChromeSearchScheme, url::SCHEME_WITHOUT_PORT},
+  {dom_distiller::kDomDistillerScheme, url::SCHEME_WITHOUT_PORT},
+#if defined(OS_CHROMEOS)
+  {chrome::kCrosScheme, url::SCHEME_WITHOUT_PORT},
+#endif
+};
+
+void ChromeContentClient::AddAdditionalSchemes(
+    std::vector<url::SchemeWithType>* standard_schemes,
+    std::vector<std::string>* savable_schemes) {
+  for (int i = 0; i < kNumChromeStandardURLSchemes; i++)
+    standard_schemes->push_back(kChromeStandardURLSchemes[i]);
+
+  savable_schemes->push_back(extensions::kExtensionScheme);
+  savable_schemes->push_back(extensions::kExtensionResourceScheme);
+  savable_schemes->push_back(chrome::kChromeSearchScheme);
+  savable_schemes->push_back(dom_distiller::kDomDistillerScheme);
+}
+
+bool ChromeContentClient::CanSendWhileSwappedOut(const IPC::Message* message) {
+  return message->type() ==
+         DataReductionProxyViewHostMsg_DataReductionProxyStatus::ID;
 }
 
 std::string ChromeContentClient::GetProduct() const {
@@ -545,10 +593,12 @@ bool ChromeContentClient::GetSandboxProfileForSandboxType(
     int sandbox_type,
     int* sandbox_profile_resource_id) const {
   DCHECK(sandbox_profile_resource_id);
+#if !defined(DISABLE_NACL)
   if (sandbox_type == NACL_SANDBOX_TYPE_NACL_LOADER) {
     *sandbox_profile_resource_id = IDR_NACL_SANDBOX_PROFILE;
     return true;
   }
+#endif
   return false;
 }
 #endif
@@ -556,8 +606,20 @@ bool ChromeContentClient::GetSandboxProfileForSandboxType(
 void ChromeContentClient::AddSecureSchemesAndOrigins(
     std::set<std::string>* schemes,
     std::set<GURL>* origins) {
+  schemes->insert(chrome::kChromeSearchScheme);
   schemes->insert(content::kChromeUIScheme);
   schemes->insert(extensions::kExtensionScheme);
   schemes->insert(extensions::kExtensionResourceScheme);
   GetSecureOriginWhitelist(origins);
+}
+
+void ChromeContentClient::AddServiceWorkerSchemes(
+    std::set<std::string>* schemes) {
+#if defined(ENABLE_EXTENSIONS)
+  if (extensions::FeatureProvider::GetBehaviorFeature(
+          extensions::BehaviorFeature::kServiceWorker)
+          ->IsAvailableToEnvironment()
+          .is_available())
+    schemes->insert(extensions::kExtensionScheme);
+#endif
 }

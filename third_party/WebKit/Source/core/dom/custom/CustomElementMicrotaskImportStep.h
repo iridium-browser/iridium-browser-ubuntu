@@ -50,11 +50,10 @@ class HTMLImportChild;
 //
 // This step blocks further Custom Element microtask processing if its
 // import isn't "ready" (finished parsing and running script.)
-class CustomElementMicrotaskImportStep : public CustomElementMicrotaskStep {
-    WTF_MAKE_NONCOPYABLE(CustomElementMicrotaskImportStep);
+class CustomElementMicrotaskImportStep final : public CustomElementMicrotaskStep {
 public:
     static PassOwnPtrWillBeRawPtr<CustomElementMicrotaskImportStep> create(HTMLImportChild*);
-    virtual ~CustomElementMicrotaskImportStep();
+    ~CustomElementMicrotaskImportStep() override;
 
     // API for HTML Imports
     void invalidate();
@@ -72,10 +71,10 @@ private:
     bool shouldWaitForImport() const;
 
     // CustomElementMicrotaskStep
-    virtual Result process() override final;
+    Result process() final;
 
 #if !defined(NDEBUG)
-    virtual void show(unsigned indent) override;
+    void show(unsigned indent) override;
 #endif
     WeakPtrWillBeWeakMember<HTMLImportChild> m_import;
 #if !ENABLE(OILPAN)

@@ -17,16 +17,12 @@ public class UrlConstants {
     public static final String NTP_URL = "chrome-native://newtab/";
     public static final String NTP_HOST = "newtab";
     public static final String BOOKMARKS_URL = "chrome-native://bookmarks/";
-    public static final String BOOKMARKS_FOLDER_URL = "chrome-native://bookmarks/folder/";
     public static final String BOOKMARKS_FILTER_URL = "chrome-native://bookmarks/filter/";
+    public static final String BOOKMARKS_FOLDER_URL = "chrome-native://bookmarks/folder/";
     public static final String
             BOOKMARKS_UNCATEGORIZED_URL = "chrome-native://bookmarks/uncategorized/";
     public static final String BOOKMARKS_HOST = "bookmarks";
     public static final String RECENT_TABS_URL = "chrome-native://recent-tabs/";
     public static final String RECENT_TABS_HOST = "recent-tabs";
     public static final String HISTORY_URL = "chrome://history/";
-
-    // This is chrome::kCrashReasonURL. Please ensure they stay in sync.
-    public static final String CRASH_REASON_URL =
-            "https://support.google.com/chrome/?p=mobile_awsnap";
 }

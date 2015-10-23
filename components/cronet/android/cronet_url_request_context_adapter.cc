@@ -11,7 +11,13 @@
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/memory/scoped_vector.h"
+#include "base/message_loop/message_loop.h"
+#include "base/prefs/pref_filter.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
+#include "base/prefs/pref_service_factory.h"
 #include "base/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "components/cronet/url_request_context_config.h"
 #include "jni/CronetUrlRequestContext_jni.h"
@@ -19,6 +25,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate_impl.h"
 #include "net/http/http_auth_handler_factory.h"
+#include "net/http/http_server_properties_manager.h"
 #include "net/log/write_to_file_net_log_observer.h"
 #include "net/proxy/proxy_service.h"
 #include "net/sdch/sdch_owner.h"
@@ -31,6 +38,8 @@
 #endif
 
 namespace {
+
+const char kHttpServerProperties[] = "net.http_server_properties";
 
 class BasicNetworkDelegate : public net::NetworkDelegateImpl {
  public:
@@ -102,10 +111,6 @@ class BasicNetworkDelegate : public net::NetworkDelegateImpl {
     return false;
   }
 
-  bool OnCanThrottleRequest(const net::URLRequest& request) const override {
-    return false;
-  }
-
   DISALLOW_COPY_AND_ASSIGN(BasicNetworkDelegate);
 };
 
@@ -121,6 +126,7 @@ bool CronetUrlRequestContextAdapterRegisterJni(JNIEnv* env) {
 CronetURLRequestContextAdapter::CronetURLRequestContextAdapter(
     scoped_ptr<URLRequestContextConfig> context_config)
     : network_thread_(new base::Thread("network")),
+      http_server_properties_manager_(nullptr),
       context_config_(context_config.Pass()),
       is_context_initialized_(false),
       default_load_flags_(net::LOAD_NORMAL) {
@@ -131,6 +137,11 @@ CronetURLRequestContextAdapter::CronetURLRequestContextAdapter(
 
 CronetURLRequestContextAdapter::~CronetURLRequestContextAdapter() {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
+
+  if (http_server_properties_manager_)
+    http_server_properties_manager_->ShutdownOnPrefThread();
+  if (pref_service_)
+    pref_service_->CommitPendingWrite();
   StopNetLogOnNetworkThread();
 }
 
@@ -185,6 +196,33 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   context_builder.set_net_log(net_log.release());
   context_builder.set_proxy_config_service(proxy_config_service_.release());
   config->ConfigureURLRequestContextBuilder(&context_builder);
+
+  // Set up pref file if storage path is specified.
+  if (!config->storage_path.empty()) {
+    base::FilePath filepath(config->storage_path);
+    filepath = filepath.Append(FILE_PATH_LITERAL("local_prefs.json"));
+    json_pref_store_ = new JsonPrefStore(
+        filepath, GetFileThread()->task_runner(), scoped_ptr<PrefFilter>());
+    context_builder.SetFileTaskRunner(GetFileThread()->task_runner());
+
+    // Set up HttpServerPropertiesManager.
+    base::PrefServiceFactory factory;
+    factory.set_user_prefs(json_pref_store_);
+    scoped_refptr<PrefRegistrySimple> registry(new PrefRegistrySimple());
+    registry->RegisterDictionaryPref(kHttpServerProperties,
+                                     new base::DictionaryValue());
+    pref_service_ = factory.Create(registry.get()).Pass();
+
+    scoped_ptr<net::HttpServerPropertiesManager> http_server_properties_manager(
+        new net::HttpServerPropertiesManager(pref_service_.get(),
+                                             kHttpServerProperties,
+                                             GetNetworkTaskRunner()));
+    http_server_properties_manager->InitializeOnNetworkThread();
+    http_server_properties_manager_ = http_server_properties_manager.get();
+    context_builder.SetHttpServerProperties(
+        http_server_properties_manager.Pass());
+  }
+
   context_.reset(context_builder.Build());
 
   default_load_flags_ = net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -196,6 +234,8 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
     DCHECK(context_->sdch_manager());
     sdch_owner_.reset(
         new net::SdchOwner(context_->sdch_manager(), context_.get()));
+    if (json_pref_store_)
+      sdch_owner_->EnablePersistentStorage(json_pref_store_.get());
   }
 
   // Currently (circa M39) enabling QUIC requires setting probability threshold.
@@ -238,7 +278,8 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
           net::AlternateProtocol::QUIC, "",
           static_cast<uint16>(quic_hint.alternate_port));
       context_->http_server_properties()->SetAlternativeService(
-          quic_hint_host_port_pair, alternative_service, 1.0f);
+          quic_hint_host_port_pair, alternative_service, 1.0f,
+          base::Time::Max());
     }
   }
 
@@ -350,6 +391,15 @@ void CronetURLRequestContextAdapter::StopNetLogOnNetworkThread() {
     write_to_file_observer_->StopObserving(context_.get());
     write_to_file_observer_.reset();
   }
+}
+
+base::Thread* CronetURLRequestContextAdapter::GetFileThread() {
+  DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
+  if (!file_thread_) {
+    file_thread_.reset(new base::Thread("Network File Thread"));
+    file_thread_->Start();
+  }
+  return file_thread_.get();
 }
 
 // Creates RequestContextAdater if config is valid URLRequestContextConfig,

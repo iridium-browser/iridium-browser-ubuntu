@@ -23,7 +23,9 @@ remoting.ClientSessionFactory = function(container, capabilities) {
   this.requiredCapabilities_ = [
     remoting.ClientSession.Capability.SEND_INITIAL_RESOLUTION,
     remoting.ClientSession.Capability.RATE_LIMIT_RESIZE_REQUESTS,
-    remoting.ClientSession.Capability.VIDEO_RECORDER
+    remoting.ClientSession.Capability.VIDEO_RECORDER,
+    remoting.ClientSession.Capability.TOUCH_EVENTS,
+    remoting.ClientSession.Capability.DESKTOP_SHAPE
   ];
 
   // Append the app-specific capabilities.
@@ -35,10 +37,13 @@ remoting.ClientSessionFactory = function(container, capabilities) {
  * Creates a session.
  *
  * @param {remoting.ClientSession.EventHandler} listener
+ * @param {remoting.SessionLogger} logger
+ * @param {boolean=} opt_useApiaryForLogging
  * @return {Promise<!remoting.ClientSession>} Resolves with the client session
  *     if succeeded or rejects with remoting.Error on failure.
  */
-remoting.ClientSessionFactory.prototype.createSession = function(listener) {
+remoting.ClientSessionFactory.prototype.createSession =
+    function(listener, logger, opt_useApiaryForLogging) {
   var that = this;
   /** @type {string} */
   var token;
@@ -47,7 +52,10 @@ remoting.ClientSessionFactory.prototype.createSession = function(listener) {
   /** @type {remoting.ClientPlugin} */
   var clientPlugin;
 
-  function OnError(/** remoting.Error */ error) {
+  function OnError(/** !remoting.Error */ error) {
+    logger.logSessionStateChange(
+        remoting.ChromotingEvent.SessionState.CONNECTION_FAILED,
+        remoting.ChromotingEvent.ConnectionError.UNEXPECTED);
     base.dispose(signalStrategy);
     base.dispose(clientPlugin);
     throw error;
@@ -58,13 +66,25 @@ remoting.ClientSessionFactory.prototype.createSession = function(listener) {
     token = authToken;
     return remoting.identity.getUserInfo();
   }).then(function(/** {email: string, name: string} */ userInfo) {
+    logger.logSessionStateChange(
+        remoting.ChromotingEvent.SessionState.SIGNALING,
+        remoting.ChromotingEvent.ConnectionError.NONE);
     return connectSignaling(userInfo.email, token);
   }).then(function(/** remoting.SignalStrategy */ strategy) {
     signalStrategy = strategy;
+    logger.logSessionStateChange(
+        remoting.ChromotingEvent.SessionState.CREATING_PLUGIN,
+        remoting.ChromotingEvent.ConnectionError.NONE);
     return createPlugin(that.container_, that.requiredCapabilities_);
   }).then(function(/** remoting.ClientPlugin */ plugin) {
     clientPlugin = plugin;
-    return new remoting.ClientSession(plugin, signalStrategy, listener);
+    // TODO(kelvinp): Remove |opt_useApiaryForLogging| once we have migrated
+    // away from XMPP based logging (crbug.com/523423).
+    var sessionLogger = Boolean(opt_useApiaryForLogging) ?
+                            logger :
+                            new remoting.LogToServer(signalStrategy);
+    return new remoting.ClientSession(
+        plugin, signalStrategy, sessionLogger, listener);
   }).catch(
     remoting.Error.handler(OnError)
   );
@@ -118,13 +138,6 @@ function createPlugin(container, capabilities) {
       return;
     }
 
-    if (!plugin.isSupportedVersion()) {
-      console.error('ERROR: bad plugin version');
-      plugin.dispose();
-      deferred.reject(
-          new remoting.Error(remoting.Error.Tag.BAD_PLUGIN_VERSION));
-      return;
-    }
     deferred.resolve(plugin);
   }
   plugin.initialize(onInitialized);

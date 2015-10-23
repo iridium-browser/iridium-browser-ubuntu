@@ -30,6 +30,7 @@
 #include "WebCommon.h"
 #include "WebData.h"
 #include "WebString.h"
+#include "WebURLLoaderTestDelegate.h"
 #include "WebVector.h"
 
 namespace blink {
@@ -54,12 +55,15 @@ public:
     // returns all the pending requests have been processed.
     virtual void serveAsynchronousMockedRequests() { }
 
+    // Set a delegate that allows callbacks for all WebURLLoaderClients to be intercepted.
+    virtual void setLoaderDelegate(WebURLLoaderTestDelegate*) { }
+
     // Returns the root directory of the WebKit code.
     virtual WebString webKitRootDir() { return WebString(); }
 
     // Constructs a WebLayerTreeView set up with reasonable defaults for
     // testing.
-    virtual WebLayerTreeView* createLayerTreeViewForTesting() { return 0; }
+    virtual WebLayerTreeView* createLayerTreeViewForTesting() { return nullptr; }
 
     virtual WebData readFromFile(const WebString& path) { return WebData(); }
 

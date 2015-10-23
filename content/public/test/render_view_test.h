@@ -73,7 +73,7 @@ class RenderViewTest : public testing::Test {
 
   // Executes the given JavaScript in the context of the main frame. The input
   // is a NULL-terminated UTF-8 string.
-  void ExecuteJavaScript(const char* js);
+  void ExecuteJavaScriptForTests(const char* js);
 
   // Executes the given JavaScript and sets the int value it evaluates to in
   // |result|.
@@ -114,6 +114,14 @@ class RenderViewTest : public testing::Test {
 
   // Sends a left mouse click at the |point|.
   void SimulatePointClick(const gfx::Point& point);
+
+  // Sends a right mouse click in the middle of the element with id
+  // |element_id|. Returns true if the event was sent, false otherwise
+  // (typically because the element was not found).
+  bool SimulateElementRightClick(const std::string& element_id);
+
+  // Sends a right mouse click at the |point|.
+  void SimulatePointRightClick(const gfx::Point& point);
 
   // Sends a tap at the |rect|.
   void SimulateRectTap(const gfx::Rect& rect);

@@ -5,9 +5,9 @@
 #ifndef V8_JSON_STRINGIFIER_H_
 #define V8_JSON_STRINGIFIER_H_
 
-#include "src/v8.h"
-
 #include "src/conversions.h"
+#include "src/lookup.h"
+#include "src/messages.h"
 #include "src/string-builder.h"
 #include "src/utils.h"
 
@@ -272,16 +272,15 @@ BasicJsonStringifier::Result BasicJsonStringifier::StackPush(
     for (int i = 0; i < length; i++) {
       if (elements->get(i) == *object) {
         AllowHeapAllocation allow_to_return_error;
-        Handle<Object> error = factory()->NewTypeError(
-            "circular_structure", HandleVector<Object>(NULL, 0));
+        Handle<Object> error =
+            factory()->NewTypeError(MessageTemplate::kCircularStructure);
         isolate_->Throw(*error);
         return EXCEPTION;
       }
     }
   }
-  JSArray::EnsureSize(stack_, length + 1);
+  JSArray::SetLength(stack_, length + 1);
   FixedArray::cast(stack_->elements())->set(length, *object);
-  stack_->set_length(Smi::FromInt(length + 1));
   return SUCCESS;
 }
 
@@ -360,16 +359,11 @@ BasicJsonStringifier::Result BasicJsonStringifier::SerializeGeneric(
     Handle<Object> key,
     bool deferred_comma,
     bool deferred_key) {
-  Handle<JSObject> builtins(isolate_->native_context()->builtins(), isolate_);
-  Handle<JSFunction> builtin = Handle<JSFunction>::cast(
-      Object::GetProperty(isolate_, builtins, "$jsonSerializeAdapter")
-          .ToHandleChecked());
-
+  Handle<JSFunction> fun = isolate_->json_serialize_adapter();
   Handle<Object> argv[] = { key, object };
   Handle<Object> result;
   ASSIGN_RETURN_ON_EXCEPTION_VALUE(
-      isolate_, result,
-      Execution::Call(isolate_, builtin, object, 2, argv),
+      isolate_, result, Execution::Call(isolate_, fun, object, 2, argv),
       EXCEPTION);
   if (result->IsUndefined()) return UNCHANGED;
   if (deferred_key) {
@@ -438,7 +432,7 @@ BasicJsonStringifier::Result BasicJsonStringifier::SerializeJSArray(
   Result stack_push = StackPush(object);
   if (stack_push != SUCCESS) return stack_push;
   uint32_t length = 0;
-  CHECK(object->length()->ToArrayIndex(&length));
+  CHECK(object->length()->ToArrayLength(&length));
   builder_.AppendCharacter('[');
   switch (object->GetElementsKind()) {
     case FAST_SMI_ELEMENTS: {
@@ -579,12 +573,9 @@ BasicJsonStringifier::Result BasicJsonStringifier::SerializeJSObject(
       } else {
         DCHECK(key->IsNumber());
         key_handle = factory()->NumberToString(Handle<Object>(key, isolate_));
-        uint32_t index;
         if (key->IsSmi()) {
           maybe_property = Object::GetElement(
               isolate_, object, Smi::cast(key)->value());
-        } else if (key_handle->AsArrayIndex(&index)) {
-          maybe_property = Object::GetElement(isolate_, object, index);
         } else {
           maybe_property = Object::GetPropertyOrElement(object, key_handle);
         }

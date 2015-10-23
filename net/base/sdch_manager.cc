@@ -6,7 +6,7 @@
 
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/time/default_clock.h"
@@ -37,12 +37,6 @@ void StripTrailingDot(GURL* gurl) {
 }  // namespace
 
 namespace net {
-
-// static
-bool SdchManager::g_sdch_enabled_ = true;
-
-// static
-bool SdchManager::g_secure_scheme_supported_ = true;
 
 SdchManager::DictionarySet::DictionarySet() {}
 
@@ -81,7 +75,7 @@ void SdchManager::DictionarySet::AddDictionary(
   dictionaries_[server_hash] = dictionary;
 }
 
-SdchManager::SdchManager() : factory_(this) {
+SdchManager::SdchManager() {
   DCHECK(thread_checker_.CalledOnValidThread());
 }
 
@@ -91,12 +85,6 @@ SdchManager::~SdchManager() {
     auto it = dictionaries_.begin();
     dictionaries_.erase(it->first);
   }
-#if defined(OS_CHROMEOS)
-  // For debugging http://crbug.com/454198; remove when resolved.
-
-  // Explicitly confirm that we can't notify any observers anymore.
-  CHECK(!observers_.might_have_observers());
-#endif
 }
 
 void SdchManager::ClearData() {
@@ -112,22 +100,11 @@ void SdchManager::SdchErrorRecovery(SdchProblemCode problem) {
                             SDCH_MAX_PROBLEM_CODE);
 }
 
-// static
-void SdchManager::EnableSdchSupport(bool enabled) {
-  g_sdch_enabled_ = enabled;
-}
-
-// static
-void SdchManager::EnableSecureSchemeSupport(bool enabled) {
-  g_secure_scheme_supported_ = enabled;
-}
-
 void SdchManager::BlacklistDomain(const GURL& url,
                                   SdchProblemCode blacklist_reason) {
   SetAllowLatencyExperiment(url, false);
 
-  BlacklistInfo* blacklist_info =
-      &blacklisted_domains_[base::StringToLowerASCII(url.host())];
+  BlacklistInfo* blacklist_info = &blacklisted_domains_[url.host()];
 
   if (blacklist_info->count > 0)
     return;  // Domain is already blacklisted.
@@ -147,8 +124,7 @@ void SdchManager::BlacklistDomainForever(const GURL& url,
                                          SdchProblemCode blacklist_reason) {
   SetAllowLatencyExperiment(url, false);
 
-  BlacklistInfo* blacklist_info =
-      &blacklisted_domains_[base::StringToLowerASCII(url.host())];
+  BlacklistInfo* blacklist_info = &blacklisted_domains_[url.host()];
   blacklist_info->count = INT_MAX;
   blacklist_info->exponential_count = INT_MAX;
   blacklist_info->reason = blacklist_reason;
@@ -159,14 +135,14 @@ void SdchManager::ClearBlacklistings() {
 }
 
 void SdchManager::ClearDomainBlacklisting(const std::string& domain) {
-  BlacklistInfo* blacklist_info = &blacklisted_domains_[
-      base::StringToLowerASCII(domain)];
+  BlacklistInfo* blacklist_info =
+      &blacklisted_domains_[base::ToLowerASCII(domain)];
   blacklist_info->count = 0;
   blacklist_info->reason = SDCH_OK;
 }
 
 int SdchManager::BlackListDomainCount(const std::string& domain) {
-  std::string domain_lower(base::StringToLowerASCII(domain));
+  std::string domain_lower(base::ToLowerASCII(domain));
 
   if (blacklisted_domains_.end() == blacklisted_domains_.find(domain_lower))
     return 0;
@@ -174,7 +150,7 @@ int SdchManager::BlackListDomainCount(const std::string& domain) {
 }
 
 int SdchManager::BlacklistDomainExponential(const std::string& domain) {
-  std::string domain_lower(base::StringToLowerASCII(domain));
+  std::string domain_lower(base::ToLowerASCII(domain));
 
   if (blacklisted_domains_.end() == blacklisted_domains_.find(domain_lower))
     return 0;
@@ -183,17 +159,10 @@ int SdchManager::BlacklistDomainExponential(const std::string& domain) {
 
 SdchProblemCode SdchManager::IsInSupportedDomain(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!g_sdch_enabled_ )
-    return SDCH_DISABLED;
-
-  if (!secure_scheme_supported() && url.SchemeIsCryptographic())
-    return SDCH_SECURE_SCHEME_NOT_SUPPORTED;
-
   if (blacklisted_domains_.empty())
     return SDCH_OK;
 
-  DomainBlacklistInfo::iterator it =
-      blacklisted_domains_.find(base::StringToLowerASCII(url.host()));
+  auto it = blacklisted_domains_.find(url.host());
   if (blacklisted_domains_.end() == it || it->second.count == 0)
     return SDCH_OK;
 
@@ -249,9 +218,6 @@ SdchProblemCode SdchManager::CanFetchDictionary(
       referring_url.scheme() != dictionary_url.scheme())
     return SDCH_DICTIONARY_LOAD_ATTEMPT_FROM_DIFFERENT_HOST;
 
-  if (!secure_scheme_supported() && referring_url.SchemeIsCryptographic())
-    return SDCH_DICTIONARY_SELECTED_FOR_SSL;
-
   // TODO(jar): Remove this failsafe conservative hack which is more restrictive
   // than current SDCH spec when needed, and justified by security audit.
   if (!referring_url.SchemeIsHTTPOrHTTPS())
@@ -268,8 +234,6 @@ SdchManager::GetDictionarySet(const GURL& target_url) {
   int count = 0;
   scoped_ptr<SdchManager::DictionarySet> result(new DictionarySet);
   for (const auto& entry: dictionaries_) {
-    if (!secure_scheme_supported() && target_url.SchemeIsCryptographic())
-      continue;
     if (entry.second->data.CanUse(target_url) != SDCH_OK)
       continue;
     if (entry.second->data.Expired())
@@ -283,7 +247,7 @@ SdchManager::GetDictionarySet(const GURL& target_url) {
 
   UMA_HISTOGRAM_COUNTS("Sdch3.Advertisement_Count", count);
   UMA_HISTOGRAM_BOOLEAN("Sdch3.AdvertisedWithSecureScheme",
-                        target_url.SchemeIsSecure());
+                        target_url.SchemeIsCryptographic());
 
   return result.Pass();
 }
@@ -299,12 +263,6 @@ SdchManager::GetDictionarySetByHash(
   const auto& it = dictionaries_.find(server_hash);
   if (it == dictionaries_.end())
     return result.Pass();
-
-  if (!SdchManager::secure_scheme_supported() &&
-      target_url.SchemeIsCryptographic()) {
-    *problem_code = SDCH_DICTIONARY_FOUND_HAS_WRONG_SCHEME;
-    return result.Pass();
-  }
 
   *problem_code = it->second->data.CanUse(target_url);
   if (*problem_code != SDCH_OK)
@@ -402,7 +360,7 @@ SdchProblemCode SdchManager::AddSdchDictionary(
         break;
       std::string name(dictionary_text, line_start, colon_index - line_start);
       std::string value(dictionary_text, value_start, line_end - value_start);
-      name = base::StringToLowerASCII(name);
+      name = base::ToLowerASCII(name);
       if (name == "domain") {
         domain = value;
       } else if (name == "path") {
@@ -411,7 +369,7 @@ SdchProblemCode SdchManager::AddSdchDictionary(
         if (value != "1.0")
           return SDCH_DICTIONARY_UNSUPPORTED_VERSION;
       } else if (name == "max-age") {
-        int64 seconds;
+        int64_t seconds;
         base::StringToInt64(value, &seconds);
         expiration = base::Time::Now() + base::TimeDelta::FromSeconds(seconds);
       } else if (name == "port") {
@@ -474,11 +432,6 @@ SdchManager::CreateEmptyDictionarySetForTesting() {
   return scoped_ptr<DictionarySet>(new DictionarySet).Pass();
 }
 
-// For investigation of http://crbug.com/454198; remove when resolved.
-base::WeakPtr<SdchManager> SdchManager::GetWeakPtr() {
-  return factory_.GetWeakPtr();
-}
-
 // static
 void SdchManager::UrlSafeBase64Encode(const std::string& input,
                                       std::string* output) {
@@ -489,46 +442,45 @@ void SdchManager::UrlSafeBase64Encode(const std::string& input,
   std::replace(output->begin(), output->end(), '/', '_');
 }
 
-base::Value* SdchManager::SdchInfoToValue() const {
-  base::DictionaryValue* value = new base::DictionaryValue();
+scoped_ptr<base::Value> SdchManager::SdchInfoToValue() const {
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
 
-  value->SetBoolean("sdch_enabled", sdch_enabled());
-  value->SetBoolean("secure_scheme_support", secure_scheme_supported());
+  value->SetBoolean("sdch_enabled", true);
 
-  base::ListValue* entry_list = new base::ListValue();
+  scoped_ptr<base::ListValue> entry_list(new base::ListValue());
   for (const auto& entry: dictionaries_) {
-    base::DictionaryValue* entry_dict = new base::DictionaryValue();
+    scoped_ptr<base::DictionaryValue> entry_dict(new base::DictionaryValue());
     entry_dict->SetString("url", entry.second->data.url().spec());
     entry_dict->SetString("client_hash", entry.second->data.client_hash());
     entry_dict->SetString("domain", entry.second->data.domain());
     entry_dict->SetString("path", entry.second->data.path());
-    base::ListValue* port_list = new base::ListValue();
+    scoped_ptr<base::ListValue> port_list(new base::ListValue());
     for (std::set<int>::const_iterator port_it =
              entry.second->data.ports().begin();
          port_it != entry.second->data.ports().end(); ++port_it) {
       port_list->AppendInteger(*port_it);
     }
-    entry_dict->Set("ports", port_list);
+    entry_dict->Set("ports", port_list.Pass());
     entry_dict->SetString("server_hash", entry.first);
-    entry_list->Append(entry_dict);
+    entry_list->Append(entry_dict.Pass());
   }
-  value->Set("dictionaries", entry_list);
+  value->Set("dictionaries", entry_list.Pass());
 
-  entry_list = new base::ListValue();
+  entry_list.reset(new base::ListValue());
   for (DomainBlacklistInfo::const_iterator it = blacklisted_domains_.begin();
        it != blacklisted_domains_.end(); ++it) {
     if (it->second.count == 0)
       continue;
-    base::DictionaryValue* entry_dict = new base::DictionaryValue();
+    scoped_ptr<base::DictionaryValue> entry_dict(new base::DictionaryValue());
     entry_dict->SetString("domain", it->first);
     if (it->second.count != INT_MAX)
       entry_dict->SetInteger("tries", it->second.count);
     entry_dict->SetInteger("reason", it->second.reason);
-    entry_list->Append(entry_dict);
+    entry_list->Append(entry_dict.Pass());
   }
-  value->Set("blacklisted", entry_list);
+  value->Set("blacklisted", entry_list.Pass());
 
-  return value;
+  return value.Pass();
 }
 
 }  // namespace net

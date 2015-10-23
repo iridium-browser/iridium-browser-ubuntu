@@ -6,9 +6,11 @@
 
 from __future__ import print_function
 
+from chromite.cli import command
 from chromite.cli import command_unittest
 from chromite.cli import flash
 from chromite.cli.cros import cros_flash
+from chromite.lib import commandline
 from chromite.lib import cros_test_lib
 
 
@@ -95,6 +97,22 @@ class CrosFlashTest(cros_test_lib.MockTempDirTestCase,
     self.cmd_mock.inst.Run()
     self.VerifyFlashParameters(self.DEVICE, self.IMAGE)
 
+  def testBrilloFlashEntersChroot(self):
+    """Test that brillo flash enters the chroot."""
+    self.SetupCommandMock([self.DEVICE, self.IMAGE])
+    self.PatchObject(command, 'GetToolset', return_value='brillo')
+    enter_chroot = self.PatchObject(commandline, 'RunInsideChroot')
+    self.cmd_mock.inst.Run()
+    self.assertTrue(enter_chroot.called)
+
+  def testCrosFlashDoesNotEnterChroot(self):
+    """Test that cros flash doesn't enter the chroot."""
+    self.SetupCommandMock([self.DEVICE, self.IMAGE])
+    self.PatchObject(command, 'GetToolset', return_value='cros')
+    enter_chroot = self.PatchObject(commandline, 'RunInsideChroot')
+    self.cmd_mock.inst.Run()
+    self.assertFalse(enter_chroot.called)
+
   def testBrick(self):
     """Tests command line --brick."""
     self.SetupCommandMock([self.DEVICE, self.IMAGE, '--brick', '//foo'])
@@ -122,20 +140,10 @@ class CrosFlashTest(cros_test_lib.MockTempDirTestCase,
     self.VerifyFlashParameters(self.DEVICE, self.IMAGE,
                                brick_name='//bricks/foo')
 
-  def testFlashError(self):
-    """Tests that FlashErrors are caught and logged."""
+  def testFlashErrorDebug(self):
+    """Tests that FlashErrors are passed through."""
     with self.OutputCapturer():
       self.SetupCommandMock([self.DEVICE, self.IMAGE])
       self.flash_mock.side_effect = flash.FlashError
-      with self.assertRaises(SystemExit):
-        self.cmd_mock.inst.Run()
-    self.AssertOutputContainsError(check_stderr=True)
-
-  def testFlashErrorDebug(self):
-    """Tests that FlashErrors are passed through with --debug."""
-    with self.OutputCapturer():
-      self.SetupCommandMock([self.DEVICE, self.IMAGE, '--debug'])
-      self.flash_mock.side_effect = flash.FlashError
       with self.assertRaises(flash.FlashError):
         self.cmd_mock.inst.Run()
-    self.AssertOutputContainsError(check_stderr=True)

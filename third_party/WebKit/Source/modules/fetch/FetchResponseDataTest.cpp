@@ -5,6 +5,7 @@
 #include "config.h"
 #include "modules/fetch/FetchResponseData.h"
 
+#include "core/dom/DOMArrayBuffer.h"
 #include "modules/fetch/FetchHeaderList.h"
 #include "platform/blob/BlobData.h"
 #include "public/platform/WebServiceWorkerResponse.h"
@@ -74,6 +75,17 @@ TEST_F(FetchResponseDataTest, ToWebServiceWorkerOpaqueType)
 
     opaqueResponseData->populateWebServiceWorkerResponse(webResponse);
     EXPECT_EQ(WebServiceWorkerResponseTypeOpaque, webResponse.responseType());
+    CheckHeaders(webResponse);
+}
+
+TEST_F(FetchResponseDataTest, ToWebServiceWorkerOpaqueRedirectType)
+{
+    WebServiceWorkerResponse webResponse;
+    FetchResponseData* internalResponse = createInternalResponse();
+    FetchResponseData* opaqueRedirectResponseData = internalResponse->createOpaqueRedirectFilteredResponse();
+
+    opaqueRedirectResponseData->populateWebServiceWorkerResponse(webResponse);
+    EXPECT_EQ(WebServiceWorkerResponseTypeOpaqueRedirect, webResponse.responseType());
     CheckHeaders(webResponse);
 }
 

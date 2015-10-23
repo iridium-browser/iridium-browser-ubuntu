@@ -7,11 +7,13 @@
 import logging
 import os
 
+from core import perf_benchmark
+
 from telemetry import benchmark
 from telemetry.core import util
 from telemetry import page as page_module
-from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry import story
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
 
@@ -95,7 +97,7 @@ class _SpaceportMeasurement(page_test.PageTest):
 
 # crbug.com/166703: This test frequently times out on Windows.
 @benchmark.Disabled('mac', 'win')
-class Spaceport(benchmark.Benchmark):
+class Spaceport(perf_benchmark.PerfBenchmark):
   """spaceport.io's PerfMarks benchmark.
 
   http://spaceport.io/community/perfmarks
@@ -110,9 +112,9 @@ class Spaceport(benchmark.Benchmark):
   def Name(cls):
     return 'spaceport'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     spaceport_dir = os.path.join(util.GetChromiumSrcDir(), 'chrome', 'test',
         'data', 'third_party', 'spaceport')
-    ps = page_set.PageSet(file_path=spaceport_dir)
-    ps.AddUserStory(page_module.Page('file://index.html', ps, ps.base_dir))
+    ps = story.StorySet(base_dir=spaceport_dir)
+    ps.AddStory(page_module.Page('file://index.html', ps, ps.base_dir))
     return ps

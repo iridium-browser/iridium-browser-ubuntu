@@ -39,8 +39,7 @@ class ScopedSleeperProcess {
   ~ScopedSleeperProcess() {
     if (process_.IsValid()) {
       process_.Terminate(-1, false);
-      int exit_code = 0;
-      EXPECT_TRUE(process_.WaitForExit(&exit_code));
+      EXPECT_TRUE(process_.WaitForExit(nullptr));
     }
   }
 
@@ -99,9 +98,10 @@ class ExitCodeWatcherTest : public testing::Test {
                           KEY_QUERY_VALUE);
 
     // The value name should encode the process id at the start.
-    EXPECT_TRUE(StartsWith(it.Name(),
-                           base::StringPrintf(L"%d-", proc_id),
-                           false));
+    EXPECT_TRUE(base::StartsWith(
+        it.Name(),
+        base::StringPrintf(L"%d-", proc_id),
+        base::CompareCase::SENSITIVE));
     DWORD value = 0;
     ASSERT_EQ(ERROR_SUCCESS, key.ReadValueDW(it.Name(), &value));
     ASSERT_EQ(exit_code, value);

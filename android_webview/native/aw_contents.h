@@ -68,6 +68,8 @@ class AwContents : public FindHelper::Listener,
   // render_process_id and render_view_id, or NULL.
   static AwContents* FromID(int render_process_id, int render_view_id);
 
+  static std::string GetLocale();
+
   AwContents(scoped_ptr<content::WebContents> web_contents);
   ~AwContents() override;
 
@@ -118,6 +120,7 @@ class AwContents : public FindHelper::Listener,
   jboolean RestoreFromOpaqueState(JNIEnv* env, jobject obj, jbyteArray state);
   void FocusFirstNode(JNIEnv* env, jobject obj);
   void SetBackgroundColor(JNIEnv* env, jobject obj, jint color);
+  void OnComputeScroll(JNIEnv* env, jobject obj, jlong animation_time_millis);
   bool OnDraw(JNIEnv* env,
               jobject obj,
               jobject canvas,
@@ -133,7 +136,7 @@ class AwContents : public FindHelper::Listener,
   void EnableOnNewPicture(JNIEnv* env, jobject obj, jboolean enabled);
   void InsertVisualStateCallback(JNIEnv* env,
                         jobject obj,
-                        long request_id,
+                        jlong request_id,
                         jobject callback);
   void ClearView(JNIEnv* env, jobject obj);
   void SetExtraHeadersForUrl(JNIEnv* env, jobject obj,
@@ -168,6 +171,10 @@ class AwContents : public FindHelper::Listener,
       const GURL& origin,
       const base::Callback<void(bool)>& callback) override;
   void CancelGeolocationPermissionRequests(const GURL& origin) override;
+  void RequestMIDISysexPermission(
+      const GURL& origin,
+      const base::Callback<void(bool)>& callback) override;
+  void CancelMIDISysexPermissionRequests(const GURL& origin) override;
 
   // Find-in-page API and related methods.
   void FindAllAsync(JNIEnv* env, jobject obj, jstring search_string);
@@ -199,13 +206,15 @@ class AwContents : public FindHelper::Listener,
   void OnNewPicture() override;
   gfx::Point GetLocationOnScreen() override;
   void ScrollContainerViewTo(gfx::Vector2d new_value) override;
-  bool IsFlingActive() const override;
+  bool IsSmoothScrollingActive() const override;
   void UpdateScrollState(gfx::Vector2d max_scroll_offset,
                          gfx::SizeF contents_size_dip,
                          float page_scale_factor,
                          float min_page_scale_factor,
                          float max_page_scale_factor) override;
-  void DidOverscroll(gfx::Vector2d overscroll_delta) override;
+  void DidOverscroll(gfx::Vector2d overscroll_delta,
+                     gfx::Vector2dF overscroll_velocity) override;
+
   void ParentDrawConstraintsUpdated(
       const ParentCompositorDrawConstraints& draw_constraints) override {}
 
@@ -227,6 +236,8 @@ class AwContents : public FindHelper::Listener,
   void PostMessageToFrame(JNIEnv* env, jobject obj, jstring frame_id,
       jstring message, jstring target_origin, jintArray sent_ports);
   void CreateMessageChannel(JNIEnv* env, jobject obj, jobjectArray ports);
+
+  void GrantFileSchemeAccesstoChildProcess(JNIEnv* env, jobject obj);
 
  private:
   void InitDataReductionProxyIfNecessary();

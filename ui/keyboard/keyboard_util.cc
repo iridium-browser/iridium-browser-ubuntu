@@ -14,7 +14,6 @@
 #include "base/strings/string16.h"
 #include "grit/keyboard_resources.h"
 #include "grit/keyboard_resources_map.h"
-#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
@@ -36,9 +35,9 @@ const char kKeyUp[] = "keyup";
 
 void SendProcessKeyEvent(ui::EventType type,
                          aura::WindowTreeHost* host) {
-  ui::KeyEvent event(type, ui::VKEY_PROCESSKEY, ui::DomCode::NONE, ui::EF_NONE,
-                     ui::DomKey::PROCESS, 0, ui::EventTimeForNow());
-  event.SetTranslated(true);
+  ui::KeyEvent event(type, ui::VKEY_PROCESSKEY, ui::DomCode::NONE,
+                     ui::EF_IS_SYNTHESIZED, ui::DomKey::PROCESS, 0,
+                     ui::EventTimeForNow());
   ui::EventDispatchDetails details =
       host->event_processor()->OnEventFromSource(&event);
   CHECK(!details.dispatcher_destroyed);
@@ -49,9 +48,14 @@ base::LazyInstance<base::Time> g_keyboard_load_time_start =
 
 bool g_accessibility_keyboard_enabled = false;
 
+bool g_hotrod_keyboard_enabled = false;
+
 base::LazyInstance<GURL> g_override_content_url = LAZY_INSTANCE_INITIALIZER;
 
 bool g_touch_keyboard_enabled = false;
+
+keyboard::KeyboardState g_requested_keyboard_state =
+    keyboard::KEYBOARD_STATE_AUTO;
 
 keyboard::KeyboardOverscrolOverride g_keyboard_overscroll_override =
     keyboard::KEYBOARD_OVERSCROLL_OVERRIDE_NONE;
@@ -80,12 +84,28 @@ bool GetAccessibilityKeyboardEnabled() {
   return g_accessibility_keyboard_enabled;
 }
 
+void SetHotrodKeyboardEnabled(bool enabled) {
+  g_hotrod_keyboard_enabled = enabled;
+}
+
+bool GetHotrodKeyboardEnabled() {
+  return g_hotrod_keyboard_enabled;
+}
+
 void SetTouchKeyboardEnabled(bool enabled) {
   g_touch_keyboard_enabled = enabled;
 }
 
 bool GetTouchKeyboardEnabled() {
   return g_touch_keyboard_enabled;
+}
+
+void SetRequestedKeyboardState(KeyboardState state) {
+  g_requested_keyboard_state = state;
+}
+
+KeyboardState GetKeyboardRequestedState() {
+  return g_requested_keyboard_state;
 }
 
 std::string GetKeyboardLayout() {
@@ -101,11 +121,19 @@ bool IsKeyboardEnabled() {
   // Policy strictly disables showing a virtual keyboard.
   if (g_keyboard_show_override == keyboard::KEYBOARD_SHOW_OVERRIDE_DISABLED)
     return false;
-  // Check if any of the flags are enabled.
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableVirtualKeyboard) ||
-         g_touch_keyboard_enabled ||
-         (g_keyboard_show_override == keyboard::KEYBOARD_SHOW_OVERRIDE_ENABLED);
+  // Policy strictly enables the keyboard.
+  if (g_keyboard_show_override == keyboard::KEYBOARD_SHOW_OVERRIDE_ENABLED)
+    return true;
+  // Run-time flag to enable keyboard has been included.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableVirtualKeyboard))
+    return true;
+  // Requested state from the application layer.
+  if (g_requested_keyboard_state == keyboard::KEYBOARD_STATE_DISABLED)
+    return false;
+  // Check if any of the other flags are enabled.
+  return g_touch_keyboard_enabled ||
+         g_requested_keyboard_state == keyboard::KEYBOARD_STATE_ENABLED;
 }
 
 bool IsKeyboardOverscrollEnabled() {
@@ -177,9 +205,11 @@ bool IsGestureEditingEnabled() {
   return keyboard_switch == switches::kGestureEditingEnabled;
 }
 
-bool IsMaterialDesignEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableNewMDInputView);
+bool IsSmartDeployEnabled() {
+  std::string keyboard_switch =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kSmartVirtualKeyboard);
+  return keyboard_switch != switches::kSmartVirtualKeyboardDisabled;
 }
 
 bool IsVoiceInputEnabled() {
@@ -284,12 +314,11 @@ bool SendKeyEvent(const std::string type,
 
   ui::KeyboardCode code = static_cast<ui::KeyboardCode>(key_code);
 
+  ui::InputMethod* input_method = host->GetInputMethod();
   if (code == ui::VKEY_UNKNOWN) {
     // Handling of special printable characters (e.g. accented characters) for
     // which there is no key code.
     if (event_type == ui::ET_KEY_RELEASED) {
-      ui::InputMethod* input_method = host->window()->GetProperty(
-          aura::client::kRootWindowInputMethodKey);
       if (!input_method)
         return false;
 
@@ -326,9 +355,13 @@ bool SendKeyEvent(const std::string type,
         code,
         dom_code,
         modifiers);
-    ui::EventDispatchDetails details =
-        host->event_processor()->OnEventFromSource(&event);
-    CHECK(!details.dispatcher_destroyed);
+    if (input_method) {
+      input_method->DispatchKeyEvent(&event);
+    } else {
+      ui::EventDispatchDetails details =
+          host->event_processor()->OnEventFromSource(&event);
+      CHECK(!details.dispatcher_destroyed);
+    }
   }
   return true;
 }
@@ -364,16 +397,28 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
   // map cannot be used directly.
   static const GritResourceMap kKeyboardResources[] = {
       {"keyboard/locales/en.js", IDR_KEYBOARD_LOCALES_EN},
-      {"keyboard/config/m-emoji.js", IDR_KEYBOARD_CONFIG_EMOJI},
-      {"keyboard/config/m-hwt.js", IDR_KEYBOARD_CONFIG_HWT},
+      {"keyboard/config/emoji.js", IDR_KEYBOARD_CONFIG_EMOJI},
+      {"keyboard/config/hwt.js", IDR_KEYBOARD_CONFIG_HWT},
       {"keyboard/config/us.js", IDR_KEYBOARD_CONFIG_US},
       {"keyboard/emoji.css", IDR_KEYBOARD_CSS_EMOJI},
+      {"keyboard/images/3dots.png", IDR_KEYBOARD_IMAGES_3_DOTS},
+      {"keyboard/images/back_to_keyboard.png",
+       IDR_KEYBOARD_IMAGES_BACK_TO_KEYBOARD},
       {"keyboard/images/backspace.png", IDR_KEYBOARD_IMAGES_BACKSPACE},
       {"keyboard/images/car.png", IDR_KEYBOARD_IMAGES_CAR},
       {"keyboard/images/check.png", IDR_KEYBOARD_IMAGES_CHECK},
+      {"keyboard/images/check_in_menu.png", IDR_KEYBOARD_IMAGES_CHECK_IN_MENU},
       {"keyboard/images/compact.png", IDR_KEYBOARD_IMAGES_COMPACT},
       {"keyboard/images/down.png", IDR_KEYBOARD_IMAGES_DOWN},
       {"keyboard/images/emoji.png", IDR_KEYBOARD_IMAGES_EMOJI},
+      {"keyboard/images/emoji_car.png", IDR_KEYBOARD_IMAGES_EMOJI_CAR},
+      {"keyboard/images/emoji_crown.png", IDR_KEYBOARD_IMAGES_EMOJI_CROWN},
+      {"keyboard/images/emoji_emoticon.png",
+       IDR_KEYBOARD_IMAGES_EMOJI_EMOTICON},
+      {"keyboard/images/emoji_flower.png", IDR_KEYBOARD_IMAGES_EMOJI_FLOWER},
+      {"keyboard/images/emoji_hot.png", IDR_KEYBOARD_IMAGES_EMOJI_HOT},
+      {"keyboard/images/emoji_recent.png", IDR_KEYBOARD_IMAGES_EMOJI_RECENT},
+      {"keyboard/images/emoji_shape.png", IDR_KEYBOARD_IMAGES_EMOJI_SHAPE},
       {"keyboard/images/emoji_cat_items.png", IDR_KEYBOARD_IMAGES_CAT},
       {"keyboard/images/emoticon.png", IDR_KEYBOARD_IMAGES_EMOTICON},
       {"keyboard/images/enter.png", IDR_KEYBOARD_IMAGES_RETURN},
@@ -381,7 +426,8 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
       {"keyboard/images/favorit.png", IDR_KEYBOARD_IMAGES_FAVORITE},
       {"keyboard/images/flower.png", IDR_KEYBOARD_IMAGES_FLOWER},
       {"keyboard/images/globe.png", IDR_KEYBOARD_IMAGES_GLOBE},
-      {"keyboard/images/hide.png", IDR_KEYBOARD_IMAGES_HIDE_KEYBOARD},
+      {"keyboard/images/hide.png", IDR_KEYBOARD_IMAGES_HIDE},
+      {"keyboard/images/hidekeyboard.png", IDR_KEYBOARD_IMAGES_HIDE_KEYBOARD},
       {"keyboard/images/keyboard.svg", IDR_KEYBOARD_IMAGES_KEYBOARD},
       {"keyboard/images/left.png", IDR_KEYBOARD_IMAGES_LEFT},
       {"keyboard/images/penci.png", IDR_KEYBOARD_IMAGES_PENCIL},
@@ -391,10 +437,14 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
       {"keyboard/images/pencil.png", IDR_KEYBOARD_IMAGES_PENCIL},
       {"keyboard/images/right.png", IDR_KEYBOARD_IMAGES_RIGHT},
       {"keyboard/images/search.png", IDR_KEYBOARD_IMAGES_SEARCH},
+      {"keyboard/images/select_right.png", IDR_KEYBOARD_IMAGES_SELECT_RIGHT},
+      {"keyboard/images/select_left.png", IDR_KEYBOARD_IMAGES_SELECT_LEFT},
       {"keyboard/images/setting.png", IDR_KEYBOARD_IMAGES_SETTINGS},
       {"keyboard/images/shift.png", IDR_KEYBOARD_IMAGES_SHIFT},
       {"keyboard/images/space.png", IDR_KEYBOARD_IMAGES_SPACE},
       {"keyboard/images/tab.png", IDR_KEYBOARD_IMAGES_TAB},
+      {"keyboard/images/tab_in_fullsize.png",
+       IDR_KEYBOARD_IMAGES_TAB_IN_FULLSIZE},
       {"keyboard/images/triangle.png", IDR_KEYBOARD_IMAGES_TRIANGLE},
       {"keyboard/images/up.png", IDR_KEYBOARD_IMAGES_UP},
       {"keyboard/index.html", IDR_KEYBOARD_INDEX},
@@ -408,16 +458,6 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
        IDR_KEYBOARD_LAYOUTS_COMPACT_NUMBERPAD},
       {"keyboard/inputview_layouts/emoji.js", IDR_KEYBOARD_LAYOUTS_EMOJI},
       {"keyboard/inputview_layouts/handwriting.js", IDR_KEYBOARD_LAYOUTS_HWT},
-      {"keyboard/inputview_layouts/m-101kbd.js",
-       IDR_KEYBOARD_LAYOUTS_MATERIAL_101},
-      {"keyboard/inputview_layouts/m-compactkbd-qwerty.js",
-       IDR_KEYBOARD_LAYOUTS_MATERIAL_COMPACT_QWERTY},
-      {"keyboard/inputview_layouts/m-compactkbd-numberpad.js",
-       IDR_KEYBOARD_LAYOUTS_MATERIAL_COMPACT_NUMBERPAD},
-      {"keyboard/inputview_layouts/m-emoji.js",
-       IDR_KEYBOARD_LAYOUTS_MATERIAL_EMOJI},
-      {"keyboard/inputview_layouts/m-handwriting.js",
-       IDR_KEYBOARD_LAYOUTS_MATERIAL_HWT},
       {"keyboard/manifest.json", IDR_KEYBOARD_MANIFEST},
       {"keyboard/sounds/keypress-delete.wav",
        IDR_KEYBOARD_SOUNDS_KEYPRESS_DELETE},

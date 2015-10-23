@@ -14,15 +14,15 @@
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/fake_file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/test_util.h"
-#include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/drive/test_util.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/drive/drive_test_util.h"
+#include "components/drive/service/fake_drive_service.h"
+#include "components/drive/service/test_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/pref_registry/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
@@ -163,7 +163,7 @@ class ExternalFileURLRequestJobTest : public testing::Test {
         new drive::DriveFileStreamReader(
             base::Bind(&ExternalFileURLRequestJobTest::GetFileSystem,
                        base::Unretained(this)),
-            worker_thread->message_loop_proxy().get()));
+            worker_thread->task_runner().get()));
     int error = net::ERR_FAILED;
     scoped_ptr<drive::ResourceEntry> entry;
     {

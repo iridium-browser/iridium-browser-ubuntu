@@ -7,8 +7,11 @@
 
 #include <string>
 
-#include "chrome/common/chrome_version_info.h"
 #include "components/metrics/proto/system_profile.pb.h"
+
+namespace version_info {
+enum class Channel;
+}
 
 namespace metrics {
 
@@ -16,10 +19,10 @@ namespace metrics {
 // platforms, and "-devel" on developer builds.
 std::string GetVersionString();
 
-// Translates chrome::VersionInfo::Channel to the equivalent
+// Translates version_info::Channel to the equivalent
 // SystemProfileProto::Channel.
 SystemProfileProto::Channel AsProtobufChannel(
-    chrome::VersionInfo::Channel channel);
+    version_info::Channel channel);
 
 }  // namespace metrics
 

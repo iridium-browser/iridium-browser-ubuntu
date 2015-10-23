@@ -13,7 +13,7 @@
 
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/pickle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -95,15 +95,14 @@ const char* const kNonUpdatedHeaderPrefixes[] = {
   "x-webkit-"
 };
 
-bool ShouldUpdateHeader(const std::string::const_iterator& name_begin,
-                        const std::string::const_iterator& name_end) {
+bool ShouldUpdateHeader(base::StringPiece name) {
   for (size_t i = 0; i < arraysize(kNonUpdatedHeaders); ++i) {
-    if (LowerCaseEqualsASCII(name_begin, name_end, kNonUpdatedHeaders[i]))
+    if (base::LowerCaseEqualsASCII(name, kNonUpdatedHeaders[i]))
       return false;
   }
   for (size_t i = 0; i < arraysize(kNonUpdatedHeaderPrefixes); ++i) {
-    if (StartsWithASCII(std::string(name_begin, name_end),
-                        kNonUpdatedHeaderPrefixes[i], false))
+    if (base::StartsWith(name, kNonUpdatedHeaderPrefixes[i],
+                         base::CompareCase::INSENSITIVE_ASCII))
       return false;
   }
   return true;
@@ -156,14 +155,15 @@ HttpResponseHeaders::HttpResponseHeaders(const std::string& raw_input)
                                    HttpUtil::GetStatusCodesForHistogram());
 }
 
-HttpResponseHeaders::HttpResponseHeaders(PickleIterator* iter)
+HttpResponseHeaders::HttpResponseHeaders(base::PickleIterator* iter)
     : response_code_(-1) {
   std::string raw_input;
   if (iter->ReadString(&raw_input))
     Parse(raw_input);
 }
 
-void HttpResponseHeaders::Persist(Pickle* pickle, PersistOptions options) {
+void HttpResponseHeaders::Persist(base::Pickle* pickle,
+                                  PersistOptions options) {
   if (options == PERSIST_RAW) {
     pickle->WriteString(raw_headers_);
     return;  // Done.
@@ -206,9 +206,8 @@ void HttpResponseHeaders::Persist(Pickle* pickle, PersistOptions options) {
     while (++k < parsed_.size() && parsed_[k].is_continuation()) {}
     --k;
 
-    std::string header_name(parsed_[i].name_begin, parsed_[i].name_end);
-    base::StringToLowerASCII(&header_name);
-
+    std::string header_name = base::ToLowerASCII(
+        base::StringPiece(parsed_[i].name_begin, parsed_[i].name_end));
     if (filter_headers.find(header_name) == filter_headers.end()) {
       // Make sure there is a null after the value.
       blob.append(parsed_[i].name_begin, parsed_[k].value_end);
@@ -246,16 +245,14 @@ void HttpResponseHeaders::Update(const HttpResponseHeaders& new_headers) {
     while (++k < new_parsed.size() && new_parsed[k].is_continuation()) {}
     --k;
 
-    const std::string::const_iterator& name_begin = new_parsed[i].name_begin;
-    const std::string::const_iterator& name_end = new_parsed[i].name_end;
-    if (ShouldUpdateHeader(name_begin, name_end)) {
-      std::string name(name_begin, name_end);
-      base::StringToLowerASCII(&name);
-      updated_headers.insert(name);
+    base::StringPiece name(new_parsed[i].name_begin, new_parsed[i].name_end);
+    if (ShouldUpdateHeader(name)) {
+      std::string name_lower = base::ToLowerASCII(name);
+      updated_headers.insert(name_lower);
 
       // Preserve this header line in the merged result, making sure there is
       // a null after the value.
-      new_raw_headers.append(name_begin, new_parsed[k].value_end);
+      new_raw_headers.append(new_parsed[i].name_begin, new_parsed[k].value_end);
       new_raw_headers.push_back('\0');
     }
 
@@ -277,8 +274,8 @@ void HttpResponseHeaders::MergeWithHeaders(const std::string& raw_headers,
     while (++k < parsed_.size() && parsed_[k].is_continuation()) {}
     --k;
 
-    std::string name(parsed_[i].name_begin, parsed_[i].name_end);
-    base::StringToLowerASCII(&name);
+    std::string name = base::ToLowerASCII(
+        base::StringPiece(parsed_[i].name_begin, parsed_[i].name_end));
     if (headers_to_remove.find(name) == headers_to_remove.end()) {
       // It's ok to preserve this header in the final result.
       new_raw_headers.append(parsed_[i].name_begin, parsed_[k].value_end);
@@ -300,8 +297,7 @@ void HttpResponseHeaders::RemoveHeader(const std::string& name) {
   std::string new_raw_headers(raw_headers_.c_str());
   new_raw_headers.push_back('\0');
 
-  std::string lowercase_name(name);
-  base::StringToLowerASCII(&lowercase_name);
+  std::string lowercase_name = base::ToLowerASCII(name);
   HeaderSet to_remove;
   to_remove.insert(lowercase_name);
   MergeWithHeaders(new_raw_headers, to_remove);
@@ -309,8 +305,7 @@ void HttpResponseHeaders::RemoveHeader(const std::string& name) {
 
 void HttpResponseHeaders::RemoveHeaderLine(const std::string& name,
                                            const std::string& value) {
-  std::string name_lowercase(name);
-  base::StringToLowerASCII(&name_lowercase);
+  std::string name_lowercase = base::ToLowerASCII(name);
 
   std::string new_raw_headers(GetStatusLine());
   new_raw_headers.push_back('\0');
@@ -321,9 +316,7 @@ void HttpResponseHeaders::RemoveHeaderLine(const std::string& name,
   std::string old_header_name;
   std::string old_header_value;
   while (EnumerateHeaderLines(&iter, &old_header_name, &old_header_value)) {
-    std::string old_header_name_lowercase(name);
-    base::StringToLowerASCII(&old_header_name_lowercase);
-
+    std::string old_header_name_lowercase = base::ToLowerASCII(old_header_name);
     if (name_lowercase == old_header_name_lowercase &&
         value == old_header_value)
       continue;
@@ -473,7 +466,7 @@ void HttpResponseHeaders::GetNormalizedHeaders(std::string* output) const {
     DCHECK(!parsed_[i].is_continuation());
 
     std::string name(parsed_[i].name_begin, parsed_[i].name_end);
-    std::string lower_name = base::StringToLowerASCII(name);
+    std::string lower_name = base::ToLowerASCII(name);
 
     iter = headers_map.find(lower_name);
     if (iter == headers_map.end()) {
@@ -601,9 +594,7 @@ bool HttpResponseHeaders::HasHeaderValue(const base::StringPiece& name,
   void* iter = NULL;
   std::string temp;
   while (EnumerateHeader(&iter, name, &temp)) {
-    if (value.size() == temp.size() &&
-        std::equal(temp.begin(), temp.end(), value.begin(),
-                   base::CaseInsensitiveCompare<char>()))
+    if (base::EqualsCaseInsensitiveASCII(value, temp))
       return true;
   }
   return false;
@@ -631,7 +622,8 @@ HttpVersion HttpResponseHeaders::ParseVersion(
   // TODO: (1*DIGIT apparently means one or more digits, but we only handle 1).
   // TODO: handle leading zeros, which is allowed by the rfc1616 sec 3.1.
 
-  if ((line_end - p < 4) || !LowerCaseEqualsASCII(p, p + 4, "http")) {
+  if (!base::StartsWith(base::StringPiece(line_begin, line_end), "http",
+                        base::CompareCase::INSENSITIVE_ASCII)) {
     DVLOG(1) << "missing status line";
     return HttpVersion();
   }
@@ -741,11 +733,8 @@ size_t HttpResponseHeaders::FindHeader(size_t from,
   for (size_t i = from; i < parsed_.size(); ++i) {
     if (parsed_[i].is_continuation())
       continue;
-    const std::string::const_iterator& name_begin = parsed_[i].name_begin;
-    const std::string::const_iterator& name_end = parsed_[i].name_end;
-    if (static_cast<size_t>(name_end - name_begin) == search.size() &&
-        std::equal(name_begin, name_end, search.begin(),
-                   base::CaseInsensitiveCompare<char>()))
+    base::StringPiece name(parsed_[i].name_begin, parsed_[i].name_end);
+    if (base::EqualsCaseInsensitiveASCII(search, name))
       return i;
   }
 
@@ -762,9 +751,8 @@ bool HttpResponseHeaders::GetCacheControlDirective(const StringPiece& directive,
   void* iter = NULL;
   while (EnumerateHeader(&iter, name, &value)) {
     if (value.size() > directive_size + 1 &&
-        LowerCaseEqualsASCII(value.begin(),
-                             value.begin() + directive_size,
-                             directive.begin()) &&
+        base::StartsWith(value, directive,
+                         base::CompareCase::INSENSITIVE_ASCII) &&
         value[directive_size] == '=') {
       int64 seconds;
       base::StringToInt64(
@@ -848,9 +836,8 @@ void HttpResponseHeaders::AddNonCacheableHeaders(HeaderSet* result) const {
 
       // assuming the header is not empty, lowercase and insert into set
       if (item_end > item) {
-        std::string name(&*item, item_end - item);
-        base::StringToLowerASCII(&name);
-        result->insert(name);
+        result->insert(
+            base::ToLowerASCII(base::StringPiece(&*item, item_end - item)));
       }
 
       // Continue to next item.
@@ -1231,7 +1218,7 @@ bool HttpResponseHeaders::IsKeepAlive() const {
     std::string token;
     while (EnumerateHeader(&iterator, header, &token)) {
       for (const KeepAliveToken& keep_alive_token : kKeepAliveTokens) {
-        if (LowerCaseEqualsASCII(token, keep_alive_token.token))
+        if (base::LowerCaseEqualsASCII(token, keep_alive_token.token))
           return keep_alive_token.keep_alive;
       }
     }
@@ -1308,9 +1295,9 @@ bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
   std::string::const_iterator content_range_spec_end =
       content_range_spec.begin() + space_position;
   HttpUtil::TrimLWS(&content_range_spec_begin, &content_range_spec_end);
-  if (!LowerCaseEqualsASCII(content_range_spec_begin,
-                            content_range_spec_end,
-                            "bytes")) {
+  if (!base::LowerCaseEqualsASCII(
+          base::StringPiece(content_range_spec_begin, content_range_spec_end),
+          "bytes")) {
     return false;
   }
 
@@ -1329,7 +1316,7 @@ bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
   std::string byte_range_resp_spec(byte_range_resp_spec_begin,
                                    byte_range_resp_spec_end);
   // If byte-range-resp-spec != "*".
-  if (!LowerCaseEqualsASCII(byte_range_resp_spec, "*")) {
+  if (!base::LowerCaseEqualsASCII(byte_range_resp_spec, "*")) {
     size_t minus_position = byte_range_resp_spec.find('-');
     if (minus_position != std::string::npos) {
       // Obtain first-byte-pos.
@@ -1373,7 +1360,9 @@ bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
       content_range_spec.end();
   HttpUtil::TrimLWS(&instance_length_begin, &instance_length_end);
 
-  if (LowerCaseEqualsASCII(instance_length_begin, instance_length_end, "*")) {
+  if (base::StartsWith(
+          base::StringPiece(instance_length_begin, instance_length_end), "*",
+          base::CompareCase::SENSITIVE)) {
     return false;
   } else if (!base::StringToInt64(StringPiece(instance_length_begin,
                                               instance_length_end),
@@ -1391,9 +1380,9 @@ bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
   return true;
 }
 
-base::Value* HttpResponseHeaders::NetLogCallback(
+scoped_ptr<base::Value> HttpResponseHeaders::NetLogCallback(
     NetLogCaptureMode capture_mode) const {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   base::ListValue* headers = new base::ListValue();
   headers->Append(new base::StringValue(GetStatusLine()));
   void* iterator = NULL;
@@ -1410,7 +1399,7 @@ base::Value* HttpResponseHeaders::NetLogCallback(
                              escaped_value.c_str())));
   }
   dict->Set("headers", headers);
-  return dict;
+  return dict.Pass();
 }
 
 // static

@@ -10,6 +10,7 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
@@ -39,6 +40,7 @@
 #include "third_party/WebKit/public/platform/WebRTCSessionDescriptionRequest.h"
 #include "third_party/WebKit/public/platform/WebRTCVoidRequest.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
+#include "third_party/libjingle/source/talk/session/media/mediasession.h"
 
 using webrtc::DataChannelInterface;
 using webrtc::IceCandidateInterface;
@@ -50,6 +52,15 @@ using webrtc::StatsReports;
 
 namespace content {
 namespace {
+
+// Used to back histogram value of "WebRTC.PeerConnection.RtcpMux",
+// so treat as append-only.
+enum RtcpMux {
+  RTCP_MUX_DISABLED,
+  RTCP_MUX_ENABLED,
+  RTCP_MUX_NO_MEDIA,
+  RTCP_MUX_MAX
+};
 
 // Converter functions from libjingle types to WebKit types.
 blink::WebRTCPeerConnectionHandlerClient::ICEGatheringState
@@ -180,41 +191,56 @@ void GetNativeRtcConfiguration(
     webrtc::PeerConnectionInterface::IceServer server;
     const blink::WebRTCICEServer& webkit_server =
         blink_config.server(i);
-    server.username = base::UTF16ToUTF8(webkit_server.username());
-    server.password = base::UTF16ToUTF8(webkit_server.credential());
+    server.username =
+        base::UTF16ToUTF8(base::StringPiece16(webkit_server.username()));
+    server.password =
+        base::UTF16ToUTF8(base::StringPiece16(webkit_server.credential()));
     server.uri = webkit_server.uri().spec();
     webrtc_config->servers.push_back(server);
   }
 
   switch (blink_config.iceTransports()) {
-  case blink::WebRTCIceTransportsNone:
-    webrtc_config->type = webrtc::PeerConnectionInterface::kNone;
-    break;
-  case blink::WebRTCIceTransportsRelay:
-    webrtc_config->type = webrtc::PeerConnectionInterface::kRelay;
-    break;
-  case blink::WebRTCIceTransportsAll:
-    webrtc_config->type = webrtc::PeerConnectionInterface::kAll;
-    break;
-  default:
-    NOTREACHED();
+    case blink::WebRTCIceTransportsNone:
+      webrtc_config->type = webrtc::PeerConnectionInterface::kNone;
+      break;
+    case blink::WebRTCIceTransportsRelay:
+      webrtc_config->type = webrtc::PeerConnectionInterface::kRelay;
+      break;
+    case blink::WebRTCIceTransportsAll:
+      webrtc_config->type = webrtc::PeerConnectionInterface::kAll;
+      break;
+    default:
+      NOTREACHED();
   }
 
   switch (blink_config.bundlePolicy()) {
-  case blink::WebRTCBundlePolicyBalanced:
-    webrtc_config->bundle_policy =
-        webrtc::PeerConnectionInterface::kBundlePolicyBalanced;
-    break;
-  case blink::WebRTCBundlePolicyMaxBundle:
-    webrtc_config->bundle_policy =
-        webrtc::PeerConnectionInterface::kBundlePolicyMaxBundle;
-    break;
-  case blink::WebRTCBundlePolicyMaxCompat:
-    webrtc_config->bundle_policy =
-        webrtc::PeerConnectionInterface::kBundlePolicyMaxCompat;
-    break;
-  default:
-    NOTREACHED();
+    case blink::WebRTCBundlePolicyBalanced:
+      webrtc_config->bundle_policy =
+          webrtc::PeerConnectionInterface::kBundlePolicyBalanced;
+      break;
+    case blink::WebRTCBundlePolicyMaxBundle:
+      webrtc_config->bundle_policy =
+          webrtc::PeerConnectionInterface::kBundlePolicyMaxBundle;
+      break;
+    case blink::WebRTCBundlePolicyMaxCompat:
+      webrtc_config->bundle_policy =
+          webrtc::PeerConnectionInterface::kBundlePolicyMaxCompat;
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  switch (blink_config.rtcpMuxPolicy()) {
+    case blink::WebRTCRtcpMuxPolicyNegotiate:
+      webrtc_config->rtcp_mux_policy =
+          webrtc::PeerConnectionInterface::kRtcpMuxPolicyNegotiate;
+      break;
+    case blink::WebRTCRtcpMuxPolicyRequire:
+      webrtc_config->rtcp_mux_policy =
+          webrtc::PeerConnectionInterface::kRtcpMuxPolicyRequire;
+      break;
+    default:
+      NOTREACHED();
   }
 }
 
@@ -296,7 +322,7 @@ class CreateSessionDescriptionRequest
 
  protected:
   ~CreateSessionDescriptionRequest() override {
-    DCHECK(webkit_request_.isNull());
+    CHECK(webkit_request_.isNull());
   }
 
   const scoped_refptr<base::SingleThreadTaskRunner> main_thread_;
@@ -489,13 +515,26 @@ class PeerConnectionUMAObserver : public webrtc::UMAObserver {
  public:
   PeerConnectionUMAObserver() {}
   ~PeerConnectionUMAObserver() override {}
-
-  void IncrementCounter(
-      webrtc::PeerConnectionUMAMetricsCounter counter) override {
-    // Runs on libjingle's signaling thread.
-    UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.IPMetrics",
-                              counter,
-                              webrtc::kBoundary);
+  void IncrementEnumCounter(webrtc::PeerConnectionEnumCounterType counter_type,
+                            int counter,
+                            int counter_max) override {
+    switch (counter_type) {
+      case webrtc::kEnumCounterAddressFamily:
+        UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.IPMetrics", counter,
+                                  counter_max);
+        break;
+      case webrtc::kEnumCounterIceCandidatePairTypeUdp:
+        UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.CandidatePairType_UDP",
+                                  counter, counter_max);
+        break;
+      case webrtc::kEnumCounterIceCandidatePairTypeTcp:
+        UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.CandidatePairType_TCP",
+                                  counter, counter_max);
+        break;
+      case webrtc::kPeerConnectionEnumCounterMax:
+        NOTREACHED();
+        break;
+    }
   }
 
   void AddHistogramSample(webrtc::PeerConnectionUMAMetricsName type,
@@ -706,10 +745,6 @@ RTCPeerConnectionHandler::RTCPeerConnectionHandler(
     PeerConnectionDependencyFactory* dependency_factory)
     : client_(client),
       dependency_factory_(dependency_factory),
-      frame_(NULL),
-      num_data_channels_created_(0),
-      num_local_candidates_ipv4_(0),
-      num_local_candidates_ipv6_(0),
       weak_factory_(this) {
   g_peer_connection_handlers.Get().insert(this);
 }
@@ -885,14 +920,20 @@ void RTCPeerConnectionHandler::createAnswer(
     peer_connection_tracker_->TrackCreateAnswer(this, constraints);
 }
 
+bool IsOfferOrAnswer(const webrtc::SessionDescriptionInterface* native_desc) {
+  DCHECK(native_desc);
+  return native_desc->type() == "offer" || native_desc->type() == "answer";
+}
+
 void RTCPeerConnectionHandler::setLocalDescription(
     const blink::WebRTCVoidRequest& request,
     const blink::WebRTCSessionDescription& description) {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::setLocalDescription");
 
-  std::string sdp = base::UTF16ToUTF8(description.sdp());
-  std::string type = base::UTF16ToUTF8(description.type());
+  std::string sdp = base::UTF16ToUTF8(base::StringPiece16(description.sdp()));
+  std::string type =
+      base::UTF16ToUTF8(base::StringPiece16(description.type()));
 
   webrtc::SdpParseError error;
   // Since CreateNativeSessionDescription uses the dependency factory, we need
@@ -914,6 +955,15 @@ void RTCPeerConnectionHandler::setLocalDescription(
         this, sdp, type, PeerConnectionTracker::SOURCE_LOCAL);
   }
 
+  if (!first_local_description_ && IsOfferOrAnswer(native_desc)) {
+    first_local_description_.reset(new FirstSessionDescription(native_desc));
+    if (first_remote_description_) {
+      ReportFirstSessionDescriptions(
+          *first_local_description_,
+          *first_remote_description_);
+    }
+  }
+
   scoped_refptr<SetSessionDescriptionRequest> set_request(
       new rtc::RefCountedObject<SetSessionDescriptionRequest>(
           base::ThreadTaskRunnerHandle::Get(), request,
@@ -933,8 +983,9 @@ void RTCPeerConnectionHandler::setRemoteDescription(
     const blink::WebRTCSessionDescription& description) {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::setRemoteDescription");
-  std::string sdp = base::UTF16ToUTF8(description.sdp());
-  std::string type = base::UTF16ToUTF8(description.type());
+  std::string sdp = base::UTF16ToUTF8(base::StringPiece16(description.sdp()));
+  std::string type =
+      base::UTF16ToUTF8(base::StringPiece16(description.type()));
 
   webrtc::SdpParseError error;
   // Since CreateNativeSessionDescription uses the dependency factory, we need
@@ -954,6 +1005,15 @@ void RTCPeerConnectionHandler::setRemoteDescription(
   if (peer_connection_tracker_) {
     peer_connection_tracker_->TrackSetSessionDescription(
         this, sdp, type, PeerConnectionTracker::SOURCE_REMOTE);
+  }
+
+  if (!first_remote_description_ && IsOfferOrAnswer(native_desc)) {
+    first_remote_description_.reset(new FirstSessionDescription(native_desc));
+    if (first_local_description_) {
+      ReportFirstSessionDescriptions(
+          *first_local_description_,
+          *first_remote_description_);
+    }
   }
 
   scoped_refptr<SetSessionDescriptionRequest> set_request(
@@ -1036,10 +1096,9 @@ bool RTCPeerConnectionHandler::addICECandidate(
   // TODO(tommi): Instead of calling addICECandidate here, we can do a
   // PostTaskAndReply kind of a thing.
   bool result = addICECandidate(candidate);
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&RTCPeerConnectionHandler::OnaddICECandidateResult,
-                 weak_factory_.GetWeakPtr(), request, result));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&RTCPeerConnectionHandler::OnaddICECandidateResult,
+                            weak_factory_.GetWeakPtr(), request, result));
   // On failure callback will be triggered.
   return true;
 }
@@ -1050,9 +1109,9 @@ bool RTCPeerConnectionHandler::addICECandidate(
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::addICECandidate");
   scoped_ptr<webrtc::IceCandidateInterface> native_candidate(
       dependency_factory_->CreateIceCandidate(
-          base::UTF16ToUTF8(candidate.sdpMid()),
+          base::UTF16ToUTF8(base::StringPiece16(candidate.sdpMid())),
           candidate.sdpMLineIndex(),
-          base::UTF16ToUTF8(candidate.candidate())));
+          base::UTF16ToUTF8(base::StringPiece16(candidate.candidate()))));
   bool return_value = false;
 
   if (native_candidate) {
@@ -1206,7 +1265,8 @@ blink::WebRTCDataChannelHandler* RTCPeerConnectionHandler::createDataChannel(
     const blink::WebString& label, const blink::WebRTCDataChannelInit& init) {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::createDataChannel");
-  DVLOG(1) << "createDataChannel label " << base::UTF16ToUTF8(label);
+  DVLOG(1) << "createDataChannel label "
+           << base::UTF16ToUTF8(base::StringPiece16(label));
 
   webrtc::DataChannelInit config;
   // TODO(jiayl): remove the deprecated reliable field once Libjingle is updated
@@ -1217,11 +1277,11 @@ blink::WebRTCDataChannelHandler* RTCPeerConnectionHandler::createDataChannel(
   config.negotiated = init.negotiated;
   config.maxRetransmits = init.maxRetransmits;
   config.maxRetransmitTime = init.maxRetransmitTime;
-  config.protocol = base::UTF16ToUTF8(init.protocol);
+  config.protocol = base::UTF16ToUTF8(base::StringPiece16(init.protocol));
 
   rtc::scoped_refptr<webrtc::DataChannelInterface> webrtc_channel(
-      native_peer_connection_->CreateDataChannel(base::UTF16ToUTF8(label),
-                                                 &config));
+      native_peer_connection_->CreateDataChannel(
+          base::UTF16ToUTF8(base::StringPiece16(label)), &config));
   if (!webrtc_channel) {
     DLOG(ERROR) << "Could not create native data channel.";
     return NULL;
@@ -1299,6 +1359,7 @@ void RTCPeerConnectionHandler::OnIceConnectionChange(
     webrtc::PeerConnectionInterface::IceConnectionState new_state) {
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::OnIceConnectionChange");
   DCHECK(thread_checker_.CalledOnValidThread());
+  ReportICEState(new_state);
   if (new_state == webrtc::PeerConnectionInterface::kIceConnectionChecking) {
     ice_connection_checking_start_ = base::TimeTicks::Now();
   } else if (new_state ==
@@ -1306,9 +1367,18 @@ void RTCPeerConnectionHandler::OnIceConnectionChange(
     // If the state becomes connected, send the time needed for PC to become
     // connected from checking to UMA. UMA data will help to know how much
     // time needed for PC to connect with remote peer.
+    if (ice_connection_checking_start_.is_null()) {
+      // From UMA, we have observed a large number of calls falling into the
+      // overflow buckets. One possibility is that the Checking is not signaled
+      // before Connected. This is to guard against that situation to make the
+      // metric more robust.
+      UMA_HISTOGRAM_MEDIUM_TIMES("WebRTC.PeerConnection.TimeToConnect",
+                                 base::TimeDelta());
+    } else {
     UMA_HISTOGRAM_MEDIUM_TIMES(
         "WebRTC.PeerConnection.TimeToConnect",
         base::TimeTicks::Now() - ice_connection_checking_start_);
+    }
   }
 
   track_metrics_.IceConnectionChange(new_state);
@@ -1343,8 +1413,7 @@ void RTCPeerConnectionHandler::OnIceGatheringChange(
              webrtc::PeerConnectionInterface::kIceGatheringGathering) {
     // ICE restarts will change gathering state back to "gathering",
     // reset the counter.
-    num_local_candidates_ipv6_ = 0;
-    num_local_candidates_ipv4_ = 0;
+    ResetUMAStats();
   }
 
   blink::WebRTCPeerConnectionHandlerClient::ICEGatheringState state =
@@ -1475,6 +1544,38 @@ RTCPeerConnectionHandler::CreateNativeSessionDescription(
   return native_desc;
 }
 
+RTCPeerConnectionHandler::FirstSessionDescription::FirstSessionDescription(
+    const webrtc::SessionDescriptionInterface* sdesc) {
+  DCHECK(sdesc);
+
+  for (const auto& content : sdesc->description()->contents()) {
+    if (content.type == cricket::NS_JINGLE_RTP) {
+      const auto* mdesc =
+          static_cast<cricket::MediaContentDescription*>(content.description);
+      audio = audio || (mdesc->type() == cricket::MEDIA_TYPE_AUDIO);
+      video = video || (mdesc->type() == cricket::MEDIA_TYPE_VIDEO);
+      rtcp_mux = rtcp_mux || mdesc->rtcp_mux();
+    }
+  }
+}
+
+void RTCPeerConnectionHandler::ReportFirstSessionDescriptions(
+    const FirstSessionDescription& local,
+    const FirstSessionDescription& remote) {
+  RtcpMux rtcp_mux = RTCP_MUX_ENABLED;
+  if ((!local.audio && !local.video) || (!remote.audio && !remote.video)) {
+    rtcp_mux = RTCP_MUX_NO_MEDIA;
+  } else if (!local.rtcp_mux || !remote.rtcp_mux) {
+    rtcp_mux = RTCP_MUX_DISABLED;
+  }
+
+  UMA_HISTOGRAM_ENUMERATION(
+      "WebRTC.PeerConnection.RtcpMux", rtcp_mux, RTCP_MUX_MAX);
+
+  // TODO(pthatcher): Reports stats about whether we have audio and
+  // video or not.
+}
+
 scoped_refptr<base::SingleThreadTaskRunner>
 RTCPeerConnectionHandler::signaling_thread() const {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -1499,4 +1600,21 @@ void RTCPeerConnectionHandler::RunSynchronousClosureOnSignalingThread(
   }
 }
 
+void RTCPeerConnectionHandler::ReportICEState(
+    webrtc::PeerConnectionInterface::IceConnectionState new_state) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (ice_state_seen_[new_state])
+    return;
+  ice_state_seen_[new_state] = true;
+  UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.ConnectionState", new_state,
+                            webrtc::PeerConnectionInterface::kIceConnectionMax);
+}
+
+void RTCPeerConnectionHandler::ResetUMAStats() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  num_local_candidates_ipv6_ = 0;
+  num_local_candidates_ipv4_ = 0;
+  ice_connection_checking_start_ = base::TimeTicks();
+  memset(ice_state_seen_, 0, sizeof(ice_state_seen_));
+}
 }  // namespace content

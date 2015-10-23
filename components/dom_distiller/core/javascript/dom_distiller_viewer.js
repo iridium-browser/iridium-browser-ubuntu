@@ -2,11 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// This variable will be changed by iOS scripts.
+var distiller_on_ios = false;
+
 function addToPage(html) {
   var div = document.createElement('div');
   div.innerHTML = html;
   document.getElementById('content').appendChild(div);
   fillYouTubePlaceholders();
+
+  if (typeof navigate_on_initial_content_load !== 'undefined' &&
+      navigate_on_initial_content_load) {
+    navigate_on_initial_content_load = false;
+    setTimeout(function() {
+        window.location = window.location + "#loaded";
+    }, 0);
+  }
 }
 
 function fillYouTubePlaceholders() {
@@ -40,19 +51,17 @@ function showLoadingIndicator(isLastPage) {
   updateLoadingIndicator(isLastPage);
 }
 
-// Sets the title. The title will be exposed with a simple animation. This
-// should only be used when the title was not included in the initial html.
+// Sets the title.
 function setTitle(title) {
   var holder = document.getElementById('titleHolder');
-  var collapse = document.getElementById('titleCollapse');
-
-  collapse.style.height = "0px";
 
   holder.textContent = title;
-  var newHeight = Math.max(90, holder.getBoundingClientRect().height);
+  document.title = title;
+}
 
-  collapse.style.transition = "height 0.2s";
-  collapse.style.height = newHeight + "px";
+// Set the text direction of the document ('ltr', 'rtl', or 'auto').
+function setTextDirection(direction) {
+  document.body.setAttribute('dir', direction);
 }
 
 // Maps JS Font Family to CSS class and then changes body class name.
@@ -76,17 +85,23 @@ function useFontFamily(fontFamily) {
 // CSS classes must agree with distilledpage.css.
 function useTheme(theme) {
   var cssClass;
+  var toolbarColor;
   if (theme == "sepia") {
     cssClass = "sepia";
+    toolbarColor = "#BF9A73";
   } else if (theme == "dark") {
     cssClass = "dark";
+    toolbarColor = "#1A1A1A";
   } else {
     cssClass = "light";
+    toolbarColor = "#F5F5F5";
   }
   // Relies on the classname order of the body being Theme class, then Font
   // Family class.
   var fontFamilyClass = document.body.className.split(" ")[1];
   document.body.className = cssClass + " " + fontFamilyClass;
+
+  document.getElementById('theme-color').content = toolbarColor;
 }
 
 var updateLoadingIndicator = function() {
@@ -114,11 +129,26 @@ var updateLoadingIndicator = function() {
  * @param noText The i18n text for the feedback answer 'NO'.
  */
 function showFeedbackForm(questionText, yesText, noText) {
+  // If the distiller is running on iOS, do not show the feedback form. This
+  // variable is set in distiller_viewer.cc before this function is run.
+  if (distiller_on_ios) return;
+
   document.getElementById('feedbackYes').innerText = yesText;
   document.getElementById('feedbackNo').innerText = noText;
   document.getElementById('feedbackQuestion').innerText = questionText;
 
+  document.getElementById('contentWrap').style.paddingBottom = '120px';
   document.getElementById('feedbackContainer').style.display = 'block';
+  var mediaQuery = window.matchMedia("print");
+  mediaQuery.addListener(function (query) {
+    if (query.matches) {
+      document.getElementById('contentWrap').style.paddingBottom = '0px';
+      document.getElementById('feedbackContainer').style.display = 'none';
+    } else {
+      document.getElementById('contentWrap').style.paddingBottom = '120px';
+      document.getElementById('feedbackContainer').style.display = 'block';
+    }
+  });
 }
 
 /**
@@ -137,12 +167,13 @@ function sendFeedback(good) {
 }
 
 // Add a listener to the "View Original" link to report opt-outs.
-document.getElementById('showOriginal').addEventListener('click', function(e) {
-  var img = document.createElement('img');
-  img.src = "/vieworiginal";
-  img.style.display = "none";
-  document.body.appendChild(img);
-}, true);
+document.getElementById('closeReaderView').addEventListener('click',
+    function(e) {
+      var img = document.createElement('img');
+      img.src = "/vieworiginal";
+      img.style.display = "none";
+      document.body.appendChild(img);
+    }, true);
 
 document.getElementById('feedbackYes').addEventListener('click', function(e) {
   sendFeedback(true);
@@ -204,8 +235,8 @@ var pincher = (function() {
   var shiftY;
 
   // The zooming speed relative to pinching speed.
-  const FONT_SCALE_MULTIPLIER = 0.5;
-  const MIN_SPAN_LENGTH = 20;
+  var FONT_SCALE_MULTIPLIER = 0.5;
+  var MIN_SPAN_LENGTH = 20;
 
   // The font size is guaranteed to be in px.
   var baseSize =

@@ -15,7 +15,6 @@
 #include "extensions/common/manifest.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/coalesced_permission_message.h"
-#include "extensions/common/permissions/permission_message.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permission_set.h"
 
@@ -49,7 +48,6 @@ class PermissionsData {
     // Otherwise, default policy should decide.
     virtual bool CanExecuteScriptOnPage(const Extension* extension,
                                         const GURL& document_url,
-                                        const GURL& top_document_url,
                                         int tab_id,
                                         int process_id,
                                         std::string* error) = 0;
@@ -80,7 +78,6 @@ class PermissionsData {
   // as is commonly the case for chrome:// urls.
   // NOTE: You probably want to use CanAccessPage().
   static bool IsRestrictedUrl(const GURL& document_url,
-                              const GURL& top_frame_url,
                               const Extension* extension,
                               std::string* error);
 
@@ -132,20 +129,9 @@ class PermissionsData {
   // network, etc.)
   bool HasEffectiveAccessToAllHosts() const;
 
-  // Returns the full list of legacy permission message IDs.
-  // Deprecated. You DO NOT want to call this!
-  // TODO(treib): Remove once we've switched to the new system.
-  PermissionMessageIDs GetLegacyPermissionMessageIDs() const;
-
-  // Returns the full list of permission messages that should display at install
-  // time, including their submessages, as strings.
-  // TODO(treib): Remove this and move callers over to
-  // GetCoalescedPermissionMessages once we've fully switched to the new system.
-  PermissionMessageStrings GetPermissionMessageStrings() const;
-
   // Returns the full list of permission details for messages that should
   // display at install time, in a nested format ready for display.
-  CoalescedPermissionMessages GetCoalescedPermissionMessages() const;
+  CoalescedPermissionMessages GetPermissionMessages() const;
 
   // Returns true if the extension has requested all-hosts permissions (or
   // something close to it), but has had it withheld.
@@ -158,7 +144,6 @@ class PermissionsData {
   // with the reason the extension cannot access the page.
   bool CanAccessPage(const Extension* extension,
                      const GURL& document_url,
-                     const GURL& top_document_url,
                      int tab_id,
                      int process_id,
                      std::string* error) const;
@@ -167,7 +152,6 @@ class PermissionsData {
   // know how to wait for permission.
   AccessType GetPageAccess(const Extension* extension,
                            const GURL& document_url,
-                           const GURL& top_document_url,
                            int tab_id,
                            int process_id,
                            std::string* error) const;
@@ -180,7 +164,6 @@ class PermissionsData {
   // method.
   bool CanRunContentScriptOnPage(const Extension* extension,
                                  const GURL& document_url,
-                                 const GURL& top_document_url,
                                  int tab_id,
                                  int process_id,
                                  std::string* error) const;
@@ -190,7 +173,6 @@ class PermissionsData {
   // know how to wait for permission.
   AccessType GetContentScriptAccess(const Extension* extension,
                                     const GURL& document_url,
-                                    const GURL& top_document_url,
                                     int tab_id,
                                     int process_id,
                                     std::string* error) const;
@@ -241,7 +223,6 @@ class PermissionsData {
   // sites (like the webstore or chrome:// urls).
   AccessType CanRunOnPage(const Extension* extension,
                           const GURL& document_url,
-                          const GURL& top_document_url,
                           int tab_id,
                           int process_id,
                           const URLPatternSet& permitted_url_patterns,

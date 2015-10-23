@@ -26,13 +26,62 @@ ProtectionSystemSpecificHeader::~ProtectionSystemSpecificHeader() {}
 FourCC ProtectionSystemSpecificHeader::BoxType() const { return FOURCC_PSSH; }
 
 bool ProtectionSystemSpecificHeader::Parse(BoxReader* reader) {
-  // Validate the box's contents and hang on to the system ID.
-  RCHECK(reader->ReadFullBoxHeader() &&
-         reader->ReadVec(&system_id, 16));
-
+  // Don't bother validating the box's contents.
   // Copy the entire box, including the header, for passing to EME as initData.
   DCHECK(raw_box.empty());
   raw_box.assign(reader->data(), reader->data() + reader->size());
+  return true;
+}
+
+FullProtectionSystemSpecificHeader::FullProtectionSystemSpecificHeader() {}
+FullProtectionSystemSpecificHeader::~FullProtectionSystemSpecificHeader() {}
+FourCC FullProtectionSystemSpecificHeader::BoxType() const {
+  return FOURCC_PSSH;
+}
+
+// The format of a 'pssh' box is as follows:
+//   unsigned int(32) size;
+//   unsigned int(32) type = "pssh";
+//   if (size==1) {
+//     unsigned int(64) largesize;
+//   } else if (size==0) {
+//     -- box extends to end of file
+//   }
+//   unsigned int(8) version;
+//   bit(24) flags;
+//   unsigned int(8)[16] SystemID;
+//   if (version > 0)
+//   {
+//     unsigned int(32) KID_count;
+//     {
+//       unsigned int(8)[16] KID;
+//     } [KID_count]
+//   }
+//   unsigned int(32) DataSize;
+//   unsigned int(8)[DataSize] Data;
+
+bool FullProtectionSystemSpecificHeader::Parse(mp4::BoxReader* reader) {
+  RCHECK(reader->type() == BoxType() && reader->ReadFullBoxHeader());
+
+  // Only versions 0 and 1 of the 'pssh' boxes are supported. Any other
+  // versions are ignored.
+  RCHECK(reader->version() == 0 || reader->version() == 1);
+  RCHECK(reader->flags() == 0);
+  RCHECK(reader->ReadVec(&system_id, 16));
+
+  if (reader->version() > 0) {
+    uint32_t kid_count;
+    RCHECK(reader->Read4(&kid_count));
+    for (uint32_t i = 0; i < kid_count; ++i) {
+      std::vector<uint8_t> kid;
+      RCHECK(reader->ReadVec(&kid, 16));
+      key_ids.push_back(kid);
+    }
+  }
+
+  uint32_t data_size;
+  RCHECK(reader->Read4(&data_size));
+  RCHECK(reader->ReadVec(&data, data_size));
   return true;
 }
 
@@ -242,55 +291,24 @@ bool SampleDescription::Parse(BoxReader* reader) {
   return true;
 }
 
-SyncSample::SyncSample() : is_present(false) {}
-SyncSample::~SyncSample() {}
-FourCC SyncSample::BoxType() const { return FOURCC_STSS; }
-
-bool SyncSample::Parse(BoxReader* reader) {
-  uint32 entry_count;
-  RCHECK(reader->ReadFullBoxHeader() &&
-         reader->Read4(&entry_count));
-
-  is_present = true;
-
-  entries.resize(entry_count);
-
-  if (entry_count == 0)
-    return true;
-
-  for (size_t i = 0; i < entry_count; ++i)
-    RCHECK(reader->Read4(&entries[i]));
-
-  return true;
-}
-
-bool SyncSample::IsSyncSample(size_t k) const {
-  // ISO/IEC 14496-12 Section 8.6.2.1 : If the sync sample box is not present,
-  // every sample is a sync sample.
-  if (!is_present)
-    return true;
-
-  // ISO/IEC 14496-12  Section 8.6.2.3 : If entry_count is zero, there are no
-  // sync samples within the stream.
-  if (entries.size() == 0u)
-    return false;
-
-  for (size_t i = 0; i < entries.size(); ++i) {
-    if (entries[i] == k)
-      return true;
-  }
-
-  return false;
-}
-
 SampleTable::SampleTable() {}
 SampleTable::~SampleTable() {}
 FourCC SampleTable::BoxType() const { return FOURCC_STBL; }
 
 bool SampleTable::Parse(BoxReader* reader) {
-  return reader->ScanChildren() &&
-      reader->ReadChild(&description) &&
-      reader->MaybeReadChild(&sync_sample);
+  RCHECK(reader->ScanChildren() &&
+         reader->ReadChild(&description));
+  // There could be multiple SampleGroupDescription boxes with different
+  // grouping types. For common encryption, the relevant grouping type is
+  // 'seig'. Continue reading until 'seig' is found, or until running out of
+  // child boxes.
+  while (reader->HasChild(&sample_group_description)) {
+    RCHECK(reader->ReadChild(&sample_group_description));
+    if (sample_group_description.grouping_type == FOURCC_SEIG)
+      break;
+    sample_group_description.entries.clear();
+  }
+  return true;
 }
 
 EditList::EditList() {}
@@ -360,16 +378,17 @@ AVCDecoderConfigurationRecord::~AVCDecoderConfigurationRecord() {}
 FourCC AVCDecoderConfigurationRecord::BoxType() const { return FOURCC_AVCC; }
 
 bool AVCDecoderConfigurationRecord::Parse(BoxReader* reader) {
-  return ParseInternal(reader, reader->log_cb());
+  return ParseInternal(reader, reader->media_log());
 }
 
 bool AVCDecoderConfigurationRecord::Parse(const uint8* data, int data_size) {
   BufferReader reader(data, data_size);
-  return ParseInternal(&reader, LogCB());
+  return ParseInternal(&reader, new MediaLog());
 }
 
-bool AVCDecoderConfigurationRecord::ParseInternal(BufferReader* reader,
-                                                  const LogCB& log_cb) {
+bool AVCDecoderConfigurationRecord::ParseInternal(
+    BufferReader* reader,
+    const scoped_refptr<MediaLog>& media_log) {
   RCHECK(reader->Read1(&version) && version == 1 &&
          reader->Read1(&profile_indication) &&
          reader->Read1(&profile_compatibility) &&
@@ -392,11 +411,11 @@ bool AVCDecoderConfigurationRecord::ParseInternal(BufferReader* reader,
            reader->ReadVec(&sps_list[i], sps_length));
     RCHECK(sps_list[i].size() > 4);
 
-    if (!log_cb.is_null()) {
-      MEDIA_LOG(INFO, log_cb) << "Video codec: avc1." << std::hex
-                              << static_cast<int>(sps_list[i][1])
-                              << static_cast<int>(sps_list[i][2])
-                              << static_cast<int>(sps_list[i][3]);
+    if (media_log.get()) {
+      MEDIA_LOG(INFO, media_log) << "Video codec: avc1." << std::hex
+                                 << static_cast<int>(sps_list[i][1])
+                                 << static_cast<int>(sps_list[i][2])
+                                 << static_cast<int>(sps_list[i][3]);
     }
   }
 
@@ -457,8 +476,13 @@ bool VideoSampleEntry::Parse(BoxReader* reader) {
     }
   }
 
-  if (IsFormatValid())
-    RCHECK(reader->ReadChild(&avcc));
+  if (IsFormatValid()) {
+    scoped_ptr<AVCDecoderConfigurationRecord> avcConfig(
+        new AVCDecoderConfigurationRecord());
+    RCHECK(reader->ReadChild(avcConfig.get()));
+    frame_bitstream_converter = make_scoped_refptr(
+        new AVCBitstreamConverter(avcConfig.Pass()));
+  }
 
   return true;
 }
@@ -489,12 +513,12 @@ bool ElementaryStreamDescriptor::Parse(BoxReader* reader) {
   object_type = es_desc.object_type();
 
   if (object_type != 0x40) {
-    MEDIA_LOG(INFO, reader->log_cb()) << "Audio codec: mp4a." << std::hex
-                                      << static_cast<int>(object_type);
+    MEDIA_LOG(INFO, reader->media_log()) << "Audio codec: mp4a." << std::hex
+                                         << static_cast<int>(object_type);
   }
 
   if (es_desc.IsAAC(object_type))
-    RCHECK(aac.Parse(es_desc.decoder_specific_info(), reader->log_cb()));
+    RCHECK(aac.Parse(es_desc.decoder_specific_info(), reader->media_log()));
 
   return true;
 }
@@ -660,7 +684,7 @@ bool Movie::Parse(BoxReader* reader) {
   RCHECK(reader->ScanChildren() && reader->ReadChild(&header) &&
          reader->ReadChildren(&tracks));
 
-  RCHECK_MEDIA_LOGGED(reader->ReadChild(&extends), reader->log_cb(),
+  RCHECK_MEDIA_LOGGED(reader->ReadChild(&extends), reader->media_log(),
                       "Detected unfragmented MP4. Media Source Extensions "
                       "require ISO BMFF moov to contain mvex to indicate that "
                       "Movie Fragments are to be expected.");
@@ -900,13 +924,17 @@ bool TrackFragment::Parse(BoxReader* reader) {
   // different grouping types. For common encryption, the relevant grouping type
   // is 'seig'. Continue reading until 'seig' is found, or until running out of
   // child boxes.
-  while (sample_group_description.grouping_type != FOURCC_SEIG &&
-         reader->HasChild(&sample_group_description)) {
+  while (reader->HasChild(&sample_group_description)) {
     RCHECK(reader->ReadChild(&sample_group_description));
+    if (sample_group_description.grouping_type == FOURCC_SEIG)
+      break;
+    sample_group_description.entries.clear();
   }
-  while (sample_to_group.grouping_type != FOURCC_SEIG &&
-         reader->HasChild(&sample_to_group)) {
+  while (reader->HasChild(&sample_to_group)) {
     RCHECK(reader->ReadChild(&sample_to_group));
+    if (sample_to_group.grouping_type == FOURCC_SEIG)
+      break;
+    sample_to_group.entries.clear();
   }
   return true;
 }

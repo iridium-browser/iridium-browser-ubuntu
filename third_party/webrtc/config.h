@@ -60,6 +60,7 @@ struct RtpExtension {
   static const char* kAbsSendTime;
   static const char* kVideoRotation;
   static const char* kAudioLevel;
+  static const char* kTransportSequenceNumber;
   std::string name;
   int id;
 };
@@ -125,6 +126,12 @@ struct NetEqCapacityConfig {
   explicit NetEqCapacityConfig(int value) : enabled(true), capacity(value) {}
   bool enabled;
   int capacity;
+};
+
+struct NetEqFastAccelerate {
+  NetEqFastAccelerate() : enabled(false) {}
+  explicit NetEqFastAccelerate(bool value) : enabled(value) {}
+  bool enabled;
 };
 
 }  // namespace webrtc

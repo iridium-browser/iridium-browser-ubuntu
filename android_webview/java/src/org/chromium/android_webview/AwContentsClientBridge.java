@@ -10,9 +10,9 @@ import android.net.http.SslError;
 import android.util.Log;
 import android.webkit.ValueCallback;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.net.AndroidPrivateKey;
 import org.chromium.net.DefaultAndroidKeyStore;
 
@@ -260,11 +260,12 @@ public class AwContentsClientBridge {
     }
 
     @CalledByNative
-    private boolean shouldOverrideUrlLoading(String url) {
+    private boolean shouldOverrideUrlLoading(
+            String url, boolean hasUserGesture, boolean isRedirect) {
         if (mClient.hasWebViewClient()) {
             return mClient.shouldOverrideUrlLoading(url);
         } else {
-            return AwContentsClient.sendBrowsingIntent(mContext, url);
+            return AwContentsClient.sendBrowsingIntent(mContext, url, hasUserGesture, isRedirect);
         }
     }
 

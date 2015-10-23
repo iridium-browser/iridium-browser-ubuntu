@@ -24,10 +24,11 @@ import android.util.Log;
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -45,10 +46,17 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     private static final String PDF_VIEWER = "com.google.android.apps.docs";
     private static final String PDF_MIME = "application/pdf";
     private static final String PDF_SUFFIX = ".pdf";
-    private final Activity mActivity;
+    private final ChromeActivity mActivity;
 
-    public ExternalNavigationDelegateImpl(Activity activity) {
+    public ExternalNavigationDelegateImpl(ChromeActivity activity) {
         mActivity = activity;
+    }
+
+    /**
+     * @return The activity that this delegate is associated with.
+     */
+    protected final Activity getActivity() {
+        return mActivity;
     }
 
     /**
@@ -201,7 +209,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
                         startActivity(intent);
                         if (tab != null && !tab.isClosing() && tab.isInitialized()
                                 && needsToCloseTab) {
-                            tab.getChromeWebContentsDelegateAndroid().closeContents();
+                            closeTab(tab);
                         }
                     }
                 })
@@ -241,7 +249,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
                     //                instead of silently dropping it on the floor.
                     if (needsToCloseTab) {
                         // If the access was not granted, then close the tab if necessary.
-                        tab.getChromeWebContentsDelegateAndroid().closeContents();
+                        closeTab(tab);
                     }
                 }
             }
@@ -260,7 +268,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
         String url = fallbackUrl != null ? fallbackUrl : intent.getDataString();
         if (!UrlUtilities.isAcceptedScheme(url)) {
-            if (needsToCloseTab) tab.getChromeWebContentsDelegateAndroid().closeContents();
+            if (needsToCloseTab) closeTab(tab);
             return;
         }
 
@@ -274,13 +282,13 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             IntentHandler.addTrustedIntentExtras(intent, mActivity);
             startActivity(intent);
 
-            if (needsToCloseTab) tab.getChromeWebContentsDelegateAndroid().closeContents();
+            if (needsToCloseTab) closeTab(tab);
             return;
         }
 
         LoadUrlParams loadUrlParams = new LoadUrlParams(url, PageTransition.AUTO_TOPLEVEL);
         if (!TextUtils.isEmpty(referrerUrl)) {
-            Referrer referrer = new Referrer(referrerUrl, 0 /* WebReferrerPolicyAlways */);
+            Referrer referrer = new Referrer(referrerUrl, Referrer.REFERRER_POLICY_ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         tab.loadUrl(loadUrlParams);
@@ -292,7 +300,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         int transitionType = PageTransition.LINK;
         LoadUrlParams loadUrlParams = new LoadUrlParams(url, transitionType);
         if (!TextUtils.isEmpty(referrerUrl)) {
-            Referrer referrer = new Referrer(referrerUrl, 0 /* WebReferrerPolicyAlways */);
+            Referrer referrer = new Referrer(referrerUrl, Referrer.REFERRER_POLICY_ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         if (tab != null) {
@@ -323,10 +331,14 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
     private static void logTransactionTooLargeOrRethrow(RuntimeException e, Intent intent) {
         // See http://crbug.com/369574.
-        if (e.getCause() != null && e.getCause() instanceof TransactionTooLargeException) {
+        if (e.getCause() instanceof TransactionTooLargeException) {
             Log.e(TAG, "Could not resolve Activity for intent " + intent.toString(), e);
         } else {
             throw e;
         }
+    }
+
+    private void closeTab(Tab tab) {
+        mActivity.getTabModelSelector().closeTab(tab);
     }
 }

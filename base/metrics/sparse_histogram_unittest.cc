@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/metrics/sparse_histogram.h"
+
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/sample_map.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/pickle.h"
 #include "base/strings/stringprintf.h"
@@ -59,6 +60,25 @@ TEST_F(SparseHistogramTest, BasicTest) {
   EXPECT_EQ(3, snapshot2->TotalCount());
   EXPECT_EQ(2, snapshot2->GetCount(100));
   EXPECT_EQ(1, snapshot2->GetCount(101));
+}
+
+TEST_F(SparseHistogramTest, BasicTestAddCount) {
+  scoped_ptr<SparseHistogram> histogram(NewSparseHistogram("Sparse"));
+  scoped_ptr<HistogramSamples> snapshot(histogram->SnapshotSamples());
+  EXPECT_EQ(0, snapshot->TotalCount());
+  EXPECT_EQ(0, snapshot->sum());
+
+  histogram->AddCount(100, 15);
+  scoped_ptr<HistogramSamples> snapshot1(histogram->SnapshotSamples());
+  EXPECT_EQ(15, snapshot1->TotalCount());
+  EXPECT_EQ(15, snapshot1->GetCount(100));
+
+  histogram->AddCount(100, 15);
+  histogram->AddCount(101, 25);
+  scoped_ptr<HistogramSamples> snapshot2(histogram->SnapshotSamples());
+  EXPECT_EQ(55, snapshot2->TotalCount());
+  EXPECT_EQ(30, snapshot2->GetCount(100));
+  EXPECT_EQ(25, snapshot2->GetCount(101));
 }
 
 TEST_F(SparseHistogramTest, MacroBasicTest) {

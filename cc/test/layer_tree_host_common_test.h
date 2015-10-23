@@ -10,6 +10,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "cc/layers/layer_lists.h"
 #include "cc/test/fake_layer_tree_host_client.h"
+#include "cc/test/layer_test_common.h"
+#include "cc/test/test_task_graph_runner.h"
+#include "cc/trees/layer_tree_settings.h"
+#include "cc/trees/property_tree.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace gfx {
@@ -26,9 +30,9 @@ class Layer;
 class LayerImpl;
 class RenderSurfaceLayerList;
 
-class LayerTreeHostCommonTestBase {
+class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
  protected:
-  LayerTreeHostCommonTestBase();
+  explicit LayerTreeHostCommonTestBase(const LayerTreeSettings& settings);
   virtual ~LayerTreeHostCommonTestBase();
 
   template <typename LayerType>
@@ -104,6 +108,9 @@ class LayerTreeHostCommonTestBase {
                                    page_scale_application_layer, false, false);
   }
 
+  void ExecuteCalculateDrawPropertiesWithPropertyTrees(Layer* layer);
+  void ExecuteCalculateDrawPropertiesWithPropertyTrees(LayerImpl* layer);
+
   RenderSurfaceLayerList* render_surface_layer_list() const {
     return render_surface_layer_list_.get();
   }
@@ -112,22 +119,30 @@ class LayerTreeHostCommonTestBase {
     return render_surface_layer_list_impl_.get();
   }
 
+  const LayerList& update_layer_list() const { return update_layer_list_; }
+  bool UpdateLayerListContains(int id) const;
+
   int render_surface_layer_list_count() const {
     return render_surface_layer_list_count_;
   }
 
-  scoped_ptr<FakeLayerTreeHost> CreateFakeLayerTreeHost();
+  const LayerSettings& layer_settings() { return layer_settings_; }
 
  private:
   scoped_ptr<RenderSurfaceLayerList> render_surface_layer_list_;
   scoped_ptr<std::vector<LayerImpl*>> render_surface_layer_list_impl_;
+  LayerList update_layer_list_;
+  LayerSettings layer_settings_;
 
-  FakeLayerTreeHostClient client_;
   int render_surface_layer_list_count_;
 };
 
 class LayerTreeHostCommonTest : public LayerTreeHostCommonTestBase,
-                                public testing::Test {};
+                                public testing::Test {
+ public:
+  LayerTreeHostCommonTest();
+  explicit LayerTreeHostCommonTest(const LayerTreeSettings& settings);
+};
 
 }  // namespace cc
 

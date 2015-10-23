@@ -111,9 +111,8 @@ class RequestImpl : public WebHistoryService::Request,
     if (response_code_ == net::HTTP_UNAUTHORIZED && ++auth_retry_count_ <= 1) {
       OAuth2TokenService::ScopeSet oauth_scopes;
       oauth_scopes.insert(kHistoryOAuthScope);
-      token_service_->InvalidateToken(
-          signin_manager_->GetAuthenticatedAccountId(),
-          oauth_scopes,
+      token_service_->InvalidateAccessToken(
+          signin_manager_->GetAuthenticatedAccountId(), oauth_scopes,
           access_token_);
 
       access_token_.clear();
@@ -313,7 +312,8 @@ scoped_ptr<base::DictionaryValue> WebHistoryService::ReadResponse(
   WebHistoryService::Request* request) {
   scoped_ptr<base::DictionaryValue> result;
   if (request->GetResponseCode() == net::HTTP_OK) {
-    base::Value* value = base::JSONReader::Read(request->GetResponseBody());
+    base::Value* value =
+        base::JSONReader::DeprecatedRead(request->GetResponseBody());
     if (value && value->IsType(base::Value::TYPE_DICTIONARY))
       result.reset(static_cast<base::DictionaryValue*>(value));
     else
@@ -362,7 +362,7 @@ void WebHistoryService::ExpireHistory(
   }
   delete_request.Set("del", deletions.release());
   std::string post_data;
-  base::JSONWriter::Write(&delete_request, &post_data);
+  base::JSONWriter::Write(delete_request, &post_data);
 
   GURL url(kHistoryDeleteHistoryUrl);
 
@@ -426,7 +426,7 @@ void WebHistoryService::SetAudioHistoryEnabled(
                                   new_enabled_value);
   enable_audio_history.SetString("client", "audio");
   std::string post_data;
-  base::JSONWriter::Write(&enable_audio_history, &post_data);
+  base::JSONWriter::Write(enable_audio_history, &post_data);
   request->SetPostData(post_data);
 
   request->Start();

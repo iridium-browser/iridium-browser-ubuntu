@@ -77,10 +77,9 @@ class GLHelperTest : public testing::Test {
 
   void StartTracing(const std::string& filter) {
     base::trace_event::TraceLog::GetInstance()->SetEnabled(
-        base::trace_event::CategoryFilter(filter),
-        base::trace_event::TraceLog::RECORDING_MODE,
-        base::trace_event::TraceOptions(
-            base::trace_event::RECORD_UNTIL_FULL));
+        base::trace_event::TraceConfig(filter,
+                                       base::trace_event::RECORD_UNTIL_FULL),
+        base::trace_event::TraceLog::RECORDING_MODE);
   }
 
   static void TraceDataCB(
@@ -112,7 +111,8 @@ class GLHelperTest : public testing::Test {
 
     std::string error_msg;
     scoped_ptr<base::Value> trace_data(
-        base::JSONReader::ReadAndReturnError(json_data, 0, NULL, &error_msg));
+        base::JSONReader::DeprecatedReadAndReturnError(json_data, 0, NULL,
+                                                       &error_msg));
     CHECK(trace_data)
         << "JSON parsing failed (" << error_msg << ") JSON data:" << std::endl
         << json_data;
@@ -1391,7 +1391,7 @@ class GLHelperTest : public testing::Test {
 
     scoped_refptr<media::VideoFrame> output_frame =
         media::VideoFrame::CreateFrame(
-            media::VideoFrame::YV12,
+            media::PIXEL_FORMAT_YV12,
             // The coded size of the output frame is rounded up to the next
             // 16-byte boundary.  This tests that the readback is being
             // positioned inside the frame's visible region, and not dependent
@@ -1402,8 +1402,7 @@ class GLHelperTest : public testing::Test {
             base::TimeDelta::FromSeconds(0));
     scoped_refptr<media::VideoFrame> truth_frame =
         media::VideoFrame::CreateFrame(
-            media::VideoFrame::YV12,
-            gfx::Size(output_xsize, output_ysize),
+            media::PIXEL_FORMAT_YV12, gfx::Size(output_xsize, output_ysize),
             gfx::Rect(0, 0, output_xsize, output_ysize),
             gfx::Size(output_xsize, output_ysize),
             base::TimeDelta::FromSeconds(0));

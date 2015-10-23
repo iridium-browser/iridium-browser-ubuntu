@@ -39,7 +39,13 @@ class PermissionDispatcher : public blink::WebPermissionClient,
   // blink::WebPermissionClient implementation.
   virtual void queryPermission(blink::WebPermissionType type,
                                const blink::WebURL& origin,
-                               blink::WebPermissionQueryCallback* callback);
+                               blink::WebPermissionCallback* callback);
+  virtual void requestPermission(blink::WebPermissionType,
+                                 const blink::WebURL& origin,
+                                 blink::WebPermissionCallback* callback);
+  virtual void revokePermission(blink::WebPermissionType,
+                                const blink::WebURL& origin,
+                                blink::WebPermissionCallback* callback);
   virtual void startListening(blink::WebPermissionType type,
                               const blink::WebURL& origin,
                               blink::WebPermissionObserver* observer);
@@ -48,8 +54,16 @@ class PermissionDispatcher : public blink::WebPermissionClient,
   // The following methods must be called by workers on the main thread.
   void QueryPermissionForWorker(blink::WebPermissionType type,
                                 const std::string& origin,
-                                blink::WebPermissionQueryCallback* callback,
+                                blink::WebPermissionCallback* callback,
                                 int worker_thread_id);
+  void RequestPermissionForWorker(blink::WebPermissionType type,
+                                  const std::string& origin,
+                                  blink::WebPermissionCallback* callback,
+                                  int worker_thread_id);
+  void RevokePermissionForWorker(blink::WebPermissionType type,
+                                 const std::string& origin,
+                                 blink::WebPermissionCallback* callback,
+                                 int worker_thread_id);
   void StartListeningForWorker(
       blink::WebPermissionType type,
       const std::string& origin,
@@ -66,7 +80,7 @@ class PermissionDispatcher : public blink::WebPermissionClient,
   // Runs the given |callback| with |status| as a parameter. It has to be run
   // on a worker thread.
   static void RunCallbackOnWorkerThread(
-      blink::WebPermissionQueryCallback* callback,
+      blink::WebPermissionCallback* callback,
       scoped_ptr<blink::WebPermissionStatus> status);
 
   // Helper method that returns an initialized PermissionServicePtr.
@@ -74,10 +88,20 @@ class PermissionDispatcher : public blink::WebPermissionClient,
 
   void QueryPermissionInternal(blink::WebPermissionType type,
                                const std::string& origin,
-                               blink::WebPermissionQueryCallback* callback,
+                               blink::WebPermissionCallback* callback,
                                int worker_thread_id);
+  void RequestPermissionInternal(blink::WebPermissionType type,
+                                const std::string& origin,
+                                blink::WebPermissionCallback* callback,
+                                int worker_thread_id);
+  void RevokePermissionInternal(blink::WebPermissionType type,
+                                const std::string& origin,
+                                blink::WebPermissionCallback* callback,
+                                int worker_thread_id);
 
-  void OnQueryPermission(int request_id, PermissionStatus status);
+  // This is the callback function used for query and revoke
+  void OnPermissionResponse(int request_id,
+                            PermissionStatus status);
   void OnPermissionChanged(blink::WebPermissionType type,
                            const std::string& origin,
                            blink::WebPermissionObserver* observer,
@@ -96,17 +120,17 @@ class PermissionDispatcher : public blink::WebPermissionClient,
   // it in the right thread.
   class CallbackInformation {
    public:
-    CallbackInformation(blink::WebPermissionQueryCallback* callback,
+    CallbackInformation(blink::WebPermissionCallback* callback,
                         int worker_thread_id);
     ~CallbackInformation();
 
-    blink::WebPermissionQueryCallback* callback() const;
+    blink::WebPermissionCallback* callback() const;
     int worker_thread_id() const;
 
-    blink::WebPermissionQueryCallback* ReleaseCallback();
+    blink::WebPermissionCallback* ReleaseCallback();
 
    private:
-    scoped_ptr<blink::WebPermissionQueryCallback> callback_;
+    scoped_ptr<blink::WebPermissionCallback> callback_;
     int worker_thread_id_;
 
     DISALLOW_COPY_AND_ASSIGN(CallbackInformation);

@@ -27,6 +27,7 @@ class SingleThreadTaskRunner;
 namespace net {
 class HttpRequestHeaders;
 class HttpResponseHeaders;
+class SSLInfo;
 class UploadDataStream;
 }  // namespace net
 
@@ -73,6 +74,8 @@ class CronetURLRequestAdapter : public net::URLRequest::Delegate {
   // Starts the request.
   void Start(JNIEnv* env, jobject jcaller);
 
+  void GetStatus(JNIEnv* env, jobject jcaller, jobject jstatus_listener) const;
+
   // Follows redirect.
   void FollowDeferredRedirect(JNIEnv* env, jobject jcaller);
 
@@ -117,6 +120,9 @@ class CronetURLRequestAdapter : public net::URLRequest::Delegate {
   void OnReceivedRedirect(net::URLRequest* request,
                           const net::RedirectInfo& redirect_info,
                           bool* defer_redirect) override;
+  void OnSSLCertificateError(net::URLRequest* request,
+                             const net::SSLInfo& ssl_info,
+                             bool fatal) override;
   void OnResponseStarted(net::URLRequest* request) override;
   void OnReadCompleted(net::URLRequest* request, int bytes_read) override;
 
@@ -124,6 +130,9 @@ class CronetURLRequestAdapter : public net::URLRequest::Delegate {
   class IOBufferWithByteBuffer;
 
   void StartOnNetworkThread();
+  void GetStatusOnNetworkThread(
+      const base::android::ScopedJavaGlobalRef<jobject>& jstatus_listener_ref)
+      const;
   void FollowDeferredRedirectOnNetworkThread();
   void ReadDataOnNetworkThread(
       scoped_refptr<IOBufferWithByteBuffer> read_buffer,

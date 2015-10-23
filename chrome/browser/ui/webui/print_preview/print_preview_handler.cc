@@ -30,6 +30,7 @@
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/dom_distiller/tab_utils.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/printing/print_error_dialog.h"
@@ -57,6 +58,9 @@
 #include "components/cloud_devices/common/cloud_device_description.h"
 #include "components/cloud_devices/common/cloud_devices_urls.h"
 #include "components/cloud_devices/common/printer_description.h"
+#include "components/dom_distiller/content/browser/distillable_page_utils.h"
+#include "components/dom_distiller/core/dom_distiller_switches.h"
+#include "components/dom_distiller/core/url_utils.h"
 #include "components/printing/common/print_messages.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
@@ -187,7 +191,7 @@ base::DictionaryValue* GetSettingsDictionary(const base::ListValue* args) {
   }
   scoped_ptr<base::DictionaryValue> settings(
       static_cast<base::DictionaryValue*>(
-          base::JSONReader::Read(json_str)));
+          base::JSONReader::DeprecatedRead(json_str)));
   if (!settings.get() || !settings->IsType(base::Value::TYPE_DICTIONARY)) {
     NOTREACHED() << "Print job settings must be a dictionary.";
     return NULL;
@@ -670,6 +674,10 @@ void PrintPreviewHandler::RegisterMessages() {
       "getExtensionPrinterCapabilities",
       base::Bind(&PrintPreviewHandler::HandleGetExtensionPrinterCapabilities,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "grantExtensionPrinterAccess",
+      base::Bind(&PrintPreviewHandler::HandleGrantExtensionPrinterAccess,
+                 base::Unretained(this)));
   RegisterForGaiaCookieChanges();
 }
 
@@ -742,6 +750,18 @@ void PrintPreviewHandler::HandleGetExtensionPrinters(
   extension_printer_handler_->Reset();
   extension_printer_handler_->StartGetPrinters(base::Bind(
       &PrintPreviewHandler::OnGotPrintersForExtension, base::Unretained(this)));
+}
+
+void PrintPreviewHandler::HandleGrantExtensionPrinterAccess(
+    const base::ListValue* args) {
+  std::string printer_id;
+  bool ok = args->GetString(0, &printer_id);
+  DCHECK(ok);
+
+  EnsureExtensionPrinterHandlerSet();
+  extension_printer_handler_->StartGrantPrinterAccess(
+      printer_id, base::Bind(&PrintPreviewHandler::OnGotExtensionPrinterInfo,
+                             base::Unretained(this), printer_id));
 }
 
 void PrintPreviewHandler::HandleGetExtensionPrinterCapabilities(
@@ -823,8 +843,28 @@ void PrintPreviewHandler::HandleGetPreview(const base::ListValue* args) {
   }
 
   VLOG(1) << "Print preview request start";
-  RenderViewHost* rvh = initiator->GetRenderViewHost();
-  rvh->Send(new PrintMsg_PrintPreview(rvh->GetRoutingID(), *settings));
+
+  bool distill_page = false;
+  if (!settings->GetBoolean(printing::kSettingDistillPageEnabled,
+                            &distill_page)) {
+    NOTREACHED();
+  }
+
+  bool selection_only = false;
+  if (!settings->GetBoolean(printing::kSettingShouldPrintSelectionOnly,
+                            &selection_only)) {
+    NOTREACHED();
+  }
+
+  if (distill_page && !selection_only) {
+    print_preview_distiller_.reset(new PrintPreviewDistiller(
+        initiator, base::Bind(&PrintPreviewUI::OnPrintPreviewFailed,
+                              print_preview_ui()->GetWeakPtr()),
+        settings.Pass()));
+  } else {
+    RenderViewHost* rvh = initiator->GetRenderViewHost();
+    rvh->Send(new PrintMsg_PrintPreview(rvh->GetRoutingID(), *settings));
+  }
 }
 
 void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
@@ -1240,6 +1280,22 @@ void PrintPreviewHandler::SendInitialSettings(
   if (print_preview_ui()->source_is_modifiable())
     GetNumberFormatAndMeasurementSystem(&initial_settings);
   web_ui()->CallJavascriptFunction("setInitialSettings", initial_settings);
+
+  WebContents* initiator = GetInitiator();
+  if (initiator && cmdline->HasSwitch(switches::kEnableDomDistiller) &&
+      dom_distiller::url_utils::IsUrlDistillable(
+          initiator->GetLastCommittedURL())) {
+    dom_distiller::IsDistillablePage(
+        initiator, false,
+        base::Bind(&PrintPreviewHandler::HandleIsPageDistillableResult,
+                   weak_factory_.GetWeakPtr()));
+  }
+}
+
+void PrintPreviewHandler::HandleIsPageDistillableResult(bool distillable) {
+  VLOG(1) << "Distillable page detection finished";
+  if (distillable)
+    web_ui()->CallJavascriptFunction("detectDistillablePage");
 }
 
 void PrintPreviewHandler::ClosePreviewDialog() {
@@ -1683,7 +1739,7 @@ void PrintPreviewHandler::FillPrinterDescription(
 #endif  // defined(ENABLE_SERVICE_DISCOVERY)
 
 void PrintPreviewHandler::EnsureExtensionPrinterHandlerSet() {
-  if (extension_printer_handler_.get())
+  if (extension_printer_handler_)
     return;
 
   extension_printer_handler_ =
@@ -1695,6 +1751,20 @@ void PrintPreviewHandler::OnGotPrintersForExtension(
     bool done) {
   web_ui()->CallJavascriptFunction("onExtensionPrintersAdded", printers,
                                    base::FundamentalValue(done));
+}
+
+void PrintPreviewHandler::OnGotExtensionPrinterInfo(
+    const std::string& printer_id,
+    const base::DictionaryValue& printer_info) {
+  if (printer_info.empty()) {
+    web_ui()->CallJavascriptFunction("failedToResolveProvisionalPrinter",
+                                     base::StringValue(printer_id));
+    return;
+  }
+
+  web_ui()->CallJavascriptFunction("onProvisionalPrinterResolved",
+                                   base::StringValue(printer_id),
+                                   printer_info);
 }
 
 void PrintPreviewHandler::OnGotExtensionPrinterCapabilities(

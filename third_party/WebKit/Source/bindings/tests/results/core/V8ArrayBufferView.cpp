@@ -18,6 +18,7 @@
 #include "bindings/core/v8/V8Int32Array.h"
 #include "bindings/core/v8/V8Int8Array.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
+#include "bindings/core/v8/V8SharedArrayBuffer.h"
 #include "bindings/core/v8/V8Uint16Array.h"
 #include "bindings/core/v8/V8Uint32Array.h"
 #include "bindings/core/v8/V8Uint8Array.h"
@@ -31,7 +32,16 @@
 
 namespace blink {
 
+// Suppress warning: global constructors, because struct WrapperTypeInfo is trivial
+// and does not depend on another global objects.
+#if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wglobal-constructors"
+#endif
 const WrapperTypeInfo V8ArrayBufferView::wrapperTypeInfo = { gin::kEmbedderBlink, 0, V8ArrayBufferView::refObject, V8ArrayBufferView::derefObject, V8ArrayBufferView::trace, 0, 0, V8ArrayBufferView::preparePrototypeObject, V8ArrayBufferView::installConditionallyEnabledProperties, "ArrayBufferView", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+#if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestArrayBufferView.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in

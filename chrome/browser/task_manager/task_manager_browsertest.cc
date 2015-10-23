@@ -13,7 +13,6 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -38,7 +37,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "extensions/browser/extension_system.h"
@@ -55,10 +53,12 @@ using task_manager::browsertest_util::MatchAnyApp;
 using task_manager::browsertest_util::MatchAnyExtension;
 using task_manager::browsertest_util::MatchAnySubframe;
 using task_manager::browsertest_util::MatchAnyTab;
+using task_manager::browsertest_util::MatchAnyUtility;
 using task_manager::browsertest_util::MatchApp;
 using task_manager::browsertest_util::MatchExtension;
 using task_manager::browsertest_util::MatchSubframe;
 using task_manager::browsertest_util::MatchTab;
+using task_manager::browsertest_util::MatchUtility;
 using task_manager::browsertest_util::WaitForTaskManagerRows;
 using task_manager::browsertest_util::WaitForTaskManagerStatToExceed;
 
@@ -118,12 +118,36 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
 
+    // These tests are for the old implementation of the task manager. We must
+    // explicitly disable the new one.
+    task_manager::browsertest_util::EnableOldTaskManager();
+
     // Do not launch device discovery process.
     command_line->AppendSwitch(switches::kDisableDeviceDiscoveryNotifications);
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TaskManagerBrowserTest);
+};
+
+class TaskManagerUtilityProcessBrowserTest : public TaskManagerBrowserTest {
+ public:
+  TaskManagerUtilityProcessBrowserTest() {}
+
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    TaskManagerBrowserTest::SetUpCommandLine(command_line);
+
+    // Enable out-of-process proxy resolver. Use a trivial PAC script to ensure
+    // that some javascript is being executed.
+    command_line->AppendSwitch(switches::kV8PacMojoOutOfProcess);
+    command_line->AppendSwitchASCII(
+        switches::kProxyPacUrl,
+        "data:,function FindProxyForURL(url, host){return \"DIRECT;\";}");
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerUtilityProcessBrowserTest);
 };
 
 // Parameterized variant of TaskManagerBrowserTest which runs with/without
@@ -137,12 +161,11 @@ class TaskManagerOOPIFBrowserTest : public TaskManagerBrowserTest,
   void SetUpCommandLine(base::CommandLine* command_line) override {
     TaskManagerBrowserTest::SetUpCommandLine(command_line);
     if (GetParam())
-      command_line->AppendSwitch(switches::kSitePerProcess);
+      content::IsolateAllSitesForTesting(command_line);
   }
 
   bool ShouldExpectSubframes() {
-    return base::CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kSitePerProcess);
+    return content::AreAllSitesIsolatedForTesting();
   }
 
  private:
@@ -235,7 +258,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   tab1->GetMainFrame()->ExecuteJavaScriptWithUserGestureForTests(
       base::ASCIIToUTF16("window.open('title3.html', '_blank');"));
   // ... then immediately hang the renderer so that title3.html can't load.
-  tab1->GetMainFrame()->ExecuteJavaScript(base::ASCIIToUTF16("while(1);"));
+  tab1->GetMainFrame()->ExecuteJavaScriptForTests(
+      base::ASCIIToUTF16("while(1);"));
 
   // Blocks until a new WebContents appears.
   WebContents* tab2 = web_contents_added_observer.GetWebContents();
@@ -839,6 +863,29 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, JSHeapMemory) {
       minimal_heap_size));
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchAnyTab()));
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("title1.html")));
+}
+
+// Checks that task manager counts utility process JS heap size.
+IN_PROC_BROWSER_TEST_F(TaskManagerUtilityProcessBrowserTest,
+                       UtilityJSHeapMemory) {
+  ShowTaskManager();
+  ui_test_utils::NavigateToURL(browser(), GetTestURL());
+  // The PAC script is trivial, so don't expect a large heap.
+  size_t minimal_heap_size = 1024;
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerStatToExceed(
+      MatchUtility(
+          l10n_util::GetStringUTF16(IDS_UTILITY_PROCESS_PROXY_RESOLVER_NAME)),
+      task_manager::browsertest_util::V8_MEMORY,
+      minimal_heap_size));
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerStatToExceed(
+      MatchUtility(
+          l10n_util::GetStringUTF16(IDS_UTILITY_PROCESS_PROXY_RESOLVER_NAME)),
+      task_manager::browsertest_util::V8_MEMORY_USED,
+      minimal_heap_size));
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchAnyUtility()));
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(
+      1, MatchUtility(l10n_util::GetStringUTF16(
+          IDS_UTILITY_PROCESS_PROXY_RESOLVER_NAME))));
 }
 
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DevToolsNewDockedWindow) {

@@ -18,6 +18,8 @@
 #include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/native_widget_types.h"
 
+struct ViewHostMsg_TextInputState_Params;
+
 namespace content {
 class BrowserPluginGuest;
 class RenderWidgetHost;
@@ -72,10 +74,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
-  void TextInputTypeChanged(ui::TextInputType type,
-                            ui::TextInputMode input_mode,
-                            bool can_compose_inline,
-                            int flags) override;
+  void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) override;
   void ImeCancelComposition() override;
 #if defined(OS_MACOSX) || defined(USE_AURA)
   void ImeCompositionRangeChanged(
@@ -117,11 +117,11 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
       const NativeWebKeyboardEvent& event) override;
 #endif  // defined(OS_MACOSX)
 
-#if defined(OS_ANDROID) || defined(TOOLKIT_VIEWS)
+#if defined(OS_ANDROID) || defined(USE_AURA)
   // RenderWidgetHostViewBase implementation.
   void ShowDisambiguationPopup(const gfx::Rect& rect_pixels,
                                const SkBitmap& zoomed_bitmap) override;
-#endif  // defined(OS_ANDROID) || defined(TOOLKIT_VIEWS)
+#endif  // defined(OS_ANDROID) || defined(USE_AURA)
 
 #if defined(OS_ANDROID)
   void LockCompositingSurface() override;

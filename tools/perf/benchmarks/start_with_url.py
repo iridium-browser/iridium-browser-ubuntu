@@ -2,13 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import benchmark
+from core import perf_benchmark
 
 from measurements import startup
 import page_sets
+from telemetry import benchmark
 
 
-class _StartWithUrl(benchmark.Benchmark):
+class _StartWithUrl(perf_benchmark.PerfBenchmark):
   page_set = page_sets.StartupPagesPageSet
   test = startup.StartWithUrl
 

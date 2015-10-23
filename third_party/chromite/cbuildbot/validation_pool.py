@@ -51,11 +51,13 @@ PRE_CQ = constants.PRE_CQ
 CQ = constants.CQ
 
 CQ_CONFIG = constants.CQ_MASTER
-PRE_CQ_GROUP_CONFIG = constants.PRE_CQ_GROUP_CONFIG
 PRE_CQ_LAUNCHER_CONFIG = constants.PRE_CQ_LAUNCHER_CONFIG
 
 # Set of configs that can reject a CL from the pre-CQ / CQ pipeline.
-CQ_PIPELINE_CONFIGS = {CQ_CONFIG, PRE_CQ_GROUP_CONFIG, PRE_CQ_LAUNCHER_CONFIG}
+# TODO(davidjames): Any Pre-CQ config can reject CLs now, so this is wrong.
+# This is only used for fail counts. Maybe it makes sense to just get rid of
+# the fail count?
+CQ_PIPELINE_CONFIGS = {CQ_CONFIG, PRE_CQ_LAUNCHER_CONFIG}
 
 # The gerrit-on-borg team tells us that delays up to 2 minutes can be
 # normal.  Setting timeout to 3 minutes to be safe-ish.
@@ -741,25 +743,13 @@ class PatchSeries(object):
     # 'change' object, so make sure we grab all of that information.
     with parallel.Manager() as manager:
       fetched_changes = manager.dict()
+
       fetch_repo = functools.partial(
-          self._FetchChangesForRepo, fetched_changes, by_repo)
+          _FetchChangesForRepo, fetched_changes, by_repo)
       parallel.RunTasksInProcessPool(fetch_repo, [[repo] for repo in by_repo])
 
       return [fetched_changes[c.id] for c in changes_to_fetch]
 
-  def _FetchChangesForRepo(self, fetched_changes, by_repo, repo):
-    """Fetch the changes for a given `repo`.
-
-    Args:
-      fetched_changes: A dict from change ids to changes which is updated by
-        this method.
-      by_repo: A mapping from repositories to changes.
-      repo: The repository we should fetch the changes for.
-    """
-    for change in by_repo[repo]:
-      original_id = change.id
-      change.Fetch(repo)
-      fetched_changes[original_id] = change
 
   @_ManifestDecorator
   def Apply(self, changes, frozen=True, honor_ordering=False,
@@ -974,6 +964,26 @@ class PatchSeries(object):
     kwargs['forced_manifest'] = _ManifestShim(git_repo, tracking_branch)
 
     return cls(git_repo, **kwargs)
+
+
+def _FetchChangesForRepo(fetched_changes, by_repo, repo):
+  """Fetch the changes for a given `repo`.
+
+  Args:
+    fetched_changes: A dict from change ids to changes which is updated by
+      this method.
+    by_repo: A mapping from repositories to changes.
+    repo: The repository we should fetch the changes for.
+  """
+  changes = by_repo[repo]
+  refs = set(c.ref for c in changes if not c.HasBeenFetched(repo))
+  cmd = ['fetch', '-f', changes[0].project_url] + list(refs)
+  git.RunGit(repo, cmd, print_cmd=True)
+
+  for change in changes:
+    sha1 = change.HasBeenFetched(repo) or change.sha1
+    change.UpdateMetadataFromRepo(repo, sha1=sha1)
+    fetched_changes[change.id] = change
 
 
 class _ManifestShim(object):

@@ -319,28 +319,33 @@ void WebNavigationTabObserver::DidCommitProvisionalLoadForFrame(
   if (!navigation_state_.CanSendEvents(render_frame_host))
     return;
 
+  events::HistogramValue histogram_value = events::UNKNOWN;
   std::string event_name;
   if (is_reference_fragment_navigation) {
+    histogram_value = events::WEB_NAVIGATION_ON_REFERENCE_FRAGMENT_UPDATED;
     event_name = web_navigation::OnReferenceFragmentUpdated::kEventName;
   } else if (is_history_state_modification) {
+    histogram_value = events::WEB_NAVIGATION_ON_HISTORY_STATE_UPDATED;
     event_name = web_navigation::OnHistoryStateUpdated::kEventName;
   } else {
     if (navigation_state_.GetIsServerRedirected(render_frame_host)) {
       transition_type = ui::PageTransitionFromInt(
           transition_type | ui::PAGE_TRANSITION_SERVER_REDIRECT);
     }
+    histogram_value = events::WEB_NAVIGATION_ON_COMMITTED;
     event_name = web_navigation::OnCommitted::kEventName;
   }
-  helpers::DispatchOnCommitted(event_name, web_contents(), render_frame_host,
-                               navigation_state_.GetUrl(render_frame_host),
-                               transition_type);
+  helpers::DispatchOnCommitted(
+      histogram_value, event_name, web_contents(), render_frame_host,
+      navigation_state_.GetUrl(render_frame_host), transition_type);
 }
 
 void WebNavigationTabObserver::DidFailProvisionalLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   DVLOG(2) << "DidFailProvisionalLoad("
            << "render_frame_host=" << render_frame_host
            << ", frame_num=" << render_frame_host->GetRoutingID()
@@ -414,7 +419,8 @@ void WebNavigationTabObserver::DidFailLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   DVLOG(2) << "DidFailLoad("
            << "render_frame_host=" << render_frame_host
            << ", frame_num=" << render_frame_host->GetRoutingID()

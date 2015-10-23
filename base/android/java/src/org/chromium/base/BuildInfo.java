@@ -4,6 +4,7 @@
 
 package org.chromium.base;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
@@ -12,6 +13,8 @@ import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Build;
 import android.text.TextUtils;
 import android.util.Log;
+
+import org.chromium.base.annotations.CalledByNative;
 
 /**
  * BuildInfo is a utility class providing easy access to {@link PackageInfo}
@@ -131,5 +134,27 @@ public class BuildInfo {
         // TODO(bauerb): Update this once the SDK is updated.
         return Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP_MR1
                  || TextUtils.equals("MNC", Build.VERSION.CODENAME);
+    }
+
+    private static boolean isLanguageSplit(String splitName) {
+        // Names look like "config.XX".
+        return splitName.length() == 9 && splitName.startsWith("config.");
+    }
+
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    @CalledByNative
+    public static boolean hasLanguageApkSplits(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return false;
+        }
+        PackageInfo packageInfo = PackageUtils.getOwnPackageInfo(context);
+        if (packageInfo.splitNames != null) {
+            for (int i = 0; i < packageInfo.splitNames.length; ++i) {
+                if (isLanguageSplit(packageInfo.splitNames[i])) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

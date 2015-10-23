@@ -26,6 +26,7 @@
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/http/http_server_properties_manager.h"
 #include "net/http/transport_security_persister.h"
 #include "net/http/transport_security_state.h"
 #include "net/ssl/channel_id_service.h"
@@ -33,6 +34,7 @@
 #include "net/ssl/ssl_config_service_defaults.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/static_http_user_agent_settings.h"
+#include "net/url_request/url_request_backoff_manager.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_intercepting_job_factory.h"
@@ -120,18 +122,14 @@ class BasicNetworkDelegate : public NetworkDelegateImpl {
     return true;
   }
 
-  bool OnCanThrottleRequest(const URLRequest& request) const override {
-    // Returning true will only enable throttling if there's also a
-    // URLRequestThrottlerManager, which there isn't, by default.
-    return true;
-  }
-
   DISALLOW_COPY_AND_ASSIGN(BasicNetworkDelegate);
 };
 
-class BasicURLRequestContext : public URLRequestContext {
+// Define a context class that can self-manage the ownership of its components
+// via a UrlRequestContextStorage object.
+class ContainerURLRequestContext : public URLRequestContext {
  public:
-  explicit BasicURLRequestContext(
+  explicit ContainerURLRequestContext(
       const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner)
       : file_task_runner_(file_task_runner), storage_(this) {}
 
@@ -157,7 +155,7 @@ class BasicURLRequestContext : public URLRequestContext {
   }
 
  protected:
-  ~BasicURLRequestContext() override { AssertNoURLRequests(); }
+  ~ContainerURLRequestContext() override { AssertNoURLRequests(); }
 
  private:
   // The thread should be torn down last.
@@ -167,7 +165,7 @@ class BasicURLRequestContext : public URLRequestContext {
   URLRequestContextStorage storage_;
   scoped_ptr<TransportSecurityPersister> transport_security_persister_;
 
-  DISALLOW_COPY_AND_ASSIGN(BasicURLRequestContext);
+  DISALLOW_COPY_AND_ASSIGN(ContainerURLRequestContext);
 };
 
 }  // namespace
@@ -183,9 +181,9 @@ URLRequestContextBuilder::HttpNetworkSessionParams::HttpNetworkSessionParams()
       testing_fixed_http_port(0),
       testing_fixed_https_port(0),
       next_protos(NextProtosDefaults()),
-      use_alternate_protocols(true),
-      enable_quic(false) {
-}
+      use_alternative_services(true),
+      enable_quic(false),
+      enable_insecure_quic(false) {}
 
 URLRequestContextBuilder::HttpNetworkSessionParams::~HttpNetworkSessionParams()
 {}
@@ -209,6 +207,7 @@ URLRequestContextBuilder::URLRequestContextBuilder()
 #endif
       http_cache_enabled_(true),
       throttling_enabled_(false),
+      backoff_enabled_(false),
       sdch_enabled_(false) {
 }
 
@@ -249,9 +248,14 @@ void URLRequestContextBuilder::SetFileTaskRunner(
   file_task_runner_ = task_runner;
 }
 
+void URLRequestContextBuilder::SetHttpServerProperties(
+    scoped_ptr<HttpServerProperties> http_server_properties) {
+  http_server_properties_ = http_server_properties.Pass();
+}
+
 URLRequestContext* URLRequestContextBuilder::Build() {
-  BasicURLRequestContext* context =
-      new BasicURLRequestContext(file_task_runner_);
+  ContainerURLRequestContext* context =
+      new ContainerURLRequestContext(file_task_runner_);
   URLRequestContextStorage* storage = context->storage();
 
   storage->set_http_user_agent_settings(new StaticHttpUserAgentSettings(
@@ -332,12 +336,20 @@ URLRequestContext* URLRequestContextBuilder::Build() {
                                            false)));
   }
 
-  storage->set_http_server_properties(
-      scoped_ptr<HttpServerProperties>(new HttpServerPropertiesImpl()));
+  if (http_server_properties_) {
+    storage->set_http_server_properties(http_server_properties_.Pass());
+  } else {
+    storage->set_http_server_properties(
+        scoped_ptr<HttpServerProperties>(new HttpServerPropertiesImpl()));
+  }
+
   storage->set_cert_verifier(CertVerifier::CreateDefault());
 
   if (throttling_enabled_)
     storage->set_throttler_manager(new URLRequestThrottlerManager());
+
+  if (backoff_enabled_)
+    storage->set_backoff_manager(new URLRequestBackoffManager());
 
   HttpNetworkSession::Params network_session_params;
   network_session_params.host_resolver = context->host_resolver();
@@ -362,12 +374,14 @@ URLRequestContext* URLRequestContextBuilder::Build() {
       http_network_session_params_.testing_fixed_http_port;
   network_session_params.testing_fixed_https_port =
       http_network_session_params_.testing_fixed_https_port;
-  network_session_params.use_alternate_protocols =
-    http_network_session_params_.use_alternate_protocols;
+  network_session_params.use_alternative_services =
+      http_network_session_params_.use_alternative_services;
   network_session_params.trusted_spdy_proxy =
       http_network_session_params_.trusted_spdy_proxy;
   network_session_params.next_protos = http_network_session_params_.next_protos;
   network_session_params.enable_quic = http_network_session_params_.enable_quic;
+  network_session_params.enable_insecure_quic =
+      http_network_session_params_.enable_insecure_quic;
   network_session_params.quic_connection_options =
       http_network_session_params_.quic_connection_options;
 

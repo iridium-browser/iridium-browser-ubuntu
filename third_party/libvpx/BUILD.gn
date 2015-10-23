@@ -4,6 +4,7 @@
 
 import("//build/config/arm.gni")
 import("//build/config/android/config.gni")
+import("//build/config/chrome_build.gni")
 import("//third_party/libvpx/libvpx_srcs.gni")
 import("//third_party/yasm/yasm_assemble.gni")
 
@@ -41,8 +42,21 @@ config("libvpx_config") {
     "//third_party/libvpx/source/libvpx",
     "$root_gen_dir/third_party/libvpx", # Provides vpx_rtcd.h.
   ]
-  if (!is_win) {
-    cflags = [ "-Wno-unused-function", "-Wno-sign-compare" ]
+}
+
+# gn orders flags on a target before flags from configs. The default config
+# adds -Wall, and these flags have to be after -Wall -- so they need to come
+# from a config and can't be on the target directly.
+config("libvpx_warnings") {
+  if (is_clang) {
+    cflags = [
+      # libvpx heavily relies on implicit enum casting.
+      "-Wno-conversion",
+      # libvpx does `if ((a == b))` in some places.
+      "-Wno-parentheses-equality",
+      # libvpx has many static functions in header, which trigger this warning.
+      "-Wno-unused-function",
+    ]
   }
 }
 
@@ -75,6 +89,7 @@ static_library("libvpx_intrinsics_mmx") {
   configs += [ ":libvpx_config" ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
+  configs += [ ":libvpx_warnings" ]
   if (!is_win) {
     cflags = [ "-mmmx" ]
   }
@@ -89,7 +104,8 @@ static_library("libvpx_intrinsics_sse2") {
   configs += [ ":libvpx_config" ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
-  if (!is_win) {
+  configs += [ ":libvpx_warnings" ]
+  if (!is_win || is_clang) {
     cflags = [ "-msse2" ]
   }
   if (current_cpu == "x86") {
@@ -103,7 +119,8 @@ static_library("libvpx_intrinsics_ssse3") {
   configs += [ ":libvpx_config" ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
-  if (!is_win) {
+  configs += [ ":libvpx_warnings" ]
+  if (!is_win || is_clang) {
     cflags = [ "-mssse3" ]
   }
   if (current_cpu == "x86") {
@@ -117,7 +134,8 @@ static_library("libvpx_intrinsics_sse4_1") {
   configs += [ ":libvpx_config" ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
-  if (!is_win) {
+  configs += [ ":libvpx_warnings" ]
+  if (!is_win || is_clang) {
     cflags = [ "-msse4.1" ]
   }
   if (current_cpu == "x86") {
@@ -131,6 +149,7 @@ static_library("libvpx_intrinsics_avx2") {
   configs += [ ":libvpx_config" ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
+  configs += [ ":libvpx_warnings" ]
   if (is_win) {
     cflags = [ "/arch:AVX2" ]
   } else {
@@ -147,6 +166,7 @@ if (cpu_arch_full == "arm-neon-cpu-detect") {
   static_library("libvpx_intrinsics_neon") {
     configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
     configs += [ ":libvpx_config" ]
+    configs += [ ":libvpx_warnings" ]
     cflags = [ "-mfpu=neon" ]
     sources = libvpx_srcs_arm_neon_cpu_detect_neon
   }
@@ -177,6 +197,7 @@ if (current_cpu == "arm") {
     sources = get_target_outputs(":convert_arm_assembly")
     configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
     configs += [ ":libvpx_config" ]
+    configs += [ ":libvpx_warnings" ]
     if (cpu_arch_full == "arm-neon" ||
         cpu_arch_full == "arm-neon-cpu-detect") {
       cflags = [ "-mfpu=neon" ]
@@ -213,15 +234,6 @@ static_library("libvpx") {
     }
   } else if (current_cpu == "arm64") {
     sources = libvpx_srcs_arm64
-  }
-
-  # gn orders flags on a target before flags from configs. The default config
-  # adds -Wall, and these flags have to be after -Wall -- so they need to come
-  # from a config and can't be on the target directly.
-  config("libvpx_warnings") {
-    if (is_clang) {
-       cflags = [ "-Wno-conversion" ]
-     }
   }
 
   configs += [ ":libvpx_config" ]

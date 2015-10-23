@@ -14,7 +14,7 @@
 #include "extensions/browser/api/bluetooth/bluetooth_event_router.h"
 #include "extensions/common/api/bluetooth_private.h"
 
-namespace bt_private = extensions::core_api::bluetooth_private;
+namespace bt_private = extensions::api::bluetooth_private;
 namespace SetDiscoveryFilter = bt_private::SetDiscoveryFilter;
 
 namespace extensions {
@@ -60,7 +60,7 @@ void BluetoothPrivateAPI::OnListenerRemoved(const EventListenerInfo& details) {
       details.extension_id);
 }
 
-namespace core_api {
+namespace api {
 
 namespace {
 
@@ -227,9 +227,9 @@ void BluetoothPrivateSetAdapterStateFunction::SendError() {
             std::back_inserter(failed_vector));
 
   std::vector<std::string> replacements(1);
-  replacements[0] = JoinString(failed_vector, ", ");
-  std::string error =
-      ReplaceStringPlaceholders(kSetAdapterPropertyError, replacements, NULL);
+  replacements[0] = base::JoinString(failed_vector, ", ");
+  std::string error = base::ReplaceStringPlaceholders(kSetAdapterPropertyError,
+                                                      replacements, NULL);
   SetError(error);
   SendResponse(false);
 }
@@ -415,6 +415,6 @@ bool BluetoothPrivateSetDiscoveryFilterFunction::DoWork(
   return true;
 }
 
-}  // namespace core_api
+}  // namespace api
 
 }  // namespace extensions

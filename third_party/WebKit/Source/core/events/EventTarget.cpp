@@ -57,6 +57,11 @@ EventTargetData::~EventTargetData()
 {
 }
 
+DEFINE_TRACE(EventTargetData)
+{
+    visitor->trace(eventListenerMap);
+}
+
 EventTarget::EventTarget()
 {
 }
@@ -87,16 +92,8 @@ inline LocalDOMWindow* EventTarget::executingWindow()
     return 0;
 }
 
-bool EventTarget::addEventListener()
+bool EventTarget::addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener, bool useCapture)
 {
-    UseCounter::count(executionContext(), UseCounter::AddEventListenerNoArguments);
-    return false;
-}
-
-bool EventTarget::addEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
-{
-    // FIXME: listener null check should throw TypeError (and be done in
-    // generated bindings), but breaks legacy content. http://crbug.com/249598
     if (!listener)
         return false;
 
@@ -111,16 +108,8 @@ bool EventTarget::addEventListener(const AtomicString& eventType, PassRefPtr<Eve
     return ensureEventTargetData().eventListenerMap.add(eventType, listener, useCapture);
 }
 
-bool EventTarget::removeEventListener()
+bool EventTarget::removeEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener, bool useCapture)
 {
-    UseCounter::count(executionContext(), UseCounter::RemoveEventListenerNoArguments);
-    return false;
-}
-
-bool EventTarget::removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
-{
-    // FIXME: listener null check should throw TypeError (and be done in
-    // generated bindings), but breaks legacy content. http://crbug.com/249598
     if (!listener)
         return false;
 
@@ -146,14 +135,18 @@ bool EventTarget::removeEventListener(const AtomicString& eventType, PassRefPtr<
             continue;
 
         --firingIterator.end;
-        if (indexOfRemovedListener <= firingIterator.iterator)
+        // Note that when firing an event listener,
+        // firingIterator.iterator indicates the next event listener
+        // that would fire, not the currently firing event
+        // listener. See EventTarget::fireEventListeners.
+        if (indexOfRemovedListener < firingIterator.iterator)
             --firingIterator.iterator;
     }
 
     return true;
 }
 
-bool EventTarget::setAttributeEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener)
+bool EventTarget::setAttributeEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener)
 {
     clearAttributeEventListener(eventType);
     if (!listener)
@@ -163,13 +156,15 @@ bool EventTarget::setAttributeEventListener(const AtomicString& eventType, PassR
 
 EventListener* EventTarget::getAttributeEventListener(const AtomicString& eventType)
 {
-    const EventListenerVector& entry = getEventListeners(eventType);
-    for (const auto& eventListener : entry) {
+    EventListenerVector* listenerVector = getEventListeners(eventType);
+    if (!listenerVector)
+        return nullptr;
+    for (const auto& eventListener : *listenerVector) {
         EventListener* listener = eventListener.listener.get();
         if (listener->isAttribute() && listener->belongsToTheCurrentWorld())
             return listener;
     }
-    return 0;
+    return nullptr;
 }
 
 bool EventTarget::clearAttributeEventListener(const AtomicString& eventType)
@@ -180,7 +175,7 @@ bool EventTarget::clearAttributeEventListener(const AtomicString& eventType)
     return removeEventListener(eventType, listener, false);
 }
 
-bool EventTarget::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event, ExceptionState& exceptionState)
+bool EventTarget::dispatchEventForBindings(PassRefPtrWillBeRawPtr<Event> event, ExceptionState& exceptionState)
 {
     if (!event) {
         exceptionState.throwDOMException(InvalidStateError, "The event provided is null.");
@@ -198,10 +193,17 @@ bool EventTarget::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event, ExceptionSt
     if (!executionContext())
         return false;
 
-    return dispatchEvent(event);
+    event->setTrusted(false);
+    return dispatchEventInternal(event);
 }
 
 bool EventTarget::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
+{
+    event->setTrusted(true);
+    return dispatchEventInternal(event);
+}
+
+bool EventTarget::dispatchEventInternal(PassRefPtrWillBeRawPtr<Event> event)
 {
     event->setTarget(this);
     event->setCurrentTarget(this);
@@ -327,6 +329,9 @@ void EventTarget::fireEventListeners(Event* event, EventTargetData* d, EventList
     } else if (event->type() == EventTypeNames::focusin || event->type() == EventTypeNames::focusout) {
         if (LocalDOMWindow* executingWindow = this->executingWindow())
             UseCounter::count(executingWindow->document(), UseCounter::FocusInOutEvent);
+    } else if (event->type() == EventTypeNames::textInput) {
+        if (LocalDOMWindow* executingWindow = this->executingWindow())
+            UseCounter::count(executingWindow->document(), UseCounter::TextInputFired);
     }
 
     size_t i = 0;
@@ -334,8 +339,14 @@ void EventTarget::fireEventListeners(Event* event, EventTargetData* d, EventList
     if (!d->firingEventIterators)
         d->firingEventIterators = adoptPtr(new FiringEventIteratorVector);
     d->firingEventIterators->append(FiringEventIterator(event->type(), i, size));
-    for ( ; i < size; ++i) {
+    while (i < size) {
         RegisteredEventListener& registeredListener = entry[i];
+
+        // Move the iterator past this event listener. This must match
+        // the handling of the FiringEventIterator::iterator in
+        // EventTarget::removeEventListener.
+        ++i;
+
         if (event->eventPhase() == Event::CAPTURING_PHASE && !registeredListener.useCapture)
             continue;
         if (event->eventPhase() == Event::BUBBLING_PHASE && registeredListener.useCapture)
@@ -351,27 +362,23 @@ void EventTarget::fireEventListeners(Event* event, EventTargetData* d, EventList
             break;
 
         InspectorInstrumentationCookie cookie = InspectorInstrumentation::willHandleEvent(this, event, registeredListener.listener.get(), registeredListener.useCapture);
+
         // To match Mozilla, the AT_TARGET phase fires both capturing and bubbling
         // event listeners, even though that violates some versions of the DOM spec.
         registeredListener.listener->handleEvent(context, event);
+        RELEASE_ASSERT(i <= size);
+
         InspectorInstrumentation::didHandleEvent(cookie);
     }
     d->firingEventIterators->removeLast();
 }
 
-const EventListenerVector& EventTarget::getEventListeners(const AtomicString& eventType)
+EventListenerVector* EventTarget::getEventListeners(const AtomicString& eventType)
 {
-    AtomicallyInitializedStaticReference(EventListenerVector, emptyVector, new EventListenerVector);
-
-    EventTargetData* d = eventTargetData();
-    if (!d)
-        return emptyVector;
-
-    EventListenerVector* listenerVector = d->eventListenerMap.find(eventType);
-    if (!listenerVector)
-        return emptyVector;
-
-    return *listenerVector;
+    EventTargetData* data = eventTargetData();
+    if (!data)
+        return nullptr;
+    return data->eventListenerMap.find(eventType);
 }
 
 Vector<AtomicString> EventTarget::eventTypes()

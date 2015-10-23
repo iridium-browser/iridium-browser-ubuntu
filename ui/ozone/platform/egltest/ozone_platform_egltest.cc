@@ -23,6 +23,7 @@
 #include "ui/gfx/vsync_provider.h"
 #include "ui/ozone/common/egl_util.h"
 #include "ui/ozone/common/native_display_delegate_ozone.h"
+#include "ui/ozone/common/stub_overlay_manager.h"
 #include "ui/ozone/public/cursor_factory_ozone.h"
 #include "ui/ozone/public/gpu_platform_support.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
@@ -96,6 +97,7 @@ class EgltestWindow : public PlatformWindow, public PlatformEventDispatcher {
   void SetCursor(PlatformCursor cursor) override;
   void MoveCursorTo(const gfx::Point& location) override;
   void ConfineCursorToBounds(const gfx::Rect& bounds) override;
+  PlatformImeController* GetPlatformImeController() override;
 
   // PlatformEventDispatcher:
   bool CanDispatchEvent(const PlatformEvent& event) override;
@@ -121,7 +123,7 @@ EgltestWindow::EgltestWindow(PlatformWindowDelegate* delegate,
       bounds_(bounds),
       window_id_(SHIM_NO_WINDOW_ID) {
   window_id_ = eglplatform_shim_->ShimCreateWindow();
-  delegate_->OnAcceleratedWidgetAvailable(window_id_);
+  delegate_->OnAcceleratedWidgetAvailable(window_id_, 1.f);
   ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
 }
 
@@ -177,6 +179,10 @@ void EgltestWindow::MoveCursorTo(const gfx::Point& location) {
 void EgltestWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {
 }
 
+PlatformImeController* EgltestWindow::GetPlatformImeController() {
+  return nullptr;
+}
+
 bool EgltestWindow::CanDispatchEvent(const ui::PlatformEvent& ne) {
   return true;
 }
@@ -215,7 +221,7 @@ class SurfaceOzoneEgltest : public SurfaceOzoneEGL {
   bool OnSwapBuffers() override { return true; }
 
   bool OnSwapBuffersAsync(const SwapCompletionCallback& callback) override {
-    callback.Run();
+    callback.Run(gfx::SwapResult::SWAP_ACK);
     return true;
   }
 
@@ -340,6 +346,9 @@ class OzonePlatformEgltest : public OzonePlatform {
   ui::SurfaceFactoryOzone* GetSurfaceFactoryOzone() override {
     return surface_factory_ozone_.get();
   }
+  OverlayManagerOzone* GetOverlayManager() override {
+    return overlay_manager_.get();
+  }
   CursorFactoryOzone* GetCursorFactoryOzone() override {
     return cursor_factory_ozone_.get();
   }
@@ -367,9 +376,7 @@ class OzonePlatformEgltest : public OzonePlatform {
 
   void InitializeUI() override {
     device_manager_ = CreateDeviceManager();
-    if (!surface_factory_ozone_)
-      surface_factory_ozone_.reset(
-          new SurfaceFactoryEgltest(&eglplatform_shim_));
+    overlay_manager_.reset(new StubOverlayManager());
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(
         make_scoped_ptr(new StubKeyboardLayoutEngine()));
     event_factory_ozone_.reset(new EventFactoryEvdev(
@@ -380,9 +387,7 @@ class OzonePlatformEgltest : public OzonePlatform {
   }
 
   void InitializeGPU() override {
-    if (!surface_factory_ozone_)
-      surface_factory_ozone_.reset(
-          new SurfaceFactoryEgltest(&eglplatform_shim_));
+    surface_factory_ozone_.reset(new SurfaceFactoryEgltest(&eglplatform_shim_));
     gpu_platform_support_.reset(CreateStubGpuPlatformSupport());
   }
 
@@ -394,6 +399,7 @@ class OzonePlatformEgltest : public OzonePlatform {
   scoped_ptr<CursorFactoryOzone> cursor_factory_ozone_;
   scoped_ptr<GpuPlatformSupport> gpu_platform_support_;
   scoped_ptr<GpuPlatformSupportHost> gpu_platform_support_host_;
+  scoped_ptr<OverlayManagerOzone> overlay_manager_;
 
   bool shim_initialized_;
 

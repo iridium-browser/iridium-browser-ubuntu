@@ -21,8 +21,8 @@ unsigned int AwGLSurface::GetBackingFrameBufferObject() {
   return fbo_;
 }
 
-bool AwGLSurface::SwapBuffers() {
-  return true;
+gfx::SwapResult AwGLSurface::SwapBuffers() {
+  return gfx::SwapResult::SWAP_ACK;
 }
 
 gfx::Size AwGLSurface::GetSize() {
@@ -39,10 +39,6 @@ void* AwGLSurface::GetDisplay() {
 
 void AwGLSurface::SetBackingFrameBufferObject(unsigned int fbo) {
   fbo_ = fbo;
-}
-
-void AwGLSurface::ResetBackingFrameBufferObject() {
-  fbo_ = 0;
 }
 
 }  // namespace android_webview

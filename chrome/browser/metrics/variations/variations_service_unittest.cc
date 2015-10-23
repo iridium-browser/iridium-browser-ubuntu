@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/base64.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
@@ -14,9 +15,10 @@
 #include "base/strings/string_util.h"
 #include "base/test/histogram_tester.h"
 #include "base/version.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/browser/metrics/variations/chrome_variations_service_client.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
+#include "components/variations/pref_names.h"
 #include "components/variations/proto/study.pb.h"
 #include "components/variations/proto/variations_seed.pb.h"
 #include "components/web_resource/resource_request_allowed_notifier_test_util.h"
@@ -43,7 +45,10 @@ class TestVariationsService : public VariationsService {
  public:
   TestVariationsService(web_resource::TestRequestAllowedNotifier* test_notifier,
                         PrefService* local_state)
-      : VariationsService(test_notifier, local_state, NULL),
+      : VariationsService(make_scoped_ptr(new ChromeVariationsServiceClient()),
+                          test_notifier,
+                          local_state,
+                          NULL),
         intercepts_fetch_(true),
         fetch_attempted_(false),
         seed_stored_(false) {
@@ -58,8 +63,8 @@ class TestVariationsService : public VariationsService {
   }
 
   bool fetch_attempted() const { return fetch_attempted_; }
-
   bool seed_stored() const { return seed_stored_; }
+  const std::string& stored_country() const { return stored_country_; }
 
   void DoActualFetch() override {
     if (intercepts_fetch_) {
@@ -71,16 +76,21 @@ class TestVariationsService : public VariationsService {
   }
 
  protected:
-  void StoreSeed(const std::string& seed_data,
+  bool StoreSeed(const std::string& seed_data,
                  const std::string& seed_signature,
-                 const base::Time& date_fetched) override {
+                 const std::string& country_code,
+                 const base::Time& date_fetched,
+                 bool is_delta_compressed) override {
     seed_stored_ = true;
+    stored_country_ = country_code;
+    return true;
   }
 
  private:
   bool intercepts_fetch_;
   bool fetch_attempted_;
   bool seed_stored_;
+  std::string stored_country_;
 
   DISALLOW_COPY_AND_ASSIGN(TestVariationsService);
 };
@@ -147,12 +157,15 @@ std::string SerializeSeed(const variations::VariationsSeed& seed) {
 
 // Simulates a variations service response by setting a date header and the
 // specified HTTP |response_code| on |fetcher|.
-void SimulateServerResponse(int response_code, net::TestURLFetcher* fetcher) {
-  ASSERT_TRUE(fetcher);
+scoped_refptr<net::HttpResponseHeaders> SimulateServerResponse(
+    int response_code,
+    net::TestURLFetcher* fetcher) {
+  EXPECT_TRUE(fetcher);
   scoped_refptr<net::HttpResponseHeaders> headers(
       new net::HttpResponseHeaders("date:Wed, 13 Feb 2013 00:25:24 GMT\0\0"));
   fetcher->set_response_headers(headers);
   fetcher->set_response_code(response_code);
+  return headers;
 }
 
 // Helper class that abstracts away platform-specific details relating to the
@@ -218,6 +231,15 @@ class TestVariationsPrefsStore {
   DISALLOW_COPY_AND_ASSIGN(TestVariationsPrefsStore);
 };
 
+// Converts |list_value| to a string, to make it easier for debugging.
+std::string ListValueToString(const base::ListValue& list_value) {
+  std::string json;
+  JSONStringValueSerializer serializer(&json);
+  serializer.set_pretty_print(true);
+  serializer.Serialize(list_value);
+  return json;
+}
+
 }  // namespace
 
 class VariationsServiceTest : public ::testing::Test {
@@ -243,18 +265,21 @@ TEST_F(VariationsServiceTest, GetVariationsServerURL) {
 
   std::string value;
   GURL url = VariationsService::GetVariationsServerURL(prefs, std::string());
-  EXPECT_TRUE(StartsWithASCII(url.spec(), default_variations_url, true));
+  EXPECT_TRUE(base::StartsWith(url.spec(), default_variations_url,
+                               base::CompareCase::SENSITIVE));
   EXPECT_FALSE(net::GetValueForKeyInQuery(url, "restrict", &value));
 
   prefs_store.SetVariationsRestrictParameterPolicyValue("restricted");
   url = VariationsService::GetVariationsServerURL(prefs, std::string());
-  EXPECT_TRUE(StartsWithASCII(url.spec(), default_variations_url, true));
+  EXPECT_TRUE(base::StartsWith(url.spec(), default_variations_url,
+                               base::CompareCase::SENSITIVE));
   EXPECT_TRUE(net::GetValueForKeyInQuery(url, "restrict", &value));
   EXPECT_EQ("restricted", value);
 
   // The override value should take precedence over what's in prefs.
   url = VariationsService::GetVariationsServerURL(prefs, "override");
-  EXPECT_TRUE(StartsWithASCII(url.spec(), default_variations_url, true));
+  EXPECT_TRUE(base::StartsWith(url.spec(), default_variations_url,
+                               base::CompareCase::SENSITIVE));
   EXPECT_TRUE(net::GetValueForKeyInQuery(url, "restrict", &value));
   EXPECT_EQ("override", value);
 }
@@ -339,6 +364,7 @@ TEST_F(VariationsServiceTest, SeedNotStoredWhenNonOKStatus) {
   VariationsService::RegisterPrefs(prefs.registry());
 
   VariationsService service(
+      make_scoped_ptr(new ChromeVariationsServiceClient()),
       new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
   service.variations_server_url_ =
       VariationsService::GetVariationsServerURL(&prefs, std::string());
@@ -355,30 +381,36 @@ TEST_F(VariationsServiceTest, SeedNotStoredWhenNonOKStatus) {
   }
 }
 
-TEST_F(VariationsServiceTest, SeedDateUpdatedOn304Status) {
+TEST_F(VariationsServiceTest, CountryHeader) {
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
-  net::TestURLFetcherFactory factory;
-  VariationsService service(
-      new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
+  TestVariationsService service(
+      new web_resource::TestRequestAllowedNotifier(&prefs), &prefs);
   service.variations_server_url_ =
       VariationsService::GetVariationsServerURL(&prefs, std::string());
+  service.set_intercepts_fetch(false);
+
+  net::TestURLFetcherFactory factory;
   service.DoActualFetch();
-  EXPECT_TRUE(
-      prefs.FindPreference(prefs::kVariationsSeedDate)->IsDefaultValue());
 
   net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
-  SimulateServerResponse(net::HTTP_NOT_MODIFIED, fetcher);
+  scoped_refptr<net::HttpResponseHeaders> headers =
+      SimulateServerResponse(net::HTTP_OK, fetcher);
+  headers->AddHeader("X-Country: test");
+  fetcher->SetResponseString(SerializeSeed(CreateTestSeed()));
+
+  EXPECT_FALSE(service.seed_stored());
   service.OnURLFetchComplete(fetcher);
-  EXPECT_FALSE(
-      prefs.FindPreference(prefs::kVariationsSeedDate)->IsDefaultValue());
+  EXPECT_TRUE(service.seed_stored());
+  EXPECT_EQ("test", service.stored_country());
 }
 
 TEST_F(VariationsServiceTest, Observer) {
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
   VariationsService service(
+      make_scoped_ptr(new ChromeVariationsServiceClient()),
       new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
 
   struct {
@@ -425,8 +457,8 @@ TEST_F(VariationsServiceTest, LoadPermanentConsistencyCountry) {
     // Comma separated list, NULL if the pref isn't set initially.
     const char* pref_value_before;
     const char* version;
-    // NULL indicates that no country code is present in the seed.
-    const char* seed_country_code;
+    // NULL indicates that no latest country code is present.
+    const char* latest_country_code;
     // Comma separated list.
     const char* expected_pref_value_after;
     std::string expected_country;
@@ -445,7 +477,7 @@ TEST_F(VariationsServiceTest, LoadPermanentConsistencyCountry) {
        VariationsService::LOAD_COUNTRY_HAS_BOTH_VERSION_NEQ_COUNTRY_NEQ},
       {"19.0.0.0,us", "20.0.0.0", "us", "20.0.0.0,us", "us",
        VariationsService::LOAD_COUNTRY_HAS_BOTH_VERSION_NEQ_COUNTRY_EQ},
-      {"19.0.0.0,ca", "20.0.0.0", nullptr, "", "",
+      {"19.0.0.0,ca", "20.0.0.0", nullptr, "19.0.0.0,ca", "",
        VariationsService::LOAD_COUNTRY_HAS_PREF_NO_SEED_VERSION_NEQ},
 
       // No existing pref value present.
@@ -477,32 +509,43 @@ TEST_F(VariationsServiceTest, LoadPermanentConsistencyCountry) {
     TestingPrefServiceSimple prefs;
     VariationsService::RegisterPrefs(prefs.registry());
     VariationsService service(
+        make_scoped_ptr(new ChromeVariationsServiceClient()),
         new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
 
     if (test.pref_value_before) {
       base::ListValue list_value;
-      std::vector<std::string> list_components;
-      base::SplitString(test.pref_value_before, ',', &list_components);
-      for (const std::string& component : list_components)
+      for (const std::string& component :
+           base::SplitString(test.pref_value_before, ",", base::TRIM_WHITESPACE,
+                             base::SPLIT_WANT_ALL)) {
         list_value.AppendString(component);
+      }
       prefs.Set(prefs::kVariationsPermanentConsistencyCountry, list_value);
     }
 
     variations::VariationsSeed seed(CreateTestSeed());
-    if (test.seed_country_code)
-      seed.set_country_code(test.seed_country_code);
+    std::string latest_country;
+    if (test.latest_country_code)
+      latest_country = test.latest_country_code;
 
     base::HistogramTester histogram_tester;
-    EXPECT_EQ(test.expected_country, service.LoadPermanentConsistencyCountry(
-                                         base::Version(test.version), seed));
+    EXPECT_EQ(test.expected_country,
+              service.LoadPermanentConsistencyCountry(
+                  base::Version(test.version), latest_country))
+        << test.pref_value_before << ", " << test.version << ", "
+        << test.latest_country_code;
 
     base::ListValue expected_list_value;
-    std::vector<std::string> list_components;
-    base::SplitString(test.expected_pref_value_after, ',', &list_components);
-    for (const std::string& component : list_components)
+    for (const std::string& component :
+         base::SplitString(test.expected_pref_value_after, ",",
+                           base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
       expected_list_value.AppendString(component);
-    EXPECT_TRUE(expected_list_value.Equals(
-        prefs.GetList(prefs::kVariationsPermanentConsistencyCountry)));
+    }
+    const base::ListValue* pref_value =
+        prefs.GetList(prefs::kVariationsPermanentConsistencyCountry);
+    EXPECT_EQ(ListValueToString(expected_list_value),
+              ListValueToString(*pref_value))
+        << test.pref_value_before << ", " << test.version << ", "
+        << test.latest_country_code;
 
     histogram_tester.ExpectUniqueSample(
         "Variations.LoadPermanentConsistencyCountryResult",

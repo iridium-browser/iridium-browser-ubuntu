@@ -162,7 +162,7 @@ public:
     FontSmoothingMode fontSmoothing() const { return static_cast<FontSmoothingMode>(m_fontSmoothing); }
     TextRenderingMode textRendering() const { return static_cast<TextRenderingMode>(m_textRendering); }
     UScriptCode script() const { return static_cast<UScriptCode>(m_script); }
-    const AtomicString& locale() const;
+    const AtomicString& locale(bool includeDefault = true) const;
     bool isSyntheticBold() const { return m_syntheticBold; }
     bool isSyntheticItalic() const { return m_syntheticItalic; }
     bool useSubpixelPositioning() const { return m_subpixelTextPosition; }
@@ -173,6 +173,7 @@ public:
     FontOrientation orientation() const { return static_cast<FontOrientation>(m_orientation); }
     bool isVerticalAnyUpright() const { return blink::isVerticalAnyUpright(orientation()); }
     bool isVerticalNonCJKUpright() const { return blink::isVerticalNonCJKUpright(orientation()); }
+    bool isVerticalUpright(UChar32 character) const { return blink::isVerticalUpright(orientation(), character); }
     bool isVerticalBaseline() const { return blink::isVerticalBaseline(orientation()); }
     FontWidthVariant widthVariant() const { return static_cast<FontWidthVariant>(m_widthVariant); }
     FontFeatureSettings* featureSettings() const { return m_featureSettings.get(); }
@@ -241,7 +242,7 @@ private:
 
     unsigned m_widthVariant : 2; // FontWidthVariant
 
-    unsigned m_style : 1; // FontStyle
+    unsigned m_style : 2; // FontStyle
     unsigned m_variant : 1; // FontVariant
     unsigned m_isAbsoluteSize : 1; // Whether or not CSS specified an explicit size
                                   // (logical sizes like "medium" don't count).

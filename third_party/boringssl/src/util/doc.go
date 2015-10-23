@@ -209,11 +209,23 @@ func skipLine(s string) string {
 }
 
 func getNameFromDecl(decl string) (string, bool) {
-	for strings.HasPrefix(decl, "#if") {
+	for strings.HasPrefix(decl, "#if") || strings.HasPrefix(decl, "#elif") {
 		decl = skipLine(decl)
 	}
 	if strings.HasPrefix(decl, "struct ") {
 		return "", false
+	}
+	if strings.HasPrefix(decl, "#define ") {
+		// This is a preprocessor #define. The name is the next symbol.
+		decl = strings.TrimPrefix(decl, "#define ")
+		for len(decl) > 0 && decl[0] == ' ' {
+			decl = decl[1:]
+		}
+		i := strings.IndexAny(decl, "( ")
+		if i < 0 {
+			return "", false
+		}
+		return decl[:i], true
 	}
 	decl = skipPast(decl, "STACK_OF(")
 	decl = skipPast(decl, "LHASH_OF(")
@@ -593,6 +605,14 @@ func generateIndex(outPath string, config *Config, headerDescriptions map[string
 	return nil
 }
 
+func copyFile(outPath string, inFilePath string) error {
+	bytes, err := ioutil.ReadFile(inFilePath)
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(filepath.Join(outPath, filepath.Base(inFilePath)), bytes, 0666)
+}
+
 func main() {
 	var (
 		configFlag *string = flag.String("config", "doc.config", "Location of config file")
@@ -631,6 +651,11 @@ func main() {
 
 	if err := generateIndex(*outputDir, &config, headerDescriptions); err != nil {
 		fmt.Printf("Failed to generate index: %s\n", err)
+		os.Exit(1)
+	}
+
+	if err := copyFile(*outputDir, "doc.css"); err != nil {
+		fmt.Printf("Failed to copy static file: %s\n", err)
 		os.Exit(1)
 	}
 }

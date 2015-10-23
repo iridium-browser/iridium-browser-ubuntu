@@ -11,6 +11,10 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
+#if DCHECK_IS_ON()
+#include <set>
+#endif
+
 namespace gfx {
 class GLImage;
 }
@@ -23,14 +27,17 @@ class GpuMemoryBufferFactorySharedMemory : public GpuMemoryBufferFactory,
   GpuMemoryBufferFactorySharedMemory();
   ~GpuMemoryBufferFactorySharedMemory() override;
 
+  static bool IsGpuMemoryBufferConfigurationSupported(gfx::BufferFormat format,
+                                                      gfx::BufferUsage usage);
+
   // Overridden from GpuMemoryBufferFactory:
   void GetSupportedGpuMemoryBufferConfigurations(
       std::vector<Configuration>* configurations) override;
   gfx::GpuMemoryBufferHandle CreateGpuMemoryBuffer(
       gfx::GpuMemoryBufferId id,
       const gfx::Size& size,
-      gfx::GpuMemoryBuffer::Format format,
-      gfx::GpuMemoryBuffer::Usage usage,
+      gfx::BufferFormat format,
+      gfx::BufferUsage usage,
       int client_id,
       gfx::PluginWindowHandle surface_handle) override;
   void DestroyGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
@@ -41,11 +48,15 @@ class GpuMemoryBufferFactorySharedMemory : public GpuMemoryBufferFactory,
   scoped_refptr<gfx::GLImage> CreateImageForGpuMemoryBuffer(
       const gfx::GpuMemoryBufferHandle& handle,
       const gfx::Size& size,
-      gfx::GpuMemoryBuffer::Format format,
+      gfx::BufferFormat format,
       unsigned internalformat,
       int client_id) override;
 
  private:
+#if DCHECK_IS_ON()
+  std::set<gfx::GpuMemoryBufferId> buffers_;
+#endif
+
   DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferFactorySharedMemory);
 };
 

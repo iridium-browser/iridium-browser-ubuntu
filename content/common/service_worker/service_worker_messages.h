@@ -18,8 +18,8 @@
 #include "ipc/ipc_param_traits.h"
 #include "third_party/WebKit/public/platform/WebCircularGeofencingRegion.h"
 #include "third_party/WebKit/public/platform/WebGeofencingEventType.h"
-#include "third_party/WebKit/public/platform/WebServiceWorkerError.h"
-#include "third_party/WebKit/public/platform/WebServiceWorkerEventResult.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerError.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerEventResult.h"
 #include "url/gurl.h"
 
 #undef IPC_MESSAGE_EXPORT
@@ -39,6 +39,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerState,
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerResponseType,
                           blink::WebServiceWorkerResponseTypeLast)
 
+IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerResponseError,
+                          blink::WebServiceWorkerResponseErrorLast)
+
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerClientType,
                           blink::WebServiceWorkerClientTypeLast)
 
@@ -56,6 +59,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerFetchRequest)
   IPC_STRUCT_TRAITS_MEMBER(blob_size)
   IPC_STRUCT_TRAITS_MEMBER(referrer)
   IPC_STRUCT_TRAITS_MEMBER(credentials_mode)
+  IPC_STRUCT_TRAITS_MEMBER(redirect_mode)
   IPC_STRUCT_TRAITS_MEMBER(is_reload)
 IPC_STRUCT_TRAITS_END()
 
@@ -71,6 +75,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerResponse)
   IPC_STRUCT_TRAITS_MEMBER(blob_uuid)
   IPC_STRUCT_TRAITS_MEMBER(blob_size)
   IPC_STRUCT_TRAITS_MEMBER(stream_url)
+  IPC_STRUCT_TRAITS_MEMBER(error)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerObjectInfo)
@@ -106,8 +111,23 @@ IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerClientQueryOptions)
   IPC_STRUCT_TRAITS_MEMBER(include_uncontrolled)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_BEGIN(ServiceWorkerMsg_MessageToDocument_Params)
+  IPC_STRUCT_MEMBER(int, thread_id)
+  IPC_STRUCT_MEMBER(int, provider_id)
+  IPC_STRUCT_MEMBER(content::ServiceWorkerObjectInfo, service_worker_info)
+  IPC_STRUCT_MEMBER(base::string16, message)
+  IPC_STRUCT_MEMBER(std::vector<content::TransferredMessagePort>, message_ports)
+  IPC_STRUCT_MEMBER(std::vector<int>, new_routing_ids)
+IPC_STRUCT_END()
+
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebGeofencingEventType,
                           blink::WebGeofencingEventTypeLast)
+
+IPC_STRUCT_TRAITS_BEGIN(content::NavigatorConnectClient)
+  IPC_STRUCT_TRAITS_MEMBER(target_url)
+  IPC_STRUCT_TRAITS_MEMBER(origin)
+  IPC_STRUCT_TRAITS_MEMBER(message_port_id)
+IPC_STRUCT_TRAITS_END()
 
 //---------------------------------------------------------------------------
 // Messages sent from the child process to the browser.
@@ -119,17 +139,28 @@ IPC_MESSAGE_CONTROL5(ServiceWorkerHostMsg_RegisterServiceWorker,
                      GURL /* scope */,
                      GURL /* script_url */)
 
+IPC_MESSAGE_CONTROL4(ServiceWorkerHostMsg_UpdateServiceWorker,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     int /* provider_id */,
+                     int64 /* registration_id */)
+
 IPC_MESSAGE_CONTROL4(ServiceWorkerHostMsg_UnregisterServiceWorker,
                      int /* thread_id */,
                      int /* request_id */,
                      int /* provider_id */,
-                     GURL /* scope (url pattern) */)
+                     int64 /* registration_id */)
 
 IPC_MESSAGE_CONTROL4(ServiceWorkerHostMsg_GetRegistration,
                      int /* thread_id */,
                      int /* request_id */,
                      int /* provider_id */,
                      GURL /* document_url */)
+
+IPC_MESSAGE_CONTROL3(ServiceWorkerHostMsg_GetRegistrations,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     int /* provider_id */)
 
 IPC_MESSAGE_CONTROL3(ServiceWorkerHostMsg_GetRegistrationForReady,
                      int /* thread_id */,
@@ -144,15 +175,16 @@ IPC_MESSAGE_CONTROL3(
     std::vector<content::TransferredMessagePort> /* sent_message_ports */)
 
 // Informs the browser of a new ServiceWorkerProvider in the child process,
-// |provider_id| is unique within its child process.
-// |render_frame_id| identifies the frame associated with the provider, it will
-// it will be MSG_ROUTING_NONE if the context is a worker instead of a document.
-// |provider_type| identifies whether this provider is for ServiceWorker
-// controllees (documents and SharedWorkers) or for controllers
-// (ServiceWorkers).
+// |provider_id| is unique within its child process. When this provider is
+// created for a document, |route_id| is the frame ID of it. When this provider
+// is created for a Shared Worker, |route_id| is the Shared Worker route ID.
+// When this provider is created for a Service Worker, |route_id| is
+// MSG_ROUTING_NONE. |provider_type| identifies whether this provider is for
+// Service Worker controllees (documents and Shared Workers) or for controllers
+// (Service Workers).
 IPC_MESSAGE_CONTROL3(ServiceWorkerHostMsg_ProviderCreated,
                      int /* provider_id */,
-                     int /* render_frame_id */,
+                     int /* route_id */,
                      content::ServiceWorkerProviderType /* provider_type */)
 
 // Informs the browser of a ServiceWorkerProvider being destroyed.
@@ -199,8 +231,6 @@ IPC_MESSAGE_ROUTED3(ServiceWorkerHostMsg_FetchEventFinished,
                     int /* request_id */,
                     content::ServiceWorkerFetchEventResult,
                     content::ServiceWorkerResponse)
-IPC_MESSAGE_ROUTED1(ServiceWorkerHostMsg_SyncEventFinished,
-                    int /* request_id */)
 IPC_MESSAGE_ROUTED1(ServiceWorkerHostMsg_NotificationClickEventFinished,
                     int /* request_id */)
 IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_PushEventFinished,
@@ -208,9 +238,6 @@ IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_PushEventFinished,
                     blink::WebServiceWorkerEventResult)
 IPC_MESSAGE_ROUTED1(ServiceWorkerHostMsg_GeofencingEventFinished,
                     int /* request_id */)
-IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_CrossOriginConnectEventFinished,
-                    int /* request_id */,
-                    bool /* accept_connection */)
 
 // Responds to a Ping from the browser.
 // Routed to the target ServiceWorkerVersion.
@@ -247,6 +274,12 @@ IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_OpenWindow,
 IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_FocusClient,
                     int /* request_id */,
                     std::string /* uuid */)
+
+// Ask the browser to navigate a client (renderer->browser).
+IPC_MESSAGE_ROUTED3(ServiceWorkerHostMsg_NavigateClient,
+                    int /* request_id */,
+                    std::string /* uuid */,
+                    GURL /* url */)
 
 // Asks the browser to force this worker to become activated.
 IPC_MESSAGE_ROUTED1(ServiceWorkerHostMsg_SkipWaiting,
@@ -291,6 +324,11 @@ IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_ServiceWorkerRegistered,
                      content::ServiceWorkerRegistrationObjectInfo,
                      content::ServiceWorkerVersionAttributes)
 
+// Response to ServiceWorkerHostMsg_UpdateServiceWorker.
+IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_ServiceWorkerUpdated,
+                     int /* thread_id */,
+                     int /* request_id */)
+
 // Response to ServiceWorkerHostMsg_UnregisterServiceWorker.
 IPC_MESSAGE_CONTROL3(ServiceWorkerMsg_ServiceWorkerUnregistered,
                      int /* thread_id */,
@@ -303,6 +341,13 @@ IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_DidGetRegistration,
                      int /* request_id */,
                      content::ServiceWorkerRegistrationObjectInfo,
                      content::ServiceWorkerVersionAttributes)
+
+// Response to ServiceWorkerHostMsg_GetRegistrations.
+IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_DidGetRegistrations,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     std::vector<content::ServiceWorkerRegistrationObjectInfo>,
+                     std::vector<content::ServiceWorkerVersionAttributes>)
 
 // Response to ServiceWorkerHostMsg_GetRegistrationForReady.
 IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_DidGetRegistrationForReady,
@@ -319,6 +364,14 @@ IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_ServiceWorkerRegistrationError,
                      blink::WebServiceWorkerError::ErrorType /* code */,
                      base::string16 /* message */)
 
+// Sent when any kind of update error occurs during a
+// UpdateServiceWorker handler above.
+IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_ServiceWorkerUpdateError,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     blink::WebServiceWorkerError::ErrorType /* code */,
+                     base::string16 /* message */)
+
 // Sent when any kind of registration error occurs during a
 // UnregisterServiceWorker handler above.
 IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_ServiceWorkerUnregistrationError,
@@ -330,6 +383,14 @@ IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_ServiceWorkerUnregistrationError,
 // Sent when any kind of registration error occurs during a
 // GetRegistration handler above.
 IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_ServiceWorkerGetRegistrationError,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     blink::WebServiceWorkerError::ErrorType /* code */,
+                     base::string16 /* message */)
+
+// Sent when any kind of registration error occurs during a
+// GetRegistrations handler above.
+IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_ServiceWorkerGetRegistrationsError,
                      int /* thread_id */,
                      int /* request_id */,
                      blink::WebServiceWorkerError::ErrorType /* code */,
@@ -364,13 +425,8 @@ IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_SetControllerServiceWorker,
                      bool /* should_notify_controllerchange */)
 
 // Sends a 'message' event to a client document (browser->renderer).
-IPC_MESSAGE_CONTROL5(
-    ServiceWorkerMsg_MessageToDocument,
-    int /* thread_id */,
-    int /* provider_id */,
-    base::string16 /* message */,
-    std::vector<content::TransferredMessagePort> /* sent_message_ports */,
-    std::vector<int> /* new_routing_ids */)
+IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_MessageToDocument,
+                     ServiceWorkerMsg_MessageToDocument_Params)
 
 // Sent via EmbeddedWorker to dispatch events.
 IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_InstallEvent,
@@ -380,12 +436,11 @@ IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_ActivateEvent,
 IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_FetchEvent,
                      int /* request_id */,
                      content::ServiceWorkerFetchRequest)
-IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_SyncEvent,
-                     int /* request_id */)
-IPC_MESSAGE_CONTROL3(ServiceWorkerMsg_NotificationClickEvent,
+IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_NotificationClickEvent,
                      int /* request_id */,
                      int64_t /* persistent_notification_id */,
-                     content::PlatformNotificationData /* notification_data */)
+                     content::PlatformNotificationData /* notification_data */,
+                     int /* action_index */)
 IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_PushEvent,
                      int /* request_id */,
                      std::string /* data */)
@@ -394,9 +449,6 @@ IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_GeofencingEvent,
                      blink::WebGeofencingEventType /* event_type */,
                      std::string /* region_id */,
                      blink::WebCircularGeofencingRegion /* region */)
-IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_CrossOriginConnectEvent,
-                     int /* request_id */,
-                     content::NavigatorConnectClient /* client */)
 IPC_MESSAGE_CONTROL3(
     ServiceWorkerMsg_MessageToWorker,
     base::string16 /* message */,
@@ -439,3 +491,13 @@ IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_OpenWindowError,
 IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_FocusClientResponse,
                      int /* request_id */,
                      content::ServiceWorkerClientInfo /* client */)
+
+// Sent via EmbeddedWorker as a response of NavigateClient.
+IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_NavigateClientResponse,
+                     int /* request_id */,
+                     content::ServiceWorkerClientInfo /* client */)
+
+// Sent via EmbeddedWorker as an error response of NavigateClient.
+IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_NavigateClientError,
+                     int /* request_id */,
+                     GURL /* url */)

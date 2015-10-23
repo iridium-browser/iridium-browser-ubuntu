@@ -321,9 +321,9 @@ bool WebPluginDelegateProxy::Initialize(
       return false;
     }
 
-    channel_host =
-        PluginChannelHost::GetPluginChannelHost(
-            channel_handle, ChildProcess::current()->io_message_loop_proxy());
+    channel_host = PluginChannelHost::GetPluginChannelHost(
+        channel_handle, ChildProcess::current()->io_task_runner(),
+        RenderThreadImpl::current()->GetAttachmentBroker());
     if (!channel_host.get()) {
       LOG(ERROR) << "Couldn't get PluginChannelHost";
       continue;
@@ -499,14 +499,7 @@ static void CopySharedMemoryHandleForMessage(
     base::SharedMemoryHandle* handle_out,
     base::ProcessId peer_pid) {
 #if defined(OS_POSIX)
-  // On POSIX, base::ShardMemoryHandle is typedef'ed to FileDescriptor, and
-  // FileDescriptor message fields needs to remain valid until the message is
-  // sent or else the sendmsg() call will fail.
-  if ((handle_out->fd = HANDLE_EINTR(dup(handle_in.fd))) < 0) {
-    PLOG(ERROR) << "dup()";
-    return;
-  }
-  handle_out->auto_close = true;
+  *handle_out = base::SharedMemory::DuplicateHandle(handle_in);
 #elif defined(OS_WIN)
   // On Windows we need to duplicate the handle for the plugin process.
   *handle_out = NULL;
@@ -616,13 +609,13 @@ void WebPluginDelegateProxy::ResetWindowlessBitmaps() {
   front_buffer_diff_ = gfx::Rect();
 }
 
+#if !defined(OS_WIN)
 static size_t BitmapSizeForPluginRect(const gfx::Rect& plugin_rect) {
   const size_t stride =
       skia::PlatformCanvasStrideForWidth(plugin_rect.width());
   return stride * plugin_rect.height();
 }
 
-#if !defined(OS_WIN)
 bool WebPluginDelegateProxy::CreateLocalBitmap(
     std::vector<uint8>* memory,
     scoped_ptr<skia::PlatformCanvas>* canvas) {
@@ -704,9 +697,9 @@ void WebPluginDelegateProxy::Paint(SkCanvas* canvas,
   SkPaint paint;
   paint.setXfermodeMode(
       transparent_ ? SkXfermode::kSrcATop_Mode : SkXfermode::kSrc_Mode);
-  SkIRect src_rect = gfx::RectToSkIRect(offset_rect);
+  SkRect src_rect = gfx::RectToSkRect(offset_rect);
   canvas->drawBitmapRect(bitmap,
-                         &src_rect,
+                         src_rect,
                          gfx::RectToSkRect(rect),
                          &paint);
 
@@ -918,11 +911,12 @@ void WebPluginDelegateProxy::OnNotifyIMEStatus(int input_type,
   if (!render_view_)
     return;
 
-  render_view_->Send(new ViewHostMsg_TextInputTypeChanged(
-      render_view_->routing_id(),
-      static_cast<ui::TextInputType>(input_type),
-      ui::TEXT_INPUT_MODE_DEFAULT,
-      true, 0));
+  ViewHostMsg_TextInputState_Params params;
+  params.type = static_cast<ui::TextInputType>(input_type);
+  params.mode = ui::TEXT_INPUT_MODE_DEFAULT;
+  params.can_compose_inline = true;
+  render_view_->Send(new ViewHostMsg_TextInputStateChanged(
+      render_view_->routing_id(), params));
 
   ViewHostMsg_SelectionBounds_Params bounds_params;
   bounds_params.anchor_rect = bounds_params.focus_rect = caret_rect;

@@ -4,6 +4,7 @@
 
 #import "ios/web/web_state/ui/crw_ui_web_view_web_controller.h"
 
+#import "base/ios/ns_error_util.h"
 #import "base/ios/weak_nsobject.h"
 #include "base/json/json_reader.h"
 #include "base/json/string_escape.h"
@@ -11,7 +12,6 @@
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/timer/timer.h"
@@ -19,19 +19,24 @@
 #import "ios/net/nsurlrequest_util.h"
 #import "ios/web/navigation/crw_session_controller.h"
 #import "ios/web/navigation/crw_session_entry.h"
+#import "ios/web/navigation/navigation_item_impl.h"
+#include "ios/web/net/clients/crw_redirect_network_client_factory.h"
 #import "ios/web/net/crw_url_verifying_protocol_handler.h"
 #include "ios/web/net/request_group_util.h"
 #include "ios/web/public/url_scheme_util.h"
 #include "ios/web/public/web_client.h"
+#import "ios/web/public/web_state/ui/crw_web_view_content_view.h"
 #import "ios/web/ui_web_view_util.h"
+#include "ios/web/web_state/frame_info.h"
 #import "ios/web/web_state/js/crw_js_invoke_parameter_queue.h"
 #import "ios/web/web_state/ui/crw_context_menu_provider.h"
 #import "ios/web/web_state/ui/crw_web_controller+protected.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/ui/web_view_js_utils.h"
 #import "ios/web/web_state/web_state_impl.h"
-#import "ios/web/web_state/web_view_creation_utils.h"
+#import "ios/web/web_state/web_view_internal_creation_util.h"
 #import "net/base/mac/url_conversions.h"
+#include "net/base/net_errors.h"
 #include "url/url_constants.h"
 
 namespace web {
@@ -54,7 +59,8 @@ const int64 kContinuousCheckIntervalMSLow = 3000;
 
 }  // namespace web
 
-@interface CRWUIWebViewWebController ()<UIWebViewDelegate> {
+@interface CRWUIWebViewWebController () <CRWRedirectClientDelegate,
+                                         UIWebViewDelegate> {
   // The UIWebView managed by this instance.
   base::scoped_nsobject<UIWebView> _uiWebView;
 
@@ -123,6 +129,10 @@ const int64 kContinuousCheckIntervalMSLow = 3000;
 
   // Backs the property of the same name.
   id<CRWRecurringTaskDelegate>_recurringTaskDelegate;
+
+  // Redirect client factory.
+  base::scoped_nsobject<CRWRedirectNetworkClientFactory>
+      redirect_client_factory_;
 }
 
 // Whether or not URL caching is enabled. Between enabling and disabling
@@ -326,6 +336,18 @@ const size_t kMaxMessageQueueSize = 262144;
         @"UIMoviePlayerControllerDidExitFullscreenNotification"
                         object:nil];
     _recurringTaskDelegate = self;
+
+    // UIWebViews require a redirect network client in order to accurately
+    // detect server redirects.
+    scoped_refptr<web::RequestTrackerImpl> requestTracker =
+        self.webStateImpl->GetRequestTracker();
+    if (requestTracker) {
+      redirect_client_factory_.reset(
+          [[CRWRedirectNetworkClientFactory alloc] initWithDelegate:self]);
+      requestTracker->PostIOTask(
+          base::Bind(&net::RequestTracker::AddNetworkClientFactory,
+                     requestTracker, redirect_client_factory_));
+    }
   }
   return self;
 }
@@ -408,9 +430,9 @@ const size_t kMaxMessageQueueSize = 262144;
 #pragma mark -
 #pragma mark Testing-Only Methods
 
-- (void)injectWebView:(id)webView {
-  [super injectWebView:webView];
-  [self setWebView:webView];
+- (void)injectWebViewContentView:(CRWWebViewContentView*)webViewContentView {
+  [super injectWebViewContentView:webViewContentView];
+  [self setWebView:static_cast<UIWebView*>(webViewContentView.webView)];
 }
 
 #pragma mark CRWJSInjectionEvaluatorMethods
@@ -585,6 +607,51 @@ const size_t kMaxMessageQueueSize = 262144;
 #endif  // !defined(NDEBUG)
 }
 
+- (void)loadRequestForCurrentNavigationItem {
+  DCHECK(self.webView && !self.nativeController);
+  NSMutableURLRequest* request = [self requestForCurrentNavigationItem];
+
+  ProceduralBlock GETBlock = ^{
+    [self registerLoadRequest:[self currentNavigationURL]
+                     referrer:[self currentSessionEntryReferrer]
+                   transition:[self currentTransition]];
+    [self loadRequest:request];
+  };
+
+  // If there is no POST data, load the request as a GET right away.
+  DCHECK([self currentSessionEntry]);
+  web::NavigationItemImpl* currentItem =
+      [self currentSessionEntry].navigationItemImpl;
+  NSData* POSTData = currentItem->GetPostData();
+  if (!POSTData) {
+    GETBlock();
+    return;
+  }
+
+  ProceduralBlock POSTBlock = ^{
+    [request setHTTPMethod:@"POST"];
+    [request setHTTPBody:POSTData];
+    [request setAllHTTPHeaderFields:[self currentHTTPHeaders]];
+    [self registerLoadRequest:[self currentNavigationURL]
+                     referrer:[self currentSessionEntryReferrer]
+                   transition:[self currentTransition]];
+    [self loadRequest:request];
+  };
+
+  // If POST data is empty or the user does not need to confirm,
+  // load the request right away.
+  if (!POSTData.length || currentItem->ShouldSkipResubmitDataConfirmation()) {
+    POSTBlock();
+    return;
+  }
+
+  // Prompt the user to confirm the POST request.
+  [self.delegate webController:self
+      onFormResubmissionForRequest:request
+                     continueBlock:POSTBlock
+                       cancelBlock:GETBlock];
+}
+
 - (void)setPageChangeProbability:(web::PageChangeProbability)probability {
   if (probability == web::PAGE_CHANGE_PROBABILITY_LOW) {
     // Reduce check interval to precautionary frequency.
@@ -750,20 +817,8 @@ const size_t kMaxMessageQueueSize = 262144;
   [super webPageChanged];
 }
 
-- (CGFloat)absoluteZoomScaleForScrollState:
-    (const web::PageScrollState&)scrollState {
-  CGFloat zoomScale = NAN;
-  if (scrollState.IsZoomScaleValid()) {
-    if (scrollState.IsZoomScaleLegacyFormat())
-      zoomScale = scrollState.zoom_scale();
-    else
-      zoomScale = scrollState.zoom_scale() / scrollState.minimum_zoom_scale();
-  }
-  return zoomScale;
-}
-
-- (void)applyWebViewScrollZoomScaleFromScrollState:
-    (const web::PageScrollState&)scrollState {
+- (void)applyWebViewScrollZoomScaleFromZoomState:
+    (const web::PageZoomState&)zoomState {
   // A UIWebView's scroll view uses zoom scales in a non-standard way.  The
   // scroll view's |zoomScale| property is always equal to 1.0, and the
   // |minimumZoomScale| and |maximumZoomScale| properties are adjusted
@@ -772,16 +827,51 @@ const size_t kMaxMessageQueueSize = 262144;
   // 2.0 will update the zoom to twice its initial scale). The maximum-scale or
   // minimum-scale meta tags of a page may have changed since the state was
   // recorded, so clamp the zoom scale to the current range if necessary.
-  DCHECK(scrollState.IsZoomScaleValid());
-  CGFloat zoomScale = scrollState.IsZoomScaleLegacyFormat()
-                          ? scrollState.zoom_scale()
+  DCHECK(zoomState.IsValid());
+  CGFloat zoomScale = zoomState.IsLegacyFormat()
+                          ? zoomState.zoom_scale()
                           : self.webScrollView.minimumZoomScale /
-                                scrollState.minimum_zoom_scale();
+                                zoomState.minimum_zoom_scale();
   if (zoomScale < self.webScrollView.minimumZoomScale)
     zoomScale = self.webScrollView.minimumZoomScale;
   if (zoomScale > self.webScrollView.maximumZoomScale)
     zoomScale = self.webScrollView.maximumZoomScale;
   self.webScrollView.zoomScale = zoomScale;
+}
+
+- (void)handleCancelledError:(NSError*)error {
+  // NSURLErrorCancelled errors generated by the Chrome net stack should be
+  // aborted.  If the error was generated by the UIWebView, it will not have
+  // an underlying net error and will be automatically retried by the web view.
+  DCHECK_EQ(error.code, NSURLErrorCancelled);
+  NSError* underlyingError = base::ios::GetFinalUnderlyingErrorFromError(error);
+  NSString* netDomain = base::SysUTF8ToNSString(net::kErrorDomain);
+  BOOL shouldAbortLoadForCancelledError =
+      [underlyingError.domain isEqualToString:netDomain];
+  if (!shouldAbortLoadForCancelledError)
+    return;
+
+  // NSURLCancelled errors with underlying errors are generated from the
+  // Chrome network stack.  Abort the load in this case.
+  [self abortLoad];
+
+  switch (underlyingError.code) {
+    case net::ERR_ABORTED:
+      // |NSURLErrorCancelled| errors with underlying net error code
+      // |net::ERR_ABORTED| are used by the Chrome network stack to
+      // indicate that the current load should be aborted and the pending
+      // entry should be discarded.
+      [[self sessionController] discardNonCommittedEntries];
+      break;
+    case net::ERR_BLOCKED_BY_CLIENT:
+      // |NSURLErrorCancelled| errors with underlying net error code
+      // |net::ERR_BLOCKED_BY_CLIENT| are used by the Chrome network stack
+      // to indicate that the current load should be aborted and the pending
+      // entry should be kept.
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 #pragma mark - JS to ObjC messaging
@@ -1240,9 +1330,9 @@ const size_t kMaxMessageQueueSize = 262144;
   // navigation has happened before the UIWebView is set here (ideally by
   // unifying the creation and setting flow).
   _spoofableRequest = YES;
-  _inJavaScriptContext = NO;
 
   if (webView) {
+    _inJavaScriptContext = NO;
     // Do initial injection even before loading another page, since the window
     // object is re-used.
     [self injectEarlyInjectionScripts];
@@ -1318,6 +1408,25 @@ const size_t kMaxMessageQueueSize = 262144;
 }
 
 #pragma mark -
+#pragma mark CRWRedirectClientDelegate
+
+- (void)wasRedirectedToRequest:(NSURLRequest*)request
+              redirectResponse:(NSURLResponse*)response {
+  // This callback can be received after -close is called; ignore it.
+  if (self.isBeingDestroyed)
+    return;
+
+  // Register the redirected load request if it originated from the main page
+  // load.
+  GURL redirectedURL = net::GURLWithNSURL(response.URL);
+  if ([self currentNavigationURL] == redirectedURL) {
+    [self registerLoadRequest:net::GURLWithNSURL(request.URL)
+                     referrer:[self currentReferrer]
+                   transition:ui::PAGE_TRANSITION_SERVER_REDIRECT];
+  }
+}
+
+#pragma mark -
 #pragma mark UIWebViewDelegate Methods
 
 // Called when a load begins, and for subsequent subpages.
@@ -1346,9 +1455,11 @@ const size_t kMaxMessageQueueSize = 262144;
   // Do not add new code above this line unless you're certain about what you're
   // doing with respect to JS re-entry.
   ScopedReentryGuard javaScriptReentryGuard(&_inJavaScriptContext);
-
+  web::FrameInfo* targetFrame = nullptr;  // No reliable way to get this info.
   BOOL isLinkClick = [self isLinkNavigation:navigationType];
-  return [self shouldAllowLoadWithRequest:request isLinkClick:isLinkClick];
+  return [self shouldAllowLoadWithRequest:request
+                              targetFrame:targetFrame
+                              isLinkClick:isLinkClick];
 }
 
 // Called at multiple points during a load, such as at the start of loading a

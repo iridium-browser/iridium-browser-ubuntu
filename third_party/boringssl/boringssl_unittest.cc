@@ -32,7 +32,7 @@ void TestProcess(const std::string& name,
   std::string output;
   EXPECT_TRUE(base::GetAppOutput(cmd, &output));
   // Account for Windows line endings.
-  ReplaceSubstringsAfterOffset(&output, 0, "\r\n", "\n");
+  base::ReplaceSubstringsAfterOffset(&output, 0, "\r\n", "\n");
 
   const bool ok = output.size() >= 5 &&
                   memcmp("PASS\n", &output[output.size() - 5], 5) == 0 &&
@@ -141,6 +141,10 @@ TEST(BoringSSL, AEADs) {
   }
 }
 
+TEST(BoringSSL, AES) {
+  TestSimple("aes_test");
+}
+
 TEST(BoringSSL, Base64) {
   TestSimple("base64_test");
 }
@@ -200,8 +204,33 @@ TEST(BoringSSL, ERR) {
   TestSimple("err_test");
 }
 
+TEST(BoringSSL, EVP) {
+  base::FilePath data_file;
+  ASSERT_TRUE(BoringSSLPath(&data_file));
+  data_file = data_file.Append(FILE_PATH_LITERAL("crypto"));
+  data_file = data_file.Append(FILE_PATH_LITERAL("evp"));
+  data_file = data_file.Append(FILE_PATH_LITERAL("evp_tests.txt"));
+
+  std::vector<base::CommandLine::StringType> args;
+  args.push_back(data_file.value());
+
+  TestProcess("evp_test", args);
+}
+
+TEST(BoringSSL, EVPExtra) {
+  TestSimple("evp_extra_test");
+}
+
+TEST(BoringSSL, ExampleMul) {
+  TestSimple("example_mul");
+}
+
 TEST(BoringSSL, GCM) {
   TestSimple("gcm_test");
+}
+
+TEST(BoringSSL, HKDF) {
+  TestSimple("hkdf_test");
 }
 
 TEST(BoringSSL, HMAC) {
@@ -221,8 +250,21 @@ TEST(BoringSSL, LH) {
   TestSimple("lhash_test");
 }
 
-TEST(BoringSSL, RSA) {
-  TestSimple("rsa_test");
+TEST(BoringSSL, PBKDF) {
+  TestSimple("pbkdf_test");
+}
+
+TEST(BoringSSL, Poly1305) {
+  base::FilePath data_file;
+  ASSERT_TRUE(BoringSSLPath(&data_file));
+  data_file = data_file.Append(FILE_PATH_LITERAL("crypto"));
+  data_file = data_file.Append(FILE_PATH_LITERAL("poly1305"));
+  data_file = data_file.Append(FILE_PATH_LITERAL("poly1305_test.txt"));
+
+  std::vector<base::CommandLine::StringType> args;
+  args.push_back(data_file.value());
+
+  TestProcess("poly1305_test", args);
 }
 
 TEST(BoringSSL, PKCS7) {
@@ -233,57 +275,30 @@ TEST(BoringSSL, PKCS12) {
   TestSimple("pkcs12_test");
 }
 
-TEST(BoringSSL, ExampleMul) {
-  TestSimple("example_mul");
+TEST(BoringSSL, PQueue) {
+  TestSimple("pqueue_test");
 }
 
-TEST(BoringSSL, EVP) {
-  base::FilePath data_file;
-  ASSERT_TRUE(BoringSSLPath(&data_file));
-  data_file = data_file.Append(FILE_PATH_LITERAL("crypto"));
-  data_file = data_file.Append(FILE_PATH_LITERAL("evp"));
-  data_file = data_file.Append(FILE_PATH_LITERAL("evp_tests.txt"));
-
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(data_file.value());
-
-  TestProcess("evp_test", args);
+TEST(BoringSSL, RefcountTest) {
+  TestSimple("refcount_test");
 }
 
-// evp_test is also run on hmac_test's input.
-TEST(BoringSSL, EVPHMAC) {
-  base::FilePath data_file;
-  ASSERT_TRUE(BoringSSLPath(&data_file));
-  data_file = data_file.Append(FILE_PATH_LITERAL("crypto"));
-  data_file = data_file.Append(FILE_PATH_LITERAL("hmac"));
-  data_file = data_file.Append(FILE_PATH_LITERAL("hmac_tests.txt"));
-
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(data_file.value());
-
-  TestProcess("evp_test", args);
-}
-
-TEST(BoringSSL, EVPExtra) {
-  TestSimple("evp_extra_test");
+TEST(BoringSSL, RSA) {
+  TestSimple("rsa_test");
 }
 
 TEST(BoringSSL, SSL) {
   TestSimple("ssl_test");
 }
 
-TEST(BoringSSL, PQueue) {
-  TestSimple("pqueue_test");
-}
-
-TEST(BoringSSL, HKDF) {
-  TestSimple("hkdf_test");
-}
-
-TEST(BoringSSL, PBKDF) {
-  TestSimple("pbkdf_test");
+TEST(BoringSSL, TabTest) {
+  TestSimple("tab_test");
 }
 
 TEST(BoringSSL, Thread) {
   TestSimple("thread_test");
+}
+
+TEST(BoringSSL, V3NameTest) {
+  TestSimple("v3name_test");
 }

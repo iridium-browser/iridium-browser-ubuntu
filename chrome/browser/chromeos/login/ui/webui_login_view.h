@@ -8,10 +8,8 @@
 #include <map>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
-#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -151,7 +149,8 @@ class WebUILoginView : public views::View,
   void DidFailProvisionalLoad(content::RenderFrameHost* render_frame_host,
                               const GURL& validated_url,
                               int error_code,
-                              const base::string16& error_description) override;
+                              const base::string16& error_description,
+                              bool was_ignored_by_handler) override;
 
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
@@ -184,13 +183,8 @@ class WebUILoginView : public views::View,
   // True to forward keyboard event.
   bool forward_keyboard_event_;
 
-  ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
-  ObserverList<FrameObserver> frame_observer_list_;
-
-  // Manage popups appearing over the login window.
-  // TODO(gbillock): See if we can get rid of this. Perhaps in favor of
-  // in-content styled popups or something? There oughtta be a way...
-  scoped_ptr<web_modal::PopupManager> popup_manager_;
+  base::ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
+  base::ObserverList<FrameObserver> frame_observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUILoginView);
 };

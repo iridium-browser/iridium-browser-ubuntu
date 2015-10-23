@@ -37,17 +37,17 @@
 
 namespace blink {
 
-class AudioContext;
+class AbstractAudioContext;
 
 class MediaStreamAudioSourceHandler final : public AudioHandler {
 public:
     static PassRefPtr<MediaStreamAudioSourceHandler> create(AudioNode&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
-    virtual ~MediaStreamAudioSourceHandler();
+    ~MediaStreamAudioSourceHandler() override;
 
     MediaStream* mediaStream() { return m_mediaStream.get(); }
 
     // AudioHandler
-    virtual void process(size_t framesToProcess) override;
+    void process(size_t framesToProcess) override;
 
     // A helper for AudioSourceProviderClient implementation of
     // MediaStreamAudioSourceNode.
@@ -58,7 +58,7 @@ public:
 private:
     MediaStreamAudioSourceHandler(AudioNode&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
     // As an audio source, we will never propagate silence.
-    virtual bool propagatesSilence() const override { return false; }
+    bool propagatesSilence() const override { return false; }
 
     // These Persistents don't make reference cycles including the owner
     // MediaStreamAudioSourceNode.
@@ -75,7 +75,7 @@ class MediaStreamAudioSourceNode final : public AudioSourceNode, public AudioSou
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(MediaStreamAudioSourceNode);
 public:
-    static MediaStreamAudioSourceNode* create(AudioContext&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    static MediaStreamAudioSourceNode* create(AbstractAudioContext&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
     DECLARE_VIRTUAL_TRACE();
     MediaStreamAudioSourceHandler& mediaStreamAudioSourceHandler() const;
 
@@ -85,7 +85,7 @@ public:
     void setFormat(size_t numberOfChannels, float sampleRate) override;
 
 private:
-    MediaStreamAudioSourceNode(AudioContext&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    MediaStreamAudioSourceNode(AbstractAudioContext&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
 };
 
 } // namespace blink

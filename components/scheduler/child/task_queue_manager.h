@@ -5,34 +5,36 @@
 #ifndef CONTENT_RENDERER_SCHEDULER_TASK_QUEUE_MANAGER_H_
 #define CONTENT_RENDERER_SCHEDULER_TASK_QUEUE_MANAGER_H_
 
+#include <map>
+
 #include "base/atomic_sequence_num.h"
 #include "base/debug/task_annotator.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/pending_task.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "components/scheduler/child/task_queue_impl.h"
 #include "components/scheduler/child/task_queue_selector.h"
-#include "components/scheduler/child/time_source.h"
 #include "components/scheduler/scheduler_export.h"
 
 namespace base {
+class TickClock;
+
 namespace trace_event {
 class ConvertableToTraceFormat;
 class TracedValue;
-}
-}
+}  // namespace trace_event
+}  // namespace base
 
 namespace scheduler {
 namespace internal {
 class LazyNow;
-class TaskQueue;
-}
+class TaskQueueImpl;
+}  // namespace internal
+
 class NestableSingleThreadTaskRunner;
-class TaskQueueSelector;
-class TimeSource;
 
 // The task queue manager provides N task queues and a selector interface for
 // choosing which task queue to service next. Each task queue consists of two
@@ -46,69 +48,23 @@ class TimeSource;
 //    the incoming task queue (if any) are moved here. The work queues are
 //    registered with the selector as input to the scheduling decision.
 //
-class SCHEDULER_EXPORT TaskQueueManager : public TaskQueueSelector::Observer {
+class SCHEDULER_EXPORT TaskQueueManager
+    : public internal::TaskQueueSelector::Observer {
  public:
-  // Keep TaskQueue::PumpPolicyToString in sync with this enum.
-  enum class PumpPolicy {
-    // Tasks posted to an incoming queue with an AUTO pump policy will be
-    // automatically scheduled for execution or transferred to the work queue
-    // automatically.
-    AUTO,
-    // Tasks posted to an incoming queue with an AFTER_WAKEUP pump policy
-    // will be scheduled for execution or transferred to the work queue
-    // automatically but only after another queue has executed a task.
-    AFTER_WAKEUP,
-    // Tasks posted to an incoming queue with a MANUAL will not be
-    // automatically scheduled for execution or transferred to the work queue.
-    // Instead, the selector should call PumpQueue() when necessary to bring
-    // in new tasks for execution.
-    MANUAL
-  };
-
-  // Create a task queue manager with |task_queue_count| task queues.
-  // |main_task_runner| identifies the thread on which where the tasks are
-  // eventually run. |selector| is used to choose which task queue to service.
-  // It should outlive this class.  Category strings must have application
-  // lifetime (statics or literals). They may not include " chars.
+  // Create a task queue manager where |main_task_runner| identifies the thread
+  // on which where the tasks are  eventually run. Category strings must have
+  // application lifetime (statics or literals). They may not include " chars.
   TaskQueueManager(
-      size_t task_queue_count,
       scoped_refptr<NestableSingleThreadTaskRunner> main_task_runner,
-      TaskQueueSelector* selector,
-      const char* disabled_by_default_tracing_category);
+      const char* disabled_by_default_tracing_category,
+      const char* disabled_by_default_verbose_tracing_category);
   ~TaskQueueManager() override;
-
-  // Returns the task runner which targets the queue selected by |queue_index|.
-  scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerForQueue(
-      size_t queue_index) const;
-
-  // Sets the pump policy for the |queue_index| to |pump_policy|. By
-  // default queues are created with AUTO_PUMP_POLICY.
-  void SetPumpPolicy(size_t queue_index, PumpPolicy pump_policy);
-
-  // Reloads new tasks from the incoming queue for |queue_index| into the work
-  // queue, regardless of whether the work queue is empty or not. After this,
-  // this function ensures that the tasks in the work queue, if any, are
-  // scheduled for execution.
-  //
-  // This function only needs to be called if automatic pumping is disabled
-  // for |queue_index|. See |SetQueueAutoPumpPolicy|. By default automatic
-  // pumping is enabled for all queues.
-  void PumpQueue(size_t queue_index);
-
-  // Returns true if there no tasks in either the work or incoming task queue
-  // identified by |queue_index|. Note that this function involves taking a
-  // lock, so calling it has some overhead.
-  bool IsQueueEmpty(size_t queue_index) const;
 
   // Returns the time of the next pending delayed task in any queue.  Ignores
   // any delayed tasks whose delay has expired. Returns a null TimeTicks object
   // if no tasks are pending.  NOTE this is somewhat expensive since every queue
   // will get locked.
   base::TimeTicks NextPendingDelayedTaskRunTime();
-
-  // Set the name |queue_index| for tracing purposes. |name| must be a pointer
-  // to a static string.
-  void SetQueueName(size_t queue_index, const char* name);
 
   // Set the number of tasks executed in a single invocation of the task queue
   // manager. Increasing the batch size can reduce the overhead of yielding
@@ -121,18 +77,21 @@ class SCHEDULER_EXPORT TaskQueueManager : public TaskQueueSelector::Observer {
   void AddTaskObserver(base::MessageLoop::TaskObserver* task_observer);
   void RemoveTaskObserver(base::MessageLoop::TaskObserver* task_observer);
 
-  void SetTimeSourceForTesting(scoped_ptr<TimeSource> time_source);
+  void SetTimeSourceForTesting(scoped_ptr<base::TickClock> time_source);
 
-  // Returns a bitmap where a bit is set iff a task on the corresponding queue
-  // was run since the last call to GetAndClearTaskWasRunOnQueueBitmap.
-  uint64 GetAndClearTaskWasRunOnQueueBitmap();
+  // Returns true if any task from a monitored task queue was was run since the
+  // last call to GetAndClearSystemIsQuiescentBit.
+  bool GetAndClearSystemIsQuiescentBit();
+
+  // Creates a task queue with the given |spec|.  Must be called on the thread
+  // this class was created on.
+  scoped_refptr<internal::TaskQueueImpl> NewTaskQueue(
+      const TaskQueue::Spec& spec);
 
  private:
-  // TaskQueueSelector::Observer implementation:
-  void OnTaskQueueEnabled() override;
-
   friend class internal::LazyNow;
-  friend class internal::TaskQueue;
+  friend class internal::TaskQueueImpl;
+  friend class TaskQueueManagerTest;
 
   class DeletionSentinel : public base::RefCounted<DeletionSentinel> {
    private:
@@ -140,9 +99,17 @@ class SCHEDULER_EXPORT TaskQueueManager : public TaskQueueSelector::Observer {
     ~DeletionSentinel() {}
   };
 
-  // Called by the task queue to register a new pending task and allocate a
-  // sequence number for it.
-  void DidQueueTask(base::PendingTask* pending_task);
+  // Unregisters a TaskQueue previously created by |NewTaskQueue()|.
+  // NOTE we have to flush the queue from |newly_updatable_| which means as a
+  // side effect MoveNewlyUpdatableQueuesIntoUpdatableQueueSet is called by this
+  // function.
+  void UnregisterTaskQueue(scoped_refptr<internal::TaskQueueImpl> task_queue);
+
+  // TaskQueueSelector::Observer implementation:
+  void OnTaskQueueEnabled(internal::TaskQueueImpl* queue) override;
+
+  // Called by the task queue to register a new pending task.
+  void DidQueueTask(const internal::TaskQueueImpl::Task& pending_task);
 
   // Post a task to call DoWork() on the main task runner.  Only one pending
   // DoWork is allowed from the main thread, to prevent an explosion of pending
@@ -150,30 +117,28 @@ class SCHEDULER_EXPORT TaskQueueManager : public TaskQueueSelector::Observer {
   void MaybePostDoWorkOnMainRunner();
 
   // Use the selector to choose a pending task and run it.
-  void DoWork(bool posted_from_main_thread);
+  void DoWork(bool decrement_pending_dowork_count);
 
   // Delayed Tasks with run_times <= Now() are enqueued onto the work queue.
   // Reloads any empty work queues which have automatic pumping enabled and
   // which are eligible to be auto pumped based on the |previous_task| which was
-  // run. Call with an empty |previous_task| if no task was just run. Returns
-  // true if any work queue has tasks after doing this.
-  // |next_pending_delayed_task| should be the time of the next known delayed
-  // task. It is updated if any task is found which should run earlier.
-  bool UpdateWorkQueues(const base::PendingTask* previous_task);
+  // run and |should_trigger_wakeup|. Call with an empty |previous_task| if no
+  // task was just run.
+  void UpdateWorkQueues(bool should_trigger_wakeup,
+                        const internal::TaskQueueImpl::Task* previous_task);
 
-  // Chooses the next work queue to service. Returns true if |out_queue_index|
+  // Chooses the next work queue to service. Returns true if |out_queue|
   // indicates the queue from which the next task should be run, false to
   // avoid running any tasks.
-  bool SelectWorkQueueToService(size_t* out_queue_index);
+  bool SelectQueueToService(internal::TaskQueueImpl** out_queue);
 
-  // Runs a single nestable task from the work queue designated by
-  // |queue_index|. If |has_previous_task| is true, |previous_task| should
-  // contain the previous task in this work batch. Non-nestable task are
-  // reposted on the run loop. The queue must not be empty.
-  // Returns true if the TaskQueueManager got deleted, and false otherwise.
-  bool ProcessTaskFromWorkQueue(size_t queue_index,
-                                bool has_previous_task,
-                                base::PendingTask* previous_task);
+  // Runs a single nestable task from the |queue|. On exit, |out_task| will
+  // contain the task which was executed. Non-nestable task are reposted on the
+  // run loop. The queue must not be empty. Returns true if the TaskQueueManager
+  // got deleted, and false otherwise.
+  bool ProcessTaskFromWorkQueue(
+      internal::TaskQueueImpl* queue,
+      internal::TaskQueueImpl::Task* out_previous_task);
 
   bool RunsTasksOnCurrentThread() const;
   bool PostDelayedTask(const tracked_objects::Location& from_here,
@@ -182,25 +147,76 @@ class SCHEDULER_EXPORT TaskQueueManager : public TaskQueueSelector::Observer {
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
                                   const base::Closure& task,
                                   base::TimeDelta delay);
-  internal::TaskQueue* Queue(size_t queue_index) const;
 
   base::TimeTicks Now() const;
 
-  scoped_refptr<base::trace_event::ConvertableToTraceFormat>
-  AsValueWithSelectorResult(bool should_run, size_t selected_queue) const;
+  int GetNextSequenceNumber();
 
-  std::vector<scoped_refptr<internal::TaskQueue>> queues_;
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+  AsValueWithSelectorResult(bool should_run,
+                            internal::TaskQueueImpl* selected_queue) const;
+
+  // Causes DoWork to start calling UpdateWorkQueue for |queue|. Can be called
+  // from any thread.
+  void RegisterAsUpdatableTaskQueue(internal::TaskQueueImpl* queue);
+
+  // Prevents DoWork from calling UpdateWorkQueue for |queue|. Must be called
+  // from the thread the TaskQueueManager was created on.
+  void UnregisterAsUpdatableTaskQueue(internal::TaskQueueImpl* queue);
+
+  // Schedule a call to DelayedDoWork at |delayed_run_time| which will call
+  // TaskQueueImpl::MoveReadyDelayedTasksToIncomingQueue for |queue|.
+  // Can be called from any thread.
+  void ScheduleDelayedWork(internal::TaskQueueImpl* queue,
+                           base::TimeTicks delayed_run_time,
+                           internal::LazyNow* lazy_now);
+
+  // Function calling ScheduleDelayedWork that's suitable for use in base::Bind.
+  void ScheduleDelayedWorkTask(scoped_refptr<internal::TaskQueueImpl> queue,
+                               base::TimeTicks delayed_run_time);
+
+  // Calls WakeupReadyDelayedQueues followed by DoWork so that ready delayed
+  // tasks are enqueued and run. Must be called from the main thread.
+  void DelayedDoWork();
+
+  // Call TaskQueueImpl::MoveReadyDelayedTasksToIncomingQueue for each
+  // registered queue for which the delay has elapsed.
+  void WakeupReadyDelayedQueues(internal::LazyNow* lazy_now);
+
+  void MoveNewlyUpdatableQueuesIntoUpdatableQueueSet();
+
+  std::set<scoped_refptr<internal::TaskQueueImpl>> queues_;
+
+  // We have to be careful when deleting a queue because some of the code uses
+  // raw pointers and doesn't expect the rug to be pulled out from underneath.
+  std::set<scoped_refptr<internal::TaskQueueImpl>> queues_to_delete_;
+
+  // This lock guards only |newly_updatable_|.  It's not expected to be heavily
+  // contended.
+  base::Lock newly_updatable_lock_;
+  std::vector<internal::TaskQueueImpl*> newly_updatable_;
+
+  // Set of task queues with avaliable work on the incoming queue.  This should
+  // only be accessed from the main thread.
+  std::set<internal::TaskQueueImpl*> updatable_queue_set_;
+
+  typedef std::multimap<base::TimeTicks, internal::TaskQueueImpl*>
+      DelayedWakeupMultimap;
+
+  DelayedWakeupMultimap delayed_wakeup_map_;
+
   base::AtomicSequenceNumber task_sequence_num_;
   base::debug::TaskAnnotator task_annotator_;
 
   base::ThreadChecker main_thread_checker_;
   scoped_refptr<NestableSingleThreadTaskRunner> main_task_runner_;
-  TaskQueueSelector* selector_;
+  internal::TaskQueueSelector selector_;
 
   base::Closure do_work_from_main_thread_closure_;
   base::Closure do_work_from_other_thread_closure_;
+  base::Closure delayed_queue_wakeup_closure_;
 
-  uint64 task_was_run_bitmap_;
+  bool task_was_run_on_quiescence_monitored_queue_;
 
   // The pending_dowork_count_ is only tracked on the main thread since that's
   // where re-entrant problems happen.
@@ -208,11 +224,12 @@ class SCHEDULER_EXPORT TaskQueueManager : public TaskQueueSelector::Observer {
 
   int work_batch_size_;
 
-  scoped_ptr<TimeSource> time_source_;
+  scoped_ptr<base::TickClock> time_source_;
 
-  ObserverList<base::MessageLoop::TaskObserver> task_observers_;
+  base::ObserverList<base::MessageLoop::TaskObserver> task_observers_;
 
   const char* disabled_by_default_tracing_category_;
+  const char* disabled_by_default_verbose_tracing_category_;
 
   scoped_refptr<DeletionSentinel> deletion_sentinel_;
   base::WeakPtrFactory<TaskQueueManager> weak_factory_;

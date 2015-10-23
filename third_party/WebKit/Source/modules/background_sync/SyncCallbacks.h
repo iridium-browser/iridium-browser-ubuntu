@@ -28,14 +28,33 @@ class WebString;
 class SyncRegistrationCallbacks final : public WebSyncRegistrationCallbacks {
     WTF_MAKE_NONCOPYABLE(SyncRegistrationCallbacks);
 public:
-    SyncRegistrationCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver>, ServiceWorkerRegistration*);
+    SyncRegistrationCallbacks(ScriptPromiseResolver*, ServiceWorkerRegistration*);
     ~SyncRegistrationCallbacks() override;
 
     void onSuccess(WebSyncRegistration*) override;
     void onError(WebSyncError*) override;
 
 private:
-    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
+    Persistent<ScriptPromiseResolver> m_resolver;
+    Persistent<ServiceWorkerRegistration> m_serviceWorkerRegistration;
+};
+
+// SyncNotifyWhenDoneCallbacks is an implementation of
+// WebSyncNotifyWhenDoneCallbacks that will resolve the underlying promise
+// depending on the result passed to the callback. It takes a
+// ServiceWorkerRegistration in its constructor and will pass it to the
+// SyncProvider.
+class SyncNotifyWhenDoneCallbacks final : public WebSyncNotifyWhenDoneCallbacks {
+    WTF_MAKE_NONCOPYABLE(SyncNotifyWhenDoneCallbacks);
+public:
+    SyncNotifyWhenDoneCallbacks(ScriptPromiseResolver*, ServiceWorkerRegistration*);
+    ~SyncNotifyWhenDoneCallbacks() override;
+
+    void onSuccess(bool*) override;
+    void onError(WebSyncError*) override;
+
+private:
+    Persistent<ScriptPromiseResolver> m_resolver;
     Persistent<ServiceWorkerRegistration> m_serviceWorkerRegistration;
 };
 
@@ -47,14 +66,14 @@ private:
 class SyncUnregistrationCallbacks final : public WebSyncUnregistrationCallbacks {
     WTF_MAKE_NONCOPYABLE(SyncUnregistrationCallbacks);
 public:
-    SyncUnregistrationCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver>, ServiceWorkerRegistration*);
+    SyncUnregistrationCallbacks(ScriptPromiseResolver*, ServiceWorkerRegistration*);
     ~SyncUnregistrationCallbacks() override;
 
     void onSuccess(bool*) override;
     void onError(WebSyncError*) override;
 
 private:
-    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
+    Persistent<ScriptPromiseResolver> m_resolver;
     Persistent<ServiceWorkerRegistration> m_serviceWorkerRegistration;
 };
 
@@ -65,14 +84,33 @@ private:
 class SyncGetRegistrationsCallbacks final : public WebSyncGetRegistrationsCallbacks {
     WTF_MAKE_NONCOPYABLE(SyncGetRegistrationsCallbacks);
 public:
-    SyncGetRegistrationsCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver>, ServiceWorkerRegistration*);
+    SyncGetRegistrationsCallbacks(ScriptPromiseResolver*, ServiceWorkerRegistration*);
     ~SyncGetRegistrationsCallbacks() override;
 
     void onSuccess(WebVector<WebSyncRegistration*>*) override;
     void onError(WebSyncError*) override;
 
 private:
-    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
+    Persistent<ScriptPromiseResolver> m_resolver;
+    Persistent<ServiceWorkerRegistration> m_serviceWorkerRegistration;
+};
+
+// SyncGetPermissionStatusCallbacks is an implementation of
+// WebSyncGetPermissionStatusCallbacks that will resolve the underlying promise
+// depending on the permission status passed to the callback.
+class SyncGetPermissionStatusCallbacks final : public WebSyncGetPermissionStatusCallbacks {
+    WTF_MAKE_NONCOPYABLE(SyncGetPermissionStatusCallbacks);
+public:
+    SyncGetPermissionStatusCallbacks(ScriptPromiseResolver*, ServiceWorkerRegistration*);
+    ~SyncGetPermissionStatusCallbacks() override;
+
+    void onSuccess(WebSyncPermissionStatus*) override;
+    void onError(WebSyncError*) override;
+
+private:
+    static String permissionString(WebSyncPermissionStatus);
+
+    Persistent<ScriptPromiseResolver> m_resolver;
     Persistent<ServiceWorkerRegistration> m_serviceWorkerRegistration;
 };
 

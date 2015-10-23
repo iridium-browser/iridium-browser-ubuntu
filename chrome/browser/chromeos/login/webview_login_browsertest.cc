@@ -13,7 +13,7 @@ namespace chromeos {
 
 class WebviewLoginTest : public OobeBaseTest {
  public:
-  WebviewLoginTest() { set_use_webview(true); }
+  WebviewLoginTest() {}
   ~WebviewLoginTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -45,7 +45,8 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, Basic) {
   session_start_waiter.Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(WebviewLoginTest, BackButton) {
+// Flaky: http://crbug.com/512648.
+IN_PROC_BROWSER_TEST_F(WebviewLoginTest, DISABLED_BackButton) {
   WaitForGaiaPageLoad();
 
   // Start: no back button, first page.
@@ -77,6 +78,13 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, BackButton) {
   ExecuteJsInSigninFrame("document.getElementById('nextButton').click();");
 
   session_start_waiter.Wait();
+}
+
+IN_PROC_BROWSER_TEST_F(WebviewLoginTest, AllowGuest) {
+  WaitForGaiaPageLoad();
+  JsExpect("!$('guest-user-header-bar-item').hidden");
+  chromeos::CrosSettings::Get()->SetBoolean(kAccountsPrefAllowGuest, false);
+  JsExpect("$('guest-user-header-bar-item').hidden");
 }
 
 }  // namespace chromeos

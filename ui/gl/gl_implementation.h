@@ -36,7 +36,8 @@ struct GL_EXPORT GLWindowSystemBindingInfo {
   bool direct_rendering;
 };
 
-void GetAllowedGLImplementations(std::vector<GLImplementation>* impls);
+void GL_EXPORT
+GetAllowedGLImplementations(std::vector<GLImplementation>* impls);
 
 #if defined(OS_WIN)
 typedef void* (WINAPI *GLGetProcAddressProc)(const char* name);
@@ -61,6 +62,13 @@ void InitializeNullDrawGLBindings();
 
 // TODO(danakj): Remove this when all test suites are using null-draw.
 GL_EXPORT bool HasInitializedNullDrawGLBindings();
+
+// Filter a list of disabled_extensions from GL style space-separated
+// extension_list, returning a space separated list of filtered extensions, in
+// the same order as the input.
+GL_EXPORT std::string FilterGLExtensionList(
+    const char* extension_list,
+    const std::vector<std::string>& disabled_extensions);
 
 // Once initialized, instantiating this turns the stub methods for drawing
 // operations off allowing drawing will occur while the object is alive.
@@ -113,6 +121,19 @@ void* GetGLProcAddress(const char* name);
 // Return information about the GL window system binding implementation (e.g.,
 // EGL, GLX, WGL). Returns true if the information was retrieved successfully.
 GL_EXPORT bool GetGLWindowSystemBindingInfo(GLWindowSystemBindingInfo* info);
+
+// Helper for fetching the OpenGL extensions from the current context.
+// This helper abstracts over differences between the desktop OpenGL
+// core profile, and OpenGL ES and the compatibility profile.  It's
+// intended for users of the bindings, not the implementation of the
+// bindings themselves. This is a relatively expensive call, so
+// callers should cache the result.
+GL_EXPORT std::string GetGLExtensionsFromCurrentContext();
+
+// Helper for the GL bindings implementation to understand whether
+// glGetString(GL_EXTENSIONS) or glGetStringi(GL_EXTENSIONS, i) will
+// be used in the function above.
+GL_EXPORT bool WillUseGLGetStringForExtensions();
 
 }  // namespace gfx
 

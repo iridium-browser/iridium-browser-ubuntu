@@ -9,7 +9,11 @@
 #include "bindings/core/v8/ScriptFunction.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/SerializedScriptValueFactory.h"
+#include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
+#include "modules/navigatorconnect/ServicePort.h"
+#include "modules/navigatorconnect/ServicePortConnectResponse.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 
 namespace blink {
@@ -49,9 +53,9 @@ private:
         ASSERT(m_observer);
         ASSERT(m_resolveType == Fulfilled || m_resolveType == Rejected);
         if (m_resolveType == Rejected)
-            m_observer->connectionWasRejected();
+            m_observer->responseWasRejected();
         else
-            m_observer->connectionWasAccepted(value);
+            m_observer->responseWasResolved(value);
         m_observer = nullptr;
         return value;
     }
@@ -60,9 +64,9 @@ private:
     ResolveType m_resolveType;
 };
 
-AcceptConnectionObserver* AcceptConnectionObserver::create(ExecutionContext* context, int eventID)
+AcceptConnectionObserver* AcceptConnectionObserver::create(ServicePortCollection* collection, PassOwnPtr<WebServicePortConnectEventCallbacks> callbacks, WebServicePortID portID, const KURL& targetURL)
 {
-    return new AcceptConnectionObserver(context, eventID);
+    return new AcceptConnectionObserver(collection, callbacks, portID, targetURL);
 }
 
 void AcceptConnectionObserver::contextDestroyed()
@@ -76,49 +80,85 @@ void AcceptConnectionObserver::didDispatchEvent()
     ASSERT(executionContext());
     if (m_state != Initial)
         return;
-    connectionWasRejected();
+    responseWasRejected();
 }
 
-void AcceptConnectionObserver::acceptConnection(ScriptState* scriptState, ScriptPromise value, ExceptionState& exceptionState)
+ScriptPromise AcceptConnectionObserver::respondWith(ScriptState* scriptState, ScriptPromise value, ExceptionState& exceptionState)
 {
     if (m_state != Initial) {
-        exceptionState.throwDOMException(InvalidStateError, "acceptConnection was already called.");
-        return;
+        return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(InvalidStateError, "respondWith was already called."));
     }
 
     m_state = Pending;
+    m_resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromise promise = m_resolver->promise();
     value.then(
         ThenFunction::createFunction(scriptState, this, ThenFunction::Fulfilled),
         ThenFunction::createFunction(scriptState, this, ThenFunction::Rejected));
+    return promise;
 }
 
-void AcceptConnectionObserver::connectionWasRejected()
+void AcceptConnectionObserver::responseWasRejected()
 {
     ASSERT(executionContext());
-    ServiceWorkerGlobalScopeClient::from(executionContext())->didHandleCrossOriginConnectEvent(m_eventID, false);
+    if (m_resolver)
+        m_resolver->reject(DOMException::create(AbortError));
+    m_callbacks->onError();
     m_state = Done;
 }
 
-void AcceptConnectionObserver::connectionWasAccepted(const ScriptValue& value)
+void AcceptConnectionObserver::responseWasResolved(const ScriptValue& value)
 {
     ASSERT(executionContext());
-    if (!value.v8Value()->IsTrue()) {
-        connectionWasRejected();
+
+    ScriptState* scriptState = m_resolver->scriptState();
+    ExceptionState exceptionState(ExceptionState::UnknownContext, nullptr, nullptr, scriptState->context()->Global(), scriptState->isolate());
+    ServicePortConnectResponse response = ScriptValue::to<ServicePortConnectResponse>(scriptState->isolate(), value, exceptionState);
+    if (exceptionState.hadException()) {
+        exceptionState.reject(m_resolver.get());
+        m_resolver = nullptr;
+        responseWasRejected();
         return;
     }
-    ServiceWorkerGlobalScopeClient::from(executionContext())->didHandleCrossOriginConnectEvent(m_eventID, true);
+    if (!response.hasAccept() || !response.accept()) {
+        responseWasRejected();
+        return;
+    }
+    WebServicePort webPort;
+    webPort.targetUrl = m_targetURL;
+    if (response.hasName())
+        webPort.name = response.name();
+    if (response.hasData()) {
+        webPort.data = SerializedScriptValueFactory::instance().create(scriptState->isolate(), response.data(), nullptr, exceptionState)->toWireString();
+        if (exceptionState.hadException()) {
+            exceptionState.reject(m_resolver.get());
+            m_resolver = nullptr;
+            responseWasRejected();
+            return;
+        }
+    }
+    webPort.id = m_portID;
+    ServicePort* port = ServicePort::create(m_collection, webPort);
+    m_collection->addPort(port);
+    m_resolver->resolve(port);
+    m_callbacks->onSuccess(&webPort);
     m_state = Done;
 }
 
-AcceptConnectionObserver::AcceptConnectionObserver(ExecutionContext* context, int eventID)
-    : ContextLifecycleObserver(context)
-    , m_eventID(eventID)
+AcceptConnectionObserver::AcceptConnectionObserver(ServicePortCollection* collection, PassOwnPtr<WebServicePortConnectEventCallbacks> callbacks, WebServicePortID portID, const KURL& targetURL)
+    : ContextLifecycleObserver(collection->executionContext())
+    , m_callbacks(callbacks)
+    , m_collection(collection)
+    , m_portID(portID)
+    , m_targetURL(targetURL)
     , m_state(Initial)
 {
 }
 
 DEFINE_TRACE(AcceptConnectionObserver)
 {
+    visitor->trace(m_collection);
+    visitor->trace(m_resolver);
     ContextLifecycleObserver::trace(visitor);
 }
 

@@ -40,7 +40,7 @@ class Widget;
 class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement, public FrameOwner {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLFrameOwnerElement);
 public:
-    virtual ~HTMLFrameOwnerElement();
+    ~HTMLFrameOwnerElement() override;
 
     Frame* contentFrame() const { return m_contentFrame; }
     DOMWindow* contentWindow() const;
@@ -87,11 +87,11 @@ protected:
     HTMLFrameOwnerElement(const QualifiedName& tagName, Document&);
     void setSandboxFlags(SandboxFlags);
 
-    bool loadOrRedirectSubframe(const KURL&, const AtomicString& frameName, bool lockBackForwardList);
+    bool loadOrRedirectSubframe(const KURL&, const AtomicString& frameName, bool replaceCurrentItem);
 
 private:
-    virtual bool isKeyboardFocusable() const override;
-    virtual bool isFrameOwnerElement() const override final { return true; }
+    bool isKeyboardFocusable() const override;
+    bool isFrameOwnerElement() const final { return true; }
 
     RawPtrWillBeMember<Frame> m_contentFrame;
     RefPtrWillBeMember<Widget> m_widget;

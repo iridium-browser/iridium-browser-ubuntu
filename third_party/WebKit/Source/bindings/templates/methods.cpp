@@ -95,7 +95,7 @@ static void {{method.name}}{{method.overload_index}}Method{{world_suffix}}(const
 {% macro generate_argument_var_declaration(argument) %}
 {# FIXME: remove EventListener special case #}
 {% if argument.idl_type == 'EventListener' %}
-RefPtr<{{argument.idl_type}}> {{argument.name}}
+RefPtrWillBeRawPtr<{{argument.idl_type}}> {{argument.name}}
 {%- else %}
 {{argument.cpp_type}} {{argument.name}}
 {%- endif %}{# argument.idl_type == 'EventListener' #}
@@ -216,6 +216,9 @@ if (!{{argument.name}}.isUndefinedOrNull() && !{{argument.name}}.isObject()) {
 
 {######################################}
 {% macro cpp_method_call(method, v8_set_return_value, cpp_value) %}
+{% if method.is_custom_call_prologue %}
+{{v8_class}}::{{method.name}}MethodPrologueCustom(info, impl);
+{% endif %}
 {# Local variables #}
 {% if method.is_call_with_script_state or method.is_call_with_this_value %}
 {# [ConstructorCallWith=ScriptState] #}
@@ -444,6 +447,35 @@ static void {{overloads.name}}Method{{world_suffix}}(const v8::FunctionCallbackI
 
 
 {##############################################################################}
+{% macro generate_post_message_impl() %}
+void postMessageImpl(const char* interfaceName, {{cpp_class}}* instance, const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    ExceptionState exceptionState(ExceptionState::ExecutionContext, "postMessage", interfaceName, info.Holder(), info.GetIsolate());
+    if (UNLIKELY(info.Length() < 1)) {
+        setMinimumArityTypeError(exceptionState, 1, info.Length());
+        exceptionState.throwIfNeeded();
+        return;
+    }
+    OwnPtrWillBeRawPtr<MessagePortArray> ports = adoptPtrWillBeNoop(new MessagePortArray);
+    ArrayBufferArray arrayBuffers;
+    if (info.Length() > 1) {
+        const int transferablesArgIndex = 1;
+        if (!SerializedScriptValue::extractTransferables(info.GetIsolate(), info[transferablesArgIndex], transferablesArgIndex, *ports, arrayBuffers, exceptionState)) {
+            exceptionState.throwIfNeeded();
+            return;
+        }
+    }
+    RefPtr<SerializedScriptValue> message = SerializedScriptValueFactory::instance().create(info.GetIsolate(), info[0], ports.get(), &arrayBuffers, exceptionState);
+    if (exceptionState.throwIfNeeded())
+        return;
+    // FIXME: Only pass context/exceptionState if instance really requires it.
+    ExecutionContext* context = currentExecutionContext(info.GetIsolate());
+    instance->postMessage(context, message.release(), ports.get(), exceptionState);
+    exceptionState.throwIfNeeded();
+}
+{% endmacro %}
+
+{##############################################################################}
 {% macro method_callback(method, world_suffix) %}
 {% filter conditional(method.conditional_string) %}
 static void {{method.name}}MethodCallback{{world_suffix}}(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -466,12 +498,14 @@ static void {{method.name}}MethodCallback{{world_suffix}}(const v8::FunctionCall
     if (contextData && contextData->activityLogger()) {
     {% endif %}
         ExceptionState exceptionState(ExceptionState::ExecutionContext, "{{method.name}}", "{{interface_name}}", info.Holder(), info.GetIsolate());
-        Vector<v8::Local<v8::Value>> loggerArgs = toImplArguments<v8::Local<v8::Value>>(info, 0, exceptionState);
+        Vector<v8::Local<v8::Value>> loggerArgs = toImplArguments<Vector<v8::Local<v8::Value>>>(info, 0, exceptionState);
         contextData->activityLogger()->logMethod("{{interface_name}}.{{method.name}}", info.Length(), loggerArgs.data());
     }
     {% endif %}
     {% if method.is_custom %}
     {{v8_class}}::{{method.name}}MethodCustom(info);
+    {% elif method.is_post_message %}
+    postMessageImpl("{{interface_name}}", {{v8_class}}::toImpl(info.Holder()), info);
     {% else %}
     {{cpp_class_or_partial}}V8Internal::{{method.name}}Method{{world_suffix}}(info);
     {% endif %}
@@ -491,20 +525,18 @@ static void {{method.name}}OriginSafeMethodGetter{{world_suffix}}(const v8::Prop
     static int domTemplateKey; // This address is used for a key to look up the dom template.
     V8PerIsolateData* data = V8PerIsolateData::from(info.GetIsolate());
     {# FIXME: 1 case of [DoNotCheckSignature] in Window.idl may differ #}
-    v8::Local<v8::FunctionTemplate> privateTemplate = data->domTemplate(&domTemplateKey, {{cpp_class}}V8Internal::{{method.name}}MethodCallback{{world_suffix}}, v8Undefined(), {{signature}}, {{method.length}});
+    v8::Local<v8::FunctionTemplate> domTemplate = data->domTemplate(&domTemplateKey, {{cpp_class}}V8Internal::{{method.name}}MethodCallback{{world_suffix}}, v8Undefined(), {{signature}}, {{method.length}});
 
+    // It is unsafe to use info.Holder() because OriginSafeMethodGetter is called
+    // back without checking the type of info.Holder().
     v8::Local<v8::Object> holder = {{v8_class}}::findInstanceInPrototypeChain(info.This(), info.GetIsolate());
     if (holder.IsEmpty()) {
-        // This is only reachable via |object.__proto__.func|, in which case it
-        // has already passed the same origin security check
-        v8SetReturnValue(info, privateTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
+        v8SetReturnValue(info, domTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
         return;
     }
     {{cpp_class}}* impl = {{v8_class}}::toImpl(holder);
     if (!BindingSecurity::shouldAllowAccessToFrame(info.GetIsolate(), impl->frame(), DoNotReportSecurityError)) {
-        static int sharedTemplateKey; // This address is used for a key to look up the dom template.
-        v8::Local<v8::FunctionTemplate> sharedTemplate = data->domTemplate(&sharedTemplateKey, {{cpp_class}}V8Internal::{{method.name}}MethodCallback{{world_suffix}}, v8Undefined(), {{signature}}, {{method.length}});
-        v8SetReturnValue(info, sharedTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
+        v8SetReturnValue(info, domTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
         return;
     }
 
@@ -515,7 +547,7 @@ static void {{method.name}}OriginSafeMethodGetter{{world_suffix}}(const v8::Prop
         return;
     }
 
-    v8SetReturnValue(info, privateTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
+    v8SetReturnValue(info, domTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
 }
 
 static void {{method.name}}OriginSafeMethodGetterCallback{{world_suffix}}(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -535,12 +567,11 @@ bool {{v8_class}}::PrivateScript::{{method.name}}Method({{method.argument_declar
         return false;
     v8::HandleScope handleScope(toIsolate(frame));
     ScriptForbiddenScope::AllowUserAgentScript script;
-    v8::Local<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
-    if (contextInPrivateScript.IsEmpty())
+    ScriptState* scriptState = ScriptState::forWorld(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
+    if (!scriptState->contextIsValid())
         return false;
-    ScriptState* scriptState = ScriptState::from(contextInPrivateScript);
     ScriptState* scriptStateInUserScript = ScriptState::forMainWorld(frame);
-    if (!scriptState->executionContext())
+    if (!scriptState->contextIsValid())
         return false;
 
     ScriptState::Scope scope(scriptState);
@@ -612,7 +643,7 @@ static void {{name}}(const v8::FunctionCallbackInfo<v8::Value>& info)
                                        if constructor.is_named_constructor else
                                        '') %}
 v8::Local<v8::Object> wrapper = info.Holder();
-impl->associateWithWrapper(info.GetIsolate(), &{{constructor_class}}::wrapperTypeInfo, wrapper);
+wrapper = impl->associateWithWrapper(info.GetIsolate(), &{{constructor_class}}::wrapperTypeInfo, wrapper);
 v8SetReturnValue(info, wrapper);
 {% endmacro %}
 
@@ -660,7 +691,7 @@ ASSERT(context);
                           if method.overloads else
                           method.runtime_enabled_function) %}
 v8::Local<v8::FunctionTemplate> functionTemplate = v8::FunctionTemplate::New(isolate, {{cpp_class_or_partial}}V8Internal::{{method.name}}MethodCallback, v8Undefined(), defaultSignature, {{method.number_of_required_arguments}});
-v8::Local<v8::Function> function = ->GetFunction(isolate->GetCurrentContext())).ToLocalChecked();
+v8::Local<v8::Function> function = v8CallOrCrash(functionTemplate->GetFunction(isolate->GetCurrentContext()));
 v8CallOrCrash(prototypeObject->Set(isolate->GetCurrentContext(), v8AtomicString(isolate, "{{method.name}}"), function));
 {% endfilter %}{# runtime_enabled() #}
 {% endfilter %}{# exposed() #}

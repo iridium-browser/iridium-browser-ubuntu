@@ -5,7 +5,6 @@
 #ifndef PopupMenuImpl_h
 #define PopupMenuImpl_h
 
-#include "core/html/forms/PopupMenuClient.h"
 #include "core/page/PagePopupClient.h"
 #include "platform/PopupMenu.h"
 
@@ -17,24 +16,26 @@ class HTMLElement;
 class HTMLHRElement;
 class HTMLOptGroupElement;
 class HTMLOptionElement;
+class HTMLSelectElement;
 
 class PopupMenuImpl final : public PopupMenu, public PagePopupClient {
 public:
-    static PassRefPtrWillBeRawPtr<PopupMenuImpl> create(ChromeClientImpl*, PopupMenuClient*);
-    virtual ~PopupMenuImpl();
+    static PassRefPtrWillBeRawPtr<PopupMenuImpl> create(ChromeClientImpl*, HTMLSelectElement&);
+    ~PopupMenuImpl() override;
+    DECLARE_VIRTUAL_TRACE();
 
     void update();
 
     void dispose();
 
 private:
-    PopupMenuImpl(ChromeClientImpl*, PopupMenuClient*);
+    PopupMenuImpl(ChromeClientImpl*, HTMLSelectElement&);
 
-    bool hasTooManyItemsForStyling();
-    void addOption(HTMLOptionElement&, bool enableExtraStyling, SharedBuffer*);
-    void addOptGroup(HTMLOptGroupElement&, bool enableExtraStyling, SharedBuffer*);
-    void addSeparator(HTMLHRElement&, bool enableExtraStyling, SharedBuffer*);
-    void addElementStyle(HTMLElement&, bool enableExtraStyling, SharedBuffer*);
+    class ItemIterationContext;
+    void addOption(ItemIterationContext&, HTMLOptionElement&);
+    void addOptGroup(ItemIterationContext&, HTMLOptGroupElement&);
+    void addSeparator(ItemIterationContext&, HTMLHRElement&);
+    void addElementStyle(ItemIterationContext&, HTMLElement&);
 
     // PopupMenu functions:
     void show(const FloatQuad& controlPosition, const IntSize& controlSize, int index) override;
@@ -54,7 +55,7 @@ private:
     void didClosePopup() override;
 
     ChromeClientImpl* m_chromeClient;
-    PopupMenuClient* m_client;
+    RawPtrWillBeMember<HTMLSelectElement> m_ownerElement;
     PagePopup* m_popup;
     bool m_needsUpdate;
 };

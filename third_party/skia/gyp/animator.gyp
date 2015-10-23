@@ -20,6 +20,7 @@
       ],
       'include_dirs': [
         '../include/animator',
+        '../include/private',
         '../src/utils',
       ],
       'sources': [
@@ -132,8 +133,6 @@
         '../src/animator/SkDrawTextBox.h',
         '../src/animator/SkDrawTo.cpp',
         '../src/animator/SkDrawTo.h',
-        '../src/animator/SkDrawTransparentShader.cpp',
-        '../src/animator/SkDrawTransparentShader.h',
         '../src/animator/SkDump.cpp',
         '../src/animator/SkDump.h',
         '../src/animator/SkExtras.h',

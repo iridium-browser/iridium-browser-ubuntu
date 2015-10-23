@@ -11,8 +11,9 @@
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/password_manager/content/browser/credential_manager_password_form_manager.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/password_manager/content/common/credential_manager_messages.h"
+#include "components/password_manager/core/browser/credential_manager_password_form_manager.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
 #include "components/password_manager/core/browser/test_password_store.h"
@@ -58,9 +59,10 @@ class MockPasswordManagerClient
   }
   ~MockPasswordManagerClient() override {}
 
-  bool PromptUserToSavePassword(
+  bool PromptUserToSaveOrUpdatePassword(
       scoped_ptr<password_manager::PasswordFormManager> manager,
-      password_manager::CredentialSourceType type) override {
+      password_manager::CredentialSourceType type,
+      bool update_password) override {
     manager_.swap(manager);
     PromptUserToSavePasswordPtr(manager_.get(), type);
     return true;
@@ -82,9 +84,9 @@ class MockPasswordManagerClient
         local_forms.empty() ? *federated_forms[0] : *local_forms[0],
         local_forms.empty()
             ? password_manager::CredentialType::CREDENTIAL_TYPE_FEDERATED
-            : password_manager::CredentialType::CREDENTIAL_TYPE_LOCAL);
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, info));
+            : password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  base::Bind(callback, info));
     PromptUserToChooseCredentialsPtr(local_forms.get(), federated_forms.get(),
                                      origin, callback);
     return true;
@@ -213,30 +215,18 @@ class CredentialManagerDispatcherTest
   scoped_ptr<CredentialManagerDispatcher> dispatcher_;
 };
 
-TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnNotifyFailedSignIn) {
-  CredentialInfo info;
-  info.type = CredentialType::CREDENTIAL_TYPE_LOCAL;
-  dispatcher()->OnNotifyFailedSignIn(kRequestId, info);
-
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeFailedSignIn::ID;
-  const IPC::Message* message =
-      process()->sink().GetFirstMessageMatching(kMsgID);
-  EXPECT_TRUE(message);
-  process()->sink().ClearMessages();
-}
-
-TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnNotifySignedIn) {
-  CredentialInfo info(form_,
-                      password_manager::CredentialType::CREDENTIAL_TYPE_LOCAL);
+TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnStore) {
+  CredentialInfo info(
+      form_, password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
   EXPECT_CALL(
       *client_,
       PromptUserToSavePasswordPtr(
           _, password_manager::CredentialSourceType::CREDENTIAL_SOURCE_API))
       .Times(testing::Exactly(1));
 
-  dispatcher()->OnNotifySignedIn(kRequestId, info);
+  dispatcher()->OnStore(kRequestId, info);
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeSignedIn::ID;
+  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeStore::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -260,7 +250,7 @@ TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnNotifySignedIn) {
 
 TEST_F(CredentialManagerDispatcherTest,
        CredentialManagerSignInWithSavingDisabledForCurrentPage) {
-  CredentialInfo info(form_, CredentialType::CREDENTIAL_TYPE_LOCAL);
+  CredentialInfo info(form_, CredentialType::CREDENTIAL_TYPE_PASSWORD);
   EXPECT_CALL(*client_, IsSavingEnabledForCurrentPage())
       .WillRepeatedly(testing::Return(false));
   EXPECT_CALL(
@@ -269,9 +259,9 @@ TEST_F(CredentialManagerDispatcherTest,
           _, password_manager::CredentialSourceType::CREDENTIAL_SOURCE_API))
       .Times(testing::Exactly(0));
 
-  dispatcher()->OnNotifySignedIn(kRequestId, info);
+  dispatcher()->OnStore(kRequestId, info);
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeSignedIn::ID;
+  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeStore::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -282,7 +272,8 @@ TEST_F(CredentialManagerDispatcherTest,
   EXPECT_FALSE(client_->pending_manager());
 }
 
-TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnNotifySignedOut) {
+TEST_F(CredentialManagerDispatcherTest,
+       CredentialManagerOnRequireUserMediation) {
   store_->AddLogin(form_);
   store_->AddLogin(cross_origin_form_);
   RunAllPendingTasks();
@@ -294,10 +285,11 @@ TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnNotifySignedOut) {
   EXPECT_FALSE(passwords[form_.signon_realm][0].skip_zero_click);
   EXPECT_FALSE(passwords[cross_origin_form_.signon_realm][0].skip_zero_click);
 
-  dispatcher()->OnNotifySignedOut(kRequestId);
+  dispatcher()->OnRequireUserMediation(kRequestId);
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeSignedOut::ID;
+  const uint32 kMsgID =
+      CredentialManagerMsg_AcknowledgeRequireUserMediation::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -333,7 +325,7 @@ TEST_F(CredentialManagerDispatcherTest,
   EXPECT_TRUE(message);
   CredentialManagerMsg_SendCredential::Param param;
   CredentialManagerMsg_SendCredential::Read(message, &param);
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, get<1>(param).type);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, base::get<1>(param).type);
   process()->sink().ClearMessages();
 }
 
@@ -361,7 +353,7 @@ TEST_F(CredentialManagerDispatcherTest,
   EXPECT_TRUE(message);
   CredentialManagerMsg_SendCredential::Param param;
   CredentialManagerMsg_SendCredential::Read(message, &param);
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, get<1>(param).type);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, base::get<1>(param).type);
   process()->sink().ClearMessages();
 }
 
@@ -403,7 +395,8 @@ TEST_F(
   EXPECT_TRUE(message);
   CredentialManagerMsg_SendCredential::Param send_param;
   CredentialManagerMsg_SendCredential::Read(message, &send_param);
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, get<1>(send_param).type);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY,
+            base::get<1>(send_param).type);
 }
 
 TEST_F(CredentialManagerDispatcherTest,
@@ -425,7 +418,8 @@ TEST_F(CredentialManagerDispatcherTest,
   EXPECT_TRUE(message);
   CredentialManagerMsg_SendCredential::Param send_param;
   CredentialManagerMsg_SendCredential::Read(message, &send_param);
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_LOCAL, get<1>(send_param).type);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_PASSWORD,
+            base::get<1>(send_param).type);
 }
 
 TEST_F(CredentialManagerDispatcherTest,
@@ -450,7 +444,8 @@ TEST_F(CredentialManagerDispatcherTest,
   CredentialManagerMsg_SendCredential::Read(message, &send_param);
 
   // With two items in the password store, we shouldn't get credentials back.
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, get<1>(send_param).type);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY,
+            base::get<1>(send_param).type);
 }
 
 TEST_F(CredentialManagerDispatcherTest,
@@ -477,10 +472,12 @@ TEST_F(CredentialManagerDispatcherTest,
 
   // We should get |origin_path_form_| back, as |form_| is marked as skipping
   // zero-click.
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_LOCAL, get<1>(send_param).type);
-  EXPECT_EQ(origin_path_form_.username_value, get<1>(send_param).id);
-  EXPECT_EQ(origin_path_form_.display_name, get<1>(send_param).name);
-  EXPECT_EQ(origin_path_form_.password_value, get<1>(send_param).password);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_PASSWORD,
+            base::get<1>(send_param).type);
+  EXPECT_EQ(origin_path_form_.username_value, base::get<1>(send_param).id);
+  EXPECT_EQ(origin_path_form_.display_name, base::get<1>(send_param).name);
+  EXPECT_EQ(origin_path_form_.password_value,
+            base::get<1>(send_param).password);
 }
 
 TEST_F(CredentialManagerDispatcherTest,
@@ -508,7 +505,8 @@ TEST_F(CredentialManagerDispatcherTest,
 
   // We only have cross-origin zero-click credentials; they should not be
   // returned.
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, get<1>(send_param).type);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY,
+            base::get<1>(send_param).type);
 }
 
 TEST_F(CredentialManagerDispatcherTest,
@@ -533,7 +531,7 @@ TEST_F(CredentialManagerDispatcherTest,
   CredentialManagerMsg_RejectCredentialRequest::Param reject_param;
   CredentialManagerMsg_RejectCredentialRequest::Read(message, &reject_param);
   EXPECT_EQ(blink::WebCredentialManagerError::ErrorTypePendingRequest,
-            get<1>(reject_param));
+            base::get<1>(reject_param));
   EXPECT_CALL(*client_, PromptUserToChooseCredentialsPtr(_, _, _, _))
       .Times(testing::Exactly(1));
   EXPECT_CALL(*client_, NotifyUserAutoSigninPtr(_)).Times(testing::Exactly(0));
@@ -549,7 +547,8 @@ TEST_F(CredentialManagerDispatcherTest,
   EXPECT_TRUE(message);
   CredentialManagerMsg_SendCredential::Param send_param;
   CredentialManagerMsg_SendCredential::Read(message, &send_param);
-  EXPECT_NE(CredentialType::CREDENTIAL_TYPE_EMPTY, get<1>(send_param).type);
+  EXPECT_NE(CredentialType::CREDENTIAL_TYPE_EMPTY,
+            base::get<1>(send_param).type);
   process()->sink().ClearMessages();
 }
 
@@ -616,7 +615,7 @@ TEST_F(CredentialManagerDispatcherTest, IncognitoZeroClickRequestCredential) {
   ASSERT_TRUE(message);
   CredentialManagerMsg_SendCredential::Param param;
   CredentialManagerMsg_SendCredential::Read(message, &param);
-  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, get<1>(param).type);
+  EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_EMPTY, base::get<1>(param).type);
 }
 
 }  // namespace password_manager

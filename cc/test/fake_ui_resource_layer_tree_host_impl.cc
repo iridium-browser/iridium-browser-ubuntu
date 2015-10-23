@@ -11,8 +11,9 @@ namespace cc {
 
 FakeUIResourceLayerTreeHostImpl::FakeUIResourceLayerTreeHostImpl(
     Proxy* proxy,
-    SharedBitmapManager* manager)
-    : FakeLayerTreeHostImpl(proxy, manager, nullptr) {
+    SharedBitmapManager* manager,
+    TaskGraphRunner* task_graph_runner)
+    : FakeLayerTreeHostImpl(proxy, manager, task_graph_runner) {
 }
 
 FakeUIResourceLayerTreeHostImpl::~FakeUIResourceLayerTreeHostImpl() {}
@@ -34,14 +35,13 @@ void FakeUIResourceLayerTreeHostImpl::CreateUIResource(
 }
 
 void FakeUIResourceLayerTreeHostImpl::DeleteUIResource(UIResourceId uid) {
-  ResourceProvider::ResourceId id = ResourceIdForUIResource(uid);
+  ResourceId id = ResourceIdForUIResource(uid);
   if (id)
     fake_ui_resource_map_.erase(uid);
 }
 
-ResourceProvider::ResourceId
-    FakeUIResourceLayerTreeHostImpl::ResourceIdForUIResource(
-        UIResourceId uid) const {
+ResourceId FakeUIResourceLayerTreeHostImpl::ResourceIdForUIResource(
+    UIResourceId uid) const {
   UIResourceMap::const_iterator iter = fake_ui_resource_map_.find(uid);
   if (iter != fake_ui_resource_map_.end())
     return iter->second.resource_id;

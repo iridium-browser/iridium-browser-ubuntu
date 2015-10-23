@@ -42,12 +42,14 @@ class SwapChain11 : public SwapChainD3D
 
     EGLint getWidth() const { return mWidth; }
     EGLint getHeight() const { return mHeight; }
+    void *getKeyedMutex() override { return mKeyedMutex; }
 
   private:
     void release();
     void initPassThroughResources();
     void releaseOffscreenTexture();
     EGLint resetOffscreenTexture(int backbufferWidth, int backbufferHeight);
+    DXGI_FORMAT getSwapChainNativeFormat() const;
 
     Renderer11 *mRenderer;
     EGLint mHeight;
@@ -57,6 +59,8 @@ class SwapChain11 : public SwapChainD3D
     bool mPassThroughResourcesInit;
 
     DXGISwapChain *mSwapChain;
+    IDXGISwapChain1 *mSwapChain1;
+    IDXGIKeyedMutex *mKeyedMutex;
 
     ID3D11Texture2D *mBackBufferTexture;
     ID3D11RenderTargetView *mBackBufferRTView;

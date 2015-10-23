@@ -6,8 +6,10 @@
 
 #include "base/base64.h"
 #include "base/json/json_writer.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/local_discovery/privet_constants.h"
 #include "chrome/browser/local_discovery/privet_http.h"
 #include "chrome/browser/local_discovery/privet_url_fetcher.h"
@@ -175,7 +177,7 @@ PrivetURLFetcher* PrivetV3Session::FetcherDelegate::CreateURLFetcher(
       orphaned ? base::Bind(&FetcherDelegate::OnTimeout, base::Owned(this))
                : base::Bind(&FetcherDelegate::OnTimeout,
                             weak_ptr_factory_.GetWeakPtr());
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, timeout_task,
       base::TimeDelta::FromSeconds(kUrlFetcherTimeoutSec));
   return url_fetcher_.get();
@@ -189,7 +191,7 @@ void PrivetV3Session::FetcherDelegate::ReplyAndDestroyItself(
       callback_.Run(result, value);
       callback_.Reset();
     }
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&PrivetV3Session::DeleteFetcher, session_,
                               base::Unretained(this)));
     session_.reset();
@@ -410,7 +412,7 @@ void PrivetV3Session::StartPostRequest(const std::string& api,
     on_post_data_.Run(input);
   std::string json;
   base::JSONWriter::WriteWithOptions(
-      &input, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);
+      input, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);
   PrivetURLFetcher* fetcher =
       CreateFetcher(api, net::URLFetcher::RequestType::POST, callback);
   fetcher->SetUploadData(cloud_print::kContentTypeJSON, json);

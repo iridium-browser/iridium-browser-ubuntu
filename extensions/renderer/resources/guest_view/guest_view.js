@@ -14,11 +14,6 @@ var GuestViewInternalNatives = requireNative('guest_view_internal');
 // Events.
 var ResizeEvent = CreateEvent('guestViewInternal.onResize');
 
-// Possible states.
-var GUEST_STATE_ATTACHED = 2;
-var GUEST_STATE_CREATED = 1;
-var GUEST_STATE_START = 0;
-
 // Error messages.
 var ERROR_MSG_ALREADY_ATTACHED = 'The guest has already been attached.';
 var ERROR_MSG_ALREADY_CREATED = 'The guest has already been created.';
@@ -35,10 +30,10 @@ var PROPERTY_ON_RESIZE = 'onresize';
 function GuestViewImpl(guestView, viewType, guestInstanceId) {
   if (guestInstanceId) {
     this.id = guestInstanceId;
-    this.state = GUEST_STATE_CREATED;
+    this.state = GuestViewImpl.GuestState.GUEST_STATE_CREATED;
   } else {
     this.id = 0;
-    this.state = GUEST_STATE_START;
+    this.state = GuestViewImpl.GuestState.GUEST_STATE_START;
   }
   this.actionQueue = [];
   this.contentWindow = null;
@@ -49,6 +44,13 @@ function GuestViewImpl(guestView, viewType, guestInstanceId) {
 
   this.setupOnResize();
 }
+
+// Possible states.
+GuestViewImpl.GuestState = {
+  GUEST_STATE_START: 0,
+  GUEST_STATE_CREATED: 1,
+  GUEST_STATE_ATTACHED: 2
+};
 
 // Sets up the onResize property on the GuestView.
 GuestViewImpl.prototype.setupOnResize = function() {
@@ -130,8 +132,22 @@ GuestViewImpl.prototype.checkState = function(action) {
   return true;
 };
 
+// Returns a wrapper function for |func| with a weak reference to |this|. This
+// implementation of weakWrapper() requires a provided |viewInstanceId| since
+// GuestViewImpl does not store this ID.
+GuestViewImpl.prototype.weakWrapper = function(func, viewInstanceId) {
+  return function() {
+    var view = GuestViewInternalNatives.GetViewFromID(viewInstanceId);
+    if (view && view.guest) {
+      return $Function.apply(func,
+                             privates(view.guest).internal,
+                             $Array.slice(arguments));
+    }
+  };
+};
+
 // Internal implementation of attach().
-GuestViewImpl.prototype.attachImpl = function(
+GuestViewImpl.prototype.attachImpl$ = function(
     internalInstanceId, viewInstanceId, attachParams, callback) {
   // Check the current state.
   if (!this.checkState('attach')) {
@@ -145,7 +161,7 @@ GuestViewImpl.prototype.attachImpl = function(
   var callbackWrapper = function(callback, contentWindow) {
     // Check if attaching failed.
     if (!contentWindow) {
-      this.state = GUEST_STATE_CREATED;
+      this.state = GuestViewImpl.GuestState.GUEST_STATE_CREATED;
       this.internalInstanceId = 0;
     } else {
       // Only update the contentWindow if attaching is successful.
@@ -162,23 +178,23 @@ GuestViewImpl.prototype.attachImpl = function(
                                        callbackWrapper.bind(this, callback));
 
   this.internalInstanceId = internalInstanceId;
-  this.state = GUEST_STATE_ATTACHED;
+  this.state = GuestViewImpl.GuestState.GUEST_STATE_ATTACHED;
 
   // Detach automatically when the container is destroyed.
-  GuestViewInternalNatives.RegisterDestructionCallback(internalInstanceId,
-                                                       function() {
-    if (this.state != GUEST_STATE_ATTACHED ||
+  GuestViewInternalNatives.RegisterDestructionCallback(
+      internalInstanceId, this.weakWrapper(function() {
+    if (this.state != GuestViewImpl.GuestState.GUEST_STATE_ATTACHED ||
         this.internalInstanceId != internalInstanceId) {
       return;
     }
 
     this.internalInstanceId = 0;
-    this.state = GUEST_STATE_CREATED;
-  }.bind(this));
+    this.state = GuestViewImpl.GuestState.GUEST_STATE_CREATED;
+  }, viewInstanceId));
 };
 
 // Internal implementation of create().
-GuestViewImpl.prototype.createImpl = function(createParams, callback) {
+GuestViewImpl.prototype.createImpl$ = function(createParams, callback) {
   // Check the current state.
   if (!this.checkState('create')) {
     this.handleCallback(callback);
@@ -195,7 +211,7 @@ GuestViewImpl.prototype.createImpl = function(createParams, callback) {
 
     // Check if creation failed.
     if (this.id === 0) {
-      this.state = GUEST_STATE_START;
+      this.state = GuestViewImpl.GuestState.GUEST_STATE_START;
       this.contentWindow = null;
     }
 
@@ -203,11 +219,14 @@ GuestViewImpl.prototype.createImpl = function(createParams, callback) {
     this.handleCallback(callback);
   };
 
-  GuestViewInternal.createGuest(this.viewType,
-                                createParams,
-                                callbackWrapper.bind(this, callback));
+  this.sendCreateRequest(createParams, callbackWrapper.bind(this, callback));
 
-  this.state = GUEST_STATE_CREATED;
+  this.state = GuestViewImpl.GuestState.GUEST_STATE_CREATED;
+};
+
+GuestViewImpl.prototype.sendCreateRequest = function(
+    createParams, boundCallback) {
+  GuestViewInternal.createGuest(this.viewType, createParams, boundCallback);
 };
 
 // Internal implementation of destroy().
@@ -218,7 +237,7 @@ GuestViewImpl.prototype.destroyImpl = function(callback) {
     return;
   }
 
-  if (this.state == GUEST_STATE_START) {
+  if (this.state == GuestViewImpl.GuestState.GUEST_STATE_START) {
     // destroy() does nothing in this case.
     this.handleCallback(callback);
     return;
@@ -236,7 +255,7 @@ GuestViewImpl.prototype.destroyImpl = function(callback) {
   this.contentWindow = null;
   this.id = 0;
   this.internalInstanceId = 0;
-  this.state = GUEST_STATE_START;
+  this.state = GuestViewImpl.GuestState.GUEST_STATE_START;
   if (ResizeEvent.hasListener(this.callOnResize)) {
     ResizeEvent.removeListener(this.callOnResize);
   }
@@ -255,7 +274,7 @@ GuestViewImpl.prototype.detachImpl = function(callback) {
       this.handleCallback.bind(this, callback));
 
   this.internalInstanceId = 0;
-  this.state = GUEST_STATE_CREATED;
+  this.state = GuestViewImpl.GuestState.GUEST_STATE_CREATED;
 };
 
 // Internal implementation of setSize().
@@ -281,7 +300,7 @@ function GuestView(viewType, guestInstanceId) {
 GuestView.prototype.attach = function(
     internalInstanceId, viewInstanceId, attachParams, callback) {
   var internal = privates(this).internal;
-  internal.actionQueue.push(internal.attachImpl.bind(
+  internal.actionQueue.push(internal.attachImpl$.bind(
       internal, internalInstanceId, viewInstanceId, attachParams, callback));
   internal.performNextAction();
 };
@@ -289,7 +308,7 @@ GuestView.prototype.attach = function(
 // Creates the guestview.
 GuestView.prototype.create = function(createParams, callback) {
   var internal = privates(this).internal;
-  internal.actionQueue.push(internal.createImpl.bind(
+  internal.actionQueue.push(internal.createImpl$.bind(
       internal, createParams, callback));
   internal.performNextAction();
 };
@@ -332,3 +351,5 @@ GuestView.prototype.getId = function() {
 
 // Exports
 exports.GuestView = GuestView;
+exports.GuestViewImpl = GuestViewImpl;
+exports.ResizeEvent = ResizeEvent;

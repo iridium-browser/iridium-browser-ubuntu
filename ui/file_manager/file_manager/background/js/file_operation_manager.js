@@ -3,18 +3,16 @@
 // found in the LICENSE file.
 
 /**
- * @param {!VolumeManager} volumeManager
  * @constructor
  * @struct
  * @suppress {checkStructDictInheritance}
  * @extends {cr.EventTarget}
  */
-function FileOperationManager(volumeManager) {
+function FileOperationManager() {
   /**
-   * @private {!VolumeManager}
-   * @const
+   * @private {VolumeManager}
    */
-  this.volumeManager_ = volumeManager;
+  this.volumeManager_ = null;
 
   /**
    * List of pending copy tasks. The manager can execute tasks in arbitary
@@ -26,7 +24,7 @@ function FileOperationManager(volumeManager) {
   /**
    * Map of volume id and running copy task. The key is a volume id and the
    * value is a copy task.
-   * @private {!Object<string,!fileOperationUtil.Task>}
+   * @private {!Object<!fileOperationUtil.Task>}
    */
   this.runningCopyTasks_ = {};
 
@@ -129,7 +127,7 @@ FileOperationManager.prototype.requestTaskCancel = function(taskId) {
 /**
  * Filters the entry in the same directory
  *
- * @param {Array.<Entry>} sourceEntries Entries of the source files.
+ * @param {Array<Entry>} sourceEntries Entries of the source files.
  * @param {DirectoryEntry|FakeEntry} targetEntry The destination entry of the
  *     target directory.
  * @param {boolean} isMove True if the operation is "move", otherwise (i.e.
@@ -170,7 +168,7 @@ FileOperationManager.prototype.filterSameDirectoryEntry = function(
 /**
  * Kick off pasting.
  *
- * @param {Array.<Entry>} sourceEntries Entries of the source files.
+ * @param {Array<Entry>} sourceEntries Entries of the source files.
  * @param {DirectoryEntry} targetEntry The destination entry of the target
  *     directory.
  * @param {boolean} isMove True if the operation is "move", otherwise (i.e.
@@ -200,7 +198,7 @@ FileOperationManager.prototype.paste = function(
  * directory.
  *
  * @param {DirectoryEntry} targetDirEntry Target directory.
- * @param {Array.<Entry>} entries Entries to copy.
+ * @param {Array<Entry>} entries Entries to copy.
  * @param {boolean} isMove In case of move.
  * @param {string=} opt_taskId If the corresponding item has already created
  *     at another places, we need to specify the ID of the item. If the
@@ -250,6 +248,14 @@ FileOperationManager.prototype.serviceAllTasks_ = function() {
       Object.keys(this.runningCopyTasks_).length === 0) {
     // All tasks have been serviced, clean up and exit.
     chrome.power.releaseKeepAwake();
+    return;
+  }
+
+  if (!this.volumeManager_) {
+    VolumeManager.getInstance().then(function(volumeManager) {
+      this.volumeManager_ = volumeManager;
+      this.serviceAllTasks_();
+    }.bind(this));
     return;
   }
 
@@ -348,7 +354,7 @@ FileOperationManager.DELETE_TIMEOUT = 30 * 1000;
 /**
  * Schedules the files deletion.
  *
- * @param {Array.<Entry>} entries The entries.
+ * @param {Array<Entry>} entries The entries.
  */
 FileOperationManager.prototype.deleteEntries = function(entries) {
   // TODO(hirono): Make fileOperationUtil.DeleteTask.
@@ -462,7 +468,7 @@ FileOperationManager.prototype.serviceDeleteTask_ = function(task, callback) {
  * Creates a zip file for the selection of files.
  *
  * @param {!DirectoryEntry} dirEntry The directory containing the selection.
- * @param {Array.<Entry>} selectionEntries The selected entries.
+ * @param {!Array<!Entry>} selectionEntries The selected entries.
  */
 FileOperationManager.prototype.zipSelection = function(
     dirEntry, selectionEntries) {

@@ -11,8 +11,8 @@
 #include "base/values.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/app_window/app_window.h"
@@ -32,7 +32,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 
-namespace app_window = extensions::core_api::app_window;
+namespace app_window = extensions::api::app_window;
 namespace Create = app_window::Create;
 
 namespace extensions {
@@ -86,7 +86,7 @@ bool CheckBoundsConflict(const scoped_ptr<int>& inner_property,
   if (inner_property.get() && outer_property.get()) {
     std::vector<std::string> subst;
     subst.push_back(property_name);
-    *error = ReplaceStringPlaceholders(
+    *error = base::ReplaceStringPlaceholders(
         app_window_constants::kConflictingBoundsOptions, subst, NULL);
     return false;
   }
@@ -135,6 +135,7 @@ bool AppWindowCreateFunction::RunAsync() {
   GURL url = extension()->GetResourceURL(params->url);
   // Allow absolute URLs for component apps, otherwise prepend the extension
   // path.
+  // TODO(devlin): Investigate if this is still used. If not, kill it dead!
   GURL absolute = GURL(params->url);
   if (absolute.has_scheme()) {
     if (extension()->location() == Manifest::COMPONENT) {
@@ -170,28 +171,29 @@ bool AppWindowCreateFunction::RunAsync() {
       }
 
       if (!options->singleton || *options->singleton) {
-        AppWindow* window = AppWindowRegistry::Get(browser_context())
-                                ->GetAppWindowForAppAndKey(
-                                    extension_id(), create_params.window_key);
-        if (window) {
-          content::RenderViewHost* created_view =
-              window->web_contents()->GetRenderViewHost();
-          int view_id = MSG_ROUTING_NONE;
-          if (render_view_host_->GetProcess()->GetID() ==
-              created_view->GetProcess()->GetID()) {
-            view_id = created_view->GetRoutingID();
+        AppWindow* existing_window =
+            AppWindowRegistry::Get(browser_context())
+                ->GetAppWindowForAppAndKey(extension_id(),
+                                           create_params.window_key);
+        if (existing_window) {
+          content::RenderFrameHost* existing_frame =
+              existing_window->web_contents()->GetMainFrame();
+          int frame_id = MSG_ROUTING_NONE;
+          if (render_frame_host()->GetProcess()->GetID() ==
+              existing_frame->GetProcess()->GetID()) {
+            frame_id = existing_frame->GetRoutingID();
           }
 
           if (!options->hidden.get() || !*options->hidden.get()) {
             if (options->focused.get() && !*options->focused.get())
-              window->Show(AppWindow::SHOW_INACTIVE);
+              existing_window->Show(AppWindow::SHOW_INACTIVE);
             else
-              window->Show(AppWindow::SHOW_ACTIVE);
+              existing_window->Show(AppWindow::SHOW_ACTIVE);
           }
 
           base::DictionaryValue* result = new base::DictionaryValue;
-          result->Set("viewId", new base::FundamentalValue(view_id));
-          window->GetSerializedState(result);
+          result->Set("frameId", new base::FundamentalValue(frame_id));
+          existing_window->GetSerializedState(result);
           result->SetBoolean("existingWindow", true);
           // TODO(benwells): Remove HTML titlebar injection.
           result->SetBoolean("injectTitlebar", false);
@@ -205,11 +207,14 @@ bool AppWindowCreateFunction::RunAsync() {
     if (!GetBoundsSpec(*options, &create_params, &error_))
       return false;
 
-    if (!AppWindowClient::Get()->IsCurrentChannelOlderThanDev() ||
-        extension()->location() == Manifest::COMPONENT) {
-      if (options->type == app_window::WINDOW_TYPE_PANEL) {
-        create_params.window_type = AppWindow::WINDOW_TYPE_PANEL;
-      }
+    if (options->type == app_window::WINDOW_TYPE_PANEL) {
+#if defined(OS_CHROMEOS)
+      // Panels for v2 apps are only supported on Chrome OS.
+      create_params.window_type = AppWindow::WINDOW_TYPE_PANEL;
+#else
+      WriteToConsole(content::CONSOLE_MESSAGE_LEVEL_WARNING,
+                     "Panels are not supported on this platform");
+#endif
     }
 
     if (!GetFrameOptions(*options, &create_params))
@@ -329,7 +334,7 @@ bool AppWindowCreateFunction::RunAsync() {
   }
 
   create_params.creator_process_id =
-      render_view_host_->GetProcess()->GetID();
+      render_frame_host()->GetProcess()->GetID();
 
   AppWindow* app_window =
       AppWindowClient::Get()->CreateAppWindow(browser_context(), extension());
@@ -340,14 +345,14 @@ bool AppWindowCreateFunction::RunAsync() {
     app_window->ForcedFullscreen();
   }
 
-  content::RenderViewHost* created_view =
-      app_window->web_contents()->GetRenderViewHost();
-  int view_id = MSG_ROUTING_NONE;
-  if (create_params.creator_process_id == created_view->GetProcess()->GetID())
-    view_id = created_view->GetRoutingID();
+  content::RenderFrameHost* created_frame =
+      app_window->web_contents()->GetMainFrame();
+  int frame_id = MSG_ROUTING_NONE;
+  if (create_params.creator_process_id == created_frame->GetProcess()->GetID())
+    frame_id = created_frame->GetRoutingID();
 
   base::DictionaryValue* result = new base::DictionaryValue;
-  result->Set("viewId", new base::FundamentalValue(view_id));
+  result->Set("frameId", new base::FundamentalValue(frame_id));
   result->Set("injectTitlebar",
       new base::FundamentalValue(inject_html_titlebar_));
   result->Set("id", new base::StringValue(app_window->window_key()));
@@ -355,7 +360,7 @@ bool AppWindowCreateFunction::RunAsync() {
   SetResult(result);
 
   if (AppWindowRegistry::Get(browser_context())
-          ->HadDevToolsAttached(created_view)) {
+          ->HadDevToolsAttached(app_window->web_contents())) {
     AppWindowClient::Get()->OpenDevToolsWindow(
         app_window->web_contents(),
         base::Bind(&AppWindowCreateFunction::SendResponse, this, true));

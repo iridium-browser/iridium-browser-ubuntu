@@ -60,7 +60,7 @@ WebAuthFlow::~WebAuthFlow() {
   // Stop listening to notifications first since some of the code
   // below may generate notifications.
   registrar_.RemoveAll();
-  WebContentsObserver::Observe(NULL);
+  WebContentsObserver::Observe(nullptr);
 
   if (!app_window_key_.empty()) {
     AppWindowRegistry::Get(profile_)->RemoveObserver(this);
@@ -73,10 +73,10 @@ WebAuthFlow::~WebAuthFlow() {
 void WebAuthFlow::Start() {
   AppWindowRegistry::Get(profile_)->AddObserver(this);
 
-  // Attach a random ID string to the window so we can recoginize it
+  // Attach a random ID string to the window so we can recognize it
   // in OnAppWindowAdded.
   std::string random_bytes;
-  crypto::RandBytes(WriteInto(&random_bytes, 33), 32);
+  crypto::RandBytes(base::WriteInto(&random_bytes, 33), 32);
   base::Base64Encode(random_bytes, &app_window_key_);
 
   // identityPrivate.onWebFlowRequest(app_window_key, provider_url_, mode_)
@@ -89,7 +89,8 @@ void WebAuthFlow::Start() {
     args->AppendString("silent");
 
   scoped_ptr<Event> event(
-      new Event(identity_private::OnWebFlowRequest::kEventName, args.Pass()));
+      new Event(events::IDENTITY_PRIVATE_ON_WEB_FLOW_REQUEST,
+                identity_private::OnWebFlowRequest::kEventName, args.Pass()));
   event->restrict_to_browser_context = profile_;
   ExtensionSystem* system = ExtensionSystem::Get(profile_);
 
@@ -101,7 +102,7 @@ void WebAuthFlow::Start() {
         base::FilePath(FILE_PATH_LITERAL("identity_scope_approval_dialog")));
   }
 
-  system->event_router()->DispatchEventWithLazyListener(
+  EventRouter::Get(profile_)->DispatchEventWithLazyListener(
       extension_misc::kIdentityApiUiAppId, event.Pass());
 }
 
@@ -128,6 +129,7 @@ void WebAuthFlow::OnAppWindowRemoved(AppWindow* app_window) {
       app_window->extension_id() == extension_misc::kIdentityApiUiAppId) {
     app_window_ = NULL;
     registrar_.RemoveAll();
+    WebContentsObserver::Observe(nullptr);
 
     if (delegate_)
       delegate_->OnAuthFlowFailure(WebAuthFlow::WINDOW_CLOSED);
@@ -167,39 +169,9 @@ void WebAuthFlow::Observe(int type,
       WebContentsObserver::Observe(web_contents);
 
       registrar_.RemoveAll();
-      registrar_.Add(this,
-                     content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
-                     content::Source<WebContents>(web_contents));
-      registrar_.Add(this,
-                     content::NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
-                     content::Source<WebContents>(web_contents));
     }
-  } else {
-    // embedded_window_created_
-    switch (type) {
-      case content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT: {
-        ResourceRedirectDetails* redirect_details =
-            content::Details<ResourceRedirectDetails>(details).ptr();
-        if (redirect_details != NULL)
-          BeforeUrlLoaded(redirect_details->new_url);
-        break;
-      }
-      case content::NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED: {
-        std::pair<content::NavigationEntry*, bool>* title =
-            content::Details<std::pair<content::NavigationEntry*, bool> >(
-                details).ptr();
-
-        if (title->first) {
-          delegate_->OnAuthFlowTitleChange(
-              base::UTF16ToUTF8(title->first->GetTitle()));
-        }
-        break;
-      }
-      default:
-        NOTREACHED()
-            << "Got a notification that we did not register for: " << type;
-        break;
-    }
+  } else {  // embedded_window_created_
+    NOTREACHED() << "Got a notification that we did not register for: " << type;
   }
 }
 
@@ -221,7 +193,8 @@ void WebAuthFlow::DidFailProvisionalLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   TRACE_EVENT_ASYNC_STEP_PAST1("identity",
                                "WebAuthFlow",
                                this,
@@ -230,6 +203,17 @@ void WebAuthFlow::DidFailProvisionalLoad(
                                error_code);
   if (delegate_)
     delegate_->OnAuthFlowFailure(LOAD_FAILED);
+}
+
+void WebAuthFlow::DidGetRedirectForResourceRequest(
+    content::RenderFrameHost* render_frame_host,
+    const content::ResourceRedirectDetails& details) {
+  BeforeUrlLoaded(details.new_url);
+}
+
+void WebAuthFlow::TitleWasSet(content::NavigationEntry* entry,
+                              bool explicit_set) {
+  delegate_->OnAuthFlowTitleChange(base::UTF16ToUTF8(entry->GetTitle()));
 }
 
 void WebAuthFlow::DidStopLoading() {

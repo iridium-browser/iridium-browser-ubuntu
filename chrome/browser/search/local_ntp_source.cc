@@ -15,8 +15,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/search/instant_io_context.h"
+#include "chrome/browser/search/local_files_ntp_source.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
@@ -55,8 +57,6 @@ const struct Resource{
   { "images/close_3_mask.png", IDR_CLOSE_3_MASK, "image/png" },
   { "images/close_4_button.png", IDR_CLOSE_4_BUTTON, "image/png" },
   { "images/google_logo.png", IDR_LOCAL_NTP_IMAGES_LOGO_PNG, "image/png" },
-  { "images/white_google_logo.png",
-    IDR_LOCAL_NTP_IMAGES_WHITE_LOGO_PNG, "image/png" },
   { "images/ntp_default_favicon.png", IDR_NTP_DEFAULT_FAVICON, "image/png" },
 };
 
@@ -94,22 +94,7 @@ bool IsIconNTPEnabled() {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableIconNtp))
     return true;
 
-  return StartsWithASCII(group_name, "Enabled", true);
-}
-
-// Returns whether we are in the Fast NTP experiment or not.
-bool IsLocalNTPFastEnabled() {
-  return StartsWithASCII(base::FieldTrialList::FindFullName("LocalNTPFast"),
-                         "Enabled", true);
-}
-
-// Serves a particular resource.
-// Used for bypassing the default resources when we are in an experiment.
-void SendResource(int resource_id,
-                  const content::URLDataSource::GotDataCallback& callback) {
-  scoped_refptr<base::RefCountedStaticMemory> response(
-      ResourceBundle::GetSharedInstance().LoadDataResourceBytes(resource_id));
-  callback.Run(response.get());
+  return base::StartsWith(group_name, "Enabled", base::CompareCase::SENSITIVE);
 }
 
 // Adds a localized string keyed by resource id to the dictionary.
@@ -154,7 +139,7 @@ scoped_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
 std::string GetConfigData(Profile* profile) {
   base::DictionaryValue config_data;
   bool is_google = DefaultSearchProviderIsGoogle(profile) &&
-      chrome::ShouldShowGoogleLocalNTP();
+                   search::ShouldShowGoogleLocalNTP();
   config_data.Set("translatedStrings",
                   GetTranslatedStrings(is_google).release());
   config_data.SetBoolean("isGooglePage", is_google);
@@ -194,26 +179,31 @@ void LocalNtpSource::StartDataRequest(
     int render_process_id,
     int render_frame_id,
     const content::URLDataSource::GotDataCallback& callback) {
-  const std::string stripped_path = StripParameters(path);
+  std::string stripped_path = StripParameters(path);
   if (stripped_path == kConfigDataFilename) {
     std::string config_data_js = GetConfigData(profile_);
     callback.Run(base::RefCountedString::TakeString(&config_data_js));
     return;
   }
-  if (IsLocalNTPFastEnabled()) {
-    if (stripped_path == "local-ntp.html") {
-      return SendResource(IDR_LOCAL_NTP_FAST_HTML, callback);
-    } else if (stripped_path == "local-ntp.js") {
-      return SendResource(IDR_LOCAL_NTP_FAST_JS, callback);
-    } else if (stripped_path == "local-ntp.css") {
-      return SendResource(IDR_LOCAL_NTP_FAST_CSS, callback);
+
+#if !defined(OFFICIAL_BUILD)
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kLocalNtpReload)) {
+    if (stripped_path == "local-ntp.html" || stripped_path == "local-ntp.js" ||
+        stripped_path == "local-ntp.css") {
+      base::ReplaceChars(stripped_path, "-", "_", &stripped_path);
+      local_ntp::SendLocalFileResource(stripped_path, callback);
+      return;
     }
   }
+#endif
+
   float scale = 1.0f;
   std::string filename;
   webui::ParsePathAndScale(
       GURL(GetLocalNtpPath() + stripped_path), &filename, &scale);
   ui::ScaleFactor scale_factor = ui::GetSupportedScaleFactor(scale);
+
   for (size_t i = 0; i < arraysize(kResources); ++i) {
     if (filename == kResources[i].filename) {
       scoped_refptr<base::RefCountedStaticMemory> response(

@@ -7,6 +7,7 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/synchronization/lock.h"
 #include "cc/base/cc_export.h"
 #include "gpu/command_buffer/common/capabilities.h"
 
@@ -26,6 +27,27 @@ struct ManagedMemoryPolicy;
 
 class ContextProvider : public base::RefCountedThreadSafe<ContextProvider> {
  public:
+  class ScopedContextLock {
+   public:
+    explicit ScopedContextLock(ContextProvider* context_provider)
+        : context_provider_(context_provider),
+          context_lock_(*context_provider_->GetLock()) {
+      // Allow current thread to bind to |context_provider|.
+      context_provider_->DetachFromThread();
+    }
+    ~ScopedContextLock() {
+      // Allow a different thread to bind to |context_provider|.
+      context_provider_->DetachFromThread();
+    }
+
+    gpu::gles2::GLES2Interface* ContextGL() {
+      return context_provider_->ContextGL();
+    }
+
+   private:
+    ContextProvider* const context_provider_;
+    base::AutoLock context_lock_;
+  };
   // Bind the 3d context to the current thread. This should be called before
   // accessing the contexts. Calling it more than once should have no effect.
   // Once this function has been called, the class should only be accessed
@@ -57,9 +79,6 @@ class ContextProvider : public base::RefCountedThreadSafe<ContextProvider> {
 
   // Returns the capabilities of the currently bound 3d context.
   virtual Capabilities ContextCapabilities() = 0;
-
-  // Checks if the context is currently known to be lost.
-  virtual bool IsContextLost() = 0;
 
   // Ask the provider to check if the contexts are valid or lost. If they are,
   // this should invalidate the provider so that it can be replaced with a new

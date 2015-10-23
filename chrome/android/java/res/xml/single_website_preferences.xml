@@ -4,6 +4,13 @@
      found in the LICENSE file. -->
 
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <org.chromium.chrome.browser.preferences.ChromeBasePreference
+        android:key="os_permissions_warning" />
+    <org.chromium.chrome.browser.preferences.ChromeBasePreference
+        android:key="os_permissions_warning_extra" />
+    <Preference
+        android:key="os_permissions_warning_divider"
+        android:layout="@layout/divider_preference" />
     <PreferenceCategory
         android:key="site_heading"
         android:title="@string/website_settings_site_category" />
@@ -25,21 +32,21 @@
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
         android:key="cookies_permission_list" />
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
+        android:key="location_access_list" />
+    <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
         android:key="camera_permission_list" />
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
         android:key="microphone_permission_list" />
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
-        android:key="popup_permission_list" />
-    <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
-        android:key="images_permission_list" />
-    <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
         android:key="javascript_permission_list" />
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
-        android:key="location_access_list" />
+        android:key="popup_permission_list" />
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
-        android:key="push_notifications_list" />
+        android:key="fullscreen_permission_list" />
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
         android:key="midi_sysex_permission_list" />
+    <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
+        android:key="push_notifications_list" />
     <org.chromium.chrome.browser.preferences.ChromeBaseListPreference
         android:key="protected_media_identifier_permission_list" />
     <org.chromium.chrome.browser.preferences.ButtonPreference

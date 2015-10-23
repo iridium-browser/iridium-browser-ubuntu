@@ -4,14 +4,15 @@
 
 #include "components/bookmarks/browser/bookmark_utils.h"
 
+#include <stdint.h>
 #include <utility>
 
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
+#include "base/macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
@@ -24,7 +25,7 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/query_parser/query_parser.h"
-#include "net/base/net_util.h"
+#include "components/url_formatter/url_formatter.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/models/tree_node_iterator.h"
 #include "url/gurl.h"
@@ -95,13 +96,14 @@ bool DoesBookmarkTextContainWords(const base::string16& text,
 bool DoesBookmarkContainWords(const BookmarkNode* node,
                               const std::vector<base::string16>& words,
                               const std::string& languages) {
-  return
-      DoesBookmarkTextContainWords(node->GetTitle(), words) ||
-      DoesBookmarkTextContainWords(
-          base::UTF8ToUTF16(node->url().spec()), words) ||
-      DoesBookmarkTextContainWords(net::FormatUrl(
-          node->url(), languages, net::kFormatUrlOmitNothing,
-          net::UnescapeRule::NORMAL, NULL, NULL, NULL), words);
+  return DoesBookmarkTextContainWords(node->GetTitle(), words) ||
+         DoesBookmarkTextContainWords(base::UTF8ToUTF16(node->url().spec()),
+                                      words) ||
+         DoesBookmarkTextContainWords(
+             url_formatter::FormatUrl(
+                 node->url(), languages, url_formatter::kFormatUrlOmitNothing,
+                 net::UnescapeRule::NORMAL, NULL, NULL, NULL),
+             words);
 }
 
 // This is used with a tree iterator to skip subtrees which are not visible.
@@ -124,7 +126,7 @@ bool HasSelectedAncestor(BookmarkModel* model,
   return HasSelectedAncestor(model, selected_nodes, node->parent());
 }
 
-const BookmarkNode* GetNodeByID(const BookmarkNode* node, int64 id) {
+const BookmarkNode* GetNodeByID(const BookmarkNode* node, int64_t id) {
   if (node->id() == id)
     return node;
 
@@ -259,10 +261,13 @@ void MakeTitleUnique(const BookmarkModel* model,
                      const GURL& url,
                      base::string16* title) {
   base::hash_set<base::string16> titles;
+  base::string16 original_title_lower = base::i18n::ToLower(*title);
   for (int i = 0; i < parent->child_count(); i++) {
     const BookmarkNode* node = parent->GetChild(i);
     if (node->is_url() && (url == node->url()) &&
-        StartsWith(node->GetTitle(), *title, false)) {
+        base::StartsWith(base::i18n::ToLower(node->GetTitle()),
+                         original_title_lower,
+                         base::CompareCase::SENSITIVE)) {
       titles.insert(node->GetTitle());
     }
   }
@@ -435,6 +440,14 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kShowManagedBookmarksInBookmarkBar,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  // Don't sync this, as otherwise, due to a limitation in sync, it
+  // will cause a deadlock (see http://crbug.com/97955).  If we truly
+  // want to sync the expanded state of folders, it should be part of
+  // bookmark sync itself (i.e., a property of the sync folder nodes).
+  registry->RegisterListPref(prefs::kBookmarkEditorExpandedNodes,
+                             new base::ListValue);
+  registry->RegisterListPref(prefs::kManagedBookmarks);
+  registry->RegisterListPref(prefs::kSupervisedBookmarks);
 }
 
 const BookmarkNode* GetParentForNewNodes(
@@ -463,10 +476,10 @@ const BookmarkNode* GetParentForNewNodes(
 }
 
 void DeleteBookmarkFolders(BookmarkModel* model,
-                           const std::vector<int64>& ids) {
+                           const std::vector<int64_t>& ids) {
   // Remove the folders that were removed. This has to be done after all the
   // other changes have been committed.
-  for (std::vector<int64>::const_iterator iter = ids.begin();
+  for (std::vector<int64_t>::const_iterator iter = ids.begin();
        iter != ids.end();
        ++iter) {
     const BookmarkNode* node = GetBookmarkNodeByID(model, *iter);
@@ -504,11 +517,11 @@ base::string16 CleanUpUrlForMatching(
     const std::string& languages,
     base::OffsetAdjuster::Adjustments* adjustments) {
   base::OffsetAdjuster::Adjustments tmp_adjustments;
-  return base::i18n::ToLower(net::FormatUrlWithAdjustments(
+  return base::i18n::ToLower(url_formatter::FormatUrlWithAdjustments(
       GURL(TruncateUrl(gurl.spec())), languages,
-      net::kFormatUrlOmitUsernamePassword,
-      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS,
-      NULL, NULL, adjustments ? adjustments : &tmp_adjustments));
+      url_formatter::kFormatUrlOmitUsernamePassword,
+      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS, NULL,
+      NULL, adjustments ? adjustments : &tmp_adjustments));
 }
 
 base::string16 CleanUpTitleForMatching(const base::string16& title) {
@@ -534,7 +547,8 @@ bool IsBookmarkedByUser(BookmarkModel* model, const GURL& url) {
   return false;
 }
 
-const BookmarkNode* GetBookmarkNodeByID(const BookmarkModel* model, int64 id) {
+const BookmarkNode* GetBookmarkNodeByID(const BookmarkModel* model,
+                                        int64_t id) {
   // TODO(sky): TreeNode needs a method that visits all nodes using a predicate.
   return GetNodeByID(model->root_node(), id);
 }

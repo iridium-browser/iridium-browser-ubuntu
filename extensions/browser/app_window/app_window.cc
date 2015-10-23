@@ -30,6 +30,7 @@
 #include "extensions/browser/app_window/size_constraints.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/process_manager.h"
@@ -236,6 +237,7 @@ AppWindow::AppWindow(BrowserContext* context,
       has_been_shown_(false),
       can_send_events_(false),
       is_hidden_(false),
+      delayed_show_type_(SHOW_ACTIVE),
       cached_always_on_top_(false),
       requested_alpha_enabled_(false),
       is_ime_window_(false),
@@ -257,6 +259,9 @@ void AppWindow::Init(const GURL& url,
   content::WebContentsObserver::Observe(web_contents());
   SetViewType(web_contents(), VIEW_TYPE_APP_WINDOW);
   app_delegate_->InitWebContents(web_contents());
+
+  ExtensionWebContentsObserver::GetForWebContents(web_contents())->
+      dispatcher()->set_delegate(this);
 
   WebContentsModalDialogManager::CreateForWebContents(web_contents());
 
@@ -284,10 +289,6 @@ void AppWindow::Init(const GURL& url,
 
   helper_.reset(new AppWebContentsHelper(
       browser_context_, extension_id_, web_contents(), app_delegate_.get()));
-
-  popup_manager_.reset(
-      new web_modal::PopupManager(GetWebContentsModalDialogHost()));
-  popup_manager_->RegisterWith(web_contents());
 
   UpdateExtensionAppIcon();
   AppWindowRegistry::Get(browser_context_)->AddAppWindow(this);
@@ -454,17 +455,34 @@ void AppWindow::OnNativeClose() {
 }
 
 void AppWindow::OnNativeWindowChanged() {
+  // This may be called during Init before |native_app_window_| is set.
+  if (!native_app_window_)
+    return;
+
+#if defined(OS_MACOSX)
+  // On Mac the user can change the window's fullscreen state. If that has
+  // happened, update AppWindow's internal state.
+  if (native_app_window_->IsFullscreen()) {
+    if (!IsFullscreen())
+      fullscreen_types_ = FULLSCREEN_TYPE_OS;
+  } else {
+    fullscreen_types_ = FULLSCREEN_TYPE_NONE;
+  }
+
+  RestoreAlwaysOnTop();  // Same as in SetNativeWindowFullscreen.
+#endif
+
   SaveWindowPosition();
 
 #if defined(OS_WIN)
-  if (native_app_window_ && cached_always_on_top_ && !IsFullscreen() &&
+  if (cached_always_on_top_ && !IsFullscreen() &&
       !native_app_window_->IsMaximized() &&
       !native_app_window_->IsMinimized()) {
     UpdateNativeAlwaysOnTop();
   }
 #endif
 
-  if (app_window_contents_ && native_app_window_)
+  if (app_window_contents_)
     app_window_contents_->NativeWindowChanged(native_app_window_.get());
 }
 
@@ -503,8 +521,9 @@ base::string16 AppWindow::GetTitle() const {
   // specified. However, we'd prefer to show the name of the extension in that
   // case, so we directly inspect the NavigationEntry's title.
   base::string16 title;
-  if (!web_contents() || !web_contents()->GetController().GetActiveEntry() ||
-      web_contents()->GetController().GetActiveEntry()->GetTitle().empty()) {
+  content::NavigationEntry* entry = web_contents() ?
+      web_contents()->GetController().GetLastCommittedEntry() : nullptr;
+  if (!entry || entry->GetTitle().empty()) {
     title = base::UTF8ToUTF16(extension->name());
   } else {
     title = web_contents()->GetTitle();
@@ -681,6 +700,11 @@ void AppWindow::SetAlwaysOnTop(bool always_on_top) {
 
 bool AppWindow::IsAlwaysOnTop() const { return cached_always_on_top_; }
 
+void AppWindow::RestoreAlwaysOnTop() {
+  if (cached_always_on_top_)
+    UpdateNativeAlwaysOnTop();
+}
+
 void AppWindow::SetInterceptAllKeys(bool want_all_keys) {
   native_app_window_->SetInterceptAllKeys(want_all_keys);
 }
@@ -688,6 +712,11 @@ void AppWindow::SetInterceptAllKeys(bool want_all_keys) {
 void AppWindow::WindowEventsReady() {
   can_send_events_ = true;
   SendOnWindowShownIfShown();
+}
+
+void AppWindow::NotifyRenderViewReady() {
+  if (app_window_contents_)
+    app_window_contents_->OnWindowReady();
 }
 
 void AppWindow::GetSerializedState(base::DictionaryValue* properties) const {
@@ -793,8 +822,7 @@ void AppWindow::UpdateExtensionAppIcon() {
 void AppWindow::SetNativeWindowFullscreen() {
   native_app_window_->SetFullscreen(fullscreen_types_);
 
-  if (cached_always_on_top_)
-    UpdateNativeAlwaysOnTop();
+  RestoreAlwaysOnTop();
 }
 
 bool AppWindow::IntersectsWithTaskbar() const {
@@ -904,7 +932,7 @@ void AppWindow::ToggleFullscreenModeForTab(content::WebContents* source,
     return;
 
   if (!IsExtensionWithPermissionOrSuggestInConsole(
-          APIPermission::kFullscreen, extension, source->GetRenderViewHost())) {
+          APIPermission::kFullscreen, extension, source->GetMainFrame())) {
     return;
   }
 
@@ -922,6 +950,14 @@ blink::WebDisplayMode AppWindow::GetDisplayMode(
                         : blink::WebDisplayModeStandalone;
 }
 
+WindowController* AppWindow::GetExtensionWindowController() const {
+  return app_window_contents_->GetWindowController();
+}
+
+content::WebContents* AppWindow::GetAssociatedWebContents() const {
+  return web_contents();
+}
+
 void AppWindow::OnExtensionUnloaded(BrowserContext* browser_context,
                                     const Extension* extension,
                                     UnloadedExtensionInfo::Reason reason) {
@@ -929,15 +965,6 @@ void AppWindow::OnExtensionUnloaded(BrowserContext* browser_context,
     native_app_window_->Close();
 }
 
-void AppWindow::OnExtensionWillBeInstalled(
-    BrowserContext* browser_context,
-    const Extension* extension,
-    bool is_update,
-    bool from_ephemeral,
-    const std::string& old_name) {
-  if (extension->id() == extension_id())
-    native_app_window_->UpdateShelfMenu();
-}
 void AppWindow::SetWebContentsBlocked(content::WebContents* web_contents,
                                       bool blocked) {
   app_delegate_->SetWebContentsBlocked(web_contents, blocked);
@@ -952,9 +979,8 @@ WebContentsModalDialogHost* AppWindow::GetWebContentsModalDialogHost() {
 }
 
 void AppWindow::SaveWindowPosition() {
+  DCHECK(native_app_window_);
   if (window_key_.empty())
-    return;
-  if (!native_app_window_)
     return;
 
   AppWindowGeometryCache* cache =

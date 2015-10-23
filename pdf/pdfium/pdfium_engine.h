@@ -46,9 +46,7 @@ class PDFiumEngine : public PDFEngine,
   virtual ~PDFiumEngine();
 
   // PDFEngine implementation.
-  virtual bool New(const char* url);
-  virtual bool New(const char* url,
-                   const char* headers);
+  virtual bool New(const char* url, const char* headers);
   virtual void PageOffsetUpdated(const pp::Point& page_offset);
   virtual void PluginSizeUpdated(const pp::Size& size);
   virtual void ScrolledToXPosition(int position);
@@ -86,6 +84,7 @@ class PDFiumEngine : public PDFEngine,
   virtual int GetMostVisiblePage();
   virtual pp::Rect GetPageRect(int index);
   virtual pp::Rect GetPageContentsRect(int index);
+  virtual pp::Rect GetPageScreenRect(int page_index) const;
   virtual int GetVerticalScrollbarYPosition() { return position_.y(); }
   virtual void PaintThumbnail(pp::ImageData* image_data, int index);
   virtual void SetGrayscale(bool grayscale);
@@ -375,10 +374,6 @@ class PDFiumEngine : public PDFEngine,
   // Returns the currently visible rectangle in document coordinates.
   pp::Rect GetVisibleRect() const;
 
-  // Returns a page's rect in screen coordinates, as well as its surrounding
-  // border areas and bottom separator.
-  pp::Rect GetPageScreenRect(int page_index) const;
-
   // Given a rectangle in document coordinates, returns the rectange into screen
   // coordinates (i.e. 0,0 is top left corner of plugin area).  If it's not
   // visible, an empty rectangle is returned.
@@ -648,6 +643,9 @@ class PDFiumEngine : public PDFEngine,
 
   // Permissions bitfield.
   unsigned long permissions_;
+
+  // Permissions security handler revision number. -1 for unknown.
+  int permissions_handler_revision_;
 
   // Interface structure to provide access to document stream.
   FPDF_FILEACCESS file_access_;

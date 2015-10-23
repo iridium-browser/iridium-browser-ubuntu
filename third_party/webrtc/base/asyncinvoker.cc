@@ -10,6 +10,7 @@
 
 #include "webrtc/base/asyncinvoker.h"
 
+#include "webrtc/base/checks.h"
 #include "webrtc/base/logging.h"
 
 namespace rtc {
@@ -62,6 +63,41 @@ void AsyncInvoker::DoInvoke(Thread* thread,
     return;
   }
   thread->Post(this, id, new ScopedRefMessageData<AsyncClosure>(closure));
+}
+
+void AsyncInvoker::DoInvokeDelayed(Thread* thread,
+                                   const scoped_refptr<AsyncClosure>& closure,
+                                   uint32 delay_ms,
+                                   uint32 id) {
+  if (destroying_) {
+    LOG(LS_WARNING) << "Tried to invoke while destroying the invoker.";
+    return;
+  }
+  thread->PostDelayed(delay_ms, this, id,
+                      new ScopedRefMessageData<AsyncClosure>(closure));
+}
+
+GuardedAsyncInvoker::GuardedAsyncInvoker() : thread_(Thread::Current()) {
+  thread_->SignalQueueDestroyed.connect(this,
+                                        &GuardedAsyncInvoker::ThreadDestroyed);
+}
+
+GuardedAsyncInvoker::~GuardedAsyncInvoker() {
+}
+
+bool GuardedAsyncInvoker::Flush(uint32 id) {
+  rtc::CritScope cs(&crit_);
+  if (thread_ == nullptr)
+    return false;
+  invoker_.Flush(thread_, id);
+  return true;
+}
+
+void GuardedAsyncInvoker::ThreadDestroyed() {
+  rtc::CritScope cs(&crit_);
+  // We should never get more than one notification about the thread dying.
+  DCHECK(thread_ != nullptr);
+  thread_ = nullptr;
 }
 
 NotifyingAsyncClosureBase::NotifyingAsyncClosureBase(AsyncInvoker* invoker,

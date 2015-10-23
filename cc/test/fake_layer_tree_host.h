@@ -15,17 +15,22 @@
 #include "cc/trees/tree_synchronizer.h"
 
 namespace cc {
+class TestTaskGraphRunner;
 
 class FakeLayerTreeHost : public LayerTreeHost {
  public:
-  static scoped_ptr<FakeLayerTreeHost> Create(FakeLayerTreeHostClient* client);
   static scoped_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
+      TestTaskGraphRunner* task_graph_runner);
+  static scoped_ptr<FakeLayerTreeHost> Create(
+      FakeLayerTreeHostClient* client,
+      TestTaskGraphRunner* task_graph_runner,
       const LayerTreeSettings& settings);
 
   ~FakeLayerTreeHost() override;
 
   void SetNeedsCommit() override;
+  void SetNeedsUpdateLayers() override {}
   void SetNeedsFullTreeSync() override {}
 
   using LayerTreeHost::SetRootLayer;
@@ -41,9 +46,7 @@ class FakeLayerTreeHost : public LayerTreeHost {
   using LayerTreeHost::SetOutputSurfaceLostForTesting;
   using LayerTreeHost::InitializeSingleThreaded;
   using LayerTreeHost::InitializeForTesting;
-  void UpdateLayers(ResourceUpdateQueue* queue) {
-    LayerTreeHost::UpdateLayers(queue);
-  }
+  void UpdateLayers() { LayerTreeHost::UpdateLayers(); }
 
   MicroBenchmarkController* GetMicroBenchmarkController() {
     return &micro_benchmark_controller_;

@@ -6,11 +6,13 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "net/spdy/spdy_buffer_producer.h"
 #include "net/spdy/spdy_http_utils.h"
@@ -20,28 +22,28 @@ namespace net {
 
 namespace {
 
-base::Value* NetLogSpdyStreamErrorCallback(
+scoped_ptr<base::Value> NetLogSpdyStreamErrorCallback(
     SpdyStreamId stream_id,
     int status,
     const std::string* description,
     NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("stream_id", static_cast<int>(stream_id));
   dict->SetInteger("status", status);
   dict->SetString("description", *description);
-  return dict;
+  return dict.Pass();
 }
 
-base::Value* NetLogSpdyStreamWindowUpdateCallback(
+scoped_ptr<base::Value> NetLogSpdyStreamWindowUpdateCallback(
     SpdyStreamId stream_id,
     int32 delta,
     int32 window_size,
     NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("stream_id", stream_id);
   dict->SetInteger("delta", delta);
   dict->SetInteger("window_size", window_size);
-  return dict;
+  return dict.Pass();
 }
 
 bool ContainsUppercaseAscii(const std::string& str) {
@@ -54,6 +56,8 @@ bool ContainsUppercaseAscii(const std::string& str) {
 }
 
 }  // namespace
+
+void SpdyStream::Delegate::OnTrailers(const SpdyHeaderBlock& trailers) {}
 
 // A wrapper around a stream that calls into ProduceSynStreamFrame().
 class SpdyStream::SynStreamBufferProducer : public SpdyBufferProducer {
@@ -131,9 +135,8 @@ void SpdyStream::SetDelegate(Delegate* delegate) {
 
   if (io_state_ == STATE_HALF_CLOSED_LOCAL_UNCLAIMED) {
     DCHECK_EQ(type_, SPDY_PUSH_STREAM);
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&SpdyStream::PushedStreamReplay, GetWeakPtr()));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&SpdyStream::PushedStreamReplay, GetWeakPtr()));
   }
 }
 
@@ -439,12 +442,18 @@ int SpdyStream::OnInitialResponseHeadersReceived(
 int SpdyStream::OnAdditionalResponseHeadersReceived(
     const SpdyHeaderBlock& additional_response_headers) {
   if (type_ == SPDY_REQUEST_RESPONSE_STREAM) {
-    session_->ResetStream(
-        stream_id_, RST_STREAM_PROTOCOL_ERROR,
-        "Additional headers received for request/response stream");
-    return ERR_SPDY_PROTOCOL_ERROR;
-  } else if (type_ == SPDY_PUSH_STREAM &&
-             response_headers_status_ == RESPONSE_HEADERS_ARE_COMPLETE) {
+    if (response_headers_status_ != RESPONSE_HEADERS_ARE_COMPLETE) {
+      session_->ResetStream(
+          stream_id_, RST_STREAM_PROTOCOL_ERROR,
+          "Additional headers received for request/response stream");
+      return ERR_SPDY_PROTOCOL_ERROR;
+    }
+    response_headers_status_ = TRAILERS_RECEIVED;
+    delegate_->OnTrailers(additional_response_headers);
+    return OK;
+  }
+  if (type_ == SPDY_PUSH_STREAM &&
+      response_headers_status_ == RESPONSE_HEADERS_ARE_COMPLETE) {
     session_->ResetStream(
         stream_id_, RST_STREAM_PROTOCOL_ERROR,
         "Additional headers received for push stream");
@@ -474,12 +483,20 @@ void SpdyStream::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
     // It should be valid for this to happen in the server push case.
     // We'll return received data when delegate gets attached to the stream.
     if (buffer) {
-      pending_recv_data_.push_back(buffer.release());
+      pending_recv_data_.push_back(buffer.Pass());
     } else {
       pending_recv_data_.push_back(NULL);
       // Note: we leave the stream open in the session until the stream
       //       is claimed.
     }
+    return;
+  }
+
+  if (response_headers_status_ == TRAILERS_RECEIVED && buffer) {
+    // TRAILERS_RECEIVED is only used in SPDY_REQUEST_RESPONSE_STREAM.
+    DCHECK_EQ(type_, SPDY_REQUEST_RESPONSE_STREAM);
+    session_->ResetStream(stream_id_, RST_STREAM_PROTOCOL_ERROR,
+                          "Data received after trailers");
     return;
   }
 
@@ -545,12 +562,6 @@ void SpdyStream::OnPaddingConsumed(size_t len) {
 void SpdyStream::OnFrameWriteComplete(SpdyFrameType frame_type,
                                       size_t frame_size) {
   DCHECK_NE(type_, SPDY_PUSH_STREAM);
-
-  if (frame_size < session_->GetFrameMinimumSize() ||
-      frame_size > session_->GetFrameMaximumSize()) {
-    NOTREACHED();
-    return;
-  }
   CHECK(frame_type == SYN_STREAM ||
         frame_type == DATA) << frame_type;
 

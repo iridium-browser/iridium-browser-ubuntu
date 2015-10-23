@@ -31,6 +31,7 @@
 #ifndef DedicatedWorkerGlobalScope_h
 #define DedicatedWorkerGlobalScope_h
 
+#include "core/CoreExport.h"
 #include "core/dom/MessagePort.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/workers/WorkerGlobalScope.h"
@@ -41,22 +42,22 @@ namespace blink {
 class DedicatedWorkerThread;
 class WorkerThreadStartupData;
 
-class DedicatedWorkerGlobalScope final : public WorkerGlobalScope {
+class CORE_EXPORT DedicatedWorkerGlobalScope final : public WorkerGlobalScope {
     DEFINE_WRAPPERTYPEINFO();
 public:
     typedef WorkerGlobalScope Base;
     static PassRefPtrWillBeRawPtr<DedicatedWorkerGlobalScope> create(DedicatedWorkerThread*, PassOwnPtr<WorkerThreadStartupData>, double timeOrigin);
-    virtual ~DedicatedWorkerGlobalScope();
+    ~DedicatedWorkerGlobalScope() override;
 
-    virtual bool isDedicatedWorkerGlobalScope() const override { return true; }
-    virtual void countFeature(UseCounter::Feature) const override;
-    virtual void countDeprecation(UseCounter::Feature) const override;
+    bool isDedicatedWorkerGlobalScope() const override { return true; }
+    void countFeature(UseCounter::Feature) const override;
+    void countDeprecation(UseCounter::Feature) const override;
 
     // Overridden to allow us to check our pending activity after executing imported script.
-    virtual void importScripts(const Vector<String>& urls, ExceptionState&) override;
+    void importScripts(const Vector<String>& urls, ExceptionState&) override;
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
 
     void postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue>, const MessagePortArray*, ExceptionState&);
 

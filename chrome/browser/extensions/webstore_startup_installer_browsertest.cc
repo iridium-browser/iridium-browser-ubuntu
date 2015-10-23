@@ -4,10 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/scoped_observer.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/extensions/webstore_installer_test.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,14 +14,11 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/extension_builder.h"
@@ -57,8 +51,7 @@ class WebstoreStartupInstallerTest : public WebstoreInstallerTest {
 };
 
 IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, Install) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::ACCEPT;
+  AutoAcceptInstall();
 
   ui_test_utils::NavigateToURL(
       browser(), GenerateTestServerUrl(kAppDomain, "install.html"));
@@ -74,8 +67,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, Install) {
 
 IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest,
     InstallNotAllowedFromNonVerifiedDomains) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::CANCEL;
+  AutoCancelInstall();
   ui_test_utils::NavigateToURL(
       browser(),
       GenerateTestServerUrl(kNonAppDomain, "install_non_verified_domain.html"));
@@ -94,8 +86,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, FindLink) {
 // Flakes on all platforms: http://crbug.com/95713, http://crbug.com/229947
 IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest,
                        DISABLED_ArgumentValidation) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::CANCEL;
+  AutoCancelInstall();
 
   // Each of these tests has to run separately, since one page/tab can
   // only have one in-progress install request. These tests don't all pass
@@ -111,8 +102,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest,
 }
 
 IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, MultipleInstallCalls) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::CANCEL;
+  AutoCancelInstall();
 
   ui_test_utils::NavigateToURL(
       browser(),
@@ -121,8 +111,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, MultipleInstallCalls) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, InstallNotSupported) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::CANCEL;
+  AutoCancelInstall();
   ui_test_utils::NavigateToURL(
       browser(),
       GenerateTestServerUrl(kAppDomain, "install_not_supported.html"));
@@ -141,8 +130,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, InstallNotSupported) {
 
 // Regression test for http://crbug.com/144991.
 IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, InstallFromHostedApp) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::ACCEPT;
+  AutoAcceptInstall();
 
   const GURL kInstallUrl = GenerateTestServerUrl(kAppDomain, "install.html");
 
@@ -195,8 +183,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerSupervisedUsersTest,
     return;
 #endif
 
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::ACCEPT;
+  AutoAcceptInstall();
 
   ui_test_utils::NavigateToURL(
       browser(), GenerateTestServerUrl(kAppDomain, "install_prohibited.html"));
@@ -231,74 +218,10 @@ class WebstoreStartupInstallUnpackFailureTest
 
 IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallUnpackFailureTest,
     WebstoreStartupInstallUnpackFailureTest) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::ACCEPT;
+  AutoAcceptInstall();
 
   ui_test_utils::NavigateToURL(browser(),
       GenerateTestServerUrl(kAppDomain, "install_unpack_failure.html"));
 
   RunTest("runTest");
-}
-
-class CommandLineWebstoreInstall
-    : public WebstoreStartupInstallerTest,
-      public content::NotificationObserver,
-      public extensions::ExtensionRegistryObserver {
- public:
-  CommandLineWebstoreInstall() : saw_install_(false), browser_open_count_(0) {}
-  ~CommandLineWebstoreInstall() override {}
-
-  void SetUpOnMainThread() override {
-    WebstoreStartupInstallerTest::SetUpOnMainThread();
-    extensions::ExtensionRegistry::Get(browser()->profile())->AddObserver(this);
-    registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                   content::NotificationService::AllSources());
-  }
-
-  void TearDownOnMainThread() override {
-    extensions::ExtensionRegistry::Get(browser()->profile())
-        ->RemoveObserver(this);
-    WebstoreStartupInstallerTest::TearDownOnMainThread();
-  }
-
-  bool saw_install() { return saw_install_; }
-
-  int browser_open_count() { return browser_open_count_; }
-
-  // NotificationObserver interface.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_OPENED);
-    ++browser_open_count_;
-  }
-
-  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
-                                  const extensions::Extension* extension,
-                                  bool is_update,
-                                  bool from_ephemeral,
-                                  const std::string& old_name) override {
-    EXPECT_EQ(extension->id(), kTestExtensionId);
-    saw_install_ = true;
-  }
-
-  content::NotificationRegistrar registrar_;
-
-  // Have we seen an installation notification for kTestExtensionId ?
-  bool saw_install_;
-
-  // How many NOTIFICATION_BROWSER_OPENED notifications have we seen?
-  int browser_open_count_;
-};
-
-IN_PROC_BROWSER_TEST_F(CommandLineWebstoreInstall, CannotInstallNonEphemeral) {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  command_line->AppendSwitchASCII(
-      switches::kInstallEphemeralAppFromWebstore, kTestExtensionId);
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::ACCEPT;
-  extensions::StartupHelper helper;
-  EXPECT_FALSE(helper.InstallEphemeralApp(*command_line, browser()->profile()));
-  EXPECT_FALSE(saw_install());
-  EXPECT_EQ(0, browser_open_count());
 }

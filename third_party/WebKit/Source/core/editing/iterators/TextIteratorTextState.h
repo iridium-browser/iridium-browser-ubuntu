@@ -62,8 +62,6 @@ public:
         m_textLength = 0;
     }
 
-    PassRefPtrWillBeRawPtr<Range> createRange() const;
-
     template<typename BufferType>
     void appendTextTo(BufferType& output, unsigned position = 0) const
     {

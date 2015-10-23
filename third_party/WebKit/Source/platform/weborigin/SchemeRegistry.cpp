@@ -160,6 +160,29 @@ static URLSchemesSet& CORSEnabledSchemes()
     return CORSEnabledSchemes;
 }
 
+static URLSchemesSet& serviceWorkerSchemes()
+{
+    assertLockHeld();
+    DEFINE_STATIC_LOCAL_NOASSERT(URLSchemesSet, serviceWorkerSchemes, ());
+
+    if (serviceWorkerSchemes.isEmpty()) {
+        // HTTP is required because http://localhost is considered secure.
+        // Additional checks are performed to ensure that other http pages
+        // are filtered out.
+        serviceWorkerSchemes.add("http");
+        serviceWorkerSchemes.add("https");
+    }
+
+    return serviceWorkerSchemes;
+}
+
+static URLSchemesSet& firstPartyWhenTopLevelSchemes()
+{
+    assertLockHeld();
+    DEFINE_STATIC_LOCAL_NOASSERT(URLSchemesSet, firstPartyWhenTopLevelSchemes, ());
+    return firstPartyWhenTopLevelSchemes;
+}
+
 static URLSchemesMap<SchemeRegistry::PolicyAreas>& ContentSecurityPolicyBypassingSchemes()
 {
     assertLockHeld();
@@ -321,6 +344,34 @@ String SchemeRegistry::listOfCORSEnabledURLSchemes()
 bool SchemeRegistry::shouldTreatURLSchemeAsLegacy(const String& scheme)
 {
     return equalIgnoringCase("ftp", scheme) || equalIgnoringCase("gopher", scheme);
+}
+
+void SchemeRegistry::registerURLSchemeAsAllowingServiceWorkers(const String& scheme)
+{
+    MutexLocker locker(mutex());
+    serviceWorkerSchemes().add(scheme);
+}
+
+bool SchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkers(const String& scheme)
+{
+    if (scheme.isEmpty())
+        return false;
+    MutexLocker locker(mutex());
+    return serviceWorkerSchemes().contains(scheme);
+}
+
+void SchemeRegistry::registerURLSchemeAsFirstPartyWhenTopLevel(const String& scheme)
+{
+    MutexLocker locker(mutex());
+    firstPartyWhenTopLevelSchemes().add(scheme);
+}
+
+bool SchemeRegistry::shouldTreatURLSchemeAsFirstPartyWhenTopLevel(const String& scheme)
+{
+    if (scheme.isEmpty())
+        return false;
+    MutexLocker locker(mutex());
+    return firstPartyWhenTopLevelSchemes().contains(scheme);
 }
 
 void SchemeRegistry::registerURLSchemeAsBypassingContentSecurityPolicy(const String& scheme, PolicyAreas policyAreas)

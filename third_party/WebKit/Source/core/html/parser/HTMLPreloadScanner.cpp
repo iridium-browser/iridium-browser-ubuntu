@@ -36,6 +36,7 @@
 #include "core/css/parser/SizesAttributeParser.h"
 #include "core/dom/Document.h"
 #include "core/frame/Settings.h"
+#include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLMetaElement.h"
 #include "core/html/LinkRelAttribute.h"
 #include "core/html/parser/HTMLParserIdioms.h"
@@ -107,10 +108,13 @@ static bool mediaAttributeMatches(const MediaValues& mediaValues, const String& 
 }
 
 class TokenPreloadScanner::StartTagScanner {
+    STACK_ALLOCATED();
 public:
-    StartTagScanner(const StringImpl* tagImpl, PassRefPtr<MediaValues> mediaValues)
+    StartTagScanner(const StringImpl* tagImpl, PassRefPtrWillBeRawPtr<MediaValues> mediaValues)
         : m_tagImpl(tagImpl)
         , m_linkIsStyleSheet(false)
+        , m_linkIsPreconnect(false)
+        , m_linkIsImport(false)
         , m_matchedMediaAttribute(true)
         , m_inputIsImage(false)
         , m_sourceSize(0)
@@ -119,6 +123,8 @@ public:
         , m_defer(FetchRequest::NoDefer)
         , m_allowCredentials(DoNotAllowStoredCredentials)
         , m_mediaValues(mediaValues)
+        , m_referrerPolicySet(false)
+        , m_referrerPolicy(ReferrerPolicyDefault)
     {
         ASSERT(m_mediaValues->isCached());
         if (match(m_tagImpl, imgTag)
@@ -158,26 +164,42 @@ public:
             processAttribute(htmlTokenAttribute.name, htmlTokenAttribute.value);
     }
 
-    void handlePictureSourceURL(String& sourceURL)
+    void handlePictureSourceURL(PictureData& pictureData)
     {
-        if (match(m_tagImpl, sourceTag) && m_matchedMediaAttribute && sourceURL.isEmpty())
-            sourceURL = m_srcsetImageCandidate.toString();
-        else if (match(m_tagImpl, imgTag) && !sourceURL.isEmpty())
-            setUrlToLoad(sourceURL, AllowURLReplacement);
+        if (match(m_tagImpl, sourceTag) && m_matchedMediaAttribute && pictureData.sourceURL.isEmpty()) {
+            pictureData.sourceURL = m_srcsetImageCandidate.toString();
+            pictureData.sourceSizeSet = m_sourceSizeSet;
+            pictureData.sourceSize = m_sourceSize;
+            pictureData.picked = true;
+        } else if (match(m_tagImpl, imgTag) && !pictureData.sourceURL.isEmpty()) {
+            setUrlToLoad(pictureData.sourceURL, AllowURLReplacement);
+        }
     }
 
-    PassOwnPtr<PreloadRequest> createPreloadRequest(const KURL& predictedBaseURL, const SegmentedString& source, const ClientHintsPreferences& clientHintsPreferences)
+    PassOwnPtr<PreloadRequest> createPreloadRequest(const KURL& predictedBaseURL, const SegmentedString& source, const ClientHintsPreferences& clientHintsPreferences, const PictureData& pictureData, const ReferrerPolicy documentReferrerPolicy)
     {
-        if (!shouldPreload() || !m_matchedMediaAttribute)
+        PreloadRequest::RequestType requestType = PreloadRequest::RequestTypePreload;
+        if (shouldPreconnect())
+            requestType = PreloadRequest::RequestTypePreconnect;
+        else if (!shouldPreload() || !m_matchedMediaAttribute)
             return nullptr;
 
         TextPosition position = TextPosition(source.currentLine(), source.currentColumn());
         FetchRequest::ResourceWidth resourceWidth;
-        if (m_sourceSizeSet && m_srcsetImageCandidate.resourceWidth() != UninitializedDescriptor) {
-            resourceWidth.width = m_sourceSize;
+        float sourceSize = m_sourceSize;
+        bool sourceSizeSet = m_sourceSizeSet;
+        if (pictureData.picked) {
+            sourceSizeSet = pictureData.sourceSizeSet;
+            sourceSize = pictureData.sourceSize;
+        }
+        if (sourceSizeSet) {
+            resourceWidth.width = sourceSize;
             resourceWidth.isSet = true;
         }
-        OwnPtr<PreloadRequest> request = PreloadRequest::create(initiatorFor(m_tagImpl), position, m_urlToLoad, predictedBaseURL, resourceType(), resourceWidth, clientHintsPreferences);
+
+        // The element's 'referrerpolicy' attribute (if present) takes precedence over the document's referrer policy.
+        ReferrerPolicy referrerPolicy = (m_referrerPolicy != ReferrerPolicyDefault && RuntimeEnabledFeatures::referrerPolicyAttributeEnabled()) ? m_referrerPolicy : documentReferrerPolicy;
+        OwnPtr<PreloadRequest> request = PreloadRequest::create(initiatorFor(m_tagImpl), position, m_urlToLoad, predictedBaseURL, resourceType(), referrerPolicy, resourceWidth, clientHintsPreferences, requestType);
         if (isCORSEnabled())
             request->setCrossOriginEnabled(allowStoredCredentials());
         request->setCharset(charset());
@@ -219,6 +241,9 @@ private:
                 m_srcsetImageCandidate = bestFitSourceForSrcsetAttribute(m_mediaValues->devicePixelRatio(), m_sourceSize, m_srcsetAttributeValue);
                 setUrlToLoad(bestFitSourceForImageAttributes(m_mediaValues->devicePixelRatio(), m_sourceSize, m_imgSrcUrl, m_srcsetImageCandidate), AllowURLReplacement);
             }
+        } else if (!m_referrerPolicySet && RuntimeEnabledFeatures::referrerPolicyAttributeEnabled() && match(attributeName, referrerpolicyAttr) && !attributeValue.isNull()) {
+            m_referrerPolicySet = true;
+            SecurityPolicy::referrerPolicyFromString(attributeValue, &m_referrerPolicy);
         }
     }
 
@@ -226,14 +251,18 @@ private:
     void processLinkAttribute(const NameType& attributeName, const String& attributeValue)
     {
         // FIXME - Don't set rel/media/crossorigin multiple times.
-        if (match(attributeName, hrefAttr))
+        if (match(attributeName, hrefAttr)) {
             setUrlToLoad(attributeValue, DisallowURLReplacement);
-        else if (match(attributeName, relAttr))
-            m_linkIsStyleSheet = relAttributeIsStyleSheet(attributeValue);
-        else if (match(attributeName, mediaAttr))
+        } else if (match(attributeName, relAttr)) {
+            LinkRelAttribute rel(attributeValue);
+            m_linkIsStyleSheet = rel.isStyleSheet() && !rel.isAlternate() && rel.iconType() == InvalidIcon && !rel.isDNSPrefetch();
+            m_linkIsPreconnect = rel.isPreconnect();
+            m_linkIsImport = rel.isImport();
+        } else if (match(attributeName, mediaAttr)) {
             m_matchedMediaAttribute = mediaAttributeMatches(*m_mediaValues, attributeValue);
-        else if (match(attributeName, crossoriginAttr))
+        } else if (match(attributeName, crossoriginAttr)) {
             setCrossOriginAllowed(attributeValue);
+        }
     }
 
     template<typename NameType>
@@ -291,12 +320,6 @@ private:
             processVideoAttribute(attributeName, attributeValue);
     }
 
-    static bool relAttributeIsStyleSheet(const String& attributeValue)
-    {
-        LinkRelAttribute rel(attributeValue);
-        return rel.isStyleSheet() && !rel.isAlternate() && rel.iconType() == InvalidIcon && !rel.isDNSPrefetch();
-    }
-
     void setUrlToLoad(const String& value, URLReplacement replacement)
     {
         // We only respect the first src/href, per HTML5:
@@ -325,15 +348,24 @@ private:
             return Resource::Image;
         if (match(m_tagImpl, linkTag) && m_linkIsStyleSheet)
             return Resource::CSSStyleSheet;
+        if (m_linkIsPreconnect)
+            return Resource::Raw;
+        if (match(m_tagImpl, linkTag) && m_linkIsImport)
+            return Resource::ImportResource;
         ASSERT_NOT_REACHED();
         return Resource::Raw;
+    }
+
+    bool shouldPreconnect() const
+    {
+        return match(m_tagImpl, linkTag) && m_linkIsPreconnect && !m_urlToLoad.isEmpty();
     }
 
     bool shouldPreload() const
     {
         if (m_urlToLoad.isEmpty())
             return false;
-        if (match(m_tagImpl, linkTag) && !m_linkIsStyleSheet)
+        if (match(m_tagImpl, linkTag) && !m_linkIsStyleSheet && !m_linkIsImport)
             return false;
         if (match(m_tagImpl, inputTag) && !m_inputIsImage)
             return false;
@@ -374,6 +406,8 @@ private:
     ImageCandidate m_srcsetImageCandidate;
     String m_charset;
     bool m_linkIsStyleSheet;
+    bool m_linkIsPreconnect;
+    bool m_linkIsImport;
     bool m_matchedMediaAttribute;
     bool m_inputIsImage;
     String m_imgSrcUrl;
@@ -383,7 +417,9 @@ private:
     bool m_isCORSEnabled;
     FetchRequest::DeferOption m_defer;
     StoredCredentials m_allowCredentials;
-    RefPtr<MediaValues> m_mediaValues;
+    RefPtrWillBeMember<MediaValues> m_mediaValues;
+    bool m_referrerPolicySet;
+    ReferrerPolicy m_referrerPolicy;
 };
 
 TokenPreloadScanner::TokenPreloadScanner(const KURL& documentURL, PassOwnPtr<CachedDocumentParameters> documentParameters)
@@ -440,16 +476,50 @@ static void handleMetaViewport(const String& attributeValue, CachedDocumentParam
         return;
     ViewportDescription description(ViewportDescription::ViewportMeta);
     HTMLMetaElement::getViewportDescriptionFromContentAttribute(attributeValue, description, nullptr, documentParameters->viewportMetaZeroValuesQuirk);
-    FloatSize initialViewport(documentParameters->mediaValues->viewportHeight(), documentParameters->mediaValues->viewportWidth());
+    FloatSize initialViewport(documentParameters->mediaValues->deviceWidth(), documentParameters->mediaValues->deviceHeight());
     PageScaleConstraints constraints = description.resolve(initialViewport, documentParameters->defaultViewportMinWidth);
     MediaValuesCached* cachedMediaValues = static_cast<MediaValuesCached*>(documentParameters->mediaValues.get());
     cachedMediaValues->setViewportHeight(constraints.layoutSize.height());
     cachedMediaValues->setViewportWidth(constraints.layoutSize.width());
 }
 
-template<typename Token>
+static void handleMetaReferrer(const String& attributeValue, CachedDocumentParameters* documentParameters, CSSPreloadScanner* cssScanner)
+{
+    if (attributeValue.isEmpty() || attributeValue.isNull() || !SecurityPolicy::referrerPolicyFromString(attributeValue, &documentParameters->referrerPolicy)) {
+        documentParameters->referrerPolicy = ReferrerPolicyDefault;
+    }
+    cssScanner->setReferrerPolicy(documentParameters->referrerPolicy);
+}
+
+template <typename Token>
+static void handleMetaNameAttribute(const Token& token, CachedDocumentParameters* documentParameters, CSSPreloadScanner* cssScanner)
+{
+    const typename Token::Attribute* nameAttribute = token.getAttributeItem(nameAttr);
+    if (!nameAttribute)
+        return;
+
+    String nameAttributeValue(nameAttribute->value);
+    const typename Token::Attribute* contentAttribute = token.getAttributeItem(contentAttr);
+    if (!contentAttribute)
+        return;
+
+    String contentAttributeValue(contentAttribute->value);
+    if (equalIgnoringCase(nameAttributeValue, "viewport")) {
+        handleMetaViewport(contentAttributeValue, documentParameters);
+        return;
+    }
+
+    if (equalIgnoringCase(nameAttributeValue, "referrer")) {
+        handleMetaReferrer(contentAttributeValue, documentParameters, cssScanner);
+    }
+}
+
+template <typename Token>
 void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& source, PreloadRequestStream& requests)
 {
+    if (!m_documentParameters->doHtmlPreloadScanning)
+        return;
+
     // Disable preload for documents with AppCache.
     if (m_isAppCacheEnabled)
         return;
@@ -509,32 +579,30 @@ void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& 
             const typename Token::Attribute* equivAttribute = token.getAttributeItem(http_equivAttr);
             if (equivAttribute) {
                 String equivAttributeValue(equivAttribute->value);
-                if (equalIgnoringCase(equivAttributeValue, "content-security-policy"))
+                if (equalIgnoringCase(equivAttributeValue, "content-security-policy")) {
                     m_isCSPEnabled = true;
-                else if (equalIgnoringCase(equivAttributeValue, "accept-ch"))
-                    handleAcceptClientHintsHeader(equivAttributeValue, m_clientHintsPreferences);
+                } else if (equalIgnoringCase(equivAttributeValue, "accept-ch")) {
+                    const typename Token::Attribute* contentAttribute = token.getAttributeItem(contentAttr);
+                    if (contentAttribute)
+                        m_clientHintsPreferences.updateFromAcceptClientHintsHeader(String(contentAttribute->value), nullptr);
+                }
                 return;
             }
-            const typename Token::Attribute* nameAttribute = token.getAttributeItem(nameAttr);
-            if (nameAttribute && equalIgnoringCase(String(nameAttribute->value), "viewport")) {
-                const typename Token::Attribute* contentAttribute = token.getAttributeItem(contentAttr);
-                if (contentAttribute)
-                    handleMetaViewport(String(contentAttribute->value), m_documentParameters.get());
-                return;
-            }
+
+            handleMetaNameAttribute(token, m_documentParameters.get(), &m_cssScanner);
         }
 
         if (match(tagImpl, pictureTag)) {
             m_inPicture = true;
-            m_pictureSourceURL = String();
+            m_pictureData = PictureData();
             return;
         }
 
         StartTagScanner scanner(tagImpl, m_documentParameters->mediaValues);
         scanner.processAttributes(token.attributes());
         if (m_inPicture)
-            scanner.handlePictureSourceURL(m_pictureSourceURL);
-        OwnPtr<PreloadRequest> request = scanner.createPreloadRequest(m_predictedBaseElementURL, source, m_clientHintsPreferences);
+            scanner.handlePictureSourceURL(m_pictureData);
+        OwnPtr<PreloadRequest> request = scanner.createPreloadRequest(m_predictedBaseElementURL, source, m_clientHintsPreferences, m_pictureData, m_documentParameters->referrerPolicy);
         if (request)
             requests.append(request.release());
         return;
@@ -592,10 +660,11 @@ void HTMLPreloadScanner::scan(ResourcePreloader* preloader, const KURL& starting
     preloader->takeAndPreload(requests);
 }
 
-CachedDocumentParameters::CachedDocumentParameters(Document* document, PassRefPtr<MediaValues> givenMediaValues)
+CachedDocumentParameters::CachedDocumentParameters(Document* document, PassRefPtrWillBeRawPtr<MediaValues> givenMediaValues)
 {
     ASSERT(isMainThread());
     ASSERT(document);
+    doHtmlPreloadScanning = !document->settings() || document->settings()->doHtmlPreloadScanning();
     if (givenMediaValues)
         mediaValues = givenMediaValues;
     else
@@ -604,6 +673,7 @@ CachedDocumentParameters::CachedDocumentParameters(Document* document, PassRefPt
     defaultViewportMinWidth = document->viewportDefaultMinWidth();
     viewportMetaZeroValuesQuirk = document->settings() && document->settings()->viewportMetaZeroValuesQuirk();
     viewportMetaEnabled = document->settings() && document->settings()->viewportMetaEnabled();
+    referrerPolicy = ReferrerPolicyDefault;
 }
 
 }

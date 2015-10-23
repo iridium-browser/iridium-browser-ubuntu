@@ -12,7 +12,7 @@
 #include "sync/engine/model_type_sync_proxy.h"
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 // Mocks the ModelTypeSyncProxy.
 //

@@ -9,9 +9,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/app_modal/app_modal_dialog.h"
 #include "components/app_modal/app_modal_dialog_queue.h"
+#include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/javascript_dialog_extensions_client.h"
 #include "components/app_modal/javascript_native_dialog_factory.h"
 #include "components/app_modal/native_app_modal_dialog.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/common/javascript_message_type.h"
 #include "grit/components_strings.h"
 #include "net/base/net_util.h"
@@ -40,17 +42,7 @@ class DefaultExtensionsClient : public JavaScriptDialogExtensionsClient {
 
 bool ShouldDisplaySuppressCheckbox(
     ChromeJavaScriptDialogExtraData* extra_data) {
-  base::TimeDelta time_since_last_message = base::TimeTicks::Now() -
-      extra_data->last_javascript_message_dismissal_;
-
-  // If a WebContents is impolite and displays a second JavaScript
-  // alert within kJavaScriptMessageExpectedDelay of a previous
-  // JavaScript alert being dismissed, show a checkbox offering to
-  // suppress future alerts from this WebContents.
-  const int kJavaScriptMessageExpectedDelay = 1000;
-
-  return time_since_last_message <
-      base::TimeDelta::FromMilliseconds(kJavaScriptMessageExpectedDelay);
+  return extra_data->has_already_shown_a_dialog_;
 }
 
 }  // namespace
@@ -95,7 +87,9 @@ void JavaScriptDialogManager::RunJavaScriptDialog(
   *did_suppress_message = false;
 
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_[web_contents];
+      &javascript_dialog_extra_data_
+          [JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
+              web_contents)];
 
   if (extra_data->suppress_javascript_messages_) {
     *did_suppress_message = true;
@@ -128,7 +122,9 @@ void JavaScriptDialogManager::RunBeforeUnloadDialog(
     bool is_reload,
     const DialogClosedCallback& callback) {
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_[web_contents];
+      &javascript_dialog_extra_data_
+          [JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
+              web_contents)];
 
   if (extra_data->suppress_javascript_messages_) {
     // If a site harassed the user enough for them to put it on mute, then it
@@ -186,7 +182,9 @@ bool JavaScriptDialogManager::HandleJavaScriptDialog(
 void JavaScriptDialogManager::ResetDialogState(
     content::WebContents* web_contents) {
   CancelActiveAndPendingDialogs(web_contents);
-  javascript_dialog_extra_data_.erase(web_contents);
+  javascript_dialog_extra_data_.erase(
+      JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
+          web_contents));
 }
 
 base::string16 JavaScriptDialogManager::GetTitle(
@@ -209,7 +207,7 @@ base::string16 JavaScriptDialogManager::GetTitle(
 
   // Otherwise, return the formatted URL.
   // In this case, force URL to have LTR directionality.
-  base::string16 url_string = net::FormatUrl(origin_url, accept_lang);
+  base::string16 url_string = url_formatter::FormatUrl(origin_url, accept_lang);
   return l10n_util::GetStringFUTF16(
       is_alert ? IDS_JAVASCRIPT_ALERT_TITLE
       : IDS_JAVASCRIPT_MESSAGEBOX_TITLE,
@@ -220,13 +218,17 @@ void JavaScriptDialogManager::CancelActiveAndPendingDialogs(
     content::WebContents* web_contents) {
   AppModalDialogQueue* queue = AppModalDialogQueue::GetInstance();
   AppModalDialog* active_dialog = queue->active_dialog();
-  if (active_dialog && active_dialog->web_contents() == web_contents)
-    active_dialog->Invalidate();
   for (AppModalDialogQueue::iterator i = queue->begin();
        i != queue->end(); ++i) {
+    // Invalidating the active dialog might trigger showing a not-yet
+    // invalidated dialog, so invalidate the active dialog last.
+    if ((*i) == active_dialog)
+      continue;
     if ((*i)->web_contents() == web_contents)
       (*i)->Invalidate();
   }
+  if (active_dialog && active_dialog->web_contents() == web_contents)
+    active_dialog->Invalidate();
 }
 
 void JavaScriptDialogManager::OnDialogClosed(

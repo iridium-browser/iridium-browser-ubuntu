@@ -10,13 +10,6 @@ namespace switches {
 // The origin of the data reduction proxy.
 const char kDataReductionProxy[]         = "spdy-proxy-auth-origin";
 
-// The origin of an alternative data reduction proxy.
-const char kDataReductionProxyAlt[]      = "data-reduction-proxy-alternative";
-
-// The origin of an alternative data reduction proxy fallback.
-const char kDataReductionProxyAltFallback[] =
-    "data-reduction-proxy-alternative-fallback";
-
 // The origin of the data reduction proxy dev.
 const char kDataReductionProxyDev[]      = "spdy-proxy-dev-auth-origin";
 
@@ -49,6 +42,15 @@ const char kDataReductionProxyWarmupURL[] = "data-reduction-proxy-warmup-url";
 // The origin of the data reduction SSL proxy.
 const char kDataReductionSSLProxy[] = "data-reduction-ssl-proxy";
 
+// The mode for Data Reduction Proxy Lo-Fi. The various modes are always-on,
+// cellular-only, slow connections only and disabled.
+const char kDataReductionProxyLoFi[] = "data-reduction-proxy-lo-fi";
+const char kDataReductionProxyLoFiValueAlwaysOn[] = "always-on";
+const char kDataReductionProxyLoFiValueCellularOnly[] = "cellular-only";
+const char kDataReductionProxyLoFiValueDisabled[] = "disabled";
+const char kDataReductionProxyLoFiValueSlowConnectionsOnly[] =
+    "slow-connections-only";
+
 // Disables the origin of the data reduction proxy dev.
 const char kDisableDataReductionProxyDev[] =
     "disable-spdy-proxy-dev-auth-origin";
@@ -57,15 +59,12 @@ const char kDisableDataReductionProxyDev[] =
 const char kEnableDataReductionProxyDev[] =
     "enable-spdy-proxy-dev-auth-origin";
 
+// Enables the origin of the carrier test data reduction proxy.
+const char kEnableDataReductionProxyCarrierTest[] =
+    "enable-data-reduction-proxy-carrier-test";
+
 // Enable the data reduction proxy.
 const char kEnableDataReductionProxy[] = "enable-spdy-proxy-auth";
-
-// Enable the alternative data reduction proxy.
-const char kEnableDataReductionProxyAlt[] = "enable-data-reduction-proxy-alt";
-
-// Enable Data Reduction Proxy Lo-Fi mode.
-const char kEnableDataReductionProxyLoFi[] =
-    "enable-data-reduction-proxy-lo-fi";
 
 // Enable the data reduction proxy bypass warning.
 const char kEnableDataReductionProxyBypassWarning[] =

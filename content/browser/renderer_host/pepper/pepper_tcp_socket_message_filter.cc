@@ -36,6 +36,10 @@
 #include "ppapi/proxy/tcp_socket_resource_base.h"
 #include "ppapi/shared_impl/private/net_address_private_impl.h"
 
+#if defined(OS_CHROMEOS)
+#include "chromeos/network/firewall_hole.h"
+#endif  // defined(OS_CHROMEOS)
+
 using ppapi::NetAddressPrivateImpl;
 using ppapi::host::NetErrorToPepperError;
 using ppapi::proxy::TCPSocketResourceBase;
@@ -73,7 +77,9 @@ PepperTCPSocketMessageFilter::PepperTCPSocketMessageFilter(
       ssl_context_helper_(host->ssl_context_helper()),
       pending_accept_(false),
       pending_read_on_unthrottle_(false),
-      pending_read_net_result_(0) {
+      pending_read_net_result_(0),
+      is_potentially_secure_plugin_context_(
+          host->IsPotentiallySecurePluginContext(instance)) {
   DCHECK(host);
   ++g_num_instances;
   host_->AddInstanceObserver(instance_, this);
@@ -106,7 +112,9 @@ PepperTCPSocketMessageFilter::PepperTCPSocketMessageFilter(
       ssl_context_helper_(host->ssl_context_helper()),
       pending_accept_(false),
       pending_read_on_unthrottle_(false),
-      pending_read_net_result_(0) {
+      pending_read_net_result_(0),
+      is_potentially_secure_plugin_context_(
+          host->IsPotentiallySecurePluginContext(instance)) {
   DCHECK(host);
   DCHECK_NE(version, ppapi::TCP_SOCKET_VERSION_1_0);
 
@@ -470,6 +478,10 @@ int32_t PepperTCPSocketMessageFilter::OnMsgClose(
     return PP_OK;
 
   state_.DoTransition(TCPSocketState::CLOSE, true);
+#if defined(OS_CHROMEOS)
+  // Close the firewall hole, it is no longer needed.
+  firewall_hole_.reset();
+#endif  // defined(OS_CHROMEOS)
   // Make sure we get no further callbacks from |socket_| or |ssl_socket_|.
   if (socket_) {
     socket_->Close();
@@ -713,8 +725,11 @@ void PepperTCPSocketMessageFilter::DoListen(
   }
 
   int32_t pp_result = NetErrorToPepperError(socket_->Listen(backlog));
-  SendListenReply(context, pp_result);
-  state_.DoTransition(TCPSocketState::LISTEN, pp_result == PP_OK);
+#if defined(OS_CHROMEOS)
+  OpenFirewallHole(context, pp_result);
+#else
+  OnListenCompleted(context, pp_result);
+#endif
 }
 
 void PepperTCPSocketMessageFilter::OnResolveCompleted(
@@ -926,6 +941,47 @@ void PepperTCPSocketMessageFilter::OnWriteCompleted(
   write_buffer_base_ = NULL;
 }
 
+void PepperTCPSocketMessageFilter::OnListenCompleted(
+    const ppapi::host::ReplyMessageContext& context,
+    int32_t pp_result) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  SendListenReply(context, pp_result);
+  state_.DoTransition(TCPSocketState::LISTEN, pp_result == PP_OK);
+}
+
+#if defined(OS_CHROMEOS)
+void PepperTCPSocketMessageFilter::OpenFirewallHole(
+    const ppapi::host::ReplyMessageContext& context,
+    int32_t pp_result) {
+  if (pp_result != PP_OK) {
+    return;
+  }
+
+  net::IPEndPoint local_addr;
+  // Has already been called successfully in DoBind().
+  socket_->GetLocalAddress(&local_addr);
+  pepper_socket_utils::FirewallHoleOpenCallback callback =
+      base::Bind(&PepperTCPSocketMessageFilter::OnFirewallHoleOpened, this,
+                 context, pp_result);
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(&pepper_socket_utils::OpenTCPFirewallHole,
+                                     local_addr, callback));
+}
+
+void PepperTCPSocketMessageFilter::OnFirewallHoleOpened(
+    const ppapi::host::ReplyMessageContext& context,
+    int32_t result,
+    scoped_ptr<chromeos::FirewallHole> hole) {
+  LOG_IF(WARNING, !hole.get()) << "Firewall hole could not be opened.";
+  firewall_hole_.reset(hole.release());
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&PepperTCPSocketMessageFilter::OnListenCompleted, this,
+                 context, result));
+}
+#endif  // defined(OS_CHROMEOS)
+
 void PepperTCPSocketMessageFilter::OnAcceptCompleted(
     const ppapi::host::ReplyMessageContext& context,
     int net_result) {
@@ -1002,7 +1058,7 @@ void PepperTCPSocketMessageFilter::SendConnectReply(
     const PP_NetAddress_Private& local_addr,
     const PP_NetAddress_Private& remote_addr) {
   UMA_HISTOGRAM_BOOLEAN("Pepper.PluginContextSecurity.TCPConnect",
-                        host_->IsPotentiallySecurePluginContext(instance_));
+                        is_potentially_secure_plugin_context_);
 
   ppapi::host::ReplyMessageContext reply_context(context);
   reply_context.params.set_result(pp_result);

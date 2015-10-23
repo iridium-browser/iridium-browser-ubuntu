@@ -45,9 +45,6 @@ class PermissionMenuButton : public views::MenuButton,
                        bool show_menu_marker);
   ~PermissionMenuButton() override;
 
-  // Overridden from views::LabelButton.
-  void SetText(const base::string16& text) override;
-
   // Overridden from views::View.
   void GetAccessibleState(ui::AXViewState* state) override;
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
@@ -71,14 +68,14 @@ PermissionMenuButton::PermissionMenuButton(const base::string16& text,
                                            bool show_menu_marker)
     : MenuButton(NULL, text, this, show_menu_marker),
       menu_model_(model) {
+  // Update the themed border before the NativeTheme is applied. Usually this
+  // happens in a call to LabelButton::OnNativeThemeChanged(). However, if
+  // PermissionMenuButton called that from its override, the NativeTheme would
+  // be available, and the button would get native GTK styling on Linux.
+  UpdateThemedBorder();
 }
 
 PermissionMenuButton::~PermissionMenuButton() {
-}
-
-void PermissionMenuButton::SetText(const base::string16& text) {
-  MenuButton::SetText(text);
-  SizeToPreferredSize();
 }
 
 void PermissionMenuButton::GetAccessibleState(ui::AXViewState* state) {
@@ -87,11 +84,11 @@ void PermissionMenuButton::GetAccessibleState(ui::AXViewState* state) {
 }
 
 void PermissionMenuButton::OnNativeThemeChanged(const ui::NativeTheme* theme) {
-  SetTextColor(views::Button::STATE_NORMAL, GetNativeTheme()->GetSystemColor(
+  SetTextColor(views::Button::STATE_NORMAL, theme->GetSystemColor(
       ui::NativeTheme::kColorId_LabelEnabledColor));
-  SetTextColor(views::Button::STATE_HOVERED, GetNativeTheme()->GetSystemColor(
+  SetTextColor(views::Button::STATE_HOVERED, theme->GetSystemColor(
       ui::NativeTheme::kColorId_LabelEnabledColor));
-  SetTextColor(views::Button::STATE_DISABLED, GetNativeTheme()->GetSystemColor(
+  SetTextColor(views::Button::STATE_DISABLED, theme->GetSystemColor(
       ui::NativeTheme::kColorId_LabelDisabledColor));
 }
 
@@ -213,6 +210,7 @@ void PermissionSelectorView::PermissionChanged(
   menu_button_->SetText(WebsiteSettingsUI::PermissionActionToUIString(
       permission.type, permission.setting, permission.default_setting,
       content_settings::SETTING_SOURCE_USER));
+  menu_button_->SizeToPreferredSize();
 
   FOR_EACH_OBSERVER(PermissionSelectorViewObserver,
                     observer_list_,

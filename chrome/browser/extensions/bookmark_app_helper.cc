@@ -29,6 +29,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/browser/notification_types.h"
@@ -253,10 +254,11 @@ class BookmarkAppInstaller : public base::RefCounted<BookmarkAppInstaller>,
     bitmap_fetcher_.reset(
         new chrome::BitmapFetcher(urls_to_download_.back(), this));
     urls_to_download_.pop_back();
-    bitmap_fetcher_->Start(
+    bitmap_fetcher_->Init(
         service_->profile()->GetRequestContext(), std::string(),
         net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
         net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES);
+    bitmap_fetcher_->Start();
   }
 
   void FinishInstallation() {
@@ -363,6 +365,29 @@ void BookmarkAppHelper::GenerateIcon(
       new GeneratedIconImageSource(letter, color, output_size),
       gfx::Size(output_size, output_size));
   icon_image.bitmap()->deepCopyTo(&(*bitmaps)[output_size].bitmap);
+}
+
+// static
+bool BookmarkAppHelper::BookmarkOrHostedAppInstalled(
+    content::BrowserContext* browser_context,
+    const GURL& url) {
+  ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context);
+  const ExtensionSet& extensions = registry->enabled_extensions();
+
+  // Iterate through the extensions and extract the LaunchWebUrl (bookmark apps)
+  // or check the web extent (hosted apps).
+  for (extensions::ExtensionSet::const_iterator iter = extensions.begin();
+       iter != extensions.end(); ++iter) {
+    const Extension* extension = iter->get();
+    if (!extension->is_hosted_app())
+      continue;
+
+    if (extension->web_extent().MatchesURL(url) ||
+        AppLaunchInfo::GetLaunchWebURL(extension) == url) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // static
@@ -483,12 +508,24 @@ BookmarkAppHelper::~BookmarkAppHelper() {}
 void BookmarkAppHelper::Create(const CreateBookmarkAppCallback& callback) {
   callback_ = callback;
 
-  if (contents_) {
+  // Do not fetch the manifest for extension URLs.
+  if (contents_ &&
+      !contents_->GetVisibleURL().SchemeIs(extensions::kExtensionScheme)) {
     contents_->GetManifest(base::Bind(&BookmarkAppHelper::OnDidGetManifest,
                                      base::Unretained(this)));
   } else {
     OnIconsDownloaded(true, std::map<GURL, std::vector<SkBitmap> >());
   }
+}
+
+void BookmarkAppHelper::CreateFromAppBanner(
+    const CreateBookmarkAppCallback& callback,
+    const content::Manifest& manifest) {
+  DCHECK(!manifest.short_name.is_null() || !manifest.name.is_null());
+  DCHECK(manifest.start_url.is_valid());
+
+  callback_ = callback;
+  OnDidGetManifest(manifest);
 }
 
 void BookmarkAppHelper::OnDidGetManifest(const content::Manifest& manifest) {
@@ -721,7 +758,7 @@ void GetWebApplicationInfoFromApp(
 }
 
 bool IsValidBookmarkAppUrl(const GURL& url) {
-  URLPattern origin_only_pattern(Extension::kValidWebExtentSchemes);
+  URLPattern origin_only_pattern(Extension::kValidBookmarkAppSchemes);
   origin_only_pattern.SetMatchAllURLs(true);
   return url.is_valid() && origin_only_pattern.MatchesURL(url);
 }

@@ -4,8 +4,8 @@
 
 #include "extensions/browser/test_extensions_browser_client.h"
 
+#include "base/values.h"
 #include "content/public/browser/browser_context.h"
-#include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_host_delegate.h"
 #include "extensions/browser/test_runtime_api_delegate.h"
 #include "extensions/browser/updater/null_extension_cache.h"
@@ -140,10 +140,6 @@ bool TestExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {
 void TestExtensionsBrowserClient::PermitExternalProtocolHandler() {
 }
 
-scoped_ptr<AppSorting> TestExtensionsBrowserClient::CreateAppSorting() {
-  return scoped_ptr<AppSorting>();
-}
-
 bool TestExtensionsBrowserClient::IsRunningInForcedAppMode() { return false; }
 
 ApiActivityMonitor* TestExtensionsBrowserClient::GetApiActivityMonitor(
@@ -177,9 +173,9 @@ TestExtensionsBrowserClient::GetComponentExtensionResourceManager() {
 }
 
 void TestExtensionsBrowserClient::BroadcastEventToRenderers(
+    events::HistogramValue histogram_value,
     const std::string& event_name,
-    scoped_ptr<base::ListValue> args) {
-}
+    scoped_ptr<base::ListValue> args) {}
 
 net::NetLog* TestExtensionsBrowserClient::GetNetLog() {
   return NULL;
@@ -196,6 +192,12 @@ bool TestExtensionsBrowserClient::IsBackgroundUpdateAllowed() {
 bool TestExtensionsBrowserClient::IsMinBrowserVersionSupported(
     const std::string& min_version) {
   return true;
+}
+
+ExtensionWebContentsObserver*
+TestExtensionsBrowserClient::GetExtensionWebContentsObserver(
+    content::WebContents* web_contents) {
+  return nullptr;
 }
 
 }  // namespace extensions

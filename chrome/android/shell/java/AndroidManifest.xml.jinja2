@@ -9,12 +9,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.chromium.chrome.shell">
 
-    <uses-sdk android:minSdkVersion="16" android:targetSdkVersion="22" />
+    <uses-sdk android:minSdkVersion="16" android:targetSdkVersion="23" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.BLUETOOTH"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -161,6 +162,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Service Worker Background Sync service listener -->
+        <service android:name="org.chromium.content.browser.BackgroundSyncLauncherService"
+            android:exported="false" />
+        <receiver android:name="org.chromium.content.browser.BackgroundSyncLauncherService$Receiver">
+            <intent-filter>
+                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
+            </intent-filter>
+        </receiver>
+
         <provider android:name="org.chromium.chrome.browser.ChromeBrowserProvider"
                   android:authorities="org.chromium.chrome.shell"
                   android:exported="true" />
@@ -174,9 +184,9 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Sync adapter for browser sync. -->
+        <!-- Sync adapter for browser invalidation. -->
         <service android:exported="false"
-                 android:name="org.chromium.chrome.shell.sync.ChromeShellSyncAdapterService">
+                 android:name="org.chromium.chrome.shell.invalidation.ChromeShellSyncAdapterService">
             <intent-filter>
                 <action android:name="android.content.SyncAdapter" />
             </intent-filter>
@@ -206,6 +216,10 @@
                 <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
             </intent-filter>
         </receiver>
+
+        <!-- Service for the media playback control notification -->
+        <service android:name="org.chromium.chrome.browser.media.ui.NotificationMediaPlaybackControl$ListenerService"
+            android:exported="false" />
 
         <!-- Activity, service, and meta-data to support casting to Chromecast -->
 

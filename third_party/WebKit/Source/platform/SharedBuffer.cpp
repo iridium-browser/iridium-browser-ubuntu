@@ -27,8 +27,8 @@
 #include "config.h"
 #include "platform/SharedBuffer.h"
 
-#include "wtf/unicode/Unicode.h"
-#include "wtf/unicode/UTF8.h"
+#include "wtf/text/UTF8.h"
+#include "wtf/text/Unicode.h"
 
 #undef SHARED_BUFFER_STATS
 
@@ -39,8 +39,6 @@
 #endif
 
 namespace blink {
-
-STATIC_CONST_MEMBER_DEFINITION const unsigned SharedBuffer::kSegmentSize;
 
 static inline unsigned segmentIndex(unsigned position)
 {
@@ -271,7 +269,7 @@ void SharedBuffer::append(const char* data, unsigned length)
         data += bytesToCopy;
         segment = allocateSegment();
         m_segments.append(segment);
-        bytesToCopy = std::min(length, kSegmentSize);
+        bytesToCopy = std::min(length, static_cast<unsigned>(kSegmentSize));
     }
 }
 
@@ -314,7 +312,7 @@ void SharedBuffer::mergeSegmentsIntoBuffer() const
     if (m_size > bufferSize) {
         unsigned bytesLeft = m_size - bufferSize;
         for (unsigned i = 0; i < m_segments.size(); ++i) {
-            unsigned bytesToCopy = std::min(bytesLeft, kSegmentSize);
+            unsigned bytesToCopy = std::min(bytesLeft, static_cast<unsigned>(kSegmentSize));
             m_buffer.append(m_segments[i], bytesToCopy);
             bytesLeft -= bytesToCopy;
             freeSegment(m_segments[i]);

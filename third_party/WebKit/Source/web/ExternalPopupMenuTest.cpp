@@ -6,10 +6,10 @@
 #include "web/ExternalPopupMenu.h"
 
 #include "core/HTMLNames.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/frame/FrameHost.h"
-#include "core/frame/PinchViewport.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLSelectElement.h"
-#include "core/html/forms/PopupMenuClient.h"
 #include "core/layout/LayoutMenuList.h"
 #include "core/page/Page.h"
 #include "core/testing/DummyPageHolder.h"
@@ -24,83 +24,32 @@
 #include "web/tests/FrameTestHelpers.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
-
-const size_t kListSize = 7;
-
-class TestPopupMenuClient : public PopupMenuClient {
-public:
-    TestPopupMenuClient() : m_listSize(0) { }
-    virtual ~TestPopupMenuClient() { }
-
-    virtual void valueChanged(unsigned listIndex, bool fireEvents = true) override { }
-    virtual void selectionChanged(unsigned listIndex, bool fireEvents = true) override { }
-    virtual void selectionCleared() override { }
-
-    virtual String itemText(unsigned listIndex) const override { return emptyString(); }
-    virtual String itemToolTip(unsigned listIndex) const override { return emptyString(); }
-    virtual String itemAccessibilityText(unsigned listIndex) const override { return emptyString(); }
-    virtual bool itemIsEnabled(unsigned listIndex) const override { return true; }
-    virtual PopupMenuStyle itemStyle(unsigned listIndex) const override
-    {
-        FontDescription fontDescription;
-        fontDescription.setComputedSize(12.0);
-        Font font(fontDescription);
-        font.update(nullptr);
-        bool displayNone = m_displayNoneIndexSet.find(listIndex) != m_displayNoneIndexSet.end();
-        return PopupMenuStyle(Color::black, Color::white, font, true, displayNone, Length(), TextDirection(), false);
-    }
-    virtual PopupMenuStyle menuStyle() const override { return itemStyle(0); }
-    virtual LayoutUnit clientPaddingLeft() const override { return 0; }
-    virtual LayoutUnit clientPaddingRight() const override { return 0; }
-    virtual int listSize() const override { return m_listSize; }
-    virtual int selectedIndex() const override { return 0; }
-    virtual void popupDidHide() override { }
-    virtual void popupDidCancel() override { }
-    virtual bool itemIsSeparator(unsigned listIndex) const override { return false;}
-    virtual bool itemIsLabel(unsigned listIndex) const override { return false; }
-    virtual bool itemIsSelected(unsigned listIndex) const override { return listIndex == 0;}
-    virtual void provisionalSelectionChanged(unsigned listIndex) override { }
-    virtual bool multiple() const override { return false; }
-    virtual IntRect elementRectRelativeToViewport() const override { return IntRect(); }
-    virtual Element& ownerElement() const override { return *m_ownerElement; }
-    virtual const ComputedStyle* computedStyleForItem(Element& element) const override { return nullptr; }
-
-    void setListSize(size_t size) { m_listSize = size; }
-    void setDisplayNoneIndex(unsigned index) { m_displayNoneIndexSet.insert(index); }
-    void setOwnerElement(PassRefPtrWillBeRawPtr<Element> element) { m_ownerElement = element; }
-private:
-    size_t m_listSize;
-    std::set<unsigned> m_displayNoneIndexSet;
-    RefPtrWillBePersistent<Element> m_ownerElement;
-};
+namespace blink {
 
 class ExternalPopupMenuDisplayNoneItemsTest : public testing::Test {
 public:
     ExternalPopupMenuDisplayNoneItemsTest() { }
 
 protected:
-    virtual void SetUp() override
+    void SetUp() override
     {
-        m_popupMenuClient.setListSize(kListSize);
-
+        m_dummyPageHolder = DummyPageHolder::create(IntSize(800, 600));
+        RefPtrWillBeRawPtr<HTMLSelectElement> element = HTMLSelectElement::create(m_dummyPageHolder->document());
         // Set the 4th an 5th items to have "display: none" property
-        m_popupMenuClient.setDisplayNoneIndex(3);
-        m_popupMenuClient.setDisplayNoneIndex(4);
-
-        OwnPtr<DummyPageHolder> dummyPageHolder = DummyPageHolder::create(IntSize(800, 600));
-        m_popupMenuClient.setOwnerElement(HTMLSelectElement::create(dummyPageHolder->document()));
+        element->setInnerHTML("<option><option><option><option style='display:none;'><option style='display:none;'><option><option>", ASSERT_NO_EXCEPTION);
+        m_dummyPageHolder->document().body()->appendChild(element.get(), ASSERT_NO_EXCEPTION);
+        m_ownerElement = element.release();
+        m_dummyPageHolder->document().updateLayoutIgnorePendingStylesheets();
     }
 
-    TestPopupMenuClient m_popupMenuClient;
+    OwnPtr<DummyPageHolder> m_dummyPageHolder;
+    RefPtrWillBePersistent<HTMLSelectElement> m_ownerElement;
 };
 
 TEST_F(ExternalPopupMenuDisplayNoneItemsTest, PopupMenuInfoSizeTest)
 {
     WebPopupMenuInfo info;
-    ExternalPopupMenu::getPopupMenuInfo(info, m_popupMenuClient);
+    ExternalPopupMenu::getPopupMenuInfo(info, *m_ownerElement);
     EXPECT_EQ(5U, info.items.size());
 }
 
@@ -108,17 +57,17 @@ TEST_F(ExternalPopupMenuDisplayNoneItemsTest, IndexMappingTest)
 {
     // 6th indexed item in popupmenu would be the 4th item in ExternalPopupMenu,
     // and vice-versa.
-    EXPECT_EQ(4, ExternalPopupMenu::toExternalPopupMenuItemIndex(6, m_popupMenuClient));
-    EXPECT_EQ(6, ExternalPopupMenu::toPopupMenuItemIndex(4, m_popupMenuClient));
+    EXPECT_EQ(4, ExternalPopupMenu::toExternalPopupMenuItemIndex(6, *m_ownerElement));
+    EXPECT_EQ(6, ExternalPopupMenu::toPopupMenuItemIndex(4, *m_ownerElement));
 
     // Invalid index, methods should return -1.
-    EXPECT_EQ(-1, ExternalPopupMenu::toExternalPopupMenuItemIndex(8, m_popupMenuClient));
-    EXPECT_EQ(-1, ExternalPopupMenu::toPopupMenuItemIndex(8, m_popupMenuClient));
+    EXPECT_EQ(-1, ExternalPopupMenu::toExternalPopupMenuItemIndex(8, *m_ownerElement));
+    EXPECT_EQ(-1, ExternalPopupMenu::toPopupMenuItemIndex(8, *m_ownerElement));
 }
 
 class ExternalPopupMenuWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
 public:
-    virtual WebExternalPopupMenu* createExternalPopupMenu(const WebPopupMenuInfo&, WebExternalPopupMenuClient*) override
+    WebExternalPopupMenu* createExternalPopupMenu(const WebPopupMenuInfo&, WebExternalPopupMenuClient*) override
     {
         return &m_mockWebExternalPopupMenu;
     }
@@ -128,11 +77,11 @@ public:
     }
 private:
     class MockWebExternalPopupMenu : public WebExternalPopupMenu {
-        virtual void show(const WebRect& bounds) override
+        void show(const WebRect& bounds) override
         {
             m_shownBounds = bounds;
         }
-        virtual void close() override { }
+        void close() override { }
 
     public:
         WebRect shownBounds() const
@@ -152,12 +101,12 @@ public:
     ExternalPopupMenuTest() : m_baseURL("http://www.test.com") { }
 
 protected:
-    virtual void SetUp() override
+    void SetUp() override
     {
         m_helper.initialize(false, &m_webFrameClient, &m_webViewClient);
         webView()->setUseExternalPopupMenus(true);
     }
-    virtual void TearDown() override
+    void TearDown() override
     {
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
@@ -183,7 +132,7 @@ private:
     FrameTestHelpers::WebViewHelper m_helper;
 };
 
-TEST_F(ExternalPopupMenuTest, PopupAccountsForPinchViewportOffset)
+TEST_F(ExternalPopupMenuTest, PopupAccountsForVisualViewportOffset)
 {
     registerMockedURLLoad("select_mid_screen.html");
     loadFrame("select_mid_screen.html");
@@ -195,15 +144,15 @@ TEST_F(ExternalPopupMenuTest, PopupAccountsForPinchViewportOffset)
     LayoutMenuList* menuList = toLayoutMenuList(select->layoutObject());
     ASSERT_TRUE(menuList);
 
-    PinchViewport& pinchViewport = webView()->page()->frameHost().pinchViewport();
+    VisualViewport& visualViewport = webView()->page()->frameHost().visualViewport();
 
     IntRect rectInDocument = menuList->absoluteBoundingBoxRect();
 
     webView()->setPageScaleFactor(2);
     IntPoint scrollDelta(20, 30);
-    pinchViewport.move(scrollDelta);
+    visualViewport.move(scrollDelta);
 
-    menuList->showPopup();
+    select->showPopup();
 
     EXPECT_EQ(rectInDocument.x() - scrollDelta.x(), client().shownBounds().x);
     EXPECT_EQ(rectInDocument.y() - scrollDelta.y(), client().shownBounds().y);
@@ -218,12 +167,12 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndex)
     LayoutMenuList* menuList = toLayoutMenuList(select->layoutObject());
     ASSERT_TRUE(menuList);
 
-    menuList->showPopup();
-    ASSERT_TRUE(menuList->popupIsVisible());
+    select->showPopup();
+    ASSERT_TRUE(select->popupIsVisible());
 
-    WebExternalPopupMenuClient* client = static_cast<ExternalPopupMenu*>(menuList->popup());
+    WebExternalPopupMenuClient* client = static_cast<ExternalPopupMenu*>(select->popup());
     client->didAcceptIndex(2);
-    EXPECT_FALSE(menuList->popupIsVisible());
+    EXPECT_FALSE(select->popupIsVisible());
     ASSERT_STREQ("2", menuList->text().utf8().data());
     EXPECT_EQ(2, select->selectedIndex());
 }
@@ -237,14 +186,14 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndices)
     LayoutMenuList* menuList = toLayoutMenuList(select->layoutObject());
     ASSERT_TRUE(menuList);
 
-    menuList->showPopup();
-    ASSERT_TRUE(menuList->popupIsVisible());
+    select->showPopup();
+    ASSERT_TRUE(select->popupIsVisible());
 
-    WebExternalPopupMenuClient* client = static_cast<ExternalPopupMenu*>(menuList->popup());
+    WebExternalPopupMenuClient* client = static_cast<ExternalPopupMenu*>(select->popup());
     int indices[] = { 2 };
     WebVector<int> indicesVector(indices, 1);
     client->didAcceptIndices(indicesVector);
-    EXPECT_FALSE(menuList->popupIsVisible());
+    EXPECT_FALSE(select->popupIsVisible());
     EXPECT_STREQ("2", menuList->text().utf8().data());
     EXPECT_EQ(2, select->selectedIndex());
 }
@@ -258,14 +207,14 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndicesClearSelect)
     LayoutMenuList* menuList = toLayoutMenuList(select->layoutObject());
     ASSERT_TRUE(menuList);
 
-    menuList->showPopup();
-    ASSERT_TRUE(menuList->popupIsVisible());
+    select->showPopup();
+    ASSERT_TRUE(select->popupIsVisible());
 
-    WebExternalPopupMenuClient* client = static_cast<ExternalPopupMenu*>(menuList->popup());
+    WebExternalPopupMenuClient* client = static_cast<ExternalPopupMenu*>(select->popup());
     WebVector<int> indices;
     client->didAcceptIndices(indices);
-    EXPECT_FALSE(menuList->popupIsVisible());
+    EXPECT_FALSE(select->popupIsVisible());
     EXPECT_EQ(-1, select->selectedIndex());
 }
 
-} // namespace
+} // namespace blink

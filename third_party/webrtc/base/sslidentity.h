@@ -107,6 +107,8 @@ class SSLCertChain {
   DISALLOW_COPY_AND_ASSIGN(SSLCertChain);
 };
 
+enum KeyType { KT_RSA, KT_ECDSA, KT_LAST, KT_DEFAULT = KT_RSA };
+
 // Parameters for generating an identity for testing. If common_name is
 // non-empty, it will be used for the certificate's subject and issuer name,
 // otherwise a random string will be used. |not_before| and |not_after| are
@@ -115,6 +117,7 @@ struct SSLIdentityParams {
   std::string common_name;
   int not_before;  // in seconds.
   int not_after;  // in seconds.
+  KeyType key_type;
 };
 
 // Our identity in an SSL negotiation: a keypair and certificate (both
@@ -127,7 +130,8 @@ class SSLIdentity {
   // subject and issuer name, otherwise a random string will be used.
   // Returns NULL on failure.
   // Caller is responsible for freeing the returned object.
-  static SSLIdentity* Generate(const std::string& common_name);
+  static SSLIdentity* Generate(const std::string& common_name,
+                               KeyType key_type);
 
   // Generates an identity with the specified validity period.
   static SSLIdentity* GenerateForTest(const SSLIdentityParams& params);
@@ -157,6 +161,7 @@ class SSLIdentity {
 
 extern const char kPemTypeCertificate[];
 extern const char kPemTypeRsaPrivateKey[];
+extern const char kPemTypeEcPrivateKey[];
 
 }  // namespace rtc
 

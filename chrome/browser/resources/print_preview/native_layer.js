@@ -67,6 +67,12 @@ cr.define('print_preview', function() {
         this.onEnableManipulateSettingsForTest_.bind(this);
     global.printPresetOptionsFromDocument =
         this.onPrintPresetOptionsFromDocument_.bind(this);
+   global.detectDistillablePage =
+        this.detectDistillablePage_.bind(this);
+    global.onProvisionalPrinterResolved =
+        this.onProvisionalDestinationResolved_.bind(this);
+    global.failedToResolveProvisionalPrinter =
+        this.failedToResolveProvisionalDestination_.bind(this);
   };
 
   /**
@@ -76,6 +82,7 @@ cr.define('print_preview', function() {
    */
   NativeLayer.EventType = {
     ACCESS_TOKEN_READY: 'print_preview.NativeLayer.ACCESS_TOKEN_READY',
+    ALLOW_DISTILL_PAGE: 'print_preview.NativeLayer.ALLOW_DISTILL_PAGE',
     CAPABILITIES_SET: 'print_preview.NativeLayer.CAPABILITIES_SET',
     CLOUD_PRINT_ENABLE: 'print_preview.NativeLayer.CLOUD_PRINT_ENABLE',
     DESTINATIONS_RELOAD: 'print_preview.NativeLayer.DESTINATIONS_RELOAD',
@@ -106,6 +113,8 @@ cr.define('print_preview', function() {
     EXTENSION_CAPABILITIES_SET:
         'print_preview.NativeLayer.EXTENSION_CAPABILITIES_SET',
     PRINT_PRESET_OPTIONS: 'print_preview.NativeLayer.PRINT_PRESET_OPTIONS',
+    PROVISIONAL_DESTINATION_RESOLVED:
+        'print_preview.NativeLayer.PROVISIONAL_DESTINATION_RESOLVED'
   };
 
   /**
@@ -214,6 +223,18 @@ cr.define('print_preview', function() {
     },
 
     /**
+     * Requests Chrome to resolve provisional extension destination by granting
+     * the provider extension access to the printer. Chrome will respond with
+     * the resolved destination properties by calling
+     * {@code onProvisionalPrinterResolved}, or in case of an error
+     * {@code failedToResolveProvisionalPrinter}
+     * @param {string} provisionalDestinationId
+     */
+    grantExtensionPrinterAccess: function(provisionalDestinationId) {
+      chrome.send('grantExtensionPrinterAccess', [provisionalDestinationId]);
+    },
+
+    /**
      * @param {!print_preview.Destination} destination Destination to print to.
      * @param {!print_preview.ticket_items.Color} color Color ticket item.
      * @return {number} Native layer color model.
@@ -255,6 +276,7 @@ cr.define('print_preview', function() {
         'landscape': printTicketStore.landscape.getValue(),
         'color': this.getNativeColorModel_(destination, printTicketStore.color),
         'headerFooterEnabled': printTicketStore.headerFooter.getValue(),
+        'distillPage': printTicketStore.distillPage.getValue(),
         'marginsType': printTicketStore.marginsType.getValue(),
         'isFirstRequest': requestId == 0,
         'requestID': requestId,
@@ -718,6 +740,19 @@ cr.define('print_preview', function() {
     },
 
     /**
+      * Updates the interface to show the "Distill Page" option
+      * when PrintPreviewHandler::HandleIsPageDistillableResult
+      * determines that this page can be distilled with the
+      * DOM Distiller.
+      * @private
+      */
+     detectDistillablePage_: function() {
+       var allowDistillPageEvent = new Event(
+           NativeLayer.EventType.ALLOW_DISTILL_PAGE);
+       this.dispatchEvent(allowDistillPageEvent);
+     },
+
+    /**
      * Simulates a user click on the print preview dialog cancel button. Used
      * only for testing.
      * @private
@@ -770,7 +805,8 @@ cr.define('print_preview', function() {
      *                 extensionName: string,
      *                 id: string,
      *                 name: string,
-     *                 description: (string|undefined)}>} printers The list
+     *                 description: (string|undefined),
+     *                 provisional: (boolean|undefined)}>} printers The list
      *     containing information about printers added by an extension.
      * @param {boolean} done Whether this is the final list of extension
      *     managed printers.
@@ -794,6 +830,42 @@ cr.define('print_preview', function() {
       event.printerId = printerId;
       event.capabilities = capabilities;
       this.dispatchEvent(event);
+    },
+
+    /**
+     * Called when Chrome reports that attempt to resolve a provisional
+     * destination failed.
+     * @param {string} destinationId The provisional destination ID.
+     * @private
+     */
+    failedToResolveProvisionalDestination_: function(destinationId) {
+      var evt = new Event(
+          NativeLayer.EventType.PROVISIONAL_DESTINATION_RESOLVED);
+      evt.provisionalId = destinationId;
+      evt.destination = null;
+      this.dispatchEvent(evt);
+    },
+
+    /**
+     * Called when Chrome reports that a provisional destination has been
+     * successfully resolved.
+     * Currently used only for extension provided destinations.
+     * @param {string} provisionalDestinationId The provisional destination id.
+     * @param {!{extensionId: string,
+     *           extensionName: string,
+     *           id: string,
+     *           name: string,
+     *           description: (string|undefined)}} destinationInfo The resolved
+     *     destination info.
+     * @private
+     */
+    onProvisionalDestinationResolved_: function(provisionalDestinationId,
+                                                destinationInfo) {
+      var evt = new Event(
+          NativeLayer.EventType.PROVISIONAL_DESTINATION_RESOLVED);
+      evt.provisionalId = provisionalDestinationId;
+      evt.destination = destinationInfo;
+      this.dispatchEvent(evt);
     },
 
    /**

@@ -42,12 +42,12 @@ class MediaQuerySet;
 // will be called whenever the value of the query changes.
 
 class CORE_EXPORT MediaQueryList final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<MediaQueryList>, public ActiveDOMObject {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCounted<MediaQueryList>);
+    REFCOUNTED_EVENT_TARGET(MediaQueryList);
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaQueryList);
 public:
     static PassRefPtrWillBeRawPtr<MediaQueryList> create(ExecutionContext*, PassRefPtrWillBeRawPtr<MediaQueryMatcher>, PassRefPtrWillBeRawPtr<MediaQuerySet>);
-    virtual ~MediaQueryList();
+    ~MediaQueryList() override;
 
     String media() const;
     bool matches();
@@ -56,8 +56,8 @@ public:
 
     // These two functions are provided for compatibility with JS code
     // written before the change listener became a DOM event.
-    void addDeprecatedListener(PassRefPtr<EventListener>);
-    void removeDeprecatedListener(PassRefPtr<EventListener>);
+    void addDeprecatedListener(PassRefPtrWillBeRawPtr<EventListener>);
+    void removeDeprecatedListener(PassRefPtrWillBeRawPtr<EventListener>);
 
     // C++ code can use these functions to listen to changes instead of having to use DOM event listeners.
     void addListener(PassRefPtrWillBeRawPtr<MediaQueryListListener>);
@@ -69,11 +69,11 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
     // From ActiveDOMObject
-    virtual bool hasPendingActivity() const override;
-    virtual void stop() override;
+    bool hasPendingActivity() const override;
+    void stop() override;
 
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override;
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
 
 private:
     MediaQueryList(ExecutionContext*, PassRefPtrWillBeRawPtr<MediaQueryMatcher>, PassRefPtrWillBeRawPtr<MediaQuerySet>);

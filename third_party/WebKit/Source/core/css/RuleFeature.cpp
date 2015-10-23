@@ -135,7 +135,6 @@ static bool supportsInvalidation(CSSSelector::PseudoType type)
     case CSSSelector::PseudoSingleButton:
     case CSSSelector::PseudoNoButton:
     case CSSSelector::PseudoFullScreen:
-    case CSSSelector::PseudoFullScreenDocument:
     case CSSSelector::PseudoFullScreenAncestor:
     case CSSSelector::PseudoInRange:
     case CSSSelector::PseudoOutOfRange:
@@ -150,7 +149,6 @@ static bool supportsInvalidation(CSSSelector::PseudoType type)
     case CSSSelector::PseudoSpatialNavigationFocus:
     case CSSSelector::PseudoListBox:
         return true;
-    case CSSSelector::PseudoNotParsed:
     case CSSSelector::PseudoUnknown:
     case CSSSelector::PseudoLeftPage:
     case CSSSelector::PseudoRightPage:
@@ -178,7 +176,7 @@ static bool supportsInvalidationWithSelectorList(CSSSelector::PseudoType pseudo)
 
 static bool requiresSubtreeInvalidation(const CSSSelector& selector)
 {
-    if (!selector.matchesPseudoElement() && selector.match() != CSSSelector::PseudoClass) {
+    if (selector.match() != CSSSelector::PseudoElement && selector.match() != CSSSelector::PseudoClass) {
         ASSERT(supportsInvalidation(selector.match()));
         return false;
     }
@@ -221,7 +219,7 @@ bool RuleFeatureSet::extractInvalidationSetFeature(const CSSSelector& selector, 
         features.classes.append(selector.value());
     else if (selector.isAttributeSelector())
         features.attributes.append(selector.attribute().localName());
-    else if (selector.isCustomPseudoElement())
+    else if (selector.pseudoType() == CSSSelector::PseudoWebKitCustomElement)
         features.customPseudoElement = true;
     else if (selector.pseudoType() == CSSSelector::PseudoBefore || selector.pseudoType() == CSSSelector::PseudoAfter)
         features.hasBeforeOrAfter = true;
@@ -482,7 +480,7 @@ void RuleFeatureSet::collectFeaturesFromSelector(const CSSSelector& selector, Ru
             metadata.usesFirstLineRules = true;
         if (current->pseudoType() == CSSSelector::PseudoWindowInactive)
             metadata.usesWindowInactiveSelector = true;
-        if (current->isDirectAdjacentSelector()) {
+        if (current->relation() == CSSSelector::DirectAdjacent) {
             maxDirectAdjacentSelectors++;
         } else if (maxDirectAdjacentSelectors
             && ((current->relation() != CSSSelector::SubSelector) || current->isLastInTagHistory())) {

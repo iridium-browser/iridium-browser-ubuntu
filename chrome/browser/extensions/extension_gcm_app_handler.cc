@@ -7,12 +7,17 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/gcm/gcm_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
+#include "chrome/browser/services/gcm/instance_id/instance_id_profile_service.h"
+#include "chrome/browser/services/gcm/instance_id/instance_id_profile_service_factory.h"
 #include "components/gcm_driver/gcm_driver.h"
+#include "components/gcm_driver/instance_id/instance_id_driver.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
@@ -63,9 +68,8 @@ void ExtensionGCMAppHandler::ShutdownHandler() {
   js_event_router_.reset();
 }
 
-void ExtensionGCMAppHandler::OnMessage(
-    const std::string& app_id,
-    const gcm::GCMClient::IncomingMessage& message) {
+void ExtensionGCMAppHandler::OnMessage(const std::string& app_id,
+                                       const gcm::IncomingMessage& message) {
   js_event_router_->OnMessage(app_id, message);
 }
 
@@ -118,10 +122,9 @@ void ExtensionGCMAppHandler::OnExtensionUnloaded(
     // the single function ExtensionService::AddExtension.
     AddDummyAppHandler();
 
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ExtensionGCMAppHandler::RemoveDummyAppHandler,
-                   weak_factory_.GetWeakPtr()));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ExtensionGCMAppHandler::RemoveDummyAppHandler,
+                              weak_factory_.GetWeakPtr()));
   }
 
   // When the extention is being uninstalled, it will be unloaded first. We
@@ -136,9 +139,10 @@ void ExtensionGCMAppHandler::OnExtensionUninstalled(
     const Extension* extension,
     extensions::UninstallReason reason) {
   if (IsGCMPermissionEnabled(extension)) {
-    GetGCMDriver()->Unregister(
-        extension->id(),
-        base::Bind(&ExtensionGCMAppHandler::OnUnregisterCompleted,
+    // Let's first remove InstanceID data. GCM unregistration will be triggered
+    // after the asynchronous call is returned in OnDeleteIDCompleted.
+    GetInstanceIDDriver()->GetInstanceID(extension->id())->DeleteID(
+        base::Bind(&ExtensionGCMAppHandler::OnDeleteIDCompleted,
                    weak_factory_.GetWeakPtr(),
                    extension->id()));
   }
@@ -156,9 +160,35 @@ gcm::GCMDriver* ExtensionGCMAppHandler::GetGCMDriver() const {
   return gcm::GCMProfileServiceFactory::GetForProfile(profile_)->driver();
 }
 
+instance_id::InstanceIDDriver* ExtensionGCMAppHandler::GetInstanceIDDriver()
+    const {
+  return instance_id::InstanceIDProfileServiceFactory::GetForProfile(profile_)->
+      driver();
+}
+
 void ExtensionGCMAppHandler::OnUnregisterCompleted(
     const std::string& app_id, gcm::GCMClient::Result result) {
   RemoveAppHandler(app_id);
+}
+
+void ExtensionGCMAppHandler::OnDeleteIDCompleted(
+    const std::string& app_id, instance_id::InstanceID::Result result) {
+  GetGCMDriver()->Unregister(
+      app_id,
+      base::Bind(&ExtensionGCMAppHandler::OnUnregisterCompleted,
+                 weak_factory_.GetWeakPtr(),
+                 app_id));
+
+  // InstanceIDDriver::RemoveInstanceID will delete the InstanceID itself.
+  // Postpone to do it outside this calling context to avoid any risk to
+  // the caller.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&ExtensionGCMAppHandler::RemoveInstanceID,
+                            weak_factory_.GetWeakPtr(), app_id));
+}
+
+void ExtensionGCMAppHandler::RemoveInstanceID(const std::string& app_id) {
+  GetInstanceIDDriver()->RemoveInstanceID(app_id);
 }
 
 void ExtensionGCMAppHandler::AddAppHandler(const std::string& app_id) {

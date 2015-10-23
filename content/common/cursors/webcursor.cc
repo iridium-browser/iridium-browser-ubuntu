@@ -80,7 +80,7 @@ void WebCursor::GetCursorInfo(CursorInfo* cursor_info) const {
 #endif
 }
 
-bool WebCursor::Deserialize(PickleIterator* iter) {
+bool WebCursor::Deserialize(base::PickleIterator* iter) {
   int type, hotspot_x, hotspot_y, size_x, size_y, data_len;
   float scale;
   const char* data;
@@ -132,7 +132,7 @@ bool WebCursor::Deserialize(PickleIterator* iter) {
   return DeserializePlatformData(iter);
 }
 
-bool WebCursor::Serialize(Pickle* pickle) const {
+bool WebCursor::Serialize(base::Pickle* pickle) const {
   if (!pickle->WriteInt(type_) ||
       !pickle->WriteInt(hotspot_.x()) ||
       !pickle->WriteInt(hotspot_.y()) ||
@@ -231,10 +231,12 @@ void WebCursor::SetCustomData(const SkBitmap& bitmap) {
     return;
 
   // Fill custom_data_ directly with the NativeImage pixels.
-  SkAutoLockPixels bitmap_lock(bitmap);
   custom_data_.resize(bitmap.getSize());
-  if (!custom_data_.empty())
-    memcpy(&custom_data_[0], bitmap.getPixels(), bitmap.getSize());
+  if (!custom_data_.empty()) {
+    //This will divide color values by alpha (un-premultiply) if necessary
+    SkImageInfo dstInfo = bitmap.info().makeAlphaType(kUnpremul_SkAlphaType);
+    bitmap.readPixels(dstInfo, &custom_data_[0], dstInfo.minRowBytes(), 0, 0);
+  }
   custom_size_.set_width(bitmap.width());
   custom_size_.set_height(bitmap.height());
 }
@@ -243,7 +245,10 @@ void WebCursor::ImageFromCustomData(SkBitmap* image) const {
   if (custom_data_.empty())
     return;
 
-  if (!image->tryAllocN32Pixels(custom_size_.width(), custom_size_.height()))
+  SkImageInfo image_info = SkImageInfo::MakeN32(custom_size_.width(),
+                                                custom_size_.height(),
+                                                kUnpremul_SkAlphaType);
+  if (!image->tryAllocPixels(image_info))
     return;
   memcpy(image->getPixels(), &custom_data_[0], custom_data_.size());
 }

@@ -33,7 +33,7 @@
 #if defined(OS_WIN)
 // A vector of filters, each being a Tuple containing a display string (i.e.
 // "Text Files") and a filter pattern (i.e. "*.txt").
-typedef std::vector<Tuple<base::string16, base::string16>>
+typedef std::vector<base::Tuple<base::string16, base::string16>>
     GetOpenFileNameFilter;
 #endif  // OS_WIN
 
@@ -87,8 +87,21 @@ IPC_PROTOBUF_MESSAGE_TRAITS_BEGIN(
 IPC_PROTOBUF_MESSAGE_TRAITS_END()
 
 IPC_PROTOBUF_MESSAGE_TRAITS_BEGIN(
+    safe_browsing::ClientDownloadRequest_MachOHeaders_LoadCommand)
+  IPC_PROTOBUF_MESSAGE_TRAITS_OPTIONAL_FUNDAMENTAL_MEMBER(command_id)
+  IPC_PROTOBUF_MESSAGE_TRAITS_REPEATED_COMPLEX_MEMBER(command)
+IPC_PROTOBUF_MESSAGE_TRAITS_END()
+
+IPC_PROTOBUF_MESSAGE_TRAITS_BEGIN(
+    safe_browsing::ClientDownloadRequest_MachOHeaders)
+  IPC_PROTOBUF_MESSAGE_TRAITS_REPEATED_COMPLEX_MEMBER(mach_header)
+  IPC_PROTOBUF_MESSAGE_TRAITS_REPEATED_COMPLEX_MEMBER(load_commands)
+IPC_PROTOBUF_MESSAGE_TRAITS_END()
+
+IPC_PROTOBUF_MESSAGE_TRAITS_BEGIN(
     safe_browsing::ClientDownloadRequest_ImageHeaders)
   IPC_PROTOBUF_MESSAGE_TRAITS_OPTIONAL_COMPLEX_MEMBER(pe_headers)
+  IPC_PROTOBUF_MESSAGE_TRAITS_REPEATED_COMPLEX_MEMBER(mach_o_headers)
 IPC_PROTOBUF_MESSAGE_TRAITS_END()
 
 IPC_PROTOBUF_MESSAGE_TRAITS_BEGIN(
@@ -106,7 +119,7 @@ IPC_STRUCT_TRAITS_BEGIN(safe_browsing::zip_analyzer::Results)
   IPC_STRUCT_TRAITS_MEMBER(has_executable)
   IPC_STRUCT_TRAITS_MEMBER(has_archive)
   IPC_STRUCT_TRAITS_MEMBER(archived_binary)
-  IPC_STRUCT_TRAITS_MEMBER(archived_archive_filetypes)
+  IPC_STRUCT_TRAITS_MEMBER(archived_archive_filenames)
 IPC_STRUCT_TRAITS_END()
 #endif  // FULL_SAFE_BROWSING
 
@@ -125,10 +138,6 @@ IPC_STRUCT_END()
 //------------------------------------------------------------------------------
 // Utility process messages:
 // These are messages from the browser to the utility process.
-
-// Tell the utility process to parse a JSON string into a Value object.
-IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_ParseJSON,
-                     std::string /* JSON to parse */)
 
 // Tell the utility process to decode the given image data.
 IPC_MESSAGE_CONTROL3(ChromeUtilityMsg_DecodeImage,
@@ -180,7 +189,14 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityMsg_StartupPing)
 IPC_MESSAGE_CONTROL2(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
                      IPC::PlatformFileForTransit /* zip_file */,
                      IPC::PlatformFileForTransit /* temp_file */)
-#endif
+
+#if defined(OS_MACOSX)
+// Tells the utility process to analyze a DMG file for malicious download
+// protection.
+IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_AnalyzeDmgFileForDownloadProtection,
+                     IPC::PlatformFileForTransit /* dmg_file */)
+#endif  // defined(OS_MACOSX)
+#endif  // defined(FULL_SAFE_BROWSING)
 
 #if defined(OS_WIN)
 // Invokes ui::base::win::OpenFileViaShell from the utility process.
@@ -209,29 +225,9 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_GetSaveFileName,
                      ChromeUtilityMsg_GetSaveFileName_Params /* params */)
 #endif  // defined(OS_WIN)
 
-#if defined(OS_ANDROID)
-// Instructs the utility process to detect support for seccomp-bpf,
-// and the result is reported through
-// ChromeUtilityHostMsg_DetectSeccompSupport_Result.
-IPC_MESSAGE_CONTROL0(ChromeUtilityMsg_DetectSeccompSupport)
-#endif
-
 //------------------------------------------------------------------------------
 // Utility process host messages:
 // These are messages from the utility process to the browser.
-
-// Reply when the utility process successfully parsed a JSON string.
-//
-// WARNING: The result can be of any Value subclass type, but we can't easily
-// pass indeterminate value types by const object reference with our IPC macros,
-// so we put the result Value into a ListValue. Handlers should examine the
-// first (and only) element of the ListValue for the actual result.
-IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Succeeded,
-                     base::ListValue)
-
-// Reply when the utility process failed in parsing a JSON string.
-IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Failed,
-                     std::string /* error message, if any*/)
 
 // Reply when the utility process has failed while unpacking and parsing a
 // web resource.  |error_message| is a user-readable explanation of what
@@ -267,7 +263,14 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_ProcessStarted)
 IPC_MESSAGE_CONTROL1(
     ChromeUtilityHostMsg_AnalyzeZipFileForDownloadProtection_Finished,
     safe_browsing::zip_analyzer::Results)
-#endif
+
+#if defined(OS_MACOSX)
+// Reply when a DMG file has been analyzed for malicious download protection.
+IPC_MESSAGE_CONTROL1(
+    ChromeUtilityHostMsg_AnalyzeDmgFileForDownloadProtection_Finished,
+    safe_browsing::zip_analyzer::Results)
+#endif  // defined(OS_MACOSX)
+#endif  // defined(FULL_SAFE_BROWSING)
 
 #if defined(OS_WIN)
 IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_GetOpenFileName_Failed)
@@ -281,10 +284,3 @@ IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GetSaveFileName_Result,
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_BuildDirectWriteFontCache,
                      base::FilePath /* cache file path */)
 #endif  // defined(OS_WIN)
-
-#if defined(OS_ANDROID)
-// Reply to ChromeUtilityMsg_DetectSeccompSupport to report the level
-// of kernel support for seccomp-bpf.
-IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_DetectSeccompSupport_ResultPrctl,
-                     bool /* seccomp prctl supported */)
-#endif

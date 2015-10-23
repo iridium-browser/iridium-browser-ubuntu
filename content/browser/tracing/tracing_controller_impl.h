@@ -31,20 +31,17 @@ class TracingControllerImpl
 
   // TracingController implementation.
   bool GetCategories(const GetCategoriesDoneCallback& callback) override;
-  bool EnableRecording(const base::trace_event::CategoryFilter& category_filter,
-                       const base::trace_event::TraceOptions& trace_options,
+  bool EnableRecording(const base::trace_event::TraceConfig& trace_config,
                        const EnableRecordingDoneCallback& callback) override;
   bool DisableRecording(const scoped_refptr<TraceDataSink>& sink) override;
   bool EnableMonitoring(
-      const base::trace_event::CategoryFilter& category_filter,
-      const base::trace_event::TraceOptions& trace_options,
+      const base::trace_event::TraceConfig& trace_config,
       const EnableMonitoringDoneCallback& callback) override;
   bool DisableMonitoring(
       const DisableMonitoringDoneCallback& callback) override;
   void GetMonitoringStatus(
       bool* out_enabled,
-      base::trace_event::CategoryFilter* out_category_filter,
-      base::trace_event::TraceOptions* out_trace_options) override;
+      base::trace_event::TraceConfig* out_trace_config) override;
   bool CaptureMonitoringSnapshot(
       const scoped_refptr<TraceDataSink>& sink) override;
   bool GetTraceBufferUsage(
@@ -53,6 +50,7 @@ class TracingControllerImpl
                      const std::string& event_name,
                      const WatchEventCallback& callback) override;
   bool CancelWatchEvent() override;
+  bool IsRecording() const override;
 
   void RegisterTracingUI(TracingUI* tracing_ui);
   void UnregisterTracingUI(TracingUI* tracing_ui);
@@ -62,10 +60,18 @@ class TracingControllerImpl
       const base::trace_event::MemoryDumpRequestArgs& args,
       const base::trace_event::MemoryDumpCallback& callback) override;
   bool IsCoordinatorProcess() const override;
+  uint64 GetTracingProcessId() const override;
 
- private:
+  typedef base::Callback<void(TraceMessageFilter*)>
+      TraceMessageFilterAddedCallback;
   typedef std::set<scoped_refptr<TraceMessageFilter> > TraceMessageFilterSet;
 
+  TraceMessageFilterAddedCallback trace_filter_added_callback_;
+  void SetTraceMessageFilterAddedCallback(
+      const TraceMessageFilterAddedCallback& callback);
+  void GetTraceMessageFilters(TraceMessageFilterSet*);
+
+ private:
   friend struct base::DefaultLazyInstanceTraits<TracingControllerImpl>;
   friend class TraceMessageFilter;
 
@@ -123,6 +129,9 @@ class TracingControllerImpl
       const scoped_refptr<base::RefCountedString>& events_str_ptr);
 #endif
 
+  void OnEndPowerTracingAcked(
+      const scoped_refptr<base::RefCountedString>& events_str_ptr);
+
   void OnCaptureMonitoringSnapshotAcked(
       TraceMessageFilter* trace_message_filter);
 
@@ -140,19 +149,16 @@ class TracingControllerImpl
   void OnWatchEventMatched();
 
   void SetEnabledOnFileThread(
-      const base::trace_event::CategoryFilter& category_filter,
+      const base::trace_event::TraceConfig& trace_config,
       int mode,
-      const base::trace_event::TraceOptions& trace_options,
       const base::Closure& callback);
   void SetDisabledOnFileThread(const base::Closure& callback);
   void OnEnableRecordingDone(
-      const base::trace_event::CategoryFilter& category_filter,
-      const base::trace_event::TraceOptions& trace_options,
+      const base::trace_event::TraceConfig& trace_config,
       const EnableRecordingDoneCallback& callback);
   void OnDisableRecordingDone();
   void OnEnableMonitoringDone(
-      const base::trace_event::CategoryFilter& category_filter,
-      const base::trace_event::TraceOptions& trace_options,
+      const base::trace_event::TraceConfig& trace_config,
       const EnableMonitoringDoneCallback& callback);
   void OnDisableMonitoringDone(const DisableMonitoringDoneCallback& callback);
 
@@ -186,7 +192,7 @@ class TracingControllerImpl
 #endif
   bool is_recording_;
   bool is_monitoring_;
-  base::trace_event::TraceOptions trace_options_;
+  bool is_power_tracing_;
 
   GetCategoriesDoneCallback pending_get_categories_done_callback_;
   GetTraceBufferUsageCallback pending_trace_buffer_usage_callback_;
@@ -194,6 +200,8 @@ class TracingControllerImpl
   std::string watch_category_name_;
   std::string watch_event_name_;
   WatchEventCallback watch_event_callback_;
+
+  TraceMessageFilterAddedCallback trace_message_filter_added_callback_;
 
   std::set<std::string> known_category_groups_;
   std::set<TracingUI*> tracing_uis_;

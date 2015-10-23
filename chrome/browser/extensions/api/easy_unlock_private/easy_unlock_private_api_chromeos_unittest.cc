@@ -5,6 +5,7 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -14,6 +15,7 @@
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/browser/extensions/test_extension_system.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_app_manager.h"
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service_regular.h"
@@ -22,6 +24,8 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_easy_unlock_client.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/event_router_factory.h"
+#include "extensions/browser/extension_prefs.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -417,20 +421,23 @@ struct AutoPairingResult {
 };
 
 // Test factory to register EasyUnlockService.
-KeyedService* BuildTestEasyUnlockService(content::BrowserContext* context) {
-  EasyUnlockService* service =
-      new EasyUnlockServiceRegular(static_cast<Profile*>(context));
+scoped_ptr<KeyedService> BuildTestEasyUnlockService(
+    content::BrowserContext* context) {
+  scoped_ptr<EasyUnlockServiceRegular> service(
+      new EasyUnlockServiceRegular(Profile::FromBrowserContext(context)));
   service->Initialize(
       EasyUnlockAppManager::Create(extensions::ExtensionSystem::Get(context),
-                                   -1 /* manifest id*/, base::FilePath()));
-  return service;
+                                   -1 /* manifest id */, base::FilePath()));
+  return service.Pass();
 }
 
 // A fake EventRouter that logs event it dispatches for testing.
 class FakeEventRouter : public extensions::EventRouter {
  public:
-  FakeEventRouter(Profile* profile, extensions::ExtensionPrefs* extension_prefs)
-      : EventRouter(profile, extension_prefs),
+  FakeEventRouter(Profile* profile,
+                  scoped_ptr<extensions::TestExtensionPrefs> extension_prefs)
+      : EventRouter(profile, extension_prefs->prefs()),
+        extension_prefs_(extension_prefs.Pass()),
         event_count_(0) {}
 
   void DispatchEventToExtension(const std::string& extension_id,
@@ -445,42 +452,25 @@ class FakeEventRouter : public extensions::EventRouter {
   const std::string& last_event_name() const { return last_event_name_; }
 
  private:
+  scoped_ptr<extensions::TestExtensionPrefs> extension_prefs_;
   int event_count_;
   std::string last_extension_id_;
   std::string last_event_name_;
 };
 
-// A fake ExtensionSystem that returns a FakeEventRouter for event_router().
-class FakeExtensionSystem : public extensions::TestExtensionSystem {
- public:
-  explicit FakeExtensionSystem(Profile* profile)
-      : TestExtensionSystem(profile),
-        prefs_(new extensions::TestExtensionPrefs(
-            base::ThreadTaskRunnerHandle::Get())) {
-    fake_event_router_.reset(new FakeEventRouter(profile, prefs_->prefs()));
-  }
-
-  extensions::EventRouter* event_router() override {
-    return fake_event_router_.get();
-  }
-
- private:
-  scoped_ptr<extensions::TestExtensionPrefs> prefs_;
-  scoped_ptr<FakeEventRouter> fake_event_router_;
-};
-
-// Factory function to register for the ExtensionSystem.
-KeyedService* BuildFakeExtensionSystem(content::BrowserContext* profile) {
-  return new FakeExtensionSystem(static_cast<Profile*>(profile));
+// FakeEventRouter factory function
+scoped_ptr<KeyedService> FakeEventRouterFactoryFunction(
+    content::BrowserContext* profile) {
+  scoped_ptr<extensions::TestExtensionPrefs> extension_prefs(
+      new extensions::TestExtensionPrefs(base::ThreadTaskRunnerHandle::Get()));
+  return make_scoped_ptr(new FakeEventRouter(static_cast<Profile*>(profile),
+                                             extension_prefs.Pass()));
 }
 
 TEST_F(EasyUnlockPrivateApiTest, AutoPairing) {
-  FakeExtensionSystem* fake_extension_system =
-      static_cast<FakeExtensionSystem*>(
-          extensions::ExtensionSystemFactory::GetInstance()
-              ->SetTestingFactoryAndUse(profile(), &BuildFakeExtensionSystem));
-  FakeEventRouter* event_router =
-      static_cast<FakeEventRouter*>(fake_extension_system->event_router());
+  FakeEventRouter* event_router = static_cast<FakeEventRouter*>(
+      extensions::EventRouterFactory::GetInstance()->SetTestingFactoryAndUse(
+          profile(), &FakeEventRouterFactoryFunction));
 
   EasyUnlockServiceFactory::GetInstance()->SetTestingFactoryAndUse(
       profile(), &BuildTestEasyUnlockService);

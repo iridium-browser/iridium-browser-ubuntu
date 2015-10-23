@@ -59,6 +59,7 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView,
   gfx::Insets GetInsets() const override;
   gfx::Size GetPreferredSize() const override;
   gfx::Size GetMinimumSize() const override;
+  gfx::Size GetMaximumSize() const override;
   void Layout() override;
   const char* GetClassName() const override;
   void ChildPreferredSizeChanged(View* child) override;
@@ -85,10 +86,10 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView,
 
  protected:
   // Returns the available screen bounds if the frame were to show in |rect|.
-  virtual gfx::Rect GetAvailableScreenBounds(const gfx::Rect& rect);
+  virtual gfx::Rect GetAvailableScreenBounds(const gfx::Rect& rect) const;
 
   bool IsCloseButtonVisible() const;
-  gfx::Rect GetCloseButtonBounds() const;
+  gfx::Rect GetCloseButtonMirroredBounds() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BubbleFrameViewTest, GetBoundsForClientView);

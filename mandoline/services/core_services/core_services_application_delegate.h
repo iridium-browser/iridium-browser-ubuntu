@@ -2,17 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef MANDOLINE_SERVICES_CORE_SERVICES_APPLICATION_DELEGATE_H_
-#define MANDOLINE_SERVICES_CORE_SERVICES_APPLICATION_DELEGATE_H_
+#ifndef MANDOLINE_SERVICES_CORE_SERVICES_CORE_SERVICES_APPLICATION_DELEGATE_H_
+#define MANDOLINE_SERVICES_CORE_SERVICES_CORE_SERVICES_APPLICATION_DELEGATE_H_
 
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
-#include "base/threading/thread.h"
+#include "base/memory/weak_ptr.h"
 #include "components/clipboard/public/interfaces/clipboard.mojom.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/interface_factory_impl.h"
+#include "mojo/application/public/interfaces/content_handler.mojom.h"
 #include "mojo/common/weak_binding_set.h"
-#include "third_party/mojo_services/src/content_handler/public/interfaces/content_handler.mojom.h"
 
 namespace core_services {
 
@@ -27,6 +27,8 @@ class CoreServicesApplicationDelegate
  public:
   CoreServicesApplicationDelegate();
   ~CoreServicesApplicationDelegate() override;
+
+  void ApplicationThreadDestroyed(ApplicationThread* thread);
 
  private:
   // Overridden from mojo::ApplicationDelegate:
@@ -48,9 +50,11 @@ class CoreServicesApplicationDelegate
 
   ScopedVector<ApplicationThread> application_threads_;
 
+  base::WeakPtrFactory<CoreServicesApplicationDelegate> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(CoreServicesApplicationDelegate);
 };
 
 }  // namespace core_services
 
-#endif  // MANDONLINE_SERVICES_CORE_SERVICES_APPLICATION_DELEGATE_H_
+#endif  // MANDOLINE_SERVICES_CORE_SERVICES_CORE_SERVICES_APPLICATION_DELEGATE_H_

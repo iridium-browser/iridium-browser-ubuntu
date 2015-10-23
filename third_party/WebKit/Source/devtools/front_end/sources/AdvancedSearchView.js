@@ -9,6 +9,7 @@
 WebInspector.AdvancedSearchView = function()
 {
     WebInspector.VBox.call(this, true);
+    this.setMinimumSize(0, 40);
     this.registerRequiredCSS("sources/sourcesSearch.css");
 
     this._searchId = 0;
@@ -23,7 +24,7 @@ WebInspector.AdvancedSearchView = function()
 
     this._search = WebInspector.HistoryInput.create();
     this._searchPanelElement.appendChild(this._search);
-    this._search.placeholder = WebInspector.UIString("Search sources");
+    this._search.placeholder = WebInspector.UIString("Use 'file:' to define search scope");
     this._search.setAttribute("type", "text");
     this._search.classList.add("search-config-search");
     this._search.setAttribute("results", "0");
@@ -49,13 +50,8 @@ WebInspector.AdvancedSearchView = function()
 
     this._advancedSearchConfig = WebInspector.settings.createLocalSetting("advancedSearchConfig", new WebInspector.SearchConfig("", true, false).toPlainObject());
     this._load();
-    WebInspector.AdvancedSearchView._instance = this;
     /** @type {!WebInspector.SearchScope} */
     this._searchScope = new WebInspector.SourcesSearchScope();
-    if (WebInspector.AdvancedSearchView._pendingQuery !== undefined) {
-        this._toggle(WebInspector.AdvancedSearchView._pendingQuery);
-        delete WebInspector.AdvancedSearchView._pendingQuery;
-    }
 }
 
 WebInspector.AdvancedSearchView.prototype = {
@@ -345,6 +341,7 @@ WebInspector.SearchResultsPane.prototype = {
  */
 WebInspector.AdvancedSearchView.ActionDelegate = function()
 {
+    this._searchView = new WebInspector.AdvancedSearchView();
 }
 
 WebInspector.AdvancedSearchView.ActionDelegate.prototype = {
@@ -355,21 +352,16 @@ WebInspector.AdvancedSearchView.ActionDelegate.prototype = {
      */
     handleAction: function(context, actionId)
     {
-        var searchView = WebInspector.AdvancedSearchView._instance;
-        if (!searchView || !searchView.isShowing() || searchView._search !== searchView.element.window().document.activeElement) {
+        if (!this._searchView.isShowing() || this._searchView._search !== this._searchView.element.window().document.activeElement) {
             var selection = WebInspector.inspectorView.element.getDeepSelection();
             var queryCandidate = "";
             if (selection.rangeCount)
                 queryCandidate = selection.toString().replace(/\r?\n.*/, "");
 
             WebInspector.inspectorView.setCurrentPanel(WebInspector.SourcesPanel.instance());
-            WebInspector.inspectorView.showViewInDrawer("sources.search");
-            if (WebInspector.AdvancedSearchView._instance)
-                WebInspector.AdvancedSearchView._instance._toggle(queryCandidate);
-            else
-                WebInspector.AdvancedSearchView._pendingQuery = queryCandidate;
-        } else {
-            WebInspector.inspectorView.closeDrawer();
+            this._searchView._toggle(queryCandidate);
+            WebInspector.inspectorView.showCloseableViewInDrawer("sources.search", WebInspector.UIString("Search"), this._searchView);
+            this._searchView.focus();
         }
     }
 }

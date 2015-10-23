@@ -81,7 +81,8 @@ Quoting can be tricky; the rules are the same as with ssh:
         help='SSH identify file (private key).')
     parser.add_argument(
         '--no-known-hosts', action='store_false', dest='known_hosts',
-        default=True, help='Do not use a known_hosts file.')
+        default=True, help='Do not use a known_hosts file; always set'
+        ' for USB connections.')
     parser.add_argument(
         'command', nargs=argparse.REMAINDER,
         help='(optional) Command to execute on the device.')
@@ -105,7 +106,10 @@ Quoting can be tricky; the rules are the same as with ssh:
   def _ConnectSettings(self):
     """Generates the correct SSH connect settings based on our state."""
     kwargs = {'NumberOfPasswordPrompts': 2}
-    if self.known_hosts:
+    # USB has no risk of a man-in-the-middle attack so we can turn off
+    # known_hosts for any USB connection.
+    if (self.known_hosts and
+        self.device.connection_type != remote_access.CONNECTION_TYPE_USB):
       # Use the default known_hosts and our current key check setting.
       kwargs['UserKnownHostsFile'] = None
       kwargs['StrictHostKeyChecking'] = self.host_key_checking
@@ -130,7 +134,7 @@ Quoting can be tricky; the rules are the same as with ssh:
                'Some common reasons for this are:\n'
                ' - Device powerwash.\n'
                ' - Device flash from a USB stick.\n'
-               ' - Device flash using "cros flash --clobber-stateful".\n'
+               ' - Device flash using "--clobber-stateful".\n'
                'Otherwise, please verify that this is the correct device'
                ' before continuing.' % self.device.hostname)
 
@@ -174,28 +178,19 @@ Quoting can be tricky; the rules are the same as with ssh:
     """Runs `cros shell`."""
     self.options.Freeze()
     self._ReadOptions()
-    # Nested try blocks so the inner can raise to the outer, which handles
-    # overall failures.
     try:
-      try:
-        return self._StartSsh()
-      except remote_access.SSHConnectionError as e:
-        # Handle a mismatched host key; mismatched keys are a bit of a pain to
-        # fix manually since `ssh-keygen -R` doesn't work within the chroot.
-        if e.IsKnownHostsMismatch():
-          # The full SSH error message has extra info for the user.
-          logging.warning('\n%s', e)
-          if self._UserConfirmKeyChange():
-            remote_access.RemoveKnownHost(self.ssh_hostname)
-            # The user already OK'd so we can skip the additional SSH check.
-            self.host_key_checking = 'no'
-            return self._StartSsh()
-          else:
-            raise
+      return self._StartSsh()
+    except remote_access.SSHConnectionError as e:
+      # Handle a mismatched host key; mismatched keys are a bit of a pain to
+      # fix manually since `ssh-keygen -R` doesn't work within the chroot.
+      if e.IsKnownHostsMismatch():
+        # The full SSH error message has extra info for the user.
+        logging.warning('\n%s', e)
+        if self._UserConfirmKeyChange():
+          remote_access.RemoveKnownHost(self.device.hostname)
+          # The user already OK'd so we can skip the additional SSH check.
+          self.host_key_checking = 'no'
+          return self._StartSsh()
         else:
-          raise
-    except (Exception, KeyboardInterrupt) as e:
-      logging.error('\n%s', e)
-      logging.error('`cros shell` failed.')
-      if self.options.debug:
-        raise
+          return 1
+      raise

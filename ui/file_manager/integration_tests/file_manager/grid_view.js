@@ -9,7 +9,7 @@
  *
  * @param {string} rootPath Root path to be used as a default current directory
  *     during initialization. Can be null, for no default path.
- * @param {Array.<TestEntryInfo>} expectedSet Set of entries that are expected
+ * @param {Array<TestEntryInfo>} expectedSet Set of entries that are expected
  *     to appear in the grid view.
  * @return {Promise} Promise to be fulfilled or rejected depending on the test
  *     result.
@@ -19,9 +19,11 @@ function showGridView(rootPath, expectedSet) {
     return entryInfo.nameText;
   }).sort();
   var setupPromise = setupAndWaitUntilReady(null, rootPath);
-  return setupPromise.then(function(windowId) {
+  return setupPromise.then(function(results) {
+    var windowId = results.windowId;
     // Click the grid view button.
-    var clickedPromise = remoteCall.waitForElement(windowId, '#view-button').
+    var clickedPromise = remoteCall.waitForElement(windowId,
+                                                   '#view-button').
         then(function() {
           return remoteCall.callRemoteTestUtil(
               'fakeEvent', windowId, ['#view-button', 'click']);

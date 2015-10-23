@@ -2,22 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var $observeNotifyChange;
 var $observeEnqueueSpliceRecord;
 var $observeBeginPerformSplice;
 var $observeEndPerformSplice;
-var $observeNativeObjectObserve;
-var $observeNativeObjectGetNotifier;
-var $observeNativeObjectNotifierPerformChange;
 
-(function(global, shared, exports) {
+var $observeObjectMethods;
+var $observeArrayMethods;
+
+(function(global, utils) {
 
 "use strict";
 
 %CheckIsBootstrapping();
 
+// -------------------------------------------------------------------
+// Imports
+
 var GlobalArray = global.Array;
 var GlobalObject = global.Object;
+var InternalArray = utils.InternalArray;
+
+var ObjectFreeze;
+var ObjectIsFrozen;
+
+utils.Import(function(from) {
+  ObjectFreeze = from.ObjectFreeze;
+  ObjectIsFrozen = from.ObjectIsFrozen;
+});
 
 // -------------------------------------------------------------------
 
@@ -196,28 +207,30 @@ function ObjectInfoGetOrCreate(object) {
       performingCount: 0,
     };
     %WeakCollectionSet(GetObservationStateJS().objectInfoMap,
-                       object, objectInfo);
+                       object, objectInfo, $getHash(object));
   }
   return objectInfo;
 }
 
 
 function ObjectInfoGet(object) {
-  return %WeakCollectionGet(GetObservationStateJS().objectInfoMap, object);
+  return %WeakCollectionGet(GetObservationStateJS().objectInfoMap, object,
+                            $getHash(object));
 }
 
 
 function ObjectInfoGetFromNotifier(notifier) {
   return %WeakCollectionGet(GetObservationStateJS().notifierObjectInfoMap,
-                            notifier);
+                            notifier, $getHash(notifier));
 }
 
 
 function ObjectInfoGetNotifier(objectInfo) {
   if (IS_NULL(objectInfo.notifier)) {
-    objectInfo.notifier = { __proto__: notifierPrototype };
+    var notifier = { __proto__: notifierPrototype };
+    objectInfo.notifier = notifier;
     %WeakCollectionSet(GetObservationStateJS().notifierObjectInfoMap,
-                       objectInfo.notifier, objectInfo);
+                       notifier, objectInfo, $getHash(notifier));
   }
 
   return objectInfo.notifier;
@@ -328,13 +341,14 @@ function ConvertAcceptListToTypeMap(arg) {
 // priority. When a change record must be enqueued for the callback, it
 // normalizes. When delivery clears any pending change records, it re-optimizes.
 function CallbackInfoGet(callback) {
-  return %WeakCollectionGet(GetObservationStateJS().callbackInfoMap, callback);
+  return %WeakCollectionGet(GetObservationStateJS().callbackInfoMap, callback,
+                            $getHash(callback));
 }
 
 
 function CallbackInfoSet(callback, callbackInfo) {
   %WeakCollectionSet(GetObservationStateJS().callbackInfoMap,
-                     callback, callbackInfo);
+                     callback, callbackInfo, $getHash(callback));
 }
 
 
@@ -374,9 +388,11 @@ function ObjectObserve(object, callback, acceptList) {
     throw MakeTypeError(kObserveNonObject, "observe", "observe");
   if (%IsJSGlobalProxy(object))
     throw MakeTypeError(kObserveGlobalProxy, "observe");
+  if (%IsAccessCheckNeeded(object))
+    throw MakeTypeError(kObserveAccessChecked, "observe");
   if (!IS_SPEC_FUNCTION(callback))
     throw MakeTypeError(kObserveNonFunction, "observe");
-  if ($objectIsFrozen(callback))
+  if (ObjectIsFrozen(callback))
     throw MakeTypeError(kObserveCallbackFrozen);
 
   var objectObserveFn = %GetObjectContextObjectObserve(object);
@@ -469,7 +485,7 @@ function ObjectInfoEnqueueExternalChangeRecord(objectInfo, changeRecord, type) {
     %DefineDataPropertyUnchecked(
         newRecord, prop, changeRecord[prop], READ_ONLY + DONT_DELETE);
   }
-  $objectFreeze(newRecord);
+  ObjectFreeze(newRecord);
 
   ObjectInfoEnqueueInternalChangeRecord(objectInfo, newRecord);
 }
@@ -521,8 +537,8 @@ function EnqueueSpliceRecord(array, index, removed, addedCount) {
     addedCount: addedCount
   };
 
-  $objectFreeze(changeRecord);
-  $objectFreeze(changeRecord.removed);
+  ObjectFreeze(changeRecord);
+  ObjectFreeze(changeRecord.removed);
   ObjectInfoEnqueueInternalChangeRecord(objectInfo, changeRecord);
 }
 
@@ -546,7 +562,7 @@ function NotifyChange(type, object, name, oldValue) {
     };
   }
 
-  $objectFreeze(changeRecord);
+  ObjectFreeze(changeRecord);
   ObjectInfoEnqueueInternalChangeRecord(objectInfo, changeRecord);
 }
 
@@ -602,8 +618,10 @@ function ObjectGetNotifier(object) {
     throw MakeTypeError(kObserveNonObject, "getNotifier", "getNotifier");
   if (%IsJSGlobalProxy(object))
     throw MakeTypeError(kObserveGlobalProxy, "getNotifier");
+  if (%IsAccessCheckNeeded(object))
+    throw MakeTypeError(kObserveAccessChecked, "getNotifier");
 
-  if ($objectIsFrozen(object)) return null;
+  if (ObjectIsFrozen(object)) return null;
 
   if (!%ObjectWasCreatedInCurrentOrigin(object)) return null;
 
@@ -661,27 +679,43 @@ function ObserveMicrotaskRunner() {
 
 // -------------------------------------------------------------------
 
-$installFunctions(GlobalObject, DONT_ENUM, [
-  "deliverChangeRecords", ObjectDeliverChangeRecords,
-  "getNotifier", ObjectGetNotifier,
-  "observe", ObjectObserve,
-  "unobserve", ObjectUnobserve
-]);
-$installFunctions(GlobalArray, DONT_ENUM, [
-  "observe", ArrayObserve,
-  "unobserve", ArrayUnobserve
-]);
-$installFunctions(notifierPrototype, DONT_ENUM, [
+utils.InstallFunctions(notifierPrototype, DONT_ENUM, [
   "notify", ObjectNotifierNotify,
   "performChange", ObjectNotifierPerformChange
 ]);
 
-$observeNotifyChange = NotifyChange;
+$observeObjectMethods = [
+  "deliverChangeRecords", ObjectDeliverChangeRecords,
+  "getNotifier", ObjectGetNotifier,
+  "observe", ObjectObserve,
+  "unobserve", ObjectUnobserve
+];
+$observeArrayMethods = [
+  "observe", ArrayObserve,
+  "unobserve", ArrayUnobserve
+];
+
+// TODO(adamk): Figure out why this prototype removal has to
+// happen as part of initial snapshotting.
+var removePrototypeFn = function(f, i) {
+  if (i % 2 === 1) %FunctionRemovePrototype(f);
+};
+$observeObjectMethods.forEach(removePrototypeFn);
+$observeArrayMethods.forEach(removePrototypeFn);
+
 $observeEnqueueSpliceRecord = EnqueueSpliceRecord;
 $observeBeginPerformSplice = BeginPerformSplice;
 $observeEndPerformSplice = EndPerformSplice;
-$observeNativeObjectObserve = NativeObjectObserve;
-$observeNativeObjectGetNotifier = NativeObjectGetNotifier;
-$observeNativeObjectNotifierPerformChange = NativeObjectNotifierPerformChange;
+
+utils.ExportToRuntime(function(to) {
+  to.ObserveNotifyChange = NotifyChange;
+  to.ObserveEnqueueSpliceRecord = EnqueueSpliceRecord;
+  to.ObserveBeginPerformSplice = BeginPerformSplice;
+  to.ObserveEndPerformSplice = EndPerformSplice;
+  to.ObserveNativeObjectObserve = NativeObjectObserve;
+  to.ObserveNativeObjectGetNotifier = NativeObjectGetNotifier;
+  to.ObserveNativeObjectNotifierPerformChange =
+      NativeObjectNotifierPerformChange;
+});
 
 })

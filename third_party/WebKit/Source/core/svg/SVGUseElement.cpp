@@ -27,6 +27,7 @@
 #include "core/svg/SVGUseElement.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "core/SVGNames.h"
 #include "core/XLinkNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
@@ -43,6 +44,12 @@
 
 namespace blink {
 
+static SVGUseEventSender& svgUseLoadEventSender()
+{
+    DEFINE_STATIC_LOCAL(SVGUseEventSender, sharedLoadEventSender, (EventTypeNames::load));
+    return sharedLoadEventSender;
+}
+
 inline SVGUseElement::SVGUseElement(Document& document)
     : SVGGraphicsElement(SVGNames::useTag, document)
     , SVGURIReference(this)
@@ -52,7 +59,6 @@ inline SVGUseElement::SVGUseElement(Document& document)
     , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
     , m_haveFiredLoadEvent(false)
     , m_needsShadowTreeRecreation(false)
-    , m_svgLoadEventTimer(this, &SVGElement::svgLoadEventTimerFired)
 {
     ASSERT(hasCustomStyleCallbacks());
 
@@ -76,6 +82,7 @@ SVGUseElement::~SVGUseElement()
 #if !ENABLE(OILPAN)
     clearResourceReferences();
 #endif
+    svgUseLoadEventSender().cancelEvent(this);
 }
 
 DEFINE_TRACE(SVGUseElement)
@@ -107,8 +114,6 @@ Node::InsertionNotificationRequest SVGUseElement::insertedInto(ContainerNode* ro
     ASSERT(!m_targetElementInstance || !isWellFormedDocument(&document()));
     ASSERT(!hasPendingResources() || !isWellFormedDocument(&document()));
     invalidateShadowTree();
-    if (!isStructurallyExternal())
-        sendSVGLoadEventIfPossibleAsynchronously();
     return InsertionDone;
 }
 
@@ -121,9 +126,9 @@ void SVGUseElement::removedFrom(ContainerNode* rootParent)
 
 TreeScope* SVGUseElement::referencedScope() const
 {
-    if (!isExternalURIReference(hrefString(), document()))
-        return &treeScope();
-    return externalDocument();
+    if (isStructurallyExternal())
+        return externalDocument();
+    return &treeScope();
 }
 
 Document* SVGUseElement::externalDocument() const
@@ -217,12 +222,11 @@ void SVGUseElement::svgAttributeChanged(const QualifiedName& attrName)
 
     if (SVGURIReference::isKnownAttribute(attrName)) {
         SVGElement::InvalidationGuard invalidationGuard(this);
-        bool isExternalReference = isExternalURIReference(hrefString(), document());
-        if (isExternalReference) {
+        if (isStructurallyExternal()) {
             KURL url = document().completeURL(hrefString());
             if (url.hasFragmentIdentifier()) {
                 FetchRequest request(ResourceRequest(url), localName());
-                setDocumentResource(document().fetcher()->fetchSVGDocument(request));
+                setDocumentResource(DocumentResource::fetchSVGDocument(request, document().fetcher()));
             }
         } else {
             setDocumentResource(0);
@@ -292,7 +296,7 @@ static bool subtreeContainsDisallowedElement(Node* start)
 
 void SVGUseElement::scheduleShadowTreeRecreation()
 {
-    if (!referencedScope() || inUseShadowTree())
+    if (inUseShadowTree())
         return;
     m_needsShadowTreeRecreation = true;
     document().scheduleUseShadowTreeUpdate(*this);
@@ -315,10 +319,10 @@ void SVGUseElement::clearResourceReferences()
 
 void SVGUseElement::buildPendingResource()
 {
-    if (!referencedScope() || inUseShadowTree())
+    if (inUseShadowTree())
         return;
     clearResourceReferences();
-    if (!inDocument())
+    if (!referencedScope() || !inDocument())
         return;
 
     AtomicString id;
@@ -435,37 +439,46 @@ static bool isDirectReference(const SVGElement& element)
         || isSVGTextElement(element);
 }
 
-void SVGUseElement::toClipPath(Path& path)
+void SVGUseElement::toClipPath(Path& path) const
 {
     ASSERT(path.isEmpty());
 
-    Node* n = userAgentShadowRoot()->firstChild();
-    if (!n || !n->isSVGElement())
-        return;
-    SVGElement& element = toSVGElement(*n);
+    const SVGGraphicsElement* element = targetGraphicsElementForClipping();
 
-    if (element.isSVGGraphicsElement()) {
-        if (!isDirectReference(element)) {
-            // Spec: Indirect references are an error (14.3.5)
-            document().accessSVGExtensions().reportError("Not allowed to use indirect reference in <clip-path>");
-        } else {
-            toSVGGraphicsElement(element).toClipPath(path);
-            // FIXME: Avoid manual resolution of x/y here. Its potentially harmful.
-            SVGLengthContext lengthContext(this);
-            path.translate(FloatSize(m_x->currentValue()->value(lengthContext), m_y->currentValue()->value(lengthContext)));
-            path.transform(calculateAnimatedLocalTransform());
-        }
+    if (!element)
+        return;
+
+    if (element->isSVGGeometryElement()) {
+        toSVGGeometryElement(*element).toClipPath(path);
+        // FIXME: Avoid manual resolution of x/y here. Its potentially harmful.
+        SVGLengthContext lengthContext(this);
+        path.translate(FloatSize(m_x->currentValue()->value(lengthContext), m_y->currentValue()->value(lengthContext)));
+        path.transform(calculateAnimatedLocalTransform());
     }
 }
 
-LayoutObject* SVGUseElement::layoutObjectClipChild() const
+SVGGraphicsElement* SVGUseElement::targetGraphicsElementForClipping() const
 {
-    if (Node* n = userAgentShadowRoot()->firstChild()) {
-        if (n->isSVGElement() && isDirectReference(toSVGElement(*n)))
-            return n->layoutObject();
+    Node* n = userAgentShadowRoot()->firstChild();
+    if (!n || !n->isSVGElement())
+        return nullptr;
+
+    SVGElement& element = toSVGElement(*n);
+
+    if (!element.isSVGGraphicsElement())
+        return nullptr;
+
+    // Spec: "If a <use> element is a child of a clipPath element, it must directly
+    // reference <path>, <text> or basic shapes elements. Indirect references are an
+    // error and the clipPath element must be ignored."
+    // http://dev.w3.org/fxtf/css-masking-1/#the-clip-path
+    if (!isDirectReference(element)) {
+        // Spec: Indirect references are an error (14.3.5)
+        document().accessSVGExtensions().reportError("Not allowed to use indirect reference in <clip-path>");
+        return nullptr;
     }
 
-    return nullptr;
+    return &toSVGGraphicsElement(element);
 }
 
 bool SVGUseElement::buildShadowTree(SVGElement* target, SVGElement* targetInstance, bool foundUse)
@@ -716,6 +729,13 @@ bool SVGUseElement::selfHasRelativeLengths() const
     return m_targetElementInstance->hasRelativeLengths();
 }
 
+void SVGUseElement::dispatchPendingEvent(SVGUseEventSender* eventSender)
+{
+    ASSERT_UNUSED(eventSender, eventSender == &svgUseLoadEventSender());
+    ASSERT(isStructurallyExternal() && m_haveFiredLoadEvent);
+    dispatchEvent(Event::create(EventTypeNames::load));
+}
+
 void SVGUseElement::notifyFinished(Resource* resource)
 {
     if (!inDocument())
@@ -731,7 +751,7 @@ void SVGUseElement::notifyFinished(Resource* resource)
             return;
         ASSERT(!m_haveFiredLoadEvent);
         m_haveFiredLoadEvent = true;
-        sendSVGLoadEventIfPossibleAsynchronously();
+        svgUseLoadEventSender().dispatchEventSoon(this);
     }
 }
 

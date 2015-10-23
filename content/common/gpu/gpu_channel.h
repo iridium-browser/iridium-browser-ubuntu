@@ -11,9 +11,9 @@
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
+#include "base/trace_event/memory_dump_provider.h"
 #include "build/build_config.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_memory_manager.h"
@@ -42,18 +42,22 @@ class SubscriptionRefSet;
 }
 
 namespace IPC {
+class AttachmentBroker;
 class MessageFilter;
 }
 
 namespace content {
 class GpuChannelManager;
 class GpuChannelMessageFilter;
+class GpuJpegDecodeAccelerator;
 class GpuWatchdog;
 
 // Encapsulates an IPC channel between the GPU process and one renderer
 // process. On the renderer side there's a corresponding GpuChannelHost.
-class GpuChannel : public IPC::Listener, public IPC::Sender,
-                   public gpu::gles2::SubscriptionRefSet::Observer {
+class GpuChannel : public IPC::Listener,
+                   public IPC::Sender,
+                   public gpu::gles2::SubscriptionRefSet::Observer,
+                   public base::trace_event::MemoryDumpProvider {
  public:
   // Takes ownership of the renderer process handle.
   GpuChannel(GpuChannelManager* gpu_channel_manager,
@@ -61,12 +65,14 @@ class GpuChannel : public IPC::Listener, public IPC::Sender,
              gfx::GLShareGroup* share_group,
              gpu::gles2::MailboxManager* mailbox_manager,
              int client_id,
+             uint64_t client_tracing_id,
              bool software,
              bool allow_future_sync_points);
   ~GpuChannel() override;
 
   void Init(base::SingleThreadTaskRunner* io_task_runner,
-            base::WaitableEvent* shutdown_event);
+            base::WaitableEvent* shutdown_event,
+            IPC::AttachmentBroker* broker);
 
   // Get the GpuChannelManager that owns this channel.
   GpuChannelManager* gpu_channel_manager() const {
@@ -83,6 +89,8 @@ class GpuChannel : public IPC::Listener, public IPC::Sender,
   base::ProcessId renderer_pid() const { return channel_->GetPeerPID(); }
 
   int client_id() const { return client_id_; }
+
+  uint64_t client_tracing_id() const { return client_tracing_id_; }
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner() const {
     return io_task_runner_;
@@ -155,7 +163,7 @@ class GpuChannel : public IPC::Listener, public IPC::Sender,
   scoped_refptr<gfx::GLImage> CreateImageForGpuMemoryBuffer(
       const gfx::GpuMemoryBufferHandle& handle,
       const gfx::Size& size,
-      gfx::GpuMemoryBuffer::Format format,
+      gfx::BufferFormat format,
       uint32 internalformat);
 
   bool allow_future_sync_points() const { return allow_future_sync_points_; }
@@ -167,6 +175,10 @@ class GpuChannel : public IPC::Listener, public IPC::Sender,
   const gpu::ValueStateMap* pending_valuebuffer_state() const {
     return pending_valuebuffer_state_.get();
   }
+
+  // base::trace_event::MemoryDumpProvider implementation.
+  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                    base::trace_event::ProcessMemoryDump* pmd) override;
 
  private:
   friend class GpuChannelMessageFilter;
@@ -184,6 +196,7 @@ class GpuChannel : public IPC::Listener, public IPC::Sender,
       int32 route_id,
       bool* succeeded);
   void OnDestroyCommandBuffer(int32 route_id);
+  void OnCreateJpegDecoder(int32 route_id, IPC::Message* reply_msg);
 
   // Decrement the count of unhandled IPC messages and defer preemption.
   void MessageProcessed();
@@ -210,6 +223,9 @@ class GpuChannel : public IPC::Listener, public IPC::Sender,
   // The id of the client who is on the other side of the channel.
   int client_id_;
 
+  // The tracing ID used for memory allocations associated with this client.
+  uint64_t client_tracing_id_;
+
   // Uniquely identifies the channel within this GPU process.
   std::string channel_id_;
 
@@ -228,6 +244,8 @@ class GpuChannel : public IPC::Listener, public IPC::Sender,
 
   typedef IDMap<GpuCommandBufferStub, IDMapOwnPointer> StubMap;
   StubMap stubs_;
+
+  scoped_ptr<GpuJpegDecodeAccelerator> jpeg_decoder_;
 
   bool log_messages_;  // True if we should log sent and received messages.
   gpu::gles2::DisallowedFeatures disallowed_features_;

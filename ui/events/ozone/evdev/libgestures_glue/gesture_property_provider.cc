@@ -505,17 +505,19 @@ bool IsMatchTypeSupported(const std::string& match_type) {
 
 // Check if a match criteria is a device type one.
 bool IsMatchDeviceType(const std::string& match_type) {
-  return StartsWithASCII(match_type, "MatchIs", true);
+  return base::StartsWith(match_type, "MatchIs", base::CompareCase::SENSITIVE);
 }
 
 // Parse a boolean value keyword (e.g., on/off, true/false).
 int ParseBooleanKeyword(const std::string& value) {
-  for (size_t i = 0; i < arraysize(kTrue); ++i)
-    if (LowerCaseEqualsASCII(value, kTrue[i]))
+  for (size_t i = 0; i < arraysize(kTrue); ++i) {
+    if (base::LowerCaseEqualsASCII(value, kTrue[i]))
       return 1;
-  for (size_t i = 0; i < arraysize(kFalse); ++i)
-    if (LowerCaseEqualsASCII(value, kFalse[i]))
+  }
+  for (size_t i = 0; i < arraysize(kFalse); ++i) {
+    if (base::LowerCaseEqualsASCII(value, kFalse[i]))
       return -1;
+  }
   return 0;
 }
 
@@ -719,7 +721,8 @@ struct ConfigurationSection {
 
 MatchCriteria::MatchCriteria(const std::string& arg) {
   // TODO(sheckylin): Should we trim all tokens here?
-  Tokenize(arg, "|", &args_);
+  args_ = base::SplitString(
+      arg, "|", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   if (args_.empty()) {
     LOG(ERROR) << "Empty match pattern found, will evaluate to the default "
                   "value (true): \"" << arg << "\"";
@@ -763,10 +766,10 @@ MatchUSBID::MatchUSBID(const std::string& arg) : MatchCriteria(arg) {
       LOG(ERROR) << "Invalid USB ID: " << args_[i];
       continue;
     }
-    std::vector<std::string> tokens;
-    base::SplitString(args_[i], ':', &tokens);
-    vid_patterns_.push_back(base::StringToLowerASCII(tokens[0]));
-    pid_patterns_.push_back(base::StringToLowerASCII(tokens[1]));
+    std::vector<std::string> tokens = base::SplitString(
+        args_[i], ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    vid_patterns_.push_back(base::ToLowerASCII(tokens[0]));
+    pid_patterns_.push_back(base::ToLowerASCII(tokens[1]));
   }
   if (vid_patterns_.empty()) {
     LOG(ERROR) << "No valid USB ID pattern found, will be ignored: \"" << arg

@@ -272,7 +272,8 @@ Status FindElement(
 
     if (base::TimeTicks::Now() - start_time >= session->implicit_wait) {
       if (only_one) {
-        return Status(kNoSuchElement);
+        return Status(kNoSuchElement, "Unable to locate element: {\"method\":\""
+         + strategy + "\",\"selector\":\"" + target + "\"}");
       } else {
         value->reset(new base::ListValue());
         return Status(kOk);
@@ -337,10 +338,12 @@ Status IsElementAttributeEqualToIgnoreCase(
   if (status.IsError())
     return status;
   std::string actual_value;
-  if (result->GetAsString(&actual_value))
-    *is_equal = LowerCaseEqualsASCII(actual_value, attribute_value.c_str());
-  else
+  if (result->GetAsString(&actual_value)) {
+    *is_equal =
+        base::LowerCaseEqualsASCII(actual_value, attribute_value.c_str());
+  } else {
     *is_equal = false;
+  }
   return status;
 }
 

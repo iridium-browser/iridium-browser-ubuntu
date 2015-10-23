@@ -38,13 +38,14 @@ class ScriptSourceCode;
 
 
 class CORE_EXPORT ScriptLoader : public NoBaseWillBeGarbageCollectedFinalized<ScriptLoader>, private ScriptResourceClient {
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(ScriptLoader);
 public:
     static PassOwnPtrWillBeRawPtr<ScriptLoader> create(Element* element, bool createdByParser, bool isEvaluated)
     {
         return adoptPtrWillBeNoop(new ScriptLoader(element, createdByParser, isEvaluated));
     }
 
-    virtual ~ScriptLoader();
+    ~ScriptLoader() override;
     DECLARE_VIRTUAL_TRACE();
 
     Element* element() const { return m_element; }
@@ -97,7 +98,7 @@ private:
     ScriptLoaderClient* client() const;
 
     // ResourceClient
-    virtual void notifyFinished(Resource*) override;
+    void notifyFinished(Resource*) override;
 
     RawPtrWillBeMember<Element> m_element;
     ResourcePtr<ScriptResource> m_resource;

@@ -136,6 +136,7 @@ class BoundsAnimatorDisabler {
 
 // The MenuModelAdapter gets slightly changed to adapt the menu appearance to
 // our requirements.
+// TODO(bruthig): ShelfMenuModelAdapter does not appear to be used, remove it.
 class ShelfMenuModelAdapter : public views::MenuModelAdapter {
  public:
   explicit ShelfMenuModelAdapter(ShelfMenuModel* menu_model);
@@ -383,6 +384,7 @@ ShelfView::ShelfView(ShelfModel* model,
       got_deleted_(NULL),
       drag_and_drop_item_pinned_(false),
       drag_and_drop_shelf_id_(0),
+      drag_replaced_view_(nullptr),
       dragged_off_shelf_(false),
       snap_back_from_rip_off_view_(NULL),
       item_manager_(Shell::GetInstance()->shelf_item_delegate_manager()),
@@ -1685,7 +1687,8 @@ void ShelfView::ButtonPressed(views::Button* sender, const ui::Event& event) {
 
   if (sender == overflow_button_) {
     ToggleOverflowBubble();
-    RecordIconActivatedSource(event);
+    shelf_button_pressed_metric_tracker_.ButtonPressed(
+        event, sender, ShelfItemDelegate::kNoAction);
     return;
   }
 
@@ -1744,47 +1747,15 @@ void ShelfView::ButtonPressed(views::Button* sender, const ui::Event& event) {
         break;
     }
 
-    RecordIconActivatedSource(event);
-
     ShelfItemDelegate::PerformedAction performed_action =
         item_manager_->GetShelfItemDelegate(model_->items()[view_index].id)
             ->ItemSelected(event);
 
-    RecordIconActivatedAction(performed_action);
+    shelf_button_pressed_metric_tracker_.ButtonPressed(event, sender,
+                                                       performed_action);
 
     if (performed_action != ShelfItemDelegate::kNewWindowCreated)
       ShowListMenuForView(model_->items()[view_index], sender, event);
-  }
-}
-
-void ShelfView::RecordIconActivatedSource(const ui::Event& event) {
-  if (event.IsMouseEvent()) {
-    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
-        UMA_LAUNCHER_BUTTON_PRESSED_WITH_MOUSE);
-  } else if (event.IsGestureEvent()) {
-    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
-        UMA_LAUNCHER_BUTTON_PRESSED_WITH_TOUCH);
-  }
-}
-
-void ShelfView::RecordIconActivatedAction(
-    ShelfItemDelegate::PerformedAction performed_action) {
-  switch (performed_action) {
-    case ShelfItemDelegate::kNoAction:
-    case ShelfItemDelegate::kAppListMenuShown:
-      break;
-    case ShelfItemDelegate::kNewWindowCreated:
-      Shell::GetInstance()->metrics()->RecordUserMetricsAction(
-          UMA_LAUNCHER_LAUNCH_TASK);
-      break;
-    case ShelfItemDelegate::kExistingWindowActivated:
-      Shell::GetInstance()->metrics()->RecordUserMetricsAction(
-          UMA_LAUNCHER_SWITCH_TASK);
-      break;
-    case ShelfItemDelegate::kExistingWindowMinimized:
-      Shell::GetInstance()->metrics()->RecordUserMetricsAction(
-          UMA_LAUNCHER_MINIMIZE_TASK);
-      break;
   }
 }
 

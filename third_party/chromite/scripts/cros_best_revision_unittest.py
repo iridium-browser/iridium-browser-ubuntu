@@ -8,7 +8,6 @@ from __future__ import print_function
 
 import os
 
-from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import tree_status
@@ -78,7 +77,7 @@ class ChromeCommitterTester(cros_build_lib_unittest.RunCommandTestCase,
       return expected[(canary, version)]
     self.PatchObject(self.committer, '_GetLatestCanaryVersions',
                      return_value=self.versions)
-    self.PatchObject(cbuildbot_config, 'GetCanariesForChromeLKGM',
+    self.PatchObject(self.committer, 'GetCanariesForChromeLKGM',
                      return_value=self.canaries)
     self.PatchObject(manifest_version.BuildSpecsManager, 'GetBuildStatus',
                      side_effect=_GetBuildStatus)

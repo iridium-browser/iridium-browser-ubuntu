@@ -89,8 +89,6 @@ bool TitleMatchesMnemonic(MenuItemView* menu, base::char16 key) {
   return !lower_title.empty() && lower_title[0] == key;
 }
 
-}  // namespace
-
 // Returns the first descendant of |view| that is hot tracked.
 static CustomButton* GetFirstHotTrackedView(View* view) {
   if (!view)
@@ -156,6 +154,8 @@ static View* GetNextFocusableView(View* ancestor,
   } while (parent != ancestor);
   return NULL;
 }
+
+}  // namespace
 
 // MenuScrollTask --------------------------------------------------------------
 
@@ -361,8 +361,8 @@ MenuItemView* MenuController::Run(Widget* parent,
     pressed_lock_.reset(new MenuButton::PressedLock(button));
 
   // Make sure Chrome doesn't attempt to shut down while the menu is showing.
-  if (ViewsDelegate::views_delegate)
-    ViewsDelegate::views_delegate->AddRef();
+  if (ViewsDelegate::GetInstance())
+    ViewsDelegate::GetInstance()->AddRef();
 
   // We need to turn on nestable tasks as in some situations (pressing alt-f for
   // one) the menus are run from a task. If we don't do this and are invoked
@@ -373,8 +373,8 @@ MenuItemView* MenuController::Run(Widget* parent,
   RunMessageLoop(nested_menu);
   message_loop_depth_--;
 
-  if (ViewsDelegate::views_delegate)
-    ViewsDelegate::views_delegate->ReleaseRef();
+  if (ViewsDelegate::GetInstance())
+    ViewsDelegate::GetInstance()->ReleaseRef();
 
   // Close any open menus.
   SetSelection(NULL, SELECTION_UPDATE_IMMEDIATELY | SELECTION_EXIT);
@@ -532,9 +532,13 @@ void MenuController::OnMouseReleased(SubmenuView* source,
       menu = part.parent;
     }
 
-    if (menu != NULL && ShowContextMenu(menu, source, event,
-                                        ui::MENU_SOURCE_MOUSE))
-      return;
+    if (menu != NULL) {
+      gfx::Point screen_location(event.location());
+      View::ConvertPointToScreen(source->GetScrollViewContainer(),
+                                 &screen_location);
+      if (ShowContextMenu(menu, screen_location, ui::MENU_SOURCE_MOUSE))
+        return;
+    }
   }
 
   // We can use Ctrl+click or the middle mouse button to recursively open urls
@@ -608,7 +612,10 @@ void MenuController::OnGestureEvent(SubmenuView* source,
     event->StopPropagation();
   } else if (event->type() == ui::ET_GESTURE_LONG_PRESS) {
     if (part.type == MenuPart::MENU_ITEM && part.menu) {
-      if (ShowContextMenu(part.menu, source, *event, ui::MENU_SOURCE_TOUCH))
+      gfx::Point screen_location(event->location());
+      View::ConvertPointToScreen(source->GetScrollViewContainer(),
+                                 &screen_location);
+      if (ShowContextMenu(part.menu, screen_location, ui::MENU_SOURCE_TOUCH))
         event->StopPropagation();
     }
   } else if (event->type() == ui::ET_GESTURE_TAP) {
@@ -813,8 +820,12 @@ ui::PostDispatchAction MenuController::OnWillDispatchKeyEvent(
     return ui::POST_DISPATCH_PERFORM_DEFAULT;
   }
 
-  bool should_quit = character ? SelectByChar(character) : !OnKeyDown(key_code);
-  if (should_quit || exit_type() != MenuController::EXIT_NONE)
+  if (character)
+    SelectByChar(character);
+  else
+    OnKeyDown(key_code);
+
+  if (exit_type() != MenuController::EXIT_NONE)
     TerminateNestedMessageLoop();
 
   return ui::POST_DISPATCH_NONE;
@@ -1016,16 +1027,16 @@ void MenuController::StartDrag(SubmenuView* source,
   did_initiate_drag_ = false;
 }
 
-bool MenuController::OnKeyDown(ui::KeyboardCode key_code) {
+void MenuController::OnKeyDown(ui::KeyboardCode key_code) {
   DCHECK(blocking_run_);
 
   switch (key_code) {
     case ui::VKEY_UP:
-      IncrementSelection(-1);
+      IncrementSelection(INCREMENT_SELECTION_UP);
       break;
 
     case ui::VKEY_DOWN:
-      IncrementSelection(1);
+      IncrementSelection(INCREMENT_SELECTION_DOWN);
       break;
 
     // Handling of VK_RIGHT and VK_LEFT is different depending on the UI
@@ -1047,8 +1058,7 @@ bool MenuController::OnKeyDown(ui::KeyboardCode key_code) {
 // On Mac, treat space the same as return.
 #if !defined(OS_MACOSX)
     case ui::VKEY_SPACE:
-      if (SendAcceleratorToHotTrackedView() == ACCELERATOR_PROCESSED_EXIT)
-        return false;
+      SendAcceleratorToHotTrackedView();
       break;
 #endif
 
@@ -1064,17 +1074,13 @@ bool MenuController::OnKeyDown(ui::KeyboardCode key_code) {
         if (pending_state_.item->HasSubmenu()) {
           if (key_code == ui::VKEY_F4 &&
               pending_state_.item->GetSubmenu()->IsShowing())
-            return false;
+            Cancel(EXIT_ALL);
           else
             OpenSubmenuChangeSelectionIfCan();
         } else {
-          SendAcceleratorResultType result = SendAcceleratorToHotTrackedView();
-          if (result == ACCELERATOR_NOT_PROCESSED &&
+          if (!SendAcceleratorToHotTrackedView() &&
               pending_state_.item->enabled()) {
             Accept(pending_state_.item, 0);
-            return false;
-          } else if (result == ACCELERATOR_PROCESSED_EXIT) {
-            return false;
           }
         }
       }
@@ -1087,15 +1093,34 @@ bool MenuController::OnKeyDown(ui::KeyboardCode key_code) {
             !state_.item->GetSubmenu()->IsShowing()))) {
         // User pressed escape and only one menu is shown, cancel it.
         Cancel(EXIT_OUTERMOST);
-        return false;
+        break;
       }
       CloseSubmenu();
       break;
 
+    case ui::VKEY_APPS: {
+      CustomButton* hot_view = GetFirstHotTrackedView(pending_state_.item);
+      if (hot_view) {
+        hot_view->ShowContextMenu(hot_view->GetKeyboardContextMenuLocation(),
+                                  ui::MENU_SOURCE_KEYBOARD);
+      } else if (pending_state_.item->enabled() &&
+                 pending_state_.item->GetRootMenuItem() !=
+                     pending_state_.item) {
+        // Show the context menu for the given menu item. We don't try to show
+        // the menu for the (boundless) root menu item. This can happen, e.g.,
+        // when the user hits the APPS key after opening the menu, when no item
+        // is selected, but showing a context menu for an implicitly-selected
+        // and invisible item doesn't make sense.
+        ShowContextMenu(pending_state_.item,
+                        pending_state_.item->GetKeyboardContextMenuLocation(),
+                        ui::MENU_SOURCE_KEYBOARD);
+      }
+      break;
+    }
+
     default:
       break;
   }
-  return true;
 }
 
 MenuController::MenuController(ui::NativeTheme* theme,
@@ -1142,18 +1167,16 @@ void MenuController::RunMessageLoop(bool nested_menu) {
   message_loop_->Run(this, owner_, nested_menu);
 }
 
-MenuController::SendAcceleratorResultType
-    MenuController::SendAcceleratorToHotTrackedView() {
+bool MenuController::SendAcceleratorToHotTrackedView() {
   CustomButton* hot_view = GetFirstHotTrackedView(pending_state_.item);
   if (!hot_view)
-    return ACCELERATOR_NOT_PROCESSED;
+    return false;
 
   ui::Accelerator accelerator(ui::VKEY_RETURN, ui::EF_NONE);
   hot_view->AcceleratorPressed(accelerator);
   CustomButton* button = static_cast<CustomButton*>(hot_view);
   button->SetHotTracked(true);
-  return (exit_type_ == EXIT_NONE) ?
-      ACCELERATOR_PROCESSED : ACCELERATOR_PROCESSED_EXIT;
+  return true;
 }
 
 void MenuController::UpdateInitialLocation(const gfx::Rect& bounds,
@@ -1269,8 +1292,7 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source,
 }
 
 bool MenuController::ShowContextMenu(MenuItemView* menu_item,
-                                     SubmenuView* source,
-                                     const ui::LocatedEvent& event,
+                                     const gfx::Point& screen_location,
                                      ui::MenuSourceType source_type) {
   // Set the selection immediately, making sure the submenu is only open
   // if it already was.
@@ -1278,11 +1300,9 @@ bool MenuController::ShowContextMenu(MenuItemView* menu_item,
   if (state_.item == pending_state_.item && state_.submenu_open)
     selection_types |= SELECTION_OPEN_SUBMENU;
   SetSelection(pending_state_.item, selection_types);
-  gfx::Point loc(event.location());
-  View::ConvertPointToScreen(source->GetScrollViewContainer(), &loc);
 
   if (menu_item->GetDelegate()->ShowContextMenu(
-          menu_item, menu_item->GetCommand(), loc, source_type)) {
+          menu_item, menu_item->GetCommand(), screen_location, source_type)) {
     SendMouseCaptureLostToActiveView();
     return true;
   }
@@ -1879,15 +1899,18 @@ int MenuController::MenuDepth(MenuItemView* item) {
   return item ? (MenuDepth(item->GetParentMenuItem()) + 1) : 0;
 }
 
-void MenuController::IncrementSelection(int delta) {
+void MenuController::IncrementSelection(
+    SelectionIncrementDirectionType direction) {
   MenuItemView* item = pending_state_.item;
   DCHECK(item);
   if (pending_state_.submenu_open && item->HasSubmenu() &&
       item->GetSubmenu()->IsShowing()) {
     // A menu is selected and open, but none of its children are selected,
-    // select the first menu item.
+    // select the first menu item that is visible and enabled.
     if (item->GetSubmenu()->GetMenuItemCount()) {
-      SetSelection(item->GetSubmenu()->GetMenuItemAt(0), SELECTION_DEFAULT);
+      MenuItemView* to_select = FindInitialSelectableMenuItem(item, direction);
+      if (to_select)
+        SetSelection(to_select, SELECTION_DEFAULT);
       return;
     }
   }
@@ -1896,14 +1919,16 @@ void MenuController::IncrementSelection(int delta) {
     CustomButton* button = GetFirstHotTrackedView(item);
     if (button) {
       button->SetHotTracked(false);
-      View* to_make_hot = GetNextFocusableView(item, button, delta == 1);
+      View* to_make_hot = GetNextFocusableView(
+          item, button, direction == INCREMENT_SELECTION_DOWN);
       CustomButton* button_hot = CustomButton::AsCustomButton(to_make_hot);
       if (button_hot) {
         button_hot->SetHotTracked(true);
         return;
       }
     } else {
-      View* to_make_hot = GetInitialFocusableView(item, delta == 1);
+      View* to_make_hot =
+          GetInitialFocusableView(item, direction == INCREMENT_SELECTION_DOWN);
       CustomButton* button_hot = CustomButton::AsCustomButton(to_make_hot);
       if (button_hot) {
         button_hot->SetHotTracked(true);
@@ -1919,11 +1944,12 @@ void MenuController::IncrementSelection(int delta) {
       for (int i = 0; i < parent_count; ++i) {
         if (parent->GetSubmenu()->GetMenuItemAt(i) == item) {
           MenuItemView* to_select =
-              FindNextSelectableMenuItem(parent, i, delta);
+              FindNextSelectableMenuItem(parent, i, direction);
           if (!to_select)
             break;
           SetSelection(to_select, SELECTION_DEFAULT);
-          View* to_make_hot = GetInitialFocusableView(to_select, delta == 1);
+          View* to_make_hot = GetInitialFocusableView(
+              to_select, direction == INCREMENT_SELECTION_DOWN);
           CustomButton* button_hot = CustomButton::AsCustomButton(to_make_hot);
           if (button_hot)
             button_hot->SetHotTracked(true);
@@ -1934,35 +1960,49 @@ void MenuController::IncrementSelection(int delta) {
   }
 }
 
-MenuItemView* MenuController::FindNextSelectableMenuItem(MenuItemView* parent,
-                                                         int index,
-                                                         int delta) {
-  int start_index = index;
+MenuItemView* MenuController::FindInitialSelectableMenuItem(
+    MenuItemView* parent,
+    SelectionIncrementDirectionType direction) {
+  return FindNextSelectableMenuItem(
+      parent, direction == INCREMENT_SELECTION_DOWN ? -1 : 0, direction);
+}
+
+MenuItemView* MenuController::FindNextSelectableMenuItem(
+    MenuItemView* parent,
+    int index,
+    SelectionIncrementDirectionType direction) {
   int parent_count = parent->GetSubmenu()->GetMenuItemCount();
+  int stop_index = (index + parent_count) % parent_count;
+  bool include_all_items =
+      (index == -1 && direction == INCREMENT_SELECTION_DOWN) ||
+      (index == 0 && direction == INCREMENT_SELECTION_UP);
+  int delta = direction == INCREMENT_SELECTION_UP ? -1 : 1;
   // Loop through the menu items skipping any invisible menus. The loop stops
-  // when we wrap or find a visible child.
+  // when we wrap or find a visible and enabled child.
   do {
     index = (index + delta + parent_count) % parent_count;
-    if (index == start_index)
+    if (index == stop_index && !include_all_items)
       return NULL;
     MenuItemView* child = parent->GetSubmenu()->GetMenuItemAt(index);
-    if (child->visible())
+    if (child->visible() && child->enabled())
       return child;
-  } while (index != start_index);
+  } while (index != stop_index);
   return NULL;
 }
 
 void MenuController::OpenSubmenuChangeSelectionIfCan() {
   MenuItemView* item = pending_state_.item;
-  if (item->HasSubmenu() && item->enabled()) {
-    if (item->GetSubmenu()->GetMenuItemCount() > 0) {
-      SetSelection(item->GetSubmenu()->GetMenuItemAt(0),
-                   SELECTION_UPDATE_IMMEDIATELY);
-    } else {
-      // No menu items, just show the sub-menu.
-      SetSelection(item, SELECTION_OPEN_SUBMENU | SELECTION_UPDATE_IMMEDIATELY);
-    }
+  if (!item->HasSubmenu() || !item->enabled())
+    return;
+  MenuItemView* to_select = NULL;
+  if (item->GetSubmenu()->GetMenuItemCount() > 0)
+    to_select = FindInitialSelectableMenuItem(item, INCREMENT_SELECTION_DOWN);
+  if (to_select) {
+    SetSelection(to_select, SELECTION_UPDATE_IMMEDIATELY);
+    return;
   }
+  // No menu items, just show the sub-menu.
+  SetSelection(item, SELECTION_OPEN_SUBMENU | SELECTION_UPDATE_IMMEDIATELY);
 }
 
 void MenuController::CloseSubmenu() {
@@ -2004,7 +2044,7 @@ MenuController::SelectByCharDetails MenuController::FindChildForMnemonic(
   return details;
 }
 
-bool MenuController::AcceptOrSelect(MenuItemView* parent,
+void MenuController::AcceptOrSelect(MenuItemView* parent,
                                     const SelectByCharDetails& details) {
   // This should only be invoked if there is a match.
   DCHECK(details.first_match != -1);
@@ -2018,7 +2058,6 @@ bool MenuController::AcceptOrSelect(MenuItemView* parent,
                    SELECTION_OPEN_SUBMENU | SELECTION_UPDATE_IMMEDIATELY);
     } else {
       Accept(submenu->GetMenuItemAt(details.first_match), 0);
-      return true;
     }
   } else if (details.index_of_item == -1 || details.next_match == -1) {
     SetSelection(submenu->GetMenuItemAt(details.first_match),
@@ -2027,10 +2066,9 @@ bool MenuController::AcceptOrSelect(MenuItemView* parent,
     SetSelection(submenu->GetMenuItemAt(details.next_match),
                  SELECTION_DEFAULT);
   }
-  return false;
 }
 
-bool MenuController::SelectByChar(base::char16 character) {
+void MenuController::SelectByChar(base::char16 character) {
   base::char16 char_array[] = { character, 0 };
   base::char16 key = base::i18n::ToLower(char_array)[0];
   MenuItemView* item = pending_state_.item;
@@ -2040,24 +2078,24 @@ bool MenuController::SelectByChar(base::char16 character) {
   DCHECK(item->HasSubmenu());
   DCHECK(item->GetSubmenu());
   if (item->GetSubmenu()->GetMenuItemCount() == 0)
-    return false;
+    return;
 
   // Look for matches based on mnemonic first.
   SelectByCharDetails details =
       FindChildForMnemonic(item, key, &MatchesMnemonic);
-  if (details.first_match != -1)
-    return AcceptOrSelect(item, details);
+  if (details.first_match != -1) {
+    AcceptOrSelect(item, details);
+    return;
+  }
 
   if (is_combobox_) {
-    item->GetSubmenu()->GetTextInputClient()->InsertChar(character, 0);
+    item->GetSubmenu()->GetPrefixSelector()->InsertChar(character, 0);
   } else {
     // If no mnemonics found, look at first character of titles.
     details = FindChildForMnemonic(item, key, &TitleMatchesMnemonic);
     if (details.first_match != -1)
-      return AcceptOrSelect(item, details);
+      AcceptOrSelect(item, details);
   }
-
-  return false;
 }
 
 void MenuController::RepostEvent(SubmenuView* source,
@@ -2096,8 +2134,8 @@ void MenuController::RepostEvent(SubmenuView* source,
   // coordinates to be in pixels.
   // PostMessage() to metro windows isn't allowed (access will be denied). Don't
   // try to repost with Win32 if the window under the mouse press is in metro.
-  if (!ViewsDelegate::views_delegate ||
-      !ViewsDelegate::views_delegate->IsWindowInMetro(window)) {
+  if (!ViewsDelegate::GetInstance() ||
+      !ViewsDelegate::GetInstance()->IsWindowInMetro(window)) {
     gfx::Point screen_loc_pixels = gfx::win::DIPToScreenPoint(screen_loc);
     HWND target_window = window ? HWNDForNativeWindow(window) :
                                   WindowFromPoint(screen_loc_pixels.ToPOINT());

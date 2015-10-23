@@ -27,6 +27,7 @@
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/api/networking_private/networking_private_api.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
 using chromeos::DeviceState;
 using chromeos::NetworkHandler;
@@ -35,7 +36,7 @@ using chromeos::NetworkTypePattern;
 using chromeos::ShillManagerClient;
 using extensions::NetworkingPrivateDelegate;
 
-namespace private_api = extensions::core_api::networking_private;
+namespace private_api = extensions::api::networking_private;
 
 namespace {
 
@@ -137,6 +138,24 @@ void NetworkHandlerFailureCallback(
   callback.Run(error_name);
 }
 
+void RequirePinSuccess(
+    const std::string& device_path,
+    const std::string& current_pin,
+    const std::string& new_pin,
+    const extensions::NetworkingPrivateChromeOS::VoidCallback& success_callback,
+    const extensions::NetworkingPrivateChromeOS::FailureCallback&
+        failure_callback) {
+  // After RequirePin succeeds, call ChangePIN iff a different new_pin is
+  // provided.
+  if (new_pin.empty() || new_pin == current_pin) {
+    success_callback.Run();
+    return;
+  }
+  NetworkHandler::Get()->network_device_handler()->ChangePin(
+      device_path, current_pin, new_pin, success_callback,
+      base::Bind(&NetworkHandlerFailureCallback, failure_callback));
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -147,8 +166,8 @@ NetworkingPrivateChromeOS::NetworkingPrivateChromeOS(
     content::BrowserContext* browser_context,
     scoped_ptr<VerifyDelegate> verify_delegate)
     : NetworkingPrivateDelegate(verify_delegate.Pass()),
-      browser_context_(browser_context) {
-}
+      browser_context_(browser_context),
+      weak_ptr_factory_(this) {}
 
 NetworkingPrivateChromeOS::~NetworkingPrivateChromeOS() {
 }
@@ -163,8 +182,14 @@ void NetworkingPrivateChromeOS::GetProperties(
     return;
   }
 
+  std::string user_id_hash;
+  if (!GetUserIdHash(browser_context_, &user_id_hash, &error)) {
+    failure_callback.Run(error);
+    return;
+  }
+
   GetManagedConfigurationHandler()->GetProperties(
-      service_path,
+      user_id_hash, service_path,
       base::Bind(&NetworkHandlerDictionaryCallback, success_callback),
       base::Bind(&NetworkHandlerFailureCallback, failure_callback));
 }
@@ -274,7 +299,7 @@ void NetworkingPrivateChromeOS::GetNetworks(
       chromeos::onc::NetworkTypePatternFromOncType(network_type);
   scoped_ptr<base::ListValue> network_properties_list =
       chromeos::network_util::TranslateNetworkListToONC(
-          pattern, configured_only, visible_only, limit, false /* debugging */);
+          pattern, configured_only, visible_only, limit);
   success_callback.Run(network_properties_list.Pass());
 }
 
@@ -291,8 +316,26 @@ void NetworkingPrivateChromeOS::StartConnect(
   const bool check_error_state = false;
   NetworkHandler::Get()->network_connection_handler()->ConnectToNetwork(
       service_path, success_callback,
-      base::Bind(&NetworkHandlerFailureCallback, failure_callback),
+      base::Bind(&NetworkingPrivateChromeOS::ConnectFailureCallback,
+                 weak_ptr_factory_.GetWeakPtr(), guid, success_callback,
+                 failure_callback),
       check_error_state);
+}
+
+void NetworkingPrivateChromeOS::ConnectFailureCallback(
+    const std::string& guid,
+    const VoidCallback& success_callback,
+    const FailureCallback& failure_callback,
+    const std::string& error_name,
+    scoped_ptr<base::DictionaryValue> error_data) {
+  // TODO(stevenjb): Temporary workaround to show the configuration UI.
+  // Eventually the caller (e.g. Settings) should handle any failures and
+  // show its own configuration UI. crbug.com/380937.
+  if (ui_delegate()->HandleConnectFailed(guid, error_name)) {
+    success_callback.Run();
+    return;
+  }
+  failure_callback.Run(error_name);
 }
 
 void NetworkingPrivateChromeOS::StartDisconnect(
@@ -312,17 +355,43 @@ void NetworkingPrivateChromeOS::StartDisconnect(
 
 void NetworkingPrivateChromeOS::StartActivate(
     const std::string& guid,
-    const std::string& carrier,
+    const std::string& specified_carrier,
     const VoidCallback& success_callback,
     const FailureCallback& failure_callback) {
-  std::string service_path, error;
-  if (!GetServicePathFromGuid(guid, &service_path, &error)) {
-    failure_callback.Run(error);
+  const chromeos::NetworkState* network =
+      GetStateHandler()->GetNetworkStateFromGuid(guid);
+  if (!network) {
+    failure_callback.Run(
+        extensions::networking_private::kErrorInvalidNetworkGuid);
+    return;
+  }
+
+  std::string carrier(specified_carrier);
+  if (carrier.empty()) {
+    const chromeos::DeviceState* device =
+        GetStateHandler()->GetDeviceState(network->device_path());
+    if (device)
+      carrier = device->carrier();
+  }
+  if (carrier != shill::kCarrierSprint) {
+    // Only Sprint is directly activated. For other carriers, show the
+    // account details page.
+    if (ui_delegate())
+      ui_delegate()->ShowAccountDetails(guid);
+    success_callback.Run();
+    return;
+  }
+
+  if (!network->RequiresActivation()) {
+    // If no activation is required, show the account details page.
+    if (ui_delegate())
+      ui_delegate()->ShowAccountDetails(guid);
+    success_callback.Run();
     return;
   }
 
   NetworkHandler::Get()->network_activation_handler()->Activate(
-      service_path, carrier, success_callback,
+      network->path(), carrier, success_callback,
       base::Bind(&NetworkHandlerFailureCallback, failure_callback));
 }
 
@@ -358,6 +427,77 @@ void NetworkingPrivateChromeOS::GetCaptivePortalStatus(
       chromeos::NetworkPortalDetector::Get()->GetCaptivePortalState(guid);
   success_callback.Run(
       chromeos::NetworkPortalDetector::CaptivePortalStatusString(state.status));
+}
+
+void NetworkingPrivateChromeOS::UnlockCellularSim(
+    const std::string& guid,
+    const std::string& pin,
+    const std::string& puk,
+    const VoidCallback& success_callback,
+    const FailureCallback& failure_callback) {
+  const chromeos::NetworkState* network_state =
+      GetStateHandler()->GetNetworkStateFromGuid(guid);
+  if (!network_state) {
+    failure_callback.Run(networking_private::kErrorNetworkUnavailable);
+    return;
+  }
+  const chromeos::DeviceState* device_state =
+      GetStateHandler()->GetDeviceState(network_state->device_path());
+  if (!device_state) {
+    failure_callback.Run(networking_private::kErrorNetworkUnavailable);
+    return;
+  }
+  std::string lock_type = device_state->sim_lock_type();
+  if (lock_type.empty()) {
+    // Sim is already unlocked.
+    failure_callback.Run(networking_private::kErrorInvalidNetworkOperation);
+    return;
+  }
+
+  // Unblock or unlock the SIM.
+  if (lock_type == shill::kSIMLockPuk) {
+    NetworkHandler::Get()->network_device_handler()->UnblockPin(
+        device_state->path(), puk, pin, success_callback,
+        base::Bind(&NetworkHandlerFailureCallback, failure_callback));
+  } else {
+    NetworkHandler::Get()->network_device_handler()->EnterPin(
+        device_state->path(), pin, success_callback,
+        base::Bind(&NetworkHandlerFailureCallback, failure_callback));
+  }
+}
+
+void NetworkingPrivateChromeOS::SetCellularSimState(
+    const std::string& guid,
+    bool require_pin,
+    const std::string& current_pin,
+    const std::string& new_pin,
+    const VoidCallback& success_callback,
+    const FailureCallback& failure_callback) {
+  const chromeos::NetworkState* network_state =
+      GetStateHandler()->GetNetworkStateFromGuid(guid);
+  if (!network_state) {
+    failure_callback.Run(networking_private::kErrorNetworkUnavailable);
+    return;
+  }
+  const chromeos::DeviceState* device_state =
+      GetStateHandler()->GetDeviceState(network_state->device_path());
+  if (!device_state) {
+    failure_callback.Run(networking_private::kErrorNetworkUnavailable);
+    return;
+  }
+  if (!device_state->sim_lock_type().empty()) {
+    // The SIM needs to be unlocked before the state can be changed.
+    failure_callback.Run(networking_private::kErrorSimLocked);
+    return;
+  }
+
+  // Only set a new pin if require_pin is true.
+  std::string set_new_pin = require_pin ? new_pin : "";
+  NetworkHandler::Get()->network_device_handler()->RequirePin(
+      device_state->path(), require_pin, current_pin,
+      base::Bind(&RequirePinSuccess, device_state->path(), current_pin,
+                 set_new_pin, success_callback, failure_callback),
+      base::Bind(&NetworkHandlerFailureCallback, failure_callback));
 }
 
 scoped_ptr<base::ListValue>

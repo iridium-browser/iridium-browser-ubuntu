@@ -9,10 +9,8 @@
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 
-namespace syncer {
-
+namespace syncer_v2 {
 class ModelTypeSyncProxyImpl;
-struct DataTypeState;
 
 // Interface for the datatype integration logic from non-sync threads.
 //

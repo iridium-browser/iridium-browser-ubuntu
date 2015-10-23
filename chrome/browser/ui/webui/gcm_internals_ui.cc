@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -66,7 +67,7 @@ void SetRegistrationInfo(
 
     row->AppendDouble(it->time.ToJsTime());
     row->AppendString(it->app_id);
-    row->AppendString(it->sender_ids);
+    row->AppendString(it->source);
     row->AppendString(it->event);
     row->AppendString(it->details);
   }
@@ -83,7 +84,7 @@ void SetReceivingInfo(
     row->AppendDouble(it->time.ToJsTime());
     row->AppendString(it->app_id);
     row->AppendString(it->from);
-    row->AppendString(base::StringPrintf("%d", it->message_byte_size));
+    row->AppendString(base::IntToString(it->message_byte_size));
     row->AppendString(it->event);
     row->AppendString(it->details);
   }
@@ -161,7 +162,7 @@ void GcmInternalsUIMessageHandler::ReturnResults(
     device_info->SetBoolean("connectionClientCreated",
                             stats->connection_client_created);
     device_info->SetString("registeredAppIds",
-                           JoinString(stats->registered_app_ids, ","));
+                           base::JoinString(stats->registered_app_ids, ","));
     if (stats->connection_client_created)
       device_info->SetString("connectionState", stats->connection_state);
     if (stats->android_id > 0) {

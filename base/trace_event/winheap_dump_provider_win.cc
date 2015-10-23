@@ -6,29 +6,38 @@
 
 #include <windows.h>
 
+#include "base/debug/profiler.h"
+#include "base/strings/string_util.h"
 #include "base/trace_event/process_memory_dump.h"
+#include "base/win/windows_version.h"
 
 namespace base {
 namespace trace_event {
+
+#define DUMP_ROOT_NAME "winheap"
+// static
+const char WinHeapDumpProvider::kAllocatedObjects[] =
+    DUMP_ROOT_NAME "/allocated_objects";
 
 namespace {
 
 // Report a heap dump to a process memory dump. The |heap_info| structure
 // contains the information about this heap, and |dump_absolute_name| will be
 // used to represent it in the report.
-bool ReportHeapDump(ProcessMemoryDump* pmd,
-                    const WinHeapInfo& heap_info,
-                    const std::string& dump_absolute_name) {
-  MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_absolute_name);
-  if (!dump)
-    return false;
-  dump->AddScalar(MemoryAllocatorDump::kNameOuterSize,
-                  MemoryAllocatorDump::kUnitsBytes, heap_info.committed_size);
-  dump->AddScalar(MemoryAllocatorDump::kNameInnerSize,
-                  MemoryAllocatorDump::kUnitsBytes, heap_info.allocated_size);
-  dump->AddScalar(MemoryAllocatorDump::kNameObjectsCount,
-                  MemoryAllocatorDump::kUnitsObjects, heap_info.block_count);
-  return true;
+void ReportHeapDump(ProcessMemoryDump* pmd, const WinHeapInfo& heap_info) {
+  MemoryAllocatorDump* outer_dump = pmd->CreateAllocatorDump(DUMP_ROOT_NAME);
+  outer_dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                        MemoryAllocatorDump::kUnitsBytes,
+                        heap_info.committed_size);
+
+  MemoryAllocatorDump* inner_dump =
+      pmd->CreateAllocatorDump(WinHeapDumpProvider::kAllocatedObjects);
+  inner_dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                        MemoryAllocatorDump::kUnitsBytes,
+                        heap_info.allocated_size);
+  inner_dump->AddScalar(MemoryAllocatorDump::kNameObjectsCount,
+                        MemoryAllocatorDump::kUnitsObjects,
+                        heap_info.block_count);
 }
 
 }  // namespace
@@ -38,7 +47,30 @@ WinHeapDumpProvider* WinHeapDumpProvider::GetInstance() {
                    LeakySingletonTraits<WinHeapDumpProvider>>::get();
 }
 
-bool WinHeapDumpProvider::OnMemoryDump(ProcessMemoryDump* pmd) {
+bool WinHeapDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
+                                       ProcessMemoryDump* pmd) {
+  // This method might be flaky for 2 reasons:
+  //   - GetProcessHeaps is racy by design. It returns a snapshot of the
+  //     available heaps, but there's no guarantee that that snapshot remains
+  //     valid. If a heap disappears between GetProcessHeaps() and HeapWalk()
+  //     then chaos should be assumed. This flakyness is acceptable for tracing.
+  //   - The MSDN page for HeapLock says: "If the HeapLock function is called on
+  //     a heap created with the HEAP_NO_SERIALIZATION flag, the results are
+  //     undefined.". This is a problem on Windows XP where some system DLLs are
+  //     known for creating heaps with this particular flag. For this reason
+  //     this function should be disabled on XP.
+  //
+  // See https://crbug.com/487291 for more details about this.
+  if (base::win::GetVersion() < base::win::VERSION_VISTA)
+    return false;
+
+  // Disable this dump provider for the SyzyASan instrumented build
+  // because they don't support the heap walking functions yet.
+#if defined(SYZYASAN)
+  if (base::debug::IsBinaryInstrumented())
+    return false;
+#endif
+
   // Retrieves the number of heaps in the current process.
   DWORD number_of_heaps = ::GetProcessHeaps(0, NULL);
   WinHeapInfo all_heap_info = {0};
@@ -68,9 +100,7 @@ bool WinHeapDumpProvider::OnMemoryDump(ProcessMemoryDump* pmd) {
     all_heap_info.block_count += heap_info.block_count;
   }
   // Report the heap dump.
-  if (!ReportHeapDump(pmd, all_heap_info, "winheap"))
-    return false;
-
+  ReportHeapDump(pmd, all_heap_info);
   return true;
 }
 

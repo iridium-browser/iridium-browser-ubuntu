@@ -36,6 +36,10 @@
 #include "components/browser_watcher/crash_reporting_metrics_win.h"
 #endif
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/memory/system_memory_stats_recorder.h"
+#endif
+
 namespace {
 
 void IncrementPrefValue(const char* path) {
@@ -108,6 +112,11 @@ void CountBrowserCrashDumpAttempts() {
   }
 }
 #endif  // defined(OS_WIN)
+
+void RecordChildKills(bool was_extension_process) {
+  UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildKills",
+                           was_extension_process ? 2 : 1);
+}
 
 }  // namespace
 
@@ -286,8 +295,18 @@ void ChromeStabilityMetricsProvider::LogRendererCrash(
     UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildCrashes",
                              was_extension_process ? 2 : 1);
   } else if (status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED) {
-    UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildKills",
-                             was_extension_process ? 2 : 1);
+    RecordChildKills(was_extension_process);
+#if defined(OS_CHROMEOS)
+  } else if (status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM) {
+    RecordChildKills(was_extension_process);
+    UMA_HISTOGRAM_ENUMERATION("BrowserRenderProcessHost.ChildKills.OOM",
+                              was_extension_process ? 2 : 1,
+                              3);
+    memory::RecordMemoryStats(
+        was_extension_process
+            ? memory::RECORD_MEMORY_STATS_EXTENSIONS_OOM_KILLED
+            : memory::RECORD_MEMORY_STATS_CONTENTS_OOM_KILLED);
+#endif
   } else if (status == base::TERMINATION_STATUS_STILL_RUNNING) {
     UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.DisconnectedAlive",
                              was_extension_process ? 2 : 1);

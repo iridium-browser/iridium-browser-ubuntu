@@ -7,12 +7,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
 
 // A ToolbarModel that is backed by instance variables, which are initialized
 // with some basic values that can be changed with the provided setters. This
 // should be used only for testing.
-class TestToolbarModel : public ToolbarModel {
+class TestToolbarModel : public ChromeToolbarModel {
  public:
   TestToolbarModel();
   ~TestToolbarModel() override;
@@ -21,11 +21,9 @@ class TestToolbarModel : public ToolbarModel {
   base::string16 GetCorpusNameForMobile() const override;
   GURL GetURL() const override;
   bool WouldPerformSearchTermReplacement(bool ignore_editing) const override;
-  ConnectionSecurityHelper::SecurityLevel GetSecurityLevel(
+  connection_security::SecurityLevel GetSecurityLevel(
       bool ignore_editing) const override;
   int GetIcon() const override;
-  int GetIconForSecurityLevel(
-      ConnectionSecurityHelper::SecurityLevel level) const override;
   base::string16 GetEVCertName() const override;
   bool ShouldDisplayURL() const override;
 
@@ -35,8 +33,7 @@ class TestToolbarModel : public ToolbarModel {
       bool perform_search_term_replacement) {
     perform_search_term_replacement_ = perform_search_term_replacement;
   }
-  void set_security_level(
-      ConnectionSecurityHelper::SecurityLevel security_level) {
+  void set_security_level(connection_security::SecurityLevel security_level) {
     security_level_ = security_level;
   }
   void set_icon(int icon) { icon_ = icon; }
@@ -51,7 +48,7 @@ class TestToolbarModel : public ToolbarModel {
   base::string16 text_;
   GURL url_;
   bool perform_search_term_replacement_;
-  ConnectionSecurityHelper::SecurityLevel security_level_;
+  connection_security::SecurityLevel security_level_;
   int icon_;
   base::string16 ev_cert_name_;
   bool should_display_url_;

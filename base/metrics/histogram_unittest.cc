@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Test of Histogram class
+#include "base/metrics/histogram.h"
 
 #include <climits>
 #include <algorithm>
@@ -11,14 +11,12 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/bucket_ranges.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sample_vector.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/pickle.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using std::vector;
 
 namespace base {
 
@@ -55,7 +53,7 @@ TEST_F(HistogramTest, BasicTest) {
       "TestLinearHistogram", 1, 1000, 10, HistogramBase::kNoFlags);
   EXPECT_TRUE(linear_histogram);
 
-  vector<int> custom_ranges;
+  std::vector<int> custom_ranges;
   custom_ranges.push_back(1);
   custom_ranges.push_back(5);
   HistogramBase* custom_histogram = CustomHistogram::FactoryGet(
@@ -157,7 +155,7 @@ TEST_F(HistogramTest, LinearRangesTest) {
 
 TEST_F(HistogramTest, ArrayToCustomRangesTest) {
   const HistogramBase::Sample ranges[3] = {5, 10, 20};
-  vector<HistogramBase::Sample> ranges_vec =
+  std::vector<HistogramBase::Sample> ranges_vec =
       CustomHistogram::ArrayToCustomRanges(ranges, 3);
   ASSERT_EQ(6u, ranges_vec.size());
   EXPECT_EQ(5, ranges_vec[0]);
@@ -170,7 +168,7 @@ TEST_F(HistogramTest, ArrayToCustomRangesTest) {
 
 TEST_F(HistogramTest, CustomHistogramTest) {
   // A well prepared custom ranges.
-  vector<HistogramBase::Sample> custom_ranges;
+  std::vector<HistogramBase::Sample> custom_ranges;
   custom_ranges.push_back(1);
   custom_ranges.push_back(2);
 
@@ -220,7 +218,7 @@ TEST_F(HistogramTest, CustomHistogramWithOnly2Buckets) {
   // We should probably change the restriction on the base class (or not inherit
   // the base class!).
 
-  vector<HistogramBase::Sample> custom_ranges;
+  std::vector<HistogramBase::Sample> custom_ranges;
   custom_ranges.push_back(4);
 
   Histogram* histogram = static_cast<Histogram*>(
@@ -231,6 +229,30 @@ TEST_F(HistogramTest, CustomHistogramWithOnly2Buckets) {
   EXPECT_EQ(0, ranges->range(0));
   EXPECT_EQ(4, ranges->range(1));
   EXPECT_EQ(HistogramBase::kSampleType_MAX, ranges->range(2));
+}
+
+// Test the AddCount function.
+TEST_F(HistogramTest, AddCountTest) {
+  const size_t kBucketCount = 50;
+  Histogram* histogram = static_cast<Histogram*>(
+      Histogram::FactoryGet("AddCountHistogram", 10, 100, kBucketCount,
+                            HistogramBase::kNoFlags));
+
+  histogram->AddCount(20, 15);
+  histogram->AddCount(30, 14);
+
+  scoped_ptr<SampleVector> samples = histogram->SnapshotSampleVector();
+  EXPECT_EQ(29, samples->TotalCount());
+  EXPECT_EQ(15, samples->GetCount(20));
+  EXPECT_EQ(14, samples->GetCount(30));
+
+  histogram->AddCount(20, 25);
+  histogram->AddCount(30, 24);
+
+  scoped_ptr<SampleVector> samples2 = histogram->SnapshotSampleVector();
+  EXPECT_EQ(78, samples2->TotalCount());
+  EXPECT_EQ(40, samples2->GetCount(20));
+  EXPECT_EQ(38, samples2->GetCount(30));
 }
 
 // Make sure histogram handles out-of-bounds data gracefully.
@@ -256,7 +278,7 @@ TEST_F(HistogramTest, BoundsTest) {
   EXPECT_EQ(0, samples->GetCountAtIndex(array_size - 2));
   EXPECT_EQ(2, samples->GetCountAtIndex(array_size - 1));
 
-  vector<int> custom_ranges;
+  std::vector<int> custom_ranges;
   custom_ranges.push_back(10);
   custom_ranges.push_back(50);
   custom_ranges.push_back(100);
@@ -405,7 +427,7 @@ TEST_F(HistogramTest, HistogramSerializeInfo) {
 }
 
 TEST_F(HistogramTest, CustomHistogramSerializeInfo) {
-  vector<int> custom_ranges;
+  std::vector<int> custom_ranges;
   custom_ranges.push_back(10);
   custom_ranges.push_back(100);
 
@@ -484,7 +506,7 @@ TEST(HistogramDeathTest, BadRangesTest) {
       linear_histogram->HasConstructionArguments(
           1, HistogramBase::kSampleType_MAX - 1, 8));
 
-  vector<int> custom_ranges;
+  std::vector<int> custom_ranges;
   custom_ranges.push_back(0);
   custom_ranges.push_back(5);
   Histogram* custom_histogram = static_cast<Histogram*>(

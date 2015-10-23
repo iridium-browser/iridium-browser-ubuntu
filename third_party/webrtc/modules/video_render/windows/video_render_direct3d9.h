@@ -14,7 +14,6 @@
 #include "webrtc/modules/video_render/windows/i_video_render_win.h"
 
 #include <d3d9.h>
-#include <d3dx9.h>
 #include <ddraw.h>
 
 #include <Map>
@@ -43,9 +42,9 @@ public:
     virtual int FrameSizeChange(int width, int height, int numberOfStreams);
 
     // A new frame is delivered.
-    virtual int DeliverFrame(const I420VideoFrame& videoFrame);
+    virtual int DeliverFrame(const VideoFrame& videoFrame);
     virtual int32_t RenderFrame(const uint32_t streamId,
-                                const I420VideoFrame& videoFrame);
+                                const VideoFrame& videoFrame);
 
     // Called to check if the video frame is updated.
     int IsUpdated(bool& isUpdated);

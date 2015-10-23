@@ -32,6 +32,7 @@
 #define CSSToLengthConversionData_h
 
 #include "core/CoreExport.h"
+#include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
 #include "wtf/MathExtras.h"
 #include <limits>
@@ -43,9 +44,11 @@ class LayoutView;
 class Font;
 
 class CORE_EXPORT CSSToLengthConversionData {
+    DISALLOW_ALLOCATION();
 public:
 
     class FontSizes {
+        DISALLOW_ALLOCATION();
     public:
         FontSizes() : m_em(0), m_rem(0), m_font(nullptr) { }
         FontSizes(float em, float rem, const Font*);
@@ -62,6 +65,7 @@ public:
     };
 
     class ViewportSize {
+        DISALLOW_ALLOCATION();
     public:
         ViewportSize() : m_width(0), m_height(0) { }
         ViewportSize(double width, double height) : m_width(width), m_height(height) { }
@@ -81,7 +85,7 @@ public:
     float zoom() const { return m_zoom; }
 
     float emFontSize() const { return m_fontSizes.em(); }
-    float remFontSize() const { return m_fontSizes.rem(); }
+    float remFontSize() const;
     float exFontSize() const { return m_fontSizes.ex(); }
     float chFontSize() const { return m_fontSizes.ch(); }
 
@@ -92,7 +96,11 @@ public:
     double viewportMaxPercent() const;
 
     void setFontSizes(const FontSizes& fontSizes) { m_fontSizes = fontSizes; }
-    void setZoom(float zoom) { m_zoom = clampTo<float>(zoom, std::numeric_limits<float>::denorm_min()); }
+    void setZoom(float zoom)
+    {
+        ASSERT(std::isfinite(zoom) && zoom > 0);
+        m_zoom = zoom;
+    }
 
     CSSToLengthConversionData copyWithAdjustedZoom(float newZoom) const
     {

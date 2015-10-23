@@ -41,6 +41,9 @@ class VPMFramePreprocessor {
   int32_t SetTargetResolution(uint32_t width, uint32_t height,
                               uint32_t frame_rate);
 
+  // Set target frame rate.
+  void SetTargetFramerate(int frame_rate);
+
   // Update incoming frame rate/dimension.
   void UpdateIncomingframe_rate();
 
@@ -52,8 +55,8 @@ class VPMFramePreprocessor {
   uint32_t DecimatedHeight() const;
 
   // Preprocess output:
-  int32_t PreprocessFrame(const I420VideoFrame& frame,
-                          I420VideoFrame** processed_frame);
+  int32_t PreprocessFrame(const VideoFrame& frame,
+                          VideoFrame** processed_frame);
   VideoContentMetrics* ContentMetrics() const;
 
  private:
@@ -62,7 +65,7 @@ class VPMFramePreprocessor {
   enum { kSkipFrameCA = 2 };
 
   VideoContentMetrics* content_metrics_;
-  I420VideoFrame resampled_frame_;
+  VideoFrame resampled_frame_;
   VPMSpatialResampler* spatial_resampler_;
   VPMContentAnalysis* ca_;
   VPMVideoDecimator* vd_;

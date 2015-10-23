@@ -140,10 +140,13 @@ static void PrintUsage(void) {
           " -f file to load; if omitted, 1st arg after \"--\" is loaded\n"
           " -B additional ELF file to load as a blob library\n"
           " -v increases verbosity\n"
+          " -e enable hardware exception handling\n"
           " -X create a bound socket and export the address via an\n"
           "    IMC message to a corresponding inherited IMC app descriptor\n"
           "    (use -1 to create the bound socket / address descriptor\n"
-          "    pair, but that no export via IMC should occur)\n");
+          "    pair, but that no export via IMC should occur)\n"
+          " -E <name=value>|<name> set an environment variable\n"
+          " -p pass through all environment variables\n");
   fprintf(stderr,
           " -R an RPC supplies the NaCl module.\n"
           "    No nacl_file argument is expected, and the -f flag cannot be\n"
@@ -160,7 +163,6 @@ static void PrintUsage(void) {
           " -Q disable platform qualification (dangerous!)\n"
           " -s safely stub out non-validating instructions\n"
           " -S enable signal handling.  Not supported on Windows.\n"
-          " -E <name=value>|<name> set an environment variable\n"
           " -Z use fixed feature x86 CPU mode\n"
           "\n"
           " (For full effect, put -l and -q at the beginning.)\n"
@@ -192,6 +194,7 @@ struct SelLdrOptions {
   int fuzzing_quit_after_load;
   int skip_qualification;
   int handle_signals;
+  int enable_env_passthrough;
   int enable_exception_handling;
   int enable_debug_stub;
   int rpc_supplies_nexe;
@@ -217,6 +220,7 @@ static void SelLdrOptionsCtor(struct SelLdrOptions *options) {
   options->fuzzing_quit_after_load = 0;
   options->skip_qualification = 0;
   options->handle_signals = 0;
+  options->enable_env_passthrough = 0;
   options->enable_exception_handling = 0;
   options->enable_debug_stub = 0;
   options->rpc_supplies_nexe = 0;
@@ -255,7 +259,7 @@ static void NaClSelLdrParseArgs(int argc, char **argv,
 #if NACL_LINUX
                        "+D:z:"
 #endif
-                       "aB:cdeE:f:Fgh:i:l:qQr:RsSvw:X:Z")) != -1) {
+                       "aB:cdeE:f:Fgh:i:l:pqQr:RsSvw:X:Z")) != -1) {
     switch (opt) {
       case 'a':
         if (!options->quiet)
@@ -303,11 +307,9 @@ static void NaClSelLdrParseArgs(int argc, char **argv,
       case 'F':
         options->fuzzing_quit_after_load = 1;
         break;
-
       case 'g':
         options->enable_debug_stub = 1;
         break;
-
       case 'h':
       case 'r':
       case 'w':
@@ -349,6 +351,9 @@ static void NaClSelLdrParseArgs(int argc, char **argv,
            */
           NaClLogSetFile(optarg);
         }
+        break;
+      case 'p':
+        options->enable_env_passthrough = 1;
         break;
       case 'q':
         options->quiet = 1;
@@ -418,7 +423,7 @@ static void NaClSelLdrParseArgs(int argc, char **argv,
       fprintf(stderr, "DEBUG MODE ENABLED (skip validator)\n");
   }
 
-  if (options->verbosity) {
+  if (options->verbosity > 0) {
     int         ix;
     char const  *separator = "";
 
@@ -564,9 +569,9 @@ int NaClSelLdrMain(int argc, char **argv) {
   if (!DynArraySet(&env_vars, env_vars.num_entries, NULL)) {
     NaClLog(LOG_FATAL, "Adding env_vars NULL terminator failed\n");
   }
-  NaClEnvCleanserCtor(&env_cleanser, 0);
+  NaClEnvCleanserCtor(&env_cleanser, 0, options->enable_env_passthrough);
   if (!NaClEnvCleanserInit(&env_cleanser, NaClGetEnviron(),
-          (char const *const *)env_vars.ptr_array)) {
+                           (char const *const *) env_vars.ptr_array)) {
     NaClLog(LOG_FATAL, "Failed to initialise env cleanser\n");
   }
   envp = NaClEnvCleanserEnvironment(&env_cleanser);
@@ -873,8 +878,9 @@ int NaClSelLdrMain(int argc, char **argv) {
  done:
   fflush(stdout);
 
-  if (options->verbosity) {
-    printf("Dumping vmmap.\n"); fflush(stdout);
+  if (options->verbosity > 0) {
+    printf("Dumping vmmap.\n");
+    fflush(stdout);
     PrintVmmap(nap);
     fflush(stdout);
   }

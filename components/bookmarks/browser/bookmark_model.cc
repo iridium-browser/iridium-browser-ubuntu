@@ -12,6 +12,7 @@
 #include "base/i18n/string_compare.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_util.h"
 #include "components/bookmarks/browser/bookmark_expanded_state_tracker.h"
@@ -100,7 +101,8 @@ BookmarkModel::BookmarkModel(BookmarkClient* client)
       other_node_(NULL),
       mobile_node_(NULL),
       next_node_id_(1),
-      observers_(ObserverList<BookmarkModelObserver>::NOTIFY_EXISTING_ONLY),
+      observers_(
+          base::ObserverList<BookmarkModelObserver>::NOTIFY_EXISTING_ONLY),
       loaded_signal_(true, false),
       extensive_changes_(0) {
   DCHECK(client_);
@@ -143,7 +145,7 @@ void BookmarkModel::Load(
       new BookmarkExpandedStateTracker(this, pref_service));
 
   // Load the bookmarks. BookmarkStorage notifies us when done.
-  store_ .reset(new BookmarkStorage(this, profile_path, io_task_runner.get()));
+  store_.reset(new BookmarkStorage(this, profile_path, io_task_runner.get()));
   store_->LoadBookmarks(CreateLoadDetails(accept_languages), ui_task_runner);
 }
 
@@ -189,11 +191,9 @@ void BookmarkModel::EndGroupedChanges() {
 }
 
 void BookmarkModel::Remove(const BookmarkNode* node) {
+  DCHECK(loaded_);
   DCHECK(node);
-  if (!loaded_ || is_root_node(node)) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK(!is_root_node(node));
   RemoveAndDeleteNode(AsMutable(node));
 }
 
@@ -435,24 +435,37 @@ void BookmarkModel::SetNodeSyncTransactionVersion(
     store_->ScheduleSave();
 }
 
-void BookmarkModel::OnFaviconChanged(const std::set<GURL>& urls) {
-  // Ignore events if |Load| has not been called yet.
-  if (!store_)
-    return;
-
-  // Prevent the observers from getting confused for multiple favicon loads.
-  for (std::set<GURL>::const_iterator i = urls.begin(); i != urls.end(); ++i) {
+void BookmarkModel::OnFaviconsChanged(const std::set<GURL>& page_urls,
+                                      const GURL& icon_url) {
+  std::set<const BookmarkNode*> to_update;
+  for (const GURL& page_url : page_urls) {
     std::vector<const BookmarkNode*> nodes;
-    GetNodesByURL(*i, &nodes);
-    for (size_t i = 0; i < nodes.size(); ++i) {
-      // Got an updated favicon, for a URL, do a new request.
-      BookmarkNode* node = AsMutable(nodes[i]);
-      node->InvalidateFavicon();
-      CancelPendingFaviconLoadRequests(node);
-      FOR_EACH_OBSERVER(BookmarkModelObserver,
-                        observers_,
-                        BookmarkNodeFaviconChanged(this, node));
+    GetNodesByURL(page_url, &nodes);
+    to_update.insert(nodes.begin(), nodes.end());
+  }
+
+  if (!icon_url.is_empty()) {
+    // Log Histogram to determine how often |icon_url| is non empty in
+    // practice.
+    // TODO(pkotwicz): Do something more efficient if |icon_url| is non-empty
+    // many times a day for each user.
+    UMA_HISTOGRAM_BOOLEAN("Bookmarks.OnFaviconsChangedIconURL", true);
+
+    base::AutoLock url_lock(url_lock_);
+    for (const BookmarkNode* node : nodes_ordered_by_url_set_) {
+      if (icon_url == node->icon_url())
+        to_update.insert(node);
     }
+  }
+
+  for (const BookmarkNode* node : to_update) {
+    // Rerequest the favicon.
+    BookmarkNode* mutable_node = AsMutable(node);
+    mutable_node->InvalidateFavicon();
+    CancelPendingFaviconLoadRequests(mutable_node);
+    FOR_EACH_OBSERVER(BookmarkModelObserver,
+                      observers_,
+                      BookmarkNodeFaviconChanged(this, node));
   }
 }
 

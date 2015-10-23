@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <Cocoa/Cocoa.h>
-#import <Carbon/Carbon.h>  // kVK_Return.
-
 #import "chrome/browser/ui/cocoa/profiles/profile_chooser_controller.h"
+
+#import <Carbon/Carbon.h>  // kVK_Return.
+#import <Cocoa/Cocoa.h>
 
 #include "base/mac/bundle_locations.h"
 #include "base/prefs/pref_service.h"
@@ -25,9 +25,9 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
-#include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/signin/signin_ui_util.h"
@@ -48,7 +48,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/signin/core/browser/mutable_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -659,6 +658,11 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
     profile_ = profile;
     controller_ = controller;
 
+    CGFloat availableWidth = frameRect.size.width;
+    NSSize textSize = [profileName sizeWithAttributes:@{
+      NSFontAttributeName : [self font]
+    }];
+
     if (editingAllowed) {
       // Show an "edit" pencil icon when hovering over. In the default state,
       // we need to create an empty placeholder of the correct size, so that
@@ -711,13 +715,16 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
           base::SysNSStringToUTF16(profileName))
                                     forAttribute:NSAccessibilityTitleAttribute];
 
-      NSSize textSize = [profileName sizeWithAttributes:@{
+      // Recompute the available width for the name since the icon takes space.
+      availableWidth -= [hoverImage size].width * 2;
+      // The profileNameTextField_ might size the text differently.
+      textSize = [profileName sizeWithAttributes:@{
         NSFontAttributeName : [profileNameTextField_ font]
       }];
-
-      if (textSize.width > frameRect.size.width - [hoverImage size].width * 2)
-        [self setToolTip:profileName];
     }
+
+    if (textSize.width > availableWidth)
+      [self setToolTip:profileName];
 
     [[self cell] accessibilitySetOverrideValue:NSAccessibilityButtonRole
                                   forAttribute:NSAccessibilityRoleAttribute];
@@ -1089,8 +1096,8 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 
 - (IBAction)removeAccount:(id)sender {
   DCHECK(!accountIdToRemove_.empty());
-  ProfileOAuth2TokenServiceFactory::GetPlatformSpecificForProfile(
-      browser_->profile())->RevokeCredentials(accountIdToRemove_);
+  ProfileOAuth2TokenServiceFactory::GetForProfile(browser_->profile())
+      ->RevokeCredentials(accountIdToRemove_);
   [self postActionPerformed:ProfileMetrics::PROFILE_DESKTOP_MENU_REMOVE_ACCT];
   accountIdToRemove_.clear();
 

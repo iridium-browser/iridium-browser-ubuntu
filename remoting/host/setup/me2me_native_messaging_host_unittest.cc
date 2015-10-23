@@ -17,6 +17,7 @@
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
 #include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/host/native_messaging/log_message_handler.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
 #include "remoting/host/pin_hash.h"
 #include "remoting/host/setup/mock_oauth_client.h"
@@ -292,7 +293,7 @@ void Me2MeNativeMessagingHostTest::SetUp() {
 
   // Arrange to run |test_message_loop_| until no components depend on it.
   host_task_runner_ = new AutoThreadTaskRunner(
-      host_thread_->message_loop_proxy(),
+      host_thread_->task_runner(),
       base::Bind(&Me2MeNativeMessagingHostTest::ExitTest,
                  base::Unretained(this)));
 
@@ -336,7 +337,7 @@ void Me2MeNativeMessagingHostTest::StartHost() {
                           base::Unretained(this)));
 
   // Notify the test that the host has finished starting up.
-  test_message_loop_->message_loop_proxy()->PostTask(
+  test_message_loop_->task_runner()->PostTask(
       FROM_HERE, test_run_loop_->QuitClosure());
 }
 
@@ -353,8 +354,8 @@ void Me2MeNativeMessagingHostTest::StopHost() {
 }
 
 void Me2MeNativeMessagingHostTest::ExitTest() {
-  if (!test_message_loop_->message_loop_proxy()->RunsTasksOnCurrentThread()) {
-    test_message_loop_->message_loop_proxy()->PostTask(
+  if (!test_message_loop_->task_runner()->RunsTasksOnCurrentThread()) {
+    test_message_loop_->task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&Me2MeNativeMessagingHostTest::ExitTest,
                    base::Unretained(this)));
@@ -383,33 +384,41 @@ void Me2MeNativeMessagingHostTest::TearDown() {
 
 scoped_ptr<base::DictionaryValue>
 Me2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
-  uint32 length;
-  int read_result = output_read_file_.ReadAtCurrentPos(
-      reinterpret_cast<char*>(&length), sizeof(length));
-  if (read_result != sizeof(length)) {
-    return nullptr;
-  }
+  while (true) {
+    uint32 length;
+    int read_result = output_read_file_.ReadAtCurrentPos(
+        reinterpret_cast<char*>(&length), sizeof(length));
+    if (read_result != sizeof(length)) {
+      return nullptr;
+    }
 
-  std::string message_json(length, '\0');
-  read_result = output_read_file_.ReadAtCurrentPos(
-      string_as_array(&message_json), length);
-  if (read_result != static_cast<int>(length)) {
-    return nullptr;
-  }
+    std::string message_json(length, '\0');
+    read_result = output_read_file_.ReadAtCurrentPos(
+        string_as_array(&message_json), length);
+    if (read_result != static_cast<int>(length)) {
+      return nullptr;
+    }
 
-  scoped_ptr<base::Value> message(base::JSONReader::Read(message_json));
-  if (!message || !message->IsType(base::Value::TYPE_DICTIONARY)) {
-    return nullptr;
-  }
+    scoped_ptr<base::Value> message = base::JSONReader::Read(message_json);
+    if (!message || !message->IsType(base::Value::TYPE_DICTIONARY)) {
+      return nullptr;
+    }
 
-  return make_scoped_ptr(
-      static_cast<base::DictionaryValue*>(message.release()));
+    scoped_ptr<base::DictionaryValue> result = make_scoped_ptr(
+        static_cast<base::DictionaryValue*>(message.release()));
+    std::string type;
+    // If this is a debug message log, ignore it, otherwise return it.
+    if (!result->GetString("type", &type) ||
+        type != LogMessageHandler::kDebugMessageTypeName) {
+      return result;
+    }
+  }
 }
 
 void Me2MeNativeMessagingHostTest::WriteMessageToInputPipe(
     const base::Value& message) {
   std::string message_json;
-  base::JSONWriter::Write(&message, &message_json);
+  base::JSONWriter::Write(message, &message_json);
 
   uint32 length = message_json.length();
   input_write_file_.WriteAtCurrentPos(reinterpret_cast<char*>(&length),

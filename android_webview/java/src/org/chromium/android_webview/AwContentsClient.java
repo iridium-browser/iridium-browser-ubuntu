@@ -16,7 +16,7 @@ import android.net.http.SslError;
 import android.os.Looper;
 import android.os.Message;
 import android.provider.Browser;
-import android.util.Log;
+import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.ConsoleMessage;
@@ -25,10 +25,11 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 
 import org.chromium.android_webview.permission.AwPermissionRequest;
+import org.chromium.base.Log;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.SelectActionMode;
-import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
+import org.chromium.content.browser.WebActionMode;
+import org.chromium.content.browser.WebActionModeCallback.ActionHandler;
 
 import java.security.Principal;
 import java.util.HashMap;
@@ -43,12 +44,18 @@ import java.util.HashMap;
  * i.e.: all methods in this class should either be final, or abstract.
  */
 public abstract class AwContentsClient {
-    private static final String TAG = "AwContentsClient";
+    private static final String TAG = "cr.AwContentsClient";
     private final AwContentsClientCallbackHelper mCallbackHelper;
 
     // Last background color reported from the renderer. Holds the sentinal value INVALID_COLOR
     // if not valid.
     private int mCachedRendererBackgroundColor = INVALID_COLOR;
+    // Holds the last known page title. {@link ContentViewClient#onUpdateTitle} is unreliable,
+    // particularly for navigating backwards and forwards in the history stack. Instead, the last
+    // known document title is kept here, and the clients gets updated whenever the value has
+    // actually changed. Blink also only sends updates when the document title have changed,
+    // so behaviours are consistent.
+    private String mTitle = "";
 
     private static final int INVALID_COLOR = 0;
 
@@ -150,7 +157,12 @@ public abstract class AwContentsClient {
     public abstract void onDownloadStart(String url, String userAgent, String contentDisposition,
             String mimeType, long contentLength);
 
-    public static boolean sendBrowsingIntent(Context context, String url) {
+    public static boolean sendBrowsingIntent(Context context, String url, boolean hasUserGesture,
+            boolean isRedirect) {
+        if (!hasUserGesture && !isRedirect) {
+            Log.w(TAG, "Denied starting an intent without a user gesture, URI " + url);
+            return true;
+        }
         Intent intent;
         // Perform generic parsing of the URI to turn it into an Intent.
         try {
@@ -361,8 +373,23 @@ public abstract class AwContentsClient {
      */
     public abstract void onNewPicture(Picture picture);
 
-    public abstract SelectActionMode startActionMode(
-            View view, ActionHandler actionHandler, boolean floating);
+    /**
+     * TODO(jdduke): Remove when all embedders have been updated.
+     */
+    public WebActionMode startActionMode(View view, ActionHandler actionHandler, boolean floating) {
+        return null;
+    }
 
-    public abstract boolean supportsFloatingActionMode();
+    /**
+     * TODO(jdduke): Remove when all embedders have been updated.
+     */
+    public boolean supportsFloatingActionMode() {
+        return false;
+    }
+
+    public void updateTitle(String title, boolean forceNotification) {
+        if (!forceNotification && TextUtils.equals(mTitle, title)) return;
+        mTitle = title;
+        mCallbackHelper.postOnReceivedTitle(mTitle);
+    }
 }

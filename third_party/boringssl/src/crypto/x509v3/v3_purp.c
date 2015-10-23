@@ -67,6 +67,8 @@
 #include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
 
+#include "../internal.h"
+
 
 static void x509v3_cache_extensions(X509 *x);
 
@@ -114,9 +116,7 @@ int X509_check_purpose(X509 *x, int id, int ca)
 	int idx;
 	const X509_PURPOSE *pt;
 	if(!(x->ex_flags & EXFLAG_SET)) {
-		CRYPTO_w_lock(CRYPTO_LOCK_X509);
 		x509v3_cache_extensions(x);
-		CRYPTO_w_unlock(CRYPTO_LOCK_X509);
 	}
 	if(id == -1) return 1;
 	idx = X509_PURPOSE_get_by_id(id);
@@ -128,7 +128,7 @@ int X509_check_purpose(X509 *x, int id, int ca)
 int X509_PURPOSE_set(int *p, int purpose)
 {
 	if(X509_PURPOSE_get_by_id(purpose) == -1) {
-		OPENSSL_PUT_ERROR(X509V3, X509_PURPOSE_set, X509V3_R_INVALID_PURPOSE);
+		OPENSSL_PUT_ERROR(X509V3, X509V3_R_INVALID_PURPOSE);
 		return 0;
 	}
 	*p = purpose;
@@ -191,7 +191,7 @@ int X509_PURPOSE_add(int id, int trust, int flags,
 	/* Need a new entry */
 	if(idx == -1) {
 		if(!(ptmp = OPENSSL_malloc(sizeof(X509_PURPOSE)))) {
-			OPENSSL_PUT_ERROR(X509V3, X509_PURPOSE_add, ERR_R_MALLOC_FAILURE);
+			OPENSSL_PUT_ERROR(X509V3, ERR_R_MALLOC_FAILURE);
 			return 0;
 		}
 		ptmp->flags = X509_PURPOSE_DYNAMIC;
@@ -201,7 +201,7 @@ int X509_PURPOSE_add(int id, int trust, int flags,
 	name_dup = BUF_strdup(name);
 	sname_dup = BUF_strdup(sname);
 	if (name_dup == NULL || sname_dup == NULL) {
-		OPENSSL_PUT_ERROR(X509V3, X509_PURPOSE_add, ERR_R_MALLOC_FAILURE);
+		OPENSSL_PUT_ERROR(X509V3, ERR_R_MALLOC_FAILURE);
 		if (name_dup != NULL)
 			OPENSSL_free(name_dup);
 		if (sname_dup != NULL)
@@ -232,12 +232,12 @@ int X509_PURPOSE_add(int id, int trust, int flags,
 	/* If its a new entry manage the dynamic table */
 	if(idx == -1) {
 		if(!xptable && !(xptable = sk_X509_PURPOSE_new(xp_cmp))) {
-			OPENSSL_PUT_ERROR(X509V3, X509_PURPOSE_add, ERR_R_MALLOC_FAILURE);
+			OPENSSL_PUT_ERROR(X509V3, ERR_R_MALLOC_FAILURE);
 			xptable_free(ptmp);
 			return 0;
 		}
 		if (!sk_X509_PURPOSE_push(xptable, ptmp)) {
-			OPENSSL_PUT_ERROR(X509V3, X509_PURPOSE_add, ERR_R_MALLOC_FAILURE);
+			OPENSSL_PUT_ERROR(X509V3, ERR_R_MALLOC_FAILURE);
 			xptable_free(ptmp);
 			return 0;
 		}
@@ -367,6 +367,15 @@ static void setup_crldp(X509 *x)
 		setup_dp(x, sk_DIST_POINT_value(x->crldp, i));
 	}
 
+/* g_x509_cache_extensions_lock is used to protect against concurrent calls to
+ * |x509v3_cache_extensions|. Ideally this would be done with a |CRYPTO_once_t|
+ * in the |X509| structure, but |CRYPTO_once_t| isn't public.
+ *
+ * Note: it's not entirely clear whether this lock is needed. Not all paths to
+ * this function took a lock in OpenSSL. */
+static struct CRYPTO_STATIC_MUTEX g_x509_cache_extensions_lock =
+    CRYPTO_STATIC_MUTEX_INIT;
+
 static void x509v3_cache_extensions(X509 *x)
 {
 	BASIC_CONSTRAINTS *bs;
@@ -377,7 +386,15 @@ static void x509v3_cache_extensions(X509 *x)
 	X509_EXTENSION *ex;
 	size_t i;
 	int j;
-	if(x->ex_flags & EXFLAG_SET) return;
+
+	CRYPTO_STATIC_MUTEX_lock_write(&g_x509_cache_extensions_lock);
+
+	if(x->ex_flags & EXFLAG_SET)
+		{
+		CRYPTO_STATIC_MUTEX_unlock(&g_x509_cache_extensions_lock);
+		return;
+		}
+
 	X509_digest(x, EVP_sha1(), x->sha1_hash, NULL);
 	/* V1 should mean no extensions ... */
 	if(!X509_get_version(x)) x->ex_flags |= EXFLAG_V1;
@@ -501,6 +518,8 @@ static void x509v3_cache_extensions(X509 *x)
 			}
 		}
 	x->ex_flags |= EXFLAG_SET;
+
+	CRYPTO_STATIC_MUTEX_unlock(&g_x509_cache_extensions_lock);
 }
 
 /* CA checks common to all purposes
@@ -544,9 +563,7 @@ static int check_ca(const X509 *x)
 int X509_check_ca(X509 *x)
 {
 	if(!(x->ex_flags & EXFLAG_SET)) {
-		CRYPTO_w_lock(CRYPTO_LOCK_X509);
 		x509v3_cache_extensions(x);
-		CRYPTO_w_unlock(CRYPTO_LOCK_X509);
 	}
 
 	return check_ca(x);

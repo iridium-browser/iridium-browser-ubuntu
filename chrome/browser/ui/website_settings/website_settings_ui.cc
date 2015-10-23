@@ -91,11 +91,16 @@ WebsiteSettingsUI::IdentityInfo::IdentityInfo()
 
 WebsiteSettingsUI::IdentityInfo::~IdentityInfo() {}
 
-base::string16 WebsiteSettingsUI::IdentityInfo::GetIdentityStatusText() const {
+base::string16 WebsiteSettingsUI::IdentityInfo::GetSecuritySummary() const {
   switch (identity_status) {
     case WebsiteSettings::SITE_IDENTITY_STATUS_CERT:
     case WebsiteSettings::SITE_IDENTITY_STATUS_EV_CERT:
     case WebsiteSettings::SITE_IDENTITY_STATUS_CERT_REVOCATION_UNKNOWN:
+      if (connection_status ==
+          WebsiteSettings::SITE_CONNECTION_STATUS_MIXED_CONTENT) {
+        return l10n_util::GetStringUTF16(
+            IDS_WEBSITE_SETTINGS_MIXED_PASSIVE_CONTENT);
+      }
       return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_SECURE_TRANSPORT);
     case WebsiteSettings::SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM:
       return l10n_util::GetStringUTF16(
@@ -351,18 +356,4 @@ const gfx::Image& WebsiteSettingsUI::GetConnectionIcon(
     WebsiteSettings::SiteConnectionStatus status) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   return rb.GetNativeImageNamed(GetConnectionIconID(status));
-}
-
-// static
-int WebsiteSettingsUI::GetFirstVisitIconID(const base::string16& first_visit) {
-  // FIXME(markusheintz): Display a minor warning icon if the page is visited
-  // the first time.
-  return IDR_PAGEINFO_INFO;
-}
-
-// static
-const gfx::Image& WebsiteSettingsUI::GetFirstVisitIcon(
-    const base::string16& first_visit) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetNativeImageNamed(GetFirstVisitIconID(first_visit));
 }

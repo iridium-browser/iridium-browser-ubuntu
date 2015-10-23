@@ -16,7 +16,7 @@ goog.require('__crWeb.message');
 __gCrWeb.core_dynamic = {};
 
 /* Beginning of anonymous object. */
-new function() {
+(function() {
   /**
    * Resets common.JSONStringify to a clean copy. This can be called to ensure
    * that its copy is not of an override injected earlier by the page. This
@@ -139,14 +139,6 @@ new function() {
   }
 
   /**
-   * Called when history.pushState and history.replaceState are invoked.
-   */
-  __gCrWeb.core_dynamic.historyWillChangeState = function () {
-    // UIWebViewWebController does not need to be notified prior to
-    // history.pushState or history.replaceState calls.
-  };
-
-  /**
    * Exits Fullscreen video by calling webkitExitFullScreen on every video
    * element.
    */
@@ -157,4 +149,4 @@ new function() {
       videos[i].webkitExitFullScreen();
     }
   };
-}
+}());

@@ -66,6 +66,9 @@ public class PeerConnection {
     /** Triggered when the IceConnectionState changes. */
     public void onIceConnectionChange(IceConnectionState newState);
 
+    /** Triggered when the ICE connection receiving status changes. */
+    public void onIceConnectionReceivingChange(boolean receiving);
+
     /** Triggered when the IceGatheringState changes. */
     public void onIceGatheringChange(IceGatheringState newState);
 
@@ -117,7 +120,11 @@ public class PeerConnection {
     BALANCED, MAXBUNDLE, MAXCOMPAT
   };
 
-  /** Java version of PeerConnectionInterface.BundlePolicy */
+  /** Java version of PeerConnectionInterface.RtcpMuxPolicy */
+  public enum RtcpMuxPolicy {
+    NEGOTIATE, REQUIRE
+  };
+  /** Java version of PeerConnectionInterface.TcpCandidatePolicy */
   public enum TcpCandidatePolicy {
     ENABLED, DISABLED
   };
@@ -127,15 +134,19 @@ public class PeerConnection {
     public IceTransportsType iceTransportsType;
     public List<IceServer> iceServers;
     public BundlePolicy bundlePolicy;
+    public RtcpMuxPolicy rtcpMuxPolicy;
     public TcpCandidatePolicy tcpCandidatePolicy;
     public int audioJitterBufferMaxPackets;
+    public boolean audioJitterBufferFastAccelerate;
 
     public RTCConfiguration(List<IceServer> iceServers) {
       iceTransportsType = IceTransportsType.ALL;
       bundlePolicy = BundlePolicy.BALANCED;
+      rtcpMuxPolicy = RtcpMuxPolicy.NEGOTIATE;
       tcpCandidatePolicy = TcpCandidatePolicy.ENABLED;
       this.iceServers = iceServers;
       audioJitterBufferMaxPackets = 50;
+      audioJitterBufferFastAccelerate = false;
     }
   };
 
@@ -168,6 +179,8 @@ public class PeerConnection {
 
   public native void setRemoteDescription(
       SdpObserver observer, SessionDescription sdp);
+
+  public native void setIceConnectionReceivingTimeout(int timeoutMs);
 
   public native boolean updateIce(
       List<IceServer> iceServers, MediaConstraints constraints);

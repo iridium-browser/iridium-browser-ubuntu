@@ -13,14 +13,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/renderer_context_menu/spelling_bubble_model.h"
+#include "chrome/browser/spellchecker/feedback_sender.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
-#include "chrome/browser/spellchecker/spellcheck_platform_mac.h"
+#include "chrome/browser/spellchecker/spellcheck_platform.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/spellchecker/spelling_service_client.h"
 #include "chrome/browser/ui/confirm_bubble.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/spellcheck_common.h"
 #include "chrome/common/spellcheck_result.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/render_view_host.h"
@@ -163,12 +165,14 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
       spellcheck_service->GetMetrics()->RecordSuggestionStats(1);
   }
 
-  // If word is misspelled, give option for "Add to dictionary" and a check item
-  // "Ask Google for suggestions".
+  // If word is misspelled, give option for "Add to dictionary" and, if
+  // multilingual spellchecking is not enabled, a check item "Ask Google for
+  // suggestions".
   proxy_->AddMenuItem(IDC_SPELLCHECK_ADD_TO_DICTIONARY,
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_ADD_TO_DICTIONARY));
 
-  proxy_->AddCheckItem(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
+  proxy_->AddCheckItem(
+      IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE));
 
   const base::CommandLine* command_line =
@@ -204,7 +208,8 @@ bool SpellingMenuObserver::IsCommandIdChecked(int command_id) {
   Profile* profile = Profile::FromBrowserContext(proxy_->GetBrowserContext());
 
   if (command_id == IDC_CONTENT_CONTEXT_SPELLING_TOGGLE)
-    return integrate_spelling_service_.GetValue() && !profile->IsOffTheRecord();
+    return integrate_spelling_service_.GetValue() &&
+           !profile->IsOffTheRecord();
   if (command_id == IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE)
     return autocorrect_spelling_.GetValue() && !profile->IsOffTheRecord();
   return false;
@@ -287,8 +292,8 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
         spellcheck->GetFeedbackSender()->AddedToDictionary(misspelling_hash_);
       }
     }
-#if defined(OS_MACOSX)
-    spellcheck_mac::AddWord(misspelled_word_);
+#if defined(USE_BROWSER_SPELLCHECKER)
+    spellcheck_platform::AddWord(misspelled_word_);
 #endif
   }
 

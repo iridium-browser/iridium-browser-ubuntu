@@ -75,6 +75,7 @@
 #include <openssl/thread.h>
 
 #include "internal.h"
+#include "../internal.h"
 
 
 /* This file implements the wNAF-based interleaving multi-exponentation method
@@ -91,7 +92,7 @@ typedef struct ec_pre_comp_st {
   EC_POINT **points; /* array with pre-calculated multiples of generator:
                       * 'num' pointers to EC_POINT objects followed by a NULL */
   size_t num; /* numblocks * 2^(w-1) */
-  int references;
+  CRYPTO_refcount_t references;
 } EC_PRE_COMP;
 
 static EC_PRE_COMP *ec_pre_comp_new(void) {
@@ -99,7 +100,7 @@ static EC_PRE_COMP *ec_pre_comp_new(void) {
 
   ret = (EC_PRE_COMP *)OPENSSL_malloc(sizeof(EC_PRE_COMP));
   if (!ret) {
-    OPENSSL_PUT_ERROR(EC, ec_pre_comp_new, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     return ret;
   }
   ret->blocksize = 8; /* default */
@@ -116,13 +117,13 @@ void *ec_pre_comp_dup(EC_PRE_COMP *pre_comp) {
     return NULL;
   }
 
-  CRYPTO_add(&pre_comp->references, 1, CRYPTO_LOCK_EC_PRE_COMP);
+  CRYPTO_refcount_inc(&pre_comp->references);
   return pre_comp;
 }
 
 void ec_pre_comp_free(EC_PRE_COMP *pre_comp) {
   if (pre_comp == NULL ||
-      CRYPTO_add(&pre_comp->references, -1, CRYPTO_LOCK_EC_PRE_COMP) > 0) {
+      !CRYPTO_refcount_dec_and_test_zero(&pre_comp->references)) {
     return;
   }
 
@@ -157,7 +158,7 @@ static signed char *compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len) {
   if (BN_is_zero(scalar)) {
     r = OPENSSL_malloc(1);
     if (!r) {
-      OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_MALLOC_FAILURE);
+      OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
       goto err;
     }
     r[0] = 0;
@@ -168,7 +169,7 @@ static signed char *compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len) {
   if (w <= 0 || w > 7) /* 'signed char' can represent integers with absolute
                           values less than 2^7 */
   {
-    OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_INTERNAL_ERROR);
+    OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
     goto err;
   }
   bit = 1 << w;        /* at most 128 */
@@ -180,7 +181,7 @@ static signed char *compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len) {
   }
 
   if (scalar->d == NULL || scalar->top == 0) {
-    OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_INTERNAL_ERROR);
+    OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
     goto err;
   }
 
@@ -191,7 +192,7 @@ static signed char *compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len) {
            * (*ret_len will be set to the actual length, i.e. at most
            * BN_num_bits(scalar) + 1) */
   if (r == NULL) {
-    OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     goto err;
   }
   window_val = scalar->d[0] & mask;
@@ -224,7 +225,7 @@ static signed char *compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len) {
       }
 
       if (digit <= -bit || digit >= bit || !(digit & 1)) {
-        OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_INTERNAL_ERROR);
+        OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
         goto err;
       }
 
@@ -234,7 +235,7 @@ static signed char *compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len) {
        * for modified window NAFs, it may also be 2^w
        */
       if (window_val != 0 && window_val != next_bit && window_val != bit) {
-        OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_INTERNAL_ERROR);
+        OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
         goto err;
       }
     }
@@ -245,13 +246,13 @@ static signed char *compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len) {
     window_val += bit * BN_is_bit_set(scalar, j + w);
 
     if (window_val > next_bit) {
-      OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_INTERNAL_ERROR);
+      OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
       goto err;
     }
   }
 
   if (j > len + 1) {
-    OPENSSL_PUT_ERROR(EC, compute_wNAF, ERR_R_INTERNAL_ERROR);
+    OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
     goto err;
   }
   len = j;
@@ -315,7 +316,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
   int ret = 0;
 
   if (group->meth != r->meth) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, EC_R_INCOMPATIBLE_OBJECTS);
+    OPENSSL_PUT_ERROR(EC, EC_R_INCOMPATIBLE_OBJECTS);
     return 0;
   }
 
@@ -325,7 +326,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
 
   for (i = 0; i < num; i++) {
     if (group->meth != points[i]->meth) {
-      OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, EC_R_INCOMPATIBLE_OBJECTS);
+      OPENSSL_PUT_ERROR(EC, EC_R_INCOMPATIBLE_OBJECTS);
       return 0;
     }
   }
@@ -340,7 +341,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
   if (scalar != NULL) {
     generator = EC_GROUP_get0_generator(group);
     if (generator == NULL) {
-      OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, EC_R_UNDEFINED_GENERATOR);
+      OPENSSL_PUT_ERROR(EC, EC_R_UNDEFINED_GENERATOR);
       goto err;
     }
 
@@ -365,7 +366,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
 
       /* check that pre_comp looks sane */
       if (pre_comp->num != (pre_comp->numblocks * pre_points_per_block)) {
-        OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_INTERNAL_ERROR);
+        OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
         goto err;
       }
     } else {
@@ -390,7 +391,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
   }
 
   if (!wsize || !wNAF_len || !wNAF || !val_sub) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     goto err;
   }
 
@@ -419,7 +420,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
 
     if (pre_comp == NULL) {
       if (num_scalar != 1) {
-        OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_INTERNAL_ERROR);
+        OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
         goto err;
       }
       /* we have already generated a wNAF for 'scalar' */
@@ -428,7 +429,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
       size_t tmp_len = 0;
 
       if (num_scalar != 0) {
-        OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_INTERNAL_ERROR);
+        OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
         goto err;
       }
 
@@ -462,7 +463,8 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
           /* possibly we can do with fewer blocks than estimated */
           numblocks = (tmp_len + blocksize - 1) / blocksize;
           if (numblocks > pre_comp->numblocks) {
-            OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_INTERNAL_ERROR);
+            OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
+            OPENSSL_free(tmp_wNAF);
             goto err;
           }
           totalnum = num + numblocks;
@@ -476,7 +478,8 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
           if (i < totalnum - 1) {
             wNAF_len[i] = blocksize;
             if (tmp_len < blocksize) {
-              OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_INTERNAL_ERROR);
+              OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
+              OPENSSL_free(tmp_wNAF);
               goto err;
             }
             tmp_len -= blocksize;
@@ -489,7 +492,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
           wNAF[i + 1] = NULL;
           wNAF[i] = OPENSSL_malloc(wNAF_len[i]);
           if (wNAF[i] == NULL) {
-            OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_MALLOC_FAILURE);
+            OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
             OPENSSL_free(tmp_wNAF);
             goto err;
           }
@@ -499,7 +502,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
           }
 
           if (*tmp_points == NULL) {
-            OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_INTERNAL_ERROR);
+            OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
             OPENSSL_free(tmp_wNAF);
             goto err;
           }
@@ -518,7 +521,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
    */
   val = OPENSSL_malloc((num_val + 1) * sizeof val[0]);
   if (val == NULL) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     goto err;
   }
   val[num_val] = NULL; /* pivot element */
@@ -536,7 +539,7 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
     }
   }
   if (!(v == val + num_val)) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_INTERNAL_ERROR);
+    OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
     goto err;
   }
 
@@ -694,7 +697,7 @@ int ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx) {
 
   generator = EC_GROUP_get0_generator(group);
   if (generator == NULL) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_precompute_mult, EC_R_UNDEFINED_GENERATOR);
+    OPENSSL_PUT_ERROR(EC, EC_R_UNDEFINED_GENERATOR);
     return 0;
   }
 
@@ -720,7 +723,7 @@ int ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx) {
     goto err;
   }
   if (BN_is_zero(order)) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_precompute_mult, EC_R_UNKNOWN_ORDER);
+    OPENSSL_PUT_ERROR(EC, EC_R_UNKNOWN_ORDER);
     goto err;
   }
 
@@ -748,7 +751,7 @@ int ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx) {
 
   points = OPENSSL_malloc(sizeof(EC_POINT *) * (num + 1));
   if (!points) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_precompute_mult, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     goto err;
   }
 
@@ -756,13 +759,13 @@ int ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx) {
   var[num] = NULL; /* pivot */
   for (i = 0; i < num; i++) {
     if ((var[i] = EC_POINT_new(group)) == NULL) {
-      OPENSSL_PUT_ERROR(EC, ec_wNAF_precompute_mult, ERR_R_MALLOC_FAILURE);
+      OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
       goto err;
     }
   }
 
   if (!(tmp_point = EC_POINT_new(group)) || !(base = EC_POINT_new(group))) {
-    OPENSSL_PUT_ERROR(EC, ec_wNAF_precompute_mult, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     goto err;
   }
 
@@ -794,7 +797,7 @@ int ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx) {
       size_t k;
 
       if (blocksize <= 2) {
-        OPENSSL_PUT_ERROR(EC, ec_wNAF_precompute_mult, ERR_R_INTERNAL_ERROR);
+        OPENSSL_PUT_ERROR(EC, ERR_R_INTERNAL_ERROR);
         goto err;
       }
 

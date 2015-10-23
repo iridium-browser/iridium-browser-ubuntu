@@ -17,6 +17,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread.h"
 #include "gpu/command_buffer/client/gpu_control.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/gpu_export.h"
@@ -46,9 +47,11 @@ class StreamTextureManagerInProcess;
 #endif
 
 namespace gpu {
+class SyncPointManager;
 class ValueStateMap;
 
 namespace gles2 {
+class FramebufferCompletenessCache;
 class GLES2Decoder;
 class MailboxManager;
 class ShaderTranslatorCache;
@@ -121,6 +124,7 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   void SetSurfaceVisible(bool visible) override;
   uint32 CreateStreamTexture(uint32 texture_id) override;
   void SetLock(base::Lock*) override;
+  bool IsGpuChannelLost() override;
 
   // The serializer interface to the GPU service (i.e. thread).
   class Service {
@@ -141,6 +145,9 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
     virtual bool UseVirtualizedGLContexts() = 0;
     virtual scoped_refptr<gles2::ShaderTranslatorCache>
         shader_translator_cache() = 0;
+    virtual scoped_refptr<gles2::FramebufferCompletenessCache>
+    framebuffer_completeness_cache() = 0;
+    virtual SyncPointManager* sync_point_manager() = 0;
     scoped_refptr<gfx::GLShareGroup> share_group();
     scoped_refptr<gles2::MailboxManager> mailbox_manager();
     scoped_refptr<gles2::SubscriptionRefSet> subscription_ref_set();
@@ -206,9 +213,10 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   void CreateImageOnGpuThread(int32 id,
                               const gfx::GpuMemoryBufferHandle& handle,
                               const gfx::Size& size,
-                              gfx::GpuMemoryBuffer::Format format,
+                              gfx::BufferFormat format,
                               uint32 internalformat);
   void DestroyImageOnGpuThread(int32 id);
+  void SetGetBufferOnGpuThread(int32 shm_id, base::WaitableEvent* completion);
 
   // Callbacks:
   void OnContextLost();
@@ -220,7 +228,7 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   // Members accessed on the gpu thread (possibly with the exception of
   // creation):
   bool context_lost_;
-  scoped_ptr<TransferBufferManagerInterface> transfer_buffer_manager_;
+  scoped_refptr<TransferBufferManagerInterface> transfer_buffer_manager_;
   scoped_ptr<GpuScheduler> gpu_scheduler_;
   scoped_ptr<gles2::GLES2Decoder> decoder_;
   scoped_refptr<gfx::GLContext> context_;
@@ -257,6 +265,36 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   base::WeakPtrFactory<InProcessCommandBuffer> gpu_thread_weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessCommandBuffer);
+};
+
+// Default Service class when a null service is used.
+class GPU_EXPORT GpuInProcessThread
+    : public base::Thread,
+      public NON_EXPORTED_BASE(InProcessCommandBuffer::Service),
+      public base::RefCountedThreadSafe<GpuInProcessThread> {
+ public:
+  explicit GpuInProcessThread(SyncPointManager* sync_point_manager);
+
+  void AddRef() const override;
+  void Release() const override;
+  void ScheduleTask(const base::Closure& task) override;
+  void ScheduleIdleWork(const base::Closure& callback) override;
+  bool UseVirtualizedGLContexts() override;
+  scoped_refptr<gles2::ShaderTranslatorCache> shader_translator_cache()
+      override;
+  scoped_refptr<gles2::FramebufferCompletenessCache>
+  framebuffer_completeness_cache() override;
+  SyncPointManager* sync_point_manager() override;
+
+ private:
+  ~GpuInProcessThread() override;
+  friend class base::RefCountedThreadSafe<GpuInProcessThread>;
+
+  SyncPointManager* sync_point_manager_;  // Non-owning.
+  scoped_refptr<gpu::gles2::ShaderTranslatorCache> shader_translator_cache_;
+  scoped_refptr<gpu::gles2::FramebufferCompletenessCache>
+      framebuffer_completeness_cache_;
+  DISALLOW_COPY_AND_ASSIGN(GpuInProcessThread);
 };
 
 }  // namespace gpu

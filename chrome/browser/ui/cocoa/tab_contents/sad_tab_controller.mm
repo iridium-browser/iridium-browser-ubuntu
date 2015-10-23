@@ -35,8 +35,8 @@ void SadTabCocoa::Close() {
 @implementation SadTabController
 
 - (id)initWithWebContents:(content::WebContents*)webContents {
-  if ((self = [super initWithNibName:@"SadTab"
-                              bundle:base::mac::FrameworkBundle()])) {
+  if ((self = [super init])) {
+    DCHECK(webContents);
     webContents_ = webContents;
 
     if (webContents_) {  // NULL in unit_tests.
@@ -51,21 +51,24 @@ void SadTabCocoa::Close() {
   return self;
 }
 
-- (void)awakeFromNib {
-  // If webContents_ is nil, ask view to remove link.
-  if (!webContents_) {
-    SadTabView* sad_view = static_cast<SadTabView*>([self view]);
-    [sad_view removeHelpText];
-  }
+- (void)dealloc {
+  [[sadTabView_ reloadButton] setTarget:nil];
+  [super dealloc];
+}
+
+- (void)loadView {
+  sadTabView_.reset([[SadTabView alloc] init]);
+  [[sadTabView_ reloadButton] setTarget:self];
+  [[sadTabView_ reloadButton] setAction:@selector(reloadPage:)];
+  [self setView:sadTabView_];
 }
 
 - (content::WebContents*)webContents {
   return webContents_;
 }
 
-- (void)openLearnMoreAboutCrashLink:(id)sender {
-  // Send the action up through the responder chain.
-  [NSApp sendAction:@selector(openLearnMoreAboutCrashLink:) to:nil from:self];
+- (IBAction)reloadPage:(id)sender {
+  webContents_->GetController().Reload(true);
 }
 
 @end

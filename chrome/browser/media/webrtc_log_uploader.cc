@@ -17,8 +17,8 @@
 #include "chrome/browser/media/media_url_constants.h"
 #include "chrome/browser/media/webrtc_log_list.h"
 #include "chrome/browser/media/webrtc_log_util.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/partial_circular_buffer.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/mime_util.h"
 #include "net/url_request/url_fetcher.h"
@@ -246,8 +246,8 @@ void WebRtcLogUploader::UploadStoredLog(
         .AddExtension(FILE_PATH_LITERAL(".meta"));
     if (base::ReadFileToString(meta_path, &meta_data_contents) &&
         !meta_data_contents.empty()) {
-      Pickle pickle(&meta_data_contents[0], meta_data_contents.size());
-      PickleIterator it(pickle);
+      base::Pickle pickle(&meta_data_contents[0], meta_data_contents.size());
+      base::PickleIterator it(pickle);
       std::string key, value;
       while (it.ReadString(&key) && it.ReadString(&value))
         (*meta_data.get())[key] = value;
@@ -296,7 +296,7 @@ void WebRtcLogUploader::LoggingStoppedDoStore(
   }
 
   if (meta_data.get() && !meta_data->empty()) {
-    Pickle pickle;
+    base::Pickle pickle;
     for (const auto& it : *meta_data.get()) {
       pickle.WriteString(it.first);
       pickle.WriteString(it.second);
@@ -351,8 +351,8 @@ void WebRtcLogUploader::SetupMultipart(
 #endif
   net::AddMultipartValueForUpload("prod", product, kMultipartBoundary,
                                   "", post_data);
-  chrome::VersionInfo version_info;
-  net::AddMultipartValueForUpload("ver", version_info.Version() + "-webrtc",
+  net::AddMultipartValueForUpload("ver",
+                                  version_info::GetVersionNumber() + "-webrtc",
                                   kMultipartBoundary, "", post_data);
   net::AddMultipartValueForUpload("guid", "0", kMultipartBoundary,
                                   "", post_data);

@@ -11,13 +11,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "cc/trees/layer_tree_host_client.h"
-#include "components/gpu/public/interfaces/gpu.mojom.h"
-#include "components/surfaces/public/interfaces/surfaces.mojom.h"
+#include "components/view_manager/public/interfaces/gpu.mojom.h"
+#include "components/view_manager/public/interfaces/surfaces.mojom.h"
 #include "mojo/cc/output_surface_mojo.h"
 #include "third_party/WebKit/public/platform/WebLayerTreeView.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 }
 
 namespace blink {
@@ -26,6 +26,11 @@ class WebWidget;
 
 namespace cc {
 class LayerTreeHost;
+class TaskGraphRunner;
+}
+
+namespace gpu {
+class GpuMemoryBufferManager;
 }
 
 namespace mojo {
@@ -39,7 +44,9 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
                              public mojo::OutputSurfaceMojoClient {
  public:
   WebLayerTreeViewImpl(
-      scoped_refptr<base::MessageLoopProxy> compositor_message_loop_proxy,
+      scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      cc::TaskGraphRunner* task_graph_runner,
       mojo::SurfacePtr surface,
       mojo::GpuPtr gpu_service);
   ~WebLayerTreeViewImpl() override;
@@ -58,9 +65,6 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override;
-  void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
-                           float page_scale,
-                           float top_controls_delta) override;
   void RequestNewOutputSurface() override;
   void DidFailToInitializeOutputSurface() override;
   void DidInitializeOutputSurface() override;
@@ -70,6 +74,10 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
   void DidCompleteSwapBuffers() override;
   void DidCompletePageScaleAnimation() override {}
   void RateLimitSharedMainThreadContext() override {}
+  void RecordFrameTimingEvents(
+      scoped_ptr<cc::FrameTimingTracker::CompositeTimingSet> composite_events,
+      scoped_ptr<cc::FrameTimingTracker::MainFrameTimingSet> main_frame_events)
+      override {}
 
   // blink::WebLayerTreeView implementation.
   virtual void setRootLayer(const blink::WebLayer& layer);
@@ -90,7 +98,6 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
                                        double duration_sec);
   virtual void heuristicsForGpuRasterizationUpdated(bool matches_heuristic) {}
   virtual void setNeedsAnimate();
-  virtual bool commitRequested() const;
   virtual void didStopFlinging() {}
   virtual void compositeAndReadbackAsync(
       blink::WebCompositeAndReadbackAsyncCallback* callback) {}

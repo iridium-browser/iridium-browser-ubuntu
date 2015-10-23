@@ -138,8 +138,8 @@ bool CharacterComposer::FilterKeyPressHexMode(const KeyEvent& event) {
   const size_t kMaxHexSequenceLength = 8;
   base::char16 c = event.GetCharacter();
   int hex_digit = 0;
-  if (IsHexDigit(c)) {
-    hex_digit = HexDigitToInt(c);
+  if (base::IsHexDigit(c)) {
+    hex_digit = base::HexDigitToInt(c);
   } else {
     // With 101 keyboard, control + shift + 3 produces '#', but a user may
     // have intended to type '3'.  So, if a hexadecimal character was not found,

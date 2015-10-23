@@ -61,7 +61,7 @@ body.platform-linux {
     background-color: rgba(0, 0, 0, 0.31);
 }
 
-#canvas {
+#canvas, #labels-canvas {
     pointer-events: none;
 }
 
@@ -145,6 +145,99 @@ body.platform-linux {
     /* Keep this in sync with view-source.css (.html-attribute-name) */
     color: rgb(153, 69, 0);
 }
+
+.editor-anchor {
+    height: 12px;
+    width: 12px;
+    position: absolute;
+}
+
+
+/* Material */
+.hidden {
+    display: none !important;
+}
+
+#tooltip-container {
+    -webkit-filter: drop-shadow(0 1px 1px hsla(0, 0%, 0%, 0.1)) drop-shadow(0 0px 1px hsla(0, 0%, 0%, 0.2));
+}
+
+#element-tooltip,
+#element-tooltip-arrow {
+    position: absolute;
+    z-index: 10;
+    -webkit-user-select: none;
+}
+
+#element-tooltip {
+    background-color: hsl(0, 0%, 25%);
+    font-size: 11px;
+    line-height: 14px;
+    padding: 5px 6px;
+    border-radius: 2px;
+    color: white;
+    display: flex;
+    align-content: stretch;
+    box-sizing: border-box;
+    max-width: calc(100% - 4px);
+    border: 1px solid hsla(0, 0%, 0%, 0.1);
+    z-index: 1;
+    background-clip: padding-box;
+    will-change: transform;
+    text-rendering: optimizeLegibility;
+}
+
+#element-tooltip-arrow {
+    border: solid;
+    border-color: hsl(0, 0%, 25%) transparent;
+    border-width: 0 8px 8px 8px;
+    z-index: 2;
+    margin-top: 1px;
+}
+
+#element-tooltip-arrow.tooltip-arrow-top {
+    border-width: 8px 8px 0 8px;
+    margin-top: -1px;
+}
+
+
+#element-description {
+    flex: 1 1;
+    word-wrap: break-word;
+}
+
+#dimensions {
+    border-left: 1px solid hsl(0, 0%, 50%);
+    padding-left: 7px;
+    margin-left: 7px;
+    float: right;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    color: hsl(0, 0%, 85%);
+}
+
+#material-node-width {
+    margin-right: 2px;
+}
+
+#material-node-height {
+    margin-left: 2px;
+}
+
+#material-tag-name {
+    color: hsl(304, 77%, 70%);
+}
+
+#material-node-id {
+    color: hsl(27, 100%, 70%);
+}
+
+#material-class-name {
+    color: hsl(202, 90%, 75%);
+}
+
 
 </style>
 <script>
@@ -318,6 +411,16 @@ function drawViewSize(drawViewSizeWithGrid)
         _drawGrid();
 }
 
+function resetCanvas(canvasElement)
+{
+    canvasElement.width = deviceScaleFactor * viewportSize.width;
+    canvasElement.height = deviceScaleFactor * viewportSize.height;
+    canvasElement.style.width = viewportSize.width + "px";
+    canvasElement.style.height = viewportSize.height + "px";
+    var context = canvasElement.getContext("2d");
+    context.scale(deviceScaleFactor, deviceScaleFactor);
+}
+
 function reset(resetData)
 {
     window.viewportSize = resetData.viewportSize;
@@ -328,19 +431,25 @@ function reset(resetData)
 
     window.canvas = document.getElementById("canvas");
     window.context = canvas.getContext("2d");
+    resetCanvas(canvas);
 
-    canvas.width = deviceScaleFactor * viewportSize.width;
-    canvas.height = deviceScaleFactor * viewportSize.height;
-    canvas.style.width = viewportSize.width + "px";
-    canvas.style.height = viewportSize.height + "px";
-    context.scale(deviceScaleFactor, deviceScaleFactor);
+    window.labelsCanvas = document.getElementById("labels-canvas");
+    resetLabelCanvas();
+
     window.canvasWidth = viewportSize.width;
     window.canvasHeight = viewportSize.height;
 
     window._controlsVisible = false;
     document.querySelector(".controls-line").style.visibility = "hidden";
     document.getElementById("element-title").style.visibility = "hidden";
+    document.getElementById("tooltip-container").classList.add("hidden");
+    var editor = document.getElementById("editor");
+    editor.style.visibility = "hidden";
+    editor.textContent = "";
     document.body.classList.remove("dimmed");
+    document.removeEventListener("mousemove", onGlobalMouseMove);
+    delete window.hoverableAreas;
+    delete window.anchorsByType;
     window._gridPainted = false;
 }
 
@@ -417,6 +526,63 @@ function _drawElementTitle(elementInfo, bounds)
     elementTitle.style.left = (boxX + 3) + "px";
 }
 
+function _drawMaterialElementTitle(elementInfo, bounds)
+{
+    // Reset position before measuring to ensure line-wraps are consistent.
+    var elementTitle = document.getElementById("element-tooltip");
+    elementTitle.style.top = "0";
+    elementTitle.style.left = "0";
+    document.getElementById("tooltip-container").classList.remove("hidden");
+
+    document.getElementById("material-tag-name").textContent = elementInfo.tagName;
+    document.getElementById("material-node-id").textContent = elementInfo.idValue ? "#" + elementInfo.idValue : "";
+    document.getElementById("material-node-id").classList.toggle("hidden", !elementInfo.idValue);
+    var className = elementInfo.className;
+    if (className && className.length > 50)
+       className = className.substring(0, 50) + "\u2026";
+    document.getElementById("material-class-name").textContent = className || "";
+    document.getElementById("material-class-name").classList.toggle("hidden", !className);
+    document.getElementById("material-node-width").textContent = elementInfo.nodeWidth;
+    document.getElementById("material-node-height").textContent = elementInfo.nodeHeight;
+
+    var titleWidth = elementTitle.offsetWidth;
+    var titleHeight = elementTitle.offsetHeight;
+    var arrowRadius = 8;
+    var pageMargin = 2;
+
+    var boxX = Math.max(pageMargin, bounds.minX + (bounds.maxX - bounds.minX) / 2 - titleWidth / 2);
+    boxX = Math.min(boxX, canvasWidth - titleWidth - pageMargin);
+
+    var boxY = bounds.minY - arrowRadius - titleHeight;
+    var onTop = true;
+    if (boxY < 0) {
+        boxY = bounds.maxY + arrowRadius;
+        onTop = false;
+    } else if (bounds.minY > canvasHeight) {
+        boxY = canvasHeight - arrowRadius - titleHeight;
+    }
+
+    elementTitle.style.top = boxY + "px";
+    elementTitle.style.left = boxX + "px";
+
+    var tooltipArrow = document.getElementById("element-tooltip-arrow");
+    // Center arrow if possible. Otherwise, try the bounds of the element.
+    var arrowX = bounds.minX + (bounds.maxX - bounds.minX) / 2 - arrowRadius;
+    var tooltipBorderRadius = 2;
+    if (arrowX < pageMargin + tooltipBorderRadius)
+        arrowX = bounds.maxX - arrowRadius * 2;
+    else if (arrowX + arrowRadius * 2 > canvasWidth - pageMargin - tooltipBorderRadius)
+        arrowX = bounds.minX;
+    // Hide arrow if element is completely off the sides of the page.
+    var arrowHidden = arrowX < pageMargin + tooltipBorderRadius || arrowX + arrowRadius * 2 > canvasWidth - pageMargin - tooltipBorderRadius;
+    tooltipArrow.classList.toggle("hidden", arrowHidden);
+    if (!arrowHidden) {
+        tooltipArrow.classList.toggle("tooltip-arrow-top", onTop);
+        tooltipArrow.style.top = (onTop ? boxY + titleHeight : boxY - arrowRadius) + "px";
+        tooltipArrow.style.left = arrowX + "px";
+    }
+}
+
 function _drawRulers(bounds, rulerAtRight, rulerAtBottom)
 {
     context.save();
@@ -461,7 +627,7 @@ function _drawRulers(bounds, rulerAtRight, rulerAtBottom)
     context.restore();
 }
 
-function drawPath(commands, fillColor, outlineColor, bounds)
+function drawPath(commands, fillColor, outlineColor, bounds, name)
 {
     var commandsIndex = 0;
 
@@ -482,47 +648,52 @@ function drawPath(commands, fillColor, outlineColor, bounds)
             bounds.rightmostXForY[y] = Math.max(bounds.rightmostXForY[y] || Number.MIN_VALUE, x);
             bounds.topmostYForX[x] = Math.min(bounds.topmostYForX[x] || Number.MAX_VALUE, y);
             bounds.bottommostYForX[x] = Math.max(bounds.bottommostYForX[x] || Number.MIN_VALUE, y);
-
             points.push(x, y);
         }
         return points;
     }
 
     context.save();
-    context.beginPath();
-
     var commandsLength = commands.length;
+    var path = new Path2D();
     while (commandsIndex < commandsLength) {
         switch (commands[commandsIndex++]) {
         case "M":
-            context.moveTo.apply(context, extractPoints(1));
+            path.moveTo.apply(path, extractPoints(1));
             break;
         case "L":
-            context.lineTo.apply(context, extractPoints(1));
+            path.lineTo.apply(path, extractPoints(1));
             break;
         case "C":
-            context.bezierCurveTo.apply(context, extractPoints(3));
+            path.bezierCurveTo.apply(path, extractPoints(3));
             break;
         case "Q":
-            context.quadraticCurveTo.apply(context, extractPoints(2));
+            path.quadraticCurveTo.apply(path, extractPoints(2));
             break;
         case "Z":
-            context.closePath();
+            path.closePath();
             break;
         }
     }
-    context.closePath();
+    path.closePath();
     context.lineWidth = 0;
     context.fillStyle = fillColor;
-    context.fill();
+    context.fill(path);
 
     if (outlineColor) {
         context.lineWidth = 2;
         context.strokeStyle = outlineColor;
-        context.stroke();
+        context.stroke(path);
     }
 
     context.restore();
+
+    if (name) {
+        if (!window.hoverableAreas)
+            window.hoverableAreas = new Map();
+
+        window.hoverableAreas.set(name, path);
+    }
 }
 
 function drawHighlight(highlight)
@@ -542,7 +713,7 @@ function drawHighlight(highlight)
 
     for (var paths = highlight.paths.slice(); paths.length;) {
         var path = paths.pop();
-        drawPath(path.path, path.fillColor, path.outlineColor, bounds);
+        drawPath(path.path, path.fillColor, path.outlineColor, bounds, path.name);
         if (paths.length) {
             context.save();
             context.globalCompositeOperation = "destination-out";
@@ -561,7 +732,9 @@ function drawHighlight(highlight)
         if (highlight.showExtensionLines)
             _drawRulers(bounds, rulerAtRight, rulerAtBottom);
 
-        if (highlight.elementInfo)
+        if (highlight.elementInfo && highlight.displayAsMaterial)
+           _drawMaterialElementTitle(highlight.elementInfo, bounds);
+        else if (highlight.elementInfo)
            _drawElementTitle(highlight.elementInfo, bounds);
     }
     context.restore();
@@ -617,6 +790,256 @@ function onDocumentKeyDown(event)
         InspectorOverlayHost.stepOver();
 }
 
+function showLayoutEditor(info)
+{
+    var editorElement = document.getElementById("editor");
+    editorElement.style.visibility = "visible";
+    var anchors = info.anchors;
+    window.anchorsByType = new Map();
+    var selectedAnchorInfo = null;
+    for (var i = 0; i < anchors.length; ++i) {
+        var anchorInfo = anchors[i];
+        if (!anchorsByType.get(anchorInfo.type))
+            anchorsByType.set(anchorInfo.type, []);
+        anchorsByType.get(anchorInfo.type).push(anchorInfo);
+        editorElement.appendChild(createAnchor(anchorInfo));
+        if (anchorInfo.propertyName === window.draggedPropertyName)
+            selectedAnchorInfo = anchorInfo;
+    }
+
+    if (selectedAnchorInfo)
+        showLabels(selectedAnchorInfo.type, selectedAnchorInfo.propertyName);
+
+    document.addEventListener("mousemove", onGlobalMouseMove);
+}
+
+function createAnchor(anchorInfo)
+{
+    var handleWidth = 5;
+    context.save();
+    context.shadowColor = "rgba(0, 0, 0, 0.34)";
+    context.shadowBlur = 2;
+    context.fillStyle = anchorColorForProperty(anchorInfo);
+    context.beginPath();
+    context.arc(anchorInfo.x, anchorInfo.y, handleWidth, 0, 2 * Math.PI);
+    context.fill();
+    context.restore();
+
+    var anchorElement = document.createElement("div");
+    anchorElement.className = "editor-anchor";
+    anchorElement.style.left = anchorInfo.x - handleWidth + "px";
+    anchorElement.style.top = anchorInfo.y - handleWidth + "px";
+    if (anchorInfo.propertyValue.mutable)
+        anchorElement.addEventListener("mousedown", onAnchorMouseDown.bind(null, anchorInfo));
+    anchorElement.addEventListener("mousemove", onAnchorMouseMove.bind(null, anchorInfo));
+    return anchorElement;
+}
+
+function calculateDelta(deltaVector, moveDelta)
+{
+    return (deltaVector.x * moveDelta.x + deltaVector.y * moveDelta.y) / Math.sqrt(deltaVector.x * deltaVector.x + deltaVector.y * deltaVector.y);
+}
+
+function onAnchorMouseDown(anchorInfo, event)
+{
+    // Only drag upon left button. Right will likely cause a context menu. So will ctrl-click on mac.
+    if (event.button || (window.platform == "mac" && event.ctrlKey))
+        return;
+
+    event.preventDefault();
+    window.boundDragMove = onDragMove.bind(null, new Point(event.screenX, event.screenY), anchorInfo.deltaVector);
+    document.addEventListener("mousemove", boundDragMove);
+    document.addEventListener("mouseup", onDragEnd);
+    InspectorOverlayHost.startPropertyChange(anchorInfo.propertyName);
+    window.draggedPropertyName = anchorInfo.propertyName;
+    showLabels(anchorInfo.type, anchorInfo.propertyName);
+}
+
+function onDragMove(mouseDownPoint, deltaVector, event)
+{
+    if (event.buttons !== 1) {
+        onDragEnd(event);
+        return;
+    }
+    event.preventDefault();
+    InspectorOverlayHost.changeProperty(calculateDelta(deltaVector, new Point(event.screenX - mouseDownPoint.x, event.screenY - mouseDownPoint.y)));
+}
+
+function showLabel(anchorInfo, showLongDescription)
+{
+    var context =  labelsCanvas.getContext("2d");
+    var secondaryColor = "rgba(255, 255, 255, 0.7)";
+    var labelColor = labelColorForProperty(anchorInfo);
+    var textDescription = [
+        {string: String(parseFloat(anchorInfo.propertyValue.value.toFixed(2))), color: "white" },
+        {string: "\u2009" + anchorInfo.propertyValue.unit, color: secondaryColor}
+    ];
+
+    if (showLongDescription)
+        textDescription.splice(0, 0, {string: anchorInfo.propertyName + ": ", color: secondaryColor});
+    _drawLabel(context, anchorInfo.x, anchorInfo.y, labelColor, textDescription, anchorInfo.deltaVector.x < 0);
+}
+
+function showLabels(type, fullLabelName)
+{
+    if (!anchorsByType)
+        return;
+
+    if (window.labelCanvasState && labelCanvasState.type === type && labelCanvasState.fullLabelName === fullLabelName)
+        return;
+
+    resetLabelCanvas();
+    window.labelCanvasState = {type: type, fullLabelName: fullLabelName};
+    var anchors = anchorsByType.get(type) || [];
+    var selectedAnchorInfo = null;
+    for (var anchorInfo of anchors) {
+        if (fullLabelName !== anchorInfo.propertyName)
+            showLabel(anchorInfo, false);
+        else
+            selectedAnchorInfo = anchorInfo;
+    }
+
+    if (selectedAnchorInfo)
+        showLabel(selectedAnchorInfo, true);
+}
+
+function onDragEnd(event)
+{
+    document.removeEventListener("mousemove", boundDragMove);
+    delete window.boundDragMove;
+    delete window.draggedPropertyName;
+    document.removeEventListener("mouseup", onDragEnd);
+    event.preventDefault();
+    InspectorOverlayHost.endPropertyChange();
+    resetLabelCanvas();
+}
+
+function onAnchorMouseMove(anchorInfo)
+{
+    if (window.draggedPropertyName)
+        return;
+    event.preventDefault();
+    event.stopPropagation();
+    showLabels(anchorInfo.type, anchorInfo.propertyName);
+}
+
+function Point(x, y)
+{
+    this.x = x;
+    this.y = y;
+}
+
+function _drawLabel(context, anchorX, anchorY, labelColor, textDescription, toLeft)
+{
+    var paddingX = 6;
+    var paddingY = 4;
+    var borderRadius = 2;
+    var arrowWidth = 6;
+    var offsetX = 6;
+    var fontSize = 10;
+
+    var wholeString = "";
+    for (var part of textDescription)
+        wholeString += part.string;
+
+    context.save();
+    context.font = fontSize + "px Arial, Roboto";
+    
+    var textWidth = context.measureText(wholeString).width;
+    var fullWidth = textWidth + offsetX + arrowWidth + paddingX;
+    var height = fontSize + paddingY;
+    var fitRight = anchorX + fullWidth < viewportSize.width;
+    var fitLeft = anchorX - fullWidth > 0;
+    var mirror = !fitLeft || (!toLeft && fitRight);
+
+    var arrowX = -offsetX;
+    var arrowY = 0;
+    var right = arrowX - arrowWidth;
+    var top = arrowY - height / 2;
+    var bottom = arrowY + height / 2;
+    var left = -fullWidth;
+
+    context.save();
+    context.translate(anchorX, anchorY);
+    if (mirror)
+      context.scale(-1, 1);
+
+    context.fillStyle = labelColor;
+    context.shadowColor = "rgba(0, 0, 0, 0.34)";
+    context.shadowOffsetY = 1;
+    context.shadowBlur = 1;  
+    context.beginPath();
+    context.moveTo(arrowX, arrowY);
+    context.lineTo(right, bottom);
+    context.lineTo(left + borderRadius, bottom);
+    context.quadraticCurveTo(left, bottom, left, bottom - borderRadius);
+    context.lineTo(left, top + borderRadius);
+    context.quadraticCurveTo(left, top, left + borderRadius, top);
+    context.lineTo(right, top);
+    context.lineTo(arrowX, arrowY);
+    context.closePath();
+    context.fill();
+    context.restore();
+
+    var textX = 0;
+    if (mirror) 
+        textX = anchorX - right + paddingX / 2;
+    else
+        textX = anchorX + left + paddingX / 2;
+
+    var textY = anchorY + top + fontSize;
+    for (var part of textDescription) {
+        context.fillStyle = part.color;
+        context.fillText(part.string, textX, textY);
+        textX += context.measureText(part.string).width;
+    }
+    context.restore();
+}
+
+function labelColorForProperty(anchorInfo)
+{
+    // TODO: find a better color
+    if (!anchorInfo.propertyValue.mutable)
+        return "rgb(159, 188, 191)";
+
+    var propertyName = anchorInfo.propertyName;
+    if (propertyName.startsWith("margin"))
+        return "rgb(246, 167, 35)";
+    return "rgb(91, 181, 0)";
+}
+
+function anchorColorForProperty(anchorInfo)
+{
+    // TODO: find a better color
+    if (!anchorInfo.propertyValue.mutable)
+        return "rgb(159, 188, 191)";
+
+    var propertyName = anchorInfo.propertyName;
+    if (propertyName.startsWith("margin"))
+        return "rgb(246, 167, 35)";
+    return "rgb(107, 213, 0)";
+}
+
+function onGlobalMouseMove(event)
+{
+    if (!window.hoverableAreas)
+        return;
+    var types = ["padding", "margin"];
+    for (var type of types) {
+        var path = hoverableAreas.get(type);
+        if (path && context.isPointInPath(path, deviceScaleFactor * event.x, deviceScaleFactor * event.y)) {
+            showLabels(type);
+            break;
+        }
+    }
+}
+
+function resetLabelCanvas()
+{
+    delete window.labelCanvasState;
+    resetCanvas(labelsCanvas);
+}
+
 window.addEventListener("DOMContentLoaded", onLoaded);
 document.addEventListener("keydown", onDocumentKeyDown);
 
@@ -630,9 +1053,17 @@ document.addEventListener("keydown", onDocumentKeyDown);
 </div>
 </body>
 <canvas id="canvas" class="fill"></canvas>
+<canvas id="labels-canvas" class="fill"></canvas>
 <div id="element-title">
   <span id="tag-name"></span><span id="node-id"></span><span id="class-name"></span>
   <span id="node-width"></span><span class="px">px</span><span class="px"> &#xD7; </span><span id="node-height"></span><span class="px">px</span>
 </div>
+<div id="tooltip-container" class="hidden">
+    <div id="element-tooltip">
+      <div id="element-description" class="monospace"><span id="material-tag-name"></span><span id="material-node-id"></span><span id="material-class-name"></span></div>
+      <div id="dimensions"><span id="material-node-width"></span>&#xD7;<span id="material-node-height"></span></div>
+    </div>
+    <div id="element-tooltip-arrow"></div>
+<div id="editor" class="fill"></div>
 <div id="log"></div>
 </html>

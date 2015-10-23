@@ -21,6 +21,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/infobars/core/infobar_delegate.h"
+#include "components/url_formatter/elide_url.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -97,8 +98,6 @@ TEST_F(ContentSettingBubbleModelTest, Cookies) {
   std::string title = bubble_content.title;
   EXPECT_FALSE(title.empty());
   ASSERT_EQ(2U, bubble_content.radio_group.radio_items.size());
-  std::string radio1 = bubble_content.radio_group.radio_items[0];
-  std::string radio2 = bubble_content.radio_group.radio_items[1];
   EXPECT_FALSE(bubble_content.custom_link.empty());
   EXPECT_TRUE(bubble_content.custom_link_enabled);
   EXPECT_FALSE(bubble_content.manage_link.empty());
@@ -114,9 +113,14 @@ TEST_F(ContentSettingBubbleModelTest, Cookies) {
   EXPECT_FALSE(bubble_content_2.title.empty());
   EXPECT_NE(title, bubble_content_2.title);
   ASSERT_EQ(2U, bubble_content_2.radio_group.radio_items.size());
-  // TODO(bauerb): Update this once the strings have been updated.
-  EXPECT_EQ(radio1, bubble_content_2.radio_group.radio_items[0]);
-  EXPECT_EQ(radio2, bubble_content_2.radio_group.radio_items[1]);
+  EXPECT_EQ(bubble_content_2.radio_group.radio_items[0],
+            l10n_util::GetStringUTF8(IDS_ALLOWED_COOKIES_NO_ACTION));
+  EXPECT_EQ(bubble_content_2.radio_group.radio_items[1],
+            l10n_util::GetStringFUTF8(
+                IDS_ALLOWED_COOKIES_BLOCK,
+                url_formatter::FormatUrlForSecurityDisplay(
+                    web_contents()->GetURL(), profile()->GetPrefs()->GetString(
+                                                  prefs::kAcceptLanguages))));
   EXPECT_FALSE(bubble_content_2.custom_link.empty());
   EXPECT_TRUE(bubble_content_2.custom_link_enabled);
   EXPECT_FALSE(bubble_content_2.manage_link.empty());
@@ -153,7 +157,9 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMicAndCamera) {
   EXPECT_EQ(bubble_content.radio_group.radio_items[0],
             l10n_util::GetStringFUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION,
-                base::UTF8ToUTF16(request_host)));
+                url_formatter::FormatUrlForSecurityDisplay(
+                    security_origin, profile()->GetPrefs()->GetString(
+                                         prefs::kAcceptLanguages))));
   EXPECT_EQ(bubble_content.radio_group.radio_items[1],
             l10n_util::GetStringUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_AND_CAMERA_BLOCK));
@@ -536,7 +542,9 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMic) {
   EXPECT_EQ(bubble_content.radio_group.radio_items[0],
             l10n_util::GetStringFUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_NO_ACTION,
-                base::UTF8ToUTF16(request_host)));
+                url_formatter::FormatUrlForSecurityDisplay(
+                    security_origin, profile()->GetPrefs()->GetString(
+                                         prefs::kAcceptLanguages))));
   EXPECT_EQ(bubble_content.radio_group.radio_items[1],
             l10n_util::GetStringUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_BLOCK));
@@ -568,7 +576,9 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMic) {
   EXPECT_EQ(new_bubble_content.radio_group.radio_items[0],
             l10n_util::GetStringFUTF8(
                 IDS_BLOCKED_MEDIASTREAM_MIC_ASK,
-                base::UTF8ToUTF16(request_host)));
+                url_formatter::FormatUrlForSecurityDisplay(
+                    security_origin, profile()->GetPrefs()->GetString(
+                                         prefs::kAcceptLanguages))));
   EXPECT_EQ(new_bubble_content.radio_group.radio_items[1],
             l10n_util::GetStringUTF8(
                 IDS_BLOCKED_MEDIASTREAM_MIC_NO_ACTION));
@@ -611,7 +621,9 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamCamera) {
   EXPECT_EQ(bubble_content.radio_group.radio_items[0],
             l10n_util::GetStringFUTF8(
                 IDS_ALLOWED_MEDIASTREAM_CAMERA_NO_ACTION,
-                base::UTF8ToUTF16(request_host)));
+                url_formatter::FormatUrlForSecurityDisplay(
+                    security_origin, profile()->GetPrefs()->GetString(
+                                         prefs::kAcceptLanguages))));
   EXPECT_EQ(bubble_content.radio_group.radio_items[1],
             l10n_util::GetStringUTF8(
                 IDS_ALLOWED_MEDIASTREAM_CAMERA_BLOCK));
@@ -643,7 +655,9 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamCamera) {
   EXPECT_EQ(new_bubble_content.radio_group.radio_items[0],
             l10n_util::GetStringFUTF8(
                 IDS_BLOCKED_MEDIASTREAM_CAMERA_ASK,
-                base::UTF8ToUTF16(request_host)));
+                url_formatter::FormatUrlForSecurityDisplay(
+                    security_origin, profile()->GetPrefs()->GetString(
+                                         prefs::kAcceptLanguages))));
   EXPECT_EQ(new_bubble_content.radio_group.radio_items[1],
             l10n_util::GetStringUTF8(
                 IDS_BLOCKED_MEDIASTREAM_CAMERA_NO_ACTION));
@@ -688,7 +702,9 @@ TEST_F(ContentSettingBubbleModelTest, AccumulateMediastreamMicAndCamera) {
   EXPECT_EQ(bubble_content.radio_group.radio_items[0],
             l10n_util::GetStringFUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_NO_ACTION,
-                base::UTF8ToUTF16(request_host)));
+                url_formatter::FormatUrlForSecurityDisplay(
+                    security_origin, profile()->GetPrefs()->GetString(
+                                         prefs::kAcceptLanguages))));
   EXPECT_EQ(bubble_content.radio_group.radio_items[1],
             l10n_util::GetStringUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_BLOCK));
@@ -718,7 +734,9 @@ TEST_F(ContentSettingBubbleModelTest, AccumulateMediastreamMicAndCamera) {
   EXPECT_EQ(new_bubble_content.radio_group.radio_items[0],
             l10n_util::GetStringFUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION,
-                base::UTF8ToUTF16(request_host)));
+                url_formatter::FormatUrlForSecurityDisplay(
+                    security_origin, profile()->GetPrefs()->GetString(
+                                         prefs::kAcceptLanguages))));
   EXPECT_EQ(new_bubble_content.radio_group.radio_items[1],
             l10n_util::GetStringUTF8(
                 IDS_ALLOWED_MEDIASTREAM_MIC_AND_CAMERA_BLOCK));

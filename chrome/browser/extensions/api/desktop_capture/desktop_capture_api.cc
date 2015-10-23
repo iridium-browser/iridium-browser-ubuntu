@@ -9,8 +9,8 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/origin_util.h"
 #include "net/base/net_util.h"
@@ -40,7 +40,7 @@ bool DesktopCaptureChooseDesktopMediaFunction::RunAsync() {
 
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &request_id_));
   DesktopCaptureRequestsRegistry::GetInstance()->AddRequest(
-      render_view_host()->GetProcess()->GetID(), request_id_, this);
+      render_frame_host()->GetProcess()->GetID(), request_id_, this);
 
   args_->Remove(0, NULL);
 
@@ -74,7 +74,8 @@ bool DesktopCaptureChooseDesktopMediaFunction::RunAsync() {
     target_name = base::UTF8ToUTF16(content::IsOriginSecure(origin) ?
         net::GetHostAndOptionalPort(origin) : origin.spec());
 
-    if (!params->target_tab->id) {
+    if (!params->target_tab->id ||
+        *params->target_tab->id == api::tabs::TAB_ID_NONE) {
       error_ = kNoTabIdError;
       return false;
     }
@@ -88,7 +89,7 @@ bool DesktopCaptureChooseDesktopMediaFunction::RunAsync() {
   } else {
     origin = extension()->url();
     target_name = base::UTF8ToUTF16(extension()->name());
-    web_contents = content::WebContents::FromRenderViewHost(render_view_host());
+    web_contents = GetSenderWebContents();
     DCHECK(web_contents);
   }
 

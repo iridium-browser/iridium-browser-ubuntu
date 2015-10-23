@@ -19,6 +19,7 @@
 #include "components/audio_modem/test/stub_whispernet_client.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/event_router_factory.h"
 
 using audio_modem::AUDIBLE;
 using audio_modem::AudioToken;
@@ -46,13 +47,13 @@ namespace {
 std::map<BrowserContext*, StubModem*> g_modems;
 
 // Create a test AudioModemAPI and store the modem it uses.
-KeyedService* ApiFactoryFunction(BrowserContext* context) {
+scoped_ptr<KeyedService> ApiFactoryFunction(BrowserContext* context) {
   StubModem* modem = new StubModem;
   g_modems[context] = modem;
-  return new AudioModemAPI(
+  return make_scoped_ptr(new AudioModemAPI(
       context,
       make_scoped_ptr<audio_modem::WhispernetClient>(new StubWhispernetClient),
-      make_scoped_ptr<audio_modem::Modem>(modem));
+      make_scoped_ptr<audio_modem::Modem>(modem)));
 }
 
 DictionaryValue* CreateParams(const std::string& audio_band) {
@@ -109,13 +110,16 @@ class StubEventRouter : public EventRouter {
   using EventCallback = base::Callback<void(const std::string&,
                                             scoped_ptr<Event>)>;
 
-  StubEventRouter(BrowserContext* context, EventCallback event_callback)
-      : EventRouter(context, nullptr),
-        event_callback_(event_callback) {}
+  explicit StubEventRouter(BrowserContext* context)
+      : EventRouter(context, nullptr) {}
 
   void DispatchEventToExtension(const std::string& extension_id,
                                 scoped_ptr<Event> event) override {
     event_callback_.Run(extension_id, event.Pass());
+  }
+
+  void SetEventCallBack(EventCallback event_callback) {
+    event_callback_ = event_callback;
   }
 
   void ClearEventCallback() {
@@ -125,6 +129,12 @@ class StubEventRouter : public EventRouter {
  private:
   EventCallback event_callback_;
 };
+
+// StubEventRouter factory function
+scoped_ptr<KeyedService> StubEventRouterFactoryFunction(
+    content::BrowserContext* context) {
+  return make_scoped_ptr(new StubEventRouter(context));
+}
 
 }  // namespace
 
@@ -192,14 +202,11 @@ class AudioModemApiUnittest : public ExtensionApiUnittest {
     AudioModemAPI::GetFactoryInstance()->SetTestingFactory(
         profile(), &ApiFactoryFunction);
 
-    scoped_ptr<EventRouter> router(new StubEventRouter(
-        profile(),
-        // The EventRouter is deleted in TearDown().
-        // It will lose this callback before we are destructed.
-        base::Bind(&AudioModemApiUnittest::CaptureEvent,
-                   base::Unretained(this))));
-    static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile()))
-        ->SetEventRouter(router.Pass());
+    StubEventRouter* stub_event_router = static_cast<StubEventRouter*>(
+        extensions::EventRouterFactory::GetInstance()->SetTestingFactoryAndUse(
+            profile(), &StubEventRouterFactoryFunction));
+    stub_event_router->SetEventCallBack(base::Bind(
+        &AudioModemApiUnittest::CaptureEvent, base::Unretained(this)));
   }
 
   void CaptureEvent(const std::string& extension_id,

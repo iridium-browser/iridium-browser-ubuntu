@@ -2,55 +2,105 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-.cast-mode {
-  -webkit-padding-start: 5px;
-  cursor: pointer;
-  font-size: 1.0em;
+.active-sink {
+  color: rgb(33, 150, 243);
 }
 
-.cast-mode:hover {
-  background-color: rgb(187, 206, 236);
-  border: 0;
+.cast-mode-icon,
+.sink-icon {
+  -webkit-padding-end: 16px;
+  -webkit-padding-start: 20px;
+  height: 16px;
+  width: 16px;
 }
 
 #cast-mode-list {
-  -webkit-user-select: none;
-  color: rgb(44, 44, 44);
-  margin: 0;
+  padding-bottom: 8px;
+  padding-top: 8px;
 }
 
-#container-header {
-  background-color: rgb(214, 214, 214);
+#container-header.cast-mode-list {
+  background-color: rgb(0, 150, 136);
 }
 
-.route {
-  color: rgb(119, 119, 119);
+#container-header.filter {
+  background-color: rgb(103, 58, 183);
+}
+
+#container-header.route-details {
+  display: none;
+}
+
+#container-header.sink-list {
+  background-color: rgb(33, 150, 243);
+}
+
+#device-missing {
+  align-items: center;
+  color: rgb(33, 150, 243);
+  display: flex;
+  height: 150px;
+  justify-content: center;
 }
 
 #header-text {
-  -webkit-padding-start: 20px;
+  -webkit-padding-start: 5px;
   flex-grow: 1;
   font-size: 1.25em;
   margin: 0;
 }
 
-.sink {
-  -webkit-user-select: none;
+paper-item {
   cursor: pointer;
   font-size: 1.0em;
+  line-height: 0;
+  min-height: 0;
+  padding: 12px 0;
 }
 
-.sink:hover {
-  background-color: rgb(187, 206, 236);
+paper-item:hover {
+  background-color: rgb(238, 238, 238);
   border: 0;
 }
 
-.sink-icon {
-  -webkit-padding-end: 10px;
+paper-menu {
+  -webkit-user-select: none;
+  color: rgb(0, 0, 0);
+  padding: 0;
+}
+
+.route {
+  color: rgb(150, 150, 150);
+}
+
+#searching-devices-spinner {
+  height: 30px;
+  width: 30px;
+}
+
+#share-screen-text {
+  -webkit-padding-start: 20px;
+  color: rgb(150, 150, 150);
+  padding-bottom: 8px;
+  padding-top: 8px;
+}
+
+.sink-content {
+  display: flex;
+  flex-direction: row;
+  font-weight: normal;
 }
 
 #sink-list {
-  margin: 0;
-  max-height: 275px;
+  max-height: 200px;
+  overflow-x: hidden;
   overflow-y: scroll;
+}
+
+.sink-text {
+  line-height: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 250px;
 }

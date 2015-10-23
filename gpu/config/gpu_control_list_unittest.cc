@@ -370,7 +370,8 @@ TEST_F(GpuControlListTest, NeedsMoreInfoForExceptions) {
   // The case this entry might apply, but need more info.
   features = control_list->MakeDecision(
       GpuControlList::kOsLinux, kOsVersion, gpu_info);
-  EXPECT_EMPTY_SET(features);
+  // Ignore exceptions if main entry info matches
+  EXPECT_SINGLE_FEATURE(features, TEST_FEATURE_0);
   EXPECT_TRUE(control_list->needs_more_info());
 
   // The case we have full info, and the exception applies (so the entry
@@ -624,6 +625,41 @@ TEST_F(GpuControlListTest, DisabledExtensionTest) {
   ASSERT_STREQ("test_extension1", disabled_extensions[0].c_str());
   ASSERT_STREQ("test_extension2", disabled_extensions[1].c_str());
   ASSERT_STREQ("test_extension3", disabled_extensions[2].c_str());
+}
+
+TEST_F(GpuControlListTest, DisabledInProcessGPUTest) {
+  const std::string exact_list_json = LONG_STRING_CONST(
+      {
+        "name": "gpu control list",
+        "version": "0.1",
+        "entries": [
+          {
+            "id": 1,
+            "os": {
+              "type": "win"
+            },
+            "in_process_gpu": true,
+            "features": [
+              "test_feature_0"
+            ]
+          }
+        ]
+      }
+  );
+  scoped_ptr<GpuControlList> control_list(Create());
+
+  EXPECT_TRUE(control_list->LoadList(exact_list_json, GpuControlList::kAllOs));
+  GPUInfo gpu_info;
+
+  gpu_info.in_process_gpu = true;
+  std::set<int> features = control_list->MakeDecision(
+        GpuControlList::kOsWin, kOsVersion, gpu_info);
+  EXPECT_SINGLE_FEATURE(features, TEST_FEATURE_0);
+
+  gpu_info.in_process_gpu = false;
+  features = control_list->MakeDecision(
+        GpuControlList::kOsWin, kOsVersion, gpu_info);
+  EXPECT_EMPTY_SET(features);
 }
 
 }  // namespace gpu

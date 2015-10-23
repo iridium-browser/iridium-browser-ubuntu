@@ -40,15 +40,16 @@ class ExecutionContext;
 
 class V8MutationCallback final : public MutationCallback, public ActiveDOMCallback {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(V8MutationCallback);
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(V8MutationCallback);
 public:
     static PassOwnPtrWillBeRawPtr<V8MutationCallback> create(v8::Local<v8::Function> callback, v8::Local<v8::Object> owner, ScriptState* scriptState)
     {
         return adoptPtrWillBeNoop(new V8MutationCallback(callback, owner, scriptState));
     }
-    virtual ~V8MutationCallback();
+    ~V8MutationCallback() override;
 
-    virtual void call(const WillBeHeapVector<RefPtrWillBeMember<MutationRecord>>&, MutationObserver*) override;
-    virtual ExecutionContext* executionContext() const override { return ContextLifecycleObserver::executionContext(); }
+    void call(const WillBeHeapVector<RefPtrWillBeMember<MutationRecord>>&, MutationObserver*) override;
+    ExecutionContext* executionContext() const override { return ContextLifecycleObserver::executionContext(); }
 
     DECLARE_VIRTUAL_TRACE();
 

@@ -7,6 +7,9 @@
 #ifndef ANGLE_TESTS_ANGLE_TEST_H_
 #define ANGLE_TESTS_ANGLE_TEST_H_
 
+#define GL_GLEXT_PROTOTYPES
+#define EGL_EGLEXT_PROTOTYPES
+
 #include <gtest/gtest.h>
 #include <algorithm>
 
@@ -15,10 +18,10 @@
 #include "common/angleutils.h"
 #include "shader_utils.h"
 
-#define EXPECT_GL_ERROR(err) EXPECT_EQ((err), glGetError())
+#define EXPECT_GL_ERROR(err) EXPECT_EQ(static_cast<GLenum>(err), glGetError())
 #define EXPECT_GL_NO_ERROR() EXPECT_GL_ERROR(GL_NO_ERROR)
 
-#define ASSERT_GL_ERROR(err) ASSERT_EQ((err), glGetError())
+#define ASSERT_GL_ERROR(err) ASSERT_EQ(static_cast<GLenum>(err), glGetError())
 #define ASSERT_GL_NO_ERROR() ASSERT_GL_ERROR(GL_NO_ERROR)
 
 #define EXPECT_EGL_ERROR(err) EXPECT_EQ((err), eglGetError())
@@ -26,6 +29,9 @@
 
 #define ASSERT_EGL_ERROR(err) ASSERT_EQ((err), eglGetError())
 #define ASSERT_EGL_SUCCESS() ASSERT_EGL_ERROR(EGL_SUCCESS)
+
+#define ASSERT_GLENUM_EQ(expected, actual) ASSERT_EQ(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
+#define EXPECT_GLENUM_EQ(expected, actual) EXPECT_EQ(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
 
 #define EXPECT_PIXEL_EQ(x, y, r, g, b, a) \
 { \
@@ -61,7 +67,6 @@ class ANGLETest : public ::testing::TestWithParam<angle::PlatformParameters>
   public:
     static bool InitTestWindow();
     static bool DestroyTestWindow();
-    static bool ResizeWindow(int width, int height);
     static void SetWindowVisible(bool isVisible);
 
   protected:
@@ -73,6 +78,8 @@ class ANGLETest : public ::testing::TestWithParam<angle::PlatformParameters>
     static void drawQuad(GLuint program, const std::string& positionAttribName, GLfloat quadDepth, GLfloat quadScale = 1.0f);
     static GLuint compileShader(GLenum type, const std::string &source);
     static bool extensionEnabled(const std::string &extName);
+    static bool eglDisplayExtensionEnabled(EGLDisplay display, const std::string &extName);
+    static bool eglClientExtensionEnabled(const std::string &extName);
 
     void setWindowWidth(int width);
     void setWindowHeight(int height);
@@ -101,6 +108,8 @@ class ANGLETest : public ::testing::TestWithParam<angle::PlatformParameters>
     bool destroyEGLContext();
 
     EGLWindow *mEGLWindow;
+    int mWidth;
+    int mHeight;
 
     static OSWindow *mOSWindow;
 };

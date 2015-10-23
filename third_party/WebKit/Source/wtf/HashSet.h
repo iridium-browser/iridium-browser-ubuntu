@@ -70,6 +70,11 @@ namespace WTF {
         unsigned capacity() const;
         bool isEmpty() const;
 
+        void reserveCapacityForSize(unsigned size)
+        {
+            m_impl.reserveCapacityForSize(size);
+        }
+
         iterator begin() const;
         iterator end() const;
 
@@ -108,7 +113,6 @@ namespace WTF {
         ValuePassOutType take(ValuePeekInType);
         ValuePassOutType takeAny();
 
-        typedef int HasInlinedTraceMethodMarker;
         template<typename VisitorDispatcher>
         void trace(VisitorDispatcher visitor) { m_impl.trace(visitor); }
 

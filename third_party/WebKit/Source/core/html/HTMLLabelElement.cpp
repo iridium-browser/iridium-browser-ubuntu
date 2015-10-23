@@ -28,11 +28,13 @@
 #include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/SelectionController.h"
 #include "core/events/MouseEvent.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/FormAssociatedElement.h"
-#include "core/page/EventHandler.h"
+#include "core/input/EventHandler.h"
 
 namespace blink {
 
@@ -86,28 +88,28 @@ HTMLFormElement* HTMLLabelElement::formOwner() const
 
 void HTMLLabelElement::setActive(bool down)
 {
-    if (down == active())
-        return;
-
-    // Update our status first.
-    HTMLElement::setActive(down);
+    if (down != active()) {
+        // Update our status first.
+        HTMLElement::setActive(down);
+    }
 
     // Also update our corresponding control.
-    if (HTMLElement* element = control())
-        element->setActive(down);
+    HTMLElement* controlElement = control();
+    if (controlElement && controlElement->active() != active())
+        controlElement->setActive(active());
 }
 
 void HTMLLabelElement::setHovered(bool over)
 {
-    if (over == hovered())
-        return;
-
-    // Update our status first.
-    HTMLElement::setHovered(over);
+    if (over != hovered()) {
+        // Update our status first.
+        HTMLElement::setHovered(over);
+    }
 
     // Also update our corresponding control.
-    if (HTMLElement* element = control())
-        element->setHovered(over);
+    HTMLElement* element = control();
+    if (element && element->hovered() != hovered())
+        element->setHovered(hovered());
 }
 
 bool HTMLLabelElement::isInteractiveContent() const
@@ -160,7 +162,7 @@ void HTMLLabelElement::defaultEventHandler(Event* evt)
             if (LocalFrame* frame = document().frame()) {
                 // Check if there is a selection and click is not on the
                 // selection.
-                if (!Position::nodeIsUserSelectNone(this) && frame->selection().isRange() && !frame->eventHandler().mouseDownWasSingleClickInSelection())
+                if (!nodeIsUserSelectNone(this) && frame->selection().isRange() && !frame->eventHandler().selectionController().mouseDownWasSingleClickInSelection())
                     isLabelTextSelected = true;
                 // If selection is there and is single click i.e. text is
                 // selected by dragging over label text, then return.
@@ -204,13 +206,13 @@ bool HTMLLabelElement::willRespondToMouseClickEvents()
     return HTMLElement::willRespondToMouseClickEvents();
 }
 
-void HTMLLabelElement::focus(bool, WebFocusType type)
+void HTMLLabelElement::focus(bool, WebFocusType type, InputDeviceCapabilities* sourceCapabilities)
 {
     // to match other browsers, always restore previous selection
     if (HTMLElement* element = control())
-        element->focus(true, type);
+        element->focus(true, type, sourceCapabilities);
     if (isFocusable())
-        HTMLElement::focus(true, type);
+        HTMLElement::focus(true, type, sourceCapabilities);
 }
 
 void HTMLLabelElement::accessKeyAction(bool sendMouseEvents)

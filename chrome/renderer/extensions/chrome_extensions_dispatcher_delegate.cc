@@ -7,8 +7,8 @@
 #include "base/command_line.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/url_constants.h"
@@ -24,6 +24,7 @@
 #include "chrome/renderer/extensions/sync_file_system_custom_bindings.h"
 #include "chrome/renderer/extensions/tabs_custom_bindings.h"
 #include "chrome/renderer/extensions/webstore_bindings.h"
+#include "components/version_info/version_info.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
@@ -200,6 +201,9 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
       "cast.streaming.receiverSession",
       IDR_CAST_STREAMING_RECEIVER_SESSION_CUSTOM_BINDINGS_JS);
 #endif
+  source_map->RegisterSource(
+      "webrtcDesktopCapturePrivate",
+      IDR_WEBRTC_DESKTOP_CAPTURE_PRIVATE_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 
   // Custom types sources.
@@ -229,7 +233,7 @@ void ChromeExtensionsDispatcherDelegate::RequireAdditionalModules(
   // a webview or appview is created and only then set up the infrastructure.
   if (context_type == extensions::Feature::BLESSED_EXTENSION_CONTEXT &&
       is_within_platform_app &&
-      extensions::GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV &&
+      extensions::GetCurrentChannel() <= version_info::Channel::DEV &&
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           extensions::switches::kEnableAppWindowControls)) {
     module_system->Require("windowControls");
@@ -252,6 +256,5 @@ void ChromeExtensionsDispatcherDelegate::OnActiveExtensionsUpdated(
 }
 
 void ChromeExtensionsDispatcherDelegate::SetChannel(int channel) {
-  extensions::SetCurrentChannel(
-      static_cast<chrome::VersionInfo::Channel>(channel));
+  extensions::SetCurrentChannel(static_cast<version_info::Channel>(channel));
 }

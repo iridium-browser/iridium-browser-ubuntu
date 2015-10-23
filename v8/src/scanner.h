@@ -14,7 +14,7 @@
 #include "src/hashmap.h"
 #include "src/list.h"
 #include "src/token.h"
-#include "src/unicode-inl.h"
+#include "src/unicode.h"
 #include "src/unicode-decoder.h"
 #include "src/utils.h"
 
@@ -435,6 +435,7 @@ class Scanner {
   const AstRawString* CurrentRawSymbol(AstValueFactory* ast_value_factory);
 
   double DoubleValue();
+  bool ContainsDot();
   bool LiteralMatches(const char* data, int length, bool allow_escapes = true) {
     if (is_literal_one_byte() &&
         literal_length() == length &&
@@ -476,21 +477,6 @@ class Scanner {
   // characters, but works for seeking forward until simple delimiter
   // tokens, which is what it is used for.
   void SeekForward(int pos);
-
-  bool HarmonyModules() const {
-    return harmony_modules_;
-  }
-  void SetHarmonyModules(bool modules) {
-    harmony_modules_ = modules;
-  }
-  bool HarmonyClasses() const {
-    return harmony_classes_;
-  }
-  void SetHarmonyClasses(bool classes) {
-    harmony_classes_ = classes;
-  }
-  bool HarmonyUnicode() const { return harmony_unicode_; }
-  void SetHarmonyUnicode(bool unicode) { harmony_unicode_ = unicode; }
 
   // Returns true if there was a line terminator before the peek'ed token,
   // possibly inside a multi-line comment.
@@ -801,12 +787,6 @@ class Scanner {
   // Whether there is a multi-line comment that contains a
   // line-terminator after the current token, and before the next.
   bool has_multiline_comment_before_next_;
-  // Whether we scan 'module', 'import', 'export' as keywords.
-  bool harmony_modules_;
-  // Whether we scan 'class', 'extends', 'static' and 'super' as keywords.
-  bool harmony_classes_;
-  // Whether we allow \u{xxxxx}.
-  bool harmony_unicode_;
 };
 
 } }  // namespace v8::internal

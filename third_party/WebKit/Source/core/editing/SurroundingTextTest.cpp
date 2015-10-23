@@ -6,17 +6,15 @@
 #include "core/editing/SurroundingText.h"
 
 #include "core/dom/Document.h"
-#include "core/dom/Position.h"
 #include "core/dom/Range.h"
 #include "core/dom/Text.h"
+#include "core/editing/Position.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/html/HTMLElement.h"
 #include "core/testing/DummyPageHolder.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 class SurroundingTextTest : public ::testing::Test {
 protected:
@@ -26,7 +24,7 @@ protected:
     VisibleSelection select(int start, int end);
 
 private:
-    virtual void SetUp() override;
+    void SetUp() override;
 
     OwnPtr<DummyPageHolder> m_dummyPageHolder;
 };
@@ -262,4 +260,4 @@ TEST_F(SurroundingTextTest, TreeRangeSelection)
     }
 }
 
-} // anonymous namespace
+} // namespace blink

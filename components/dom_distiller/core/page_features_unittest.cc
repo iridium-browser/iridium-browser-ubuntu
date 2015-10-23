@@ -35,11 +35,11 @@ TEST(DomDistillerPageFeaturesTest, TestCalculateDerivedFeatures) {
           "components/test/data/dom_distiller/derived_features.json"),
       &expected_output_data));
 
-  scoped_ptr<base::Value> input_json(base::JSONReader::Read(input_data));
+  scoped_ptr<base::Value> input_json = base::JSONReader::Read(input_data);
   ASSERT_TRUE(input_json);
 
   scoped_ptr<base::Value> expected_output_json(
-      base::JSONReader::Read(expected_output_data));
+      base::JSONReader::DeprecatedRead(expected_output_data));
   ASSERT_TRUE(expected_output_json);
 
   base::ListValue* input_entries;
@@ -70,7 +70,7 @@ TEST(DomDistillerPageFeaturesTest, TestCalculateDerivedFeatures) {
     // CalculateDerivedFeaturesFromJSON expects a base::Value of the stringified
     // JSON (and not a base::Value of the JSON itself)
     std::string stringified_json;
-    ASSERT_TRUE(base::JSONWriter::Write(core_features, &stringified_json));
+    ASSERT_TRUE(base::JSONWriter::Write(*core_features, &stringified_json));
     scoped_ptr<base::Value> stringified_value(
         new base::StringValue(stringified_json));
     std::vector<double> derived(

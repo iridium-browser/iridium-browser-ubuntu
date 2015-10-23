@@ -128,6 +128,12 @@ WebString WebMediaStreamSource::name() const
     return m_private.get()->name();
 }
 
+bool WebMediaStreamSource::remote() const
+{
+    ASSERT(!m_private.isNull());
+    return m_private.get()->remote();
+}
+
 void WebMediaStreamSource::setReadyState(ReadyState state)
 {
     ASSERT(!m_private.isNull());
@@ -178,8 +184,8 @@ public:
         return new ConsumerWrapper(consumer);
     }
 
-    virtual void setFormat(size_t numberOfChannels, float sampleRate) override;
-    virtual void consumeAudio(AudioBus*, size_t numberOfFrames) override;
+    void setFormat(size_t numberOfChannels, float sampleRate) override;
+    void consumeAudio(AudioBus*, size_t numberOfFrames) override;
 
     WebAudioDestinationConsumer* consumer() { return m_consumer; }
 

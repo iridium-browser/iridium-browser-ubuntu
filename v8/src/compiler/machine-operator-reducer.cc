@@ -439,6 +439,10 @@ Reduction MachineOperatorReducer::Reduce(Node* node) {
       return ReduceFloat64InsertHighWord32(node);
     case IrOpcode::kStore:
       return ReduceStore(node);
+    case IrOpcode::kFloat64Equal:
+    case IrOpcode::kFloat64LessThan:
+    case IrOpcode::kFloat64LessThanOrEqual:
+      return ReduceFloat64Compare(node);
     default:
       break;
   }
@@ -646,14 +650,13 @@ Reduction MachineOperatorReducer::ReduceTruncateFloat64ToInt32(Node* node) {
     Node* const phi = m.node();
     DCHECK_EQ(kRepFloat64, RepresentationOf(OpParameter<MachineType>(phi)));
     if (phi->OwnedBy(node)) {
-      // TruncateFloat64ToInt32(Phi[Float64](x1,...,xn))
-      //   => Phi[Int32](TruncateFloat64ToInt32(x1),
+      // TruncateFloat64ToInt32[mode](Phi[Float64](x1,...,xn))
+      //   => Phi[Int32](TruncateFloat64ToInt32[mode](x1),
       //                 ...,
-      //                 TruncateFloat64ToInt32(xn))
+      //                 TruncateFloat64ToInt32[mode](xn))
       const int value_input_count = phi->InputCount() - 1;
       for (int i = 0; i < value_input_count; ++i) {
-        Node* input = graph()->NewNode(machine()->TruncateFloat64ToInt32(),
-                                       phi->InputAt(i));
+        Node* input = graph()->NewNode(node->op(), phi->InputAt(i));
         // TODO(bmeurer): Reschedule input for reduction once we have Revisit()
         // instead of recursing into ReduceTruncateFloat64ToInt32() here.
         Reduction reduction = ReduceTruncateFloat64ToInt32(input);
@@ -1000,6 +1003,37 @@ Reduction MachineOperatorReducer::ReduceFloat64InsertHighWord32(Node* node) {
     return ReplaceFloat64(bit_cast<double>(
         (bit_cast<uint64_t>(mlhs.Value()) & V8_UINT64_C(0xFFFFFFFF)) |
         (static_cast<uint64_t>(mrhs.Value()) << 32)));
+  }
+  return NoChange();
+}
+
+
+Reduction MachineOperatorReducer::ReduceFloat64Compare(Node* node) {
+  DCHECK((IrOpcode::kFloat64Equal == node->opcode()) ||
+         (IrOpcode::kFloat64LessThan == node->opcode()) ||
+         (IrOpcode::kFloat64LessThanOrEqual == node->opcode()));
+  // As all Float32 values have an exact representation in Float64, comparing
+  // two Float64 values both converted from Float32 is equivalent to comparing
+  // the original Float32s, so we can ignore the conversions.
+  Float64BinopMatcher m(node);
+  if (m.left().IsChangeFloat32ToFloat64() &&
+      m.right().IsChangeFloat32ToFloat64()) {
+    switch (node->opcode()) {
+      case IrOpcode::kFloat64Equal:
+        node->set_op(machine()->Float32Equal());
+        break;
+      case IrOpcode::kFloat64LessThan:
+        node->set_op(machine()->Float32LessThan());
+        break;
+      case IrOpcode::kFloat64LessThanOrEqual:
+        node->set_op(machine()->Float32LessThanOrEqual());
+        break;
+      default:
+        return NoChange();
+    }
+    node->ReplaceInput(0, m.left().InputAt(0));
+    node->ReplaceInput(1, m.right().InputAt(0));
+    return Changed(node);
   }
   return NoChange();
 }

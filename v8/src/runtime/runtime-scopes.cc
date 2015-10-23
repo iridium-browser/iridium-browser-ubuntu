@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
+#include "src/runtime/runtime-utils.h"
 
 #include "src/accessors.h"
 #include "src/arguments.h"
 #include "src/frames-inl.h"
 #include "src/messages.h"
-#include "src/runtime/runtime-utils.h"
 #include "src/scopeinfo.h"
 #include "src/scopes.h"
 
@@ -17,17 +16,15 @@ namespace internal {
 
 static Object* ThrowRedeclarationError(Isolate* isolate, Handle<String> name) {
   HandleScope scope(isolate);
-  Handle<Object> args[1] = {name};
   THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError("var_redeclaration", HandleVector(args, 1)));
+      isolate, NewTypeError(MessageTemplate::kVarRedeclaration, name));
 }
 
 
 RUNTIME_FUNCTION(Runtime_ThrowConstAssignError) {
   HandleScope scope(isolate);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate,
-      NewTypeError("const_assign", HandleVector<Object>(NULL, 0)));
+  THROW_NEW_ERROR_RETURN_FAILURE(isolate,
+                                 NewTypeError(MessageTemplate::kConstAssign));
 }
 
 
@@ -88,12 +85,12 @@ static Object* DeclareGlobals(Isolate* isolate, Handle<GlobalObject> global,
 
 RUNTIME_FUNCTION(Runtime_DeclareGlobals) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
+  DCHECK_EQ(2, args.length());
   Handle<GlobalObject> global(isolate->global_object());
+  Handle<Context> context(isolate->context());
 
-  CONVERT_ARG_HANDLE_CHECKED(Context, context, 0);
-  CONVERT_ARG_HANDLE_CHECKED(FixedArray, pairs, 1);
-  CONVERT_SMI_ARG_CHECKED(flags, 2);
+  CONVERT_ARG_HANDLE_CHECKED(FixedArray, pairs, 0);
+  CONVERT_SMI_ARG_CHECKED(flags, 1);
 
   // Traverse the name/value pairs and set the properties.
   int length = pairs->length();
@@ -204,20 +201,16 @@ RUNTIME_FUNCTION(Runtime_InitializeConstGlobal) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_DeclareLookupSlot) {
-  HandleScope scope(isolate);
-  DCHECK(args.length() == 4);
+namespace {
 
+Object* DeclareLookupSlot(Isolate* isolate, Handle<String> name,
+                          Handle<Object> initial_value,
+                          PropertyAttributes attr) {
   // Declarations are always made in a function, eval or script context. In
   // the case of eval code, the context passed is the context of the caller,
   // which may be some nested context and not the declaration context.
-  CONVERT_ARG_HANDLE_CHECKED(Context, context_arg, 0);
-  Handle<Context> context(context_arg->declaration_context());
-  CONVERT_ARG_HANDLE_CHECKED(String, name, 1);
-  CONVERT_SMI_ARG_CHECKED(attr_arg, 2);
-  PropertyAttributes attr = static_cast<PropertyAttributes>(attr_arg);
-  RUNTIME_ASSERT(attr == READ_ONLY || attr == NONE);
-  CONVERT_ARG_HANDLE_CHECKED(Object, initial_value, 3);
+  Handle<Context> context_arg(isolate->context(), isolate);
+  Handle<Context> context(context_arg->declaration_context(), isolate);
 
   // TODO(verwaest): Unify the encoding indicating "var" with DeclareGlobals.
   bool is_var = *initial_value == NULL;
@@ -232,6 +225,10 @@ RUNTIME_FUNCTION(Runtime_DeclareLookupSlot) {
   BindingFlags binding_flags;
   Handle<Object> holder =
       context->Lookup(name, flags, &index, &attributes, &binding_flags);
+  if (holder.is_null()) {
+    // In case of JSProxy, an exception might have been thrown.
+    if (isolate->has_pending_exception()) return isolate->heap()->exception();
+  }
 
   Handle<JSObject> object;
   Handle<Object> value =
@@ -248,6 +245,12 @@ RUNTIME_FUNCTION(Runtime_DeclareLookupSlot) {
       context_arg->extension()->IsJSGlobalObject()) {
     Handle<JSGlobalObject> global(
         JSGlobalObject::cast(context_arg->extension()), isolate);
+    return DeclareGlobals(isolate, global, name, value, attr, is_var, is_const,
+                          is_function);
+  } else if (context->IsScriptContext()) {
+    DCHECK(context->global_object()->IsJSGlobalObject());
+    Handle<JSGlobalObject> global(
+        JSGlobalObject::cast(context->global_object()), isolate);
     return DeclareGlobals(isolate, global, name, value, attr, is_var, is_const,
                           is_function);
   }
@@ -286,6 +289,28 @@ RUNTIME_FUNCTION(Runtime_DeclareLookupSlot) {
   return isolate->heap()->undefined_value();
 }
 
+}  // namespace
+
+
+RUNTIME_FUNCTION(Runtime_DeclareLookupSlot) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(2, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(String, name, 0);
+  CONVERT_ARG_HANDLE_CHECKED(Object, initial_value, 1);
+
+  return DeclareLookupSlot(isolate, name, initial_value, NONE);
+}
+
+
+RUNTIME_FUNCTION(Runtime_DeclareReadOnlyLookupSlot) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(2, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(String, name, 0);
+  CONVERT_ARG_HANDLE_CHECKED(Object, initial_value, 1);
+
+  return DeclareLookupSlot(isolate, name, initial_value, READ_ONLY);
+}
+
 
 RUNTIME_FUNCTION(Runtime_InitializeLegacyConstLookupSlot) {
   HandleScope scope(isolate);
@@ -304,6 +329,10 @@ RUNTIME_FUNCTION(Runtime_InitializeLegacyConstLookupSlot) {
   BindingFlags binding_flags;
   Handle<Object> holder =
       context->Lookup(name, flags, &index, &attributes, &binding_flags);
+  if (holder.is_null()) {
+    // In case of JSProxy, an exception might have been thrown.
+    if (isolate->has_pending_exception()) return isolate->heap()->exception();
+  }
 
   if (index >= 0) {
     DCHECK(holder->IsContext());
@@ -325,8 +354,12 @@ RUNTIME_FUNCTION(Runtime_InitializeLegacyConstLookupSlot) {
   // meanwhile. If so, re-introduce the variable in the context extension.
   if (attributes == ABSENT) {
     Handle<Context> declaration_context(context_arg->declaration_context());
-    DCHECK(declaration_context->has_extension());
-    holder = handle(declaration_context->extension(), isolate);
+    if (declaration_context->IsScriptContext()) {
+      holder = handle(declaration_context->global_object(), isolate);
+    } else {
+      DCHECK(declaration_context->has_extension());
+      holder = handle(declaration_context->extension(), isolate);
+    }
     CHECK(holder->IsJSObject());
   } else {
     // For JSContextExtensionObjects, the initializer can be run multiple times
@@ -363,7 +396,7 @@ static Handle<JSObject> NewSloppyArguments(Isolate* isolate,
                                            Object** parameters,
                                            int argument_count) {
   CHECK(!IsSubclassConstructor(callee->shared()->kind()));
-  DCHECK(callee->is_simple_parameter_list());
+  DCHECK(callee->has_simple_parameters());
   Handle<JSObject> result =
       isolate->factory()->NewArgumentsObject(callee, argument_count);
 
@@ -375,11 +408,7 @@ static Handle<JSObject> NewSloppyArguments(Isolate* isolate,
       Handle<FixedArray> parameter_map =
           isolate->factory()->NewFixedArray(mapped_count + 2, NOT_TENURED);
       parameter_map->set_map(isolate->heap()->sloppy_arguments_elements_map());
-
-      Handle<Map> map = Map::Copy(handle(result->map()), "NewSloppyArguments");
-      map->set_elements_kind(SLOPPY_ARGUMENTS_ELEMENTS);
-
-      result->set_map(*map);
+      result->set_map(isolate->native_context()->fast_aliased_arguments_map());
       result->set_elements(*parameter_map);
 
       // Store the context and the arguments array at the beginning of the
@@ -488,7 +517,7 @@ RUNTIME_FUNCTION(Runtime_NewArguments) {
   Object** parameters = reinterpret_cast<Object**>(frame->GetParameterSlot(-1));
 
   return (is_strict(callee->shared()->language_mode()) ||
-             !callee->is_simple_parameter_list())
+             !callee->has_simple_parameters())
              ? *NewStrictArguments(isolate, callee, parameters, argument_count)
              : *NewSloppyArguments(isolate, callee, parameters, argument_count);
 }
@@ -514,10 +543,9 @@ RUNTIME_FUNCTION(Runtime_NewStrictArguments) {
 }
 
 
-static Handle<JSArray> NewRestParam(Isolate* isolate,
-                                    Object** parameters,
-                                    int num_params,
-                                    int rest_index) {
+static Handle<JSArray> NewRestParam(Isolate* isolate, Object** parameters,
+                                    int num_params, int rest_index,
+                                    LanguageMode language_mode) {
   parameters -= rest_index;
   int num_elements = std::max(0, num_params - rest_index);
   Handle<FixedArray> elements =
@@ -525,26 +553,29 @@ static Handle<JSArray> NewRestParam(Isolate* isolate,
   for (int i = 0; i < num_elements; ++i) {
     elements->set(i, *--parameters);
   }
-  return isolate->factory()->NewJSArrayWithElements(elements, FAST_ELEMENTS,
-                                                    num_elements);
+  return isolate->factory()->NewJSArrayWithElements(
+      elements, FAST_ELEMENTS, num_elements, strength(language_mode));
 }
 
 
 RUNTIME_FUNCTION(Runtime_NewRestParam) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
+  DCHECK(args.length() == 4);
   Object** parameters = reinterpret_cast<Object**>(args[0]);
   CONVERT_SMI_ARG_CHECKED(num_params, 1);
   CONVERT_SMI_ARG_CHECKED(rest_index, 2);
+  CONVERT_SMI_ARG_CHECKED(language_mode, 3);
 
-  return *NewRestParam(isolate, parameters, num_params, rest_index);
+  return *NewRestParam(isolate, parameters, num_params, rest_index,
+                       static_cast<LanguageMode>(language_mode));
 }
 
 
 RUNTIME_FUNCTION(Runtime_NewRestParamSlow) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 1);
+  DCHECK(args.length() == 2);
   CONVERT_SMI_ARG_CHECKED(rest_index, 0);
+  CONVERT_SMI_ARG_CHECKED(language_mode, 1);
 
   JavaScriptFrameIterator it(isolate);
 
@@ -555,7 +586,8 @@ RUNTIME_FUNCTION(Runtime_NewRestParamSlow) {
   int argument_count = frame->GetArgumentsLength();
   Object** parameters = reinterpret_cast<Object**>(frame->GetParameterSlot(-1));
 
-  return *NewRestParam(isolate, parameters, argument_count, rest_index);
+  return *NewRestParam(isolate, parameters, argument_count, rest_index,
+                       static_cast<LanguageMode>(language_mode));
 }
 
 
@@ -625,16 +657,23 @@ RUNTIME_FUNCTION(Runtime_NewScriptContext) {
   Handle<ScriptContextTable> script_context_table(
       native_context->script_context_table());
 
-  Handle<String> clashed_name;
   Object* name_clash_result =
       FindNameClash(scope_info, global_object, script_context_table);
   if (isolate->has_pending_exception()) return name_clash_result;
 
+  // Script contexts have a canonical empty function as their closure, not the
+  // anonymous closure containing the global code.  See
+  // FullCodeGenerator::PushFunctionArgumentForContextAllocation.
+  Handle<JSFunction> closure(global_object->IsJSBuiltinsObject()
+                                 ? *function
+                                 : native_context->closure());
   Handle<Context> result =
-      isolate->factory()->NewScriptContext(function, scope_info);
+      isolate->factory()->NewScriptContext(closure, scope_info);
+
+  result->InitializeGlobalSlots();
 
   DCHECK(function->context() == isolate->context());
-  DCHECK(function->context()->global_object() == result->global_object());
+  DCHECK(*global_object == result->global_object());
 
   Handle<ScriptContextTable> new_script_context_table =
       ScriptContextTable::Extend(script_context_table, result);
@@ -808,7 +847,6 @@ RUNTIME_FUNCTION(Runtime_DeclareModules) {
           USE(result);
           break;
         }
-        case INTERNAL:
         case TEMPORARY:
         case DYNAMIC:
         case DYNAMIC_GLOBAL:
@@ -841,6 +879,8 @@ RUNTIME_FUNCTION(Runtime_DeleteLookupSlot) {
 
   // If the slot was not found the result is true.
   if (holder.is_null()) {
+    // In case of JSProxy, an exception might have been thrown.
+    if (isolate->has_pending_exception()) return isolate->heap()->exception();
     return isolate->heap()->true_value();
   }
 
@@ -995,18 +1035,25 @@ RUNTIME_FUNCTION(Runtime_StoreLookupSlot) {
   BindingFlags binding_flags;
   Handle<Object> holder =
       context->Lookup(name, flags, &index, &attributes, &binding_flags);
-  // In case of JSProxy, an exception might have been thrown.
-  if (isolate->has_pending_exception()) return isolate->heap()->exception();
+  if (holder.is_null()) {
+    // In case of JSProxy, an exception might have been thrown.
+    if (isolate->has_pending_exception()) return isolate->heap()->exception();
+  }
 
   // The property was found in a context slot.
   if (index >= 0) {
+    if ((binding_flags == MUTABLE_CHECK_INITIALIZED ||
+         binding_flags == IMMUTABLE_CHECK_INITIALIZED_HARMONY) &&
+        Handle<Context>::cast(holder)->is_the_hole(index)) {
+      THROW_NEW_ERROR_RETURN_FAILURE(
+          isolate, NewReferenceError(MessageTemplate::kNotDefined, name));
+    }
     if ((attributes & READ_ONLY) == 0) {
       Handle<Context>::cast(holder)->set(index, *value);
     } else if (is_strict(language_mode)) {
       // Setting read only property in strict mode.
       THROW_NEW_ERROR_RETURN_FAILURE(
-          isolate,
-          NewTypeError("strict_cannot_assign", HandleVector(&name, 1)));
+          isolate, NewTypeError(MessageTemplate::kStrictCannotAssign, name));
     }
     return *value;
   }
@@ -1034,7 +1081,16 @@ RUNTIME_FUNCTION(Runtime_StoreLookupSlot) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_GetArgumentsProperty) {
+RUNTIME_FUNCTION(Runtime_ArgumentsLength) {
+  SealHandleScope shs(isolate);
+  DCHECK(args.length() == 0);
+  JavaScriptFrameIterator it(isolate);
+  JavaScriptFrame* frame = it.frame();
+  return Smi::FromInt(frame->GetArgumentsLength());
+}
+
+
+RUNTIME_FUNCTION(Runtime_Arguments) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 1);
   CONVERT_ARG_HANDLE_CHECKED(Object, raw_key, 0);
@@ -1049,7 +1105,7 @@ RUNTIME_FUNCTION(Runtime_GetArgumentsProperty) {
 
   // Try to convert the key to an index. If successful and within
   // index return the the argument from the frame.
-  uint32_t index;
+  uint32_t index = 0;
   if (raw_key->ToArrayIndex(&index) && index < n) {
     return frame->GetParameter(index);
   }
@@ -1097,8 +1153,7 @@ RUNTIME_FUNCTION(Runtime_GetArgumentsProperty) {
     JSFunction* function = frame->function();
     if (is_strict(function->shared()->language_mode())) {
       THROW_NEW_ERROR_RETURN_FAILURE(
-          isolate, NewTypeError("strict_arguments_callee",
-                                HandleVector<Object>(NULL, 0)));
+          isolate, NewTypeError(MessageTemplate::kStrictPoisonPill));
     }
     return function;
   }
@@ -1110,20 +1165,5 @@ RUNTIME_FUNCTION(Runtime_GetArgumentsProperty) {
       Object::GetProperty(isolate->initial_object_prototype(), key));
   return *result;
 }
-
-
-RUNTIME_FUNCTION(Runtime_ArgumentsLength) {
-  SealHandleScope shs(isolate);
-  DCHECK(args.length() == 0);
-  JavaScriptFrameIterator it(isolate);
-  JavaScriptFrame* frame = it.frame();
-  return Smi::FromInt(frame->GetArgumentsLength());
-}
-
-
-RUNTIME_FUNCTION(Runtime_Arguments) {
-  SealHandleScope shs(isolate);
-  return __RT_impl_Runtime_GetArgumentsProperty(args, isolate);
-}
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

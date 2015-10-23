@@ -14,11 +14,8 @@ import com.google.ipc.invalidation.external.client.types.ObjectId;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
-import org.chromium.sync.internal_api.pub.base.ModelType;
 
 import java.util.Arrays;
-import java.util.EnumSet;
-import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -33,33 +30,6 @@ public class InvalidationPreferencesTest extends InstrumentationTestCase {
     protected void setUp() throws Exception {
         super.setUp();
         mContext = new AdvancedMockContext(getInstrumentation().getContext());
-    }
-
-    @SmallTest
-    @Feature({"Sync"})
-    public void testTranslateBasicSyncTypes() throws Exception {
-        /*
-         * Test plan: convert three strings to model types, one of which is invalid. Verify that
-         * the two valid strings are properly converted and that the invalid string is dropped.
-         */
-        HashSet<ModelType> expectedTypes = CollectionUtil.newHashSet(
-                ModelType.BOOKMARK, ModelType.SESSION);
-        Set<ModelType> actualTypes = ModelType.syncTypesToModelTypes(
-                CollectionUtil.newHashSet("BOOKMARK", "SESSION", "0!!!INVALID"));
-        assertEquals(expectedTypes, actualTypes);
-    }
-
-    @SmallTest
-    @Feature({"Sync"})
-    public void testTranslateAllSyncTypes() {
-        /*
-         * Test plan: convert the special all-types type to model types. Verify that it is
-         * properly expanded.
-         */
-        Set<ModelType> expectedTypes = EnumSet.allOf(ModelType.class);
-        Set<ModelType> actualTypes = ModelType.syncTypesToModelTypes(
-                CollectionUtil.newHashSet(ModelType.ALL_TYPES_TYPE));
-        assertEquals(expectedTypes, actualTypes);
     }
 
     @SmallTest
@@ -85,9 +55,9 @@ public class InvalidationPreferencesTest extends InstrumentationTestCase {
         InvalidationPreferences invPreferences = new InvalidationPreferences(mContext);
         InvalidationPreferences.EditContext editContext = invPreferences.edit();
 
-        // We should never write both a real type and the all-types type in practice, but we test
-        // with them here to ensure that preferences are not interpreting the written data.
-        Set<String> syncTypes = CollectionUtil.newHashSet("BOOKMARK", ModelType.ALL_TYPES_TYPE);
+        // Write mix of valid and invalid types to disk to test that preferences are not
+        // interpreting the data. Invalid types should never be written to disk in practice.
+        Set<String> syncTypes = CollectionUtil.newHashSet("BOOKMARK", "INVALID");
         Set<ObjectId> objectIds = CollectionUtil.newHashSet(
                 ObjectId.newInstance(1, "obj1".getBytes()),
                 ObjectId.newInstance(2, "obj2".getBytes()));

@@ -550,11 +550,13 @@ ImageUtil.ImageLoader.prototype.load = function(item, callback, opt_delay) {
           item.getMetadataItem().modificationTime &&
           item.getMetadataItem().modificationTime.getTime();
       ImageLoaderClient.getInstance().load(entry.toURL(), function(result) {
+        if (generation !== this.generation_)
+          return;
         if (result.status === 'success')
           loadImage(result.data);
         else
           onError('GALLERY_IMAGE_ERROR');
-      }, {
+      }.bind(this), {
         cache: true,
         timestamp: timestamp,
         priority: 0  // Use highest priority to show main image.
@@ -731,7 +733,7 @@ ImageUtil.getMetricName = function(name) {
 
 /**
  * Used for metrics reporting, keep in sync with the histogram description.
- * @type {Array.<string>}
+ * @type {Array<string>}
  * @const
  */
 ImageUtil.FILE_TYPES = ['jpg', 'png', 'gif', 'bmp', 'webp'];

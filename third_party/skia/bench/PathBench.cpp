@@ -1,15 +1,16 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
 #include "Benchmark.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
 #include "SkColorPriv.h"
 #include "SkPaint.h"
+#include "SkPath.h"
 #include "SkRandom.h"
 #include "SkShader.h"
 #include "SkString.h"
@@ -148,7 +149,7 @@ public:
     void appendName(SkString* name) override {
         name->append("sawtooth");
     }
-    virtual void makePath(SkPath* path) {
+    void makePath(SkPath* path) override {
         SkScalar x = SkIntToScalar(20);
         SkScalar y = SkIntToScalar(20);
         const SkScalar x0 = x;

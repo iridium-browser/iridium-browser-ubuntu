@@ -20,7 +20,7 @@ RESULTS_BANNER = """
 Status: %(status)s
 
 Test Command: %(command)s
-Test Metric: %(metrics)s
+Test Metric: %(metric)s
 Relative Change: %(change)s
 Estimated Confidence: %(confidence).02f%%
 Retested CL with revert: %(retest)s"""
@@ -50,47 +50,14 @@ Commit  : %(cl)s
 Date    : %(cl_date)s"""
 
 RESULTS_THANKYOU = """
-| O O | Visit http://www.chromium.org/developers/core-principles for Chrome's
-|  X  | policy on perf regressions. Contact chrome-perf-dashboard-team with any
-| / \\ | questions or suggestions about bisecting. THANK YOU."""
-
-REPRO_STEPS_LOCAL = """
-==== INSTRUCTIONS TO REPRODUCE ====
-To run locally:
- - Use the test command given under 'BISECT JOB RESULTS' above.
- - Consider using a profiler. Pass --profiler=list to list available profilers.
-"""
-
-REPRO_STEPS_TRYJOB = """
-To reproduce on a performance try bot:
- 1. Edit run-perf-test.cfg
- 2. git try -b bot-name --svn_repo='svn://svn.chromium.org/chrome-try/try-perf'
-
-Notes:
- a) Follow the in-file instructions in run-perf-test.cfg.
- b) run-perf-test.cfg is under tools/ or under third_party/WebKit/Tools.
- c) Do your edits preferably under a new git branch.
- d) --browser=release and --browser=android-chromium-testshell are supported
-    depending on the platform (desktop|android).
- e) Strip any src/ directories from the head of relative path names.
- f) Make sure to use the appropriate bot on step 3.
-
-For more details please visit
-https://sites.google.com/a/chromium.org/dev/developers/performance-try-bots"""
-
-REPRO_STEPS_TRYJOB_TELEMETRY = """
-To reproduce on a performance try bot:
-%(command)s
-(Where bot-name comes from tools/perf/run_benchmark --browser=list)
-
-For more details please visit
-https://sites.google.com/a/chromium.org/dev/developers/performance-try-bots
-"""
+| O O | Visit http://www.chromium.org/developers/speed-infra/perf-bug-faq
+|  X  | for more information addressing perf regression bugs. For feedback,
+| / \\ | file a bug with label Cr-Tests-AutoBisect.  Thank you!"""
 
 
 class BisectPrinter(object):
 
-  def __init__(self, opts, depot_registry):
+  def __init__(self, opts, depot_registry=None):
     self.opts = opts
     self.depot_registry = depot_registry
 
@@ -138,8 +105,6 @@ class BisectPrinter(object):
       for culprit in bisect_results.culprit_revisions:
         cl, info, depot = culprit
         self._PrintRevisionInfo(cl, info, depot)
-      if bisect_results.other_regressions:
-        self._PrintOtherRegressions(bisect_results.other_regressions)
     self._PrintRetestResults(bisect_results)
     self._PrintTestedCommitsTable(bisect_results.state.GetRevisionStates(),
                                   bisect_results.first_working_revision,
@@ -147,7 +112,6 @@ class BisectPrinter(object):
                                   bisect_results.confidence,
                                   final_step=True)
     self._PrintStepTime(bisect_results.state.GetRevisionStates())
-    self._PrintReproSteps()
     self._PrintThankYou()
     if self.opts.output_buildbot_annotations:
       bisect_utils.OutputAnnotationStepClosed()
@@ -160,14 +124,21 @@ class BisectPrinter(object):
                                   last_broken_rev, 100, final_step=False)
 
   def _PrintAbortResults(self, abort_reason):
-
     if self.opts.output_buildbot_annotations:
       bisect_utils.OutputAnnotationStepStart('Results')
+
+    # Metric string in config is not split in case of return code mode.
+    if (self.opts.metric and
+        self.opts.bisect_mode != bisect_utils.BISECT_MODE_RETURN_CODE):
+      metric = '/'.join(self.opts.metric)
+    else:
+      metric = self.opts.metric
+
     print ABORT_REASON_TEMPLATE % {
         'abort_reason': abort_reason,
         'bug_id': self.opts.bug_id or 'NOT SPECIFIED',
         'command': self.opts.command,
-        'metric': '/'.join(self.opts.metric),
+        'metric': metric,
         'good_revision': self.opts.good_revision,
         'bad_revision': self.opts.bad_revision,
     }
@@ -332,78 +303,33 @@ class BisectPrinter(object):
     self._PrintTestedCommitsEntry(
         bisect_results.retest_results_reverted, '', '', '')
 
-  def _PrintReproSteps(self):
-    """Prints out a section of the results explaining how to run the test.
-
-    This message includes the command used to run the test.
-    """
-    command = '$ ' + self.opts.command
-    if bisect_utils.IsTelemetryCommand(self.opts.command):
-      command += ('\nAlso consider passing --profiler=list to see available '
-                  'profilers.')
-    print REPRO_STEPS_LOCAL
-    if bisect_utils.IsTelemetryCommand(self.opts.command):
-      telemetry_command = re.sub(r'--browser=[^\s]+',
-                                 '--browser=bot-name',
-                                 command)
-      print REPRO_STEPS_TRYJOB_TELEMETRY % {'command': telemetry_command}
-    else:
-      print REPRO_STEPS_TRYJOB
-
-  def _PrintOtherRegressions(self, other_regressions):
-    """Prints a section of the results about other potential regressions."""
-    print
-    print 'Other regressions may have occurred:'
-    self._PrintTableRow([8, 70, 10], ['Depot', 'Range', 'Confidence'])
-    for regression in other_regressions:
-      current_rev_state, prev_rev_state, confidence = regression
-      self._PrintTableRow(
-          [8, 70, 10],
-          [current_rev_state.depot, current_rev_state.revision,
-           '%d%%' % confidence])
-      self._PrintTableRow(
-          [8, 70], [prev_rev_state.depot, prev_rev_state.revision])
-      print
-
-  @staticmethod
-  def _ConfidenceLevelStatus(bisect_results):
-    if not bisect_results.confidence:
-      return None
-    confidence_status = 'Successful with %(level)s confidence%(warning)s.'
-    if bisect_results.confidence >= bisect_utils.HIGH_CONFIDENCE:
-      level = 'high'
-    else:
-      level = 'low'
-    warning = ' and warnings'
-    if not bisect_results.warnings:
-      warning = ''
-    return confidence_status % {'level': level, 'warning': warning}
-
   def _PrintBanner(self, bisect_results):
     if self.opts.bisect_mode == bisect_utils.BISECT_MODE_RETURN_CODE:
-      metrics = 'N/A'
+      metric = 'N/A'
       change = 'Yes'
     else:
-      metrics = '/'.join(self.opts.metric)
+      metric = '/'.join(self.opts.metric)
       change = '%.02f%% (+/-%.02f%%)' % (
           bisect_results.regression_size, bisect_results.regression_std_err)
-
-    if bisect_results.culprit_revisions and bisect_results.confidence:
-      status = self._ConfidenceLevelStatus(bisect_results)
-    else:
-      status = 'Failure, could not reproduce.'
-      change = 'Bisect could not reproduce a change.'
-
-    retest_text = 'Yes' if bisect_results.retest_results_tot else 'No'
+    if not bisect_results.culprit_revisions:
+      change = 'No significant change reproduced.'
 
     print RESULTS_BANNER % {
-        'status': status,
+        'status': self._StatusMessage(bisect_results),
         'command': self.opts.command,
-        'metrics': metrics,
+        'metric': metric,
         'change': change,
         'confidence': bisect_results.confidence,
-        'retest': retest_text,
+        'retest': 'Yes' if bisect_results.retest_results_tot else 'No',
     }
+
+  @staticmethod
+  def _StatusMessage(bisect_results):
+    if bisect_results.confidence >= bisect_utils.HIGH_CONFIDENCE:
+      return 'Positive: Reproduced a change.'
+    elif bisect_results.culprit_revisions:
+      return 'Negative: Found possible suspect(s), but with low confidence.'
+    return 'Negative: Did not reproduce a change.'
 
   @staticmethod
   def _PrintWarnings(warnings):

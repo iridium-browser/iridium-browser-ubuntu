@@ -273,12 +273,6 @@ JOWW(jint, VoiceEngine_setSpeakerVolume)(JNIEnv* jni, jobject j_voe,
   return voe_data->volume->SetSpeakerVolume(level);
 }
 
-JOWW(jint, VoiceEngine_setLoudspeakerStatus)(JNIEnv* jni, jobject j_voe,
-                                             jboolean enable) {
-  VoiceEngineData* voe_data = GetVoiceEngineData(jni, j_voe);
-  return voe_data->hardware->SetLoudspeakerStatus(enable);
-}
-
 JOWW(jint, VoiceEngine_startPlayingFileLocally)(JNIEnv* jni, jobject j_voe,
                                                 jint channel,
                                                 jstring j_filename,
@@ -398,22 +392,6 @@ JOWW(jint, VoiceEngine_startDebugRecording)(JNIEnv* jni, jobject j_voe,
 JOWW(jint, VoiceEngine_stopDebugRecording)(JNIEnv* jni, jobject j_voe) {
   VoiceEngineData* voe_data = GetVoiceEngineData(jni, j_voe);
   return voe_data->apm->StopDebugRecording();
-}
-
-JOWW(jint, VoiceEngine_startRtpDump)(JNIEnv* jni, jobject j_voe, jint channel,
-                                     jstring j_filename, jint direction) {
-  VoiceEngineData* voe_data = GetVoiceEngineData(jni, j_voe);
-  std::string filename = JavaToStdString(jni, j_filename);
-  return voe_data->rtp->StartRTPDump(
-      channel, filename.c_str(),
-      static_cast<webrtc::RTPDirections>(direction));
-}
-
-JOWW(jint, VoiceEngine_stopRtpDump)(JNIEnv* jni, jobject j_voe, jint channel,
-                                    jint direction) {
-  VoiceEngineData* voe_data = GetVoiceEngineData(jni, j_voe);
-  return voe_data->rtp->StopRTPDump(
-      channel, static_cast<webrtc::RTPDirections>(direction));
 }
 
 JOWW(void, CodecInst_dispose)(JNIEnv* jni, jobject j_codec) {

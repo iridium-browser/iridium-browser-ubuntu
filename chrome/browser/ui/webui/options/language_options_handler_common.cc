@@ -12,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/memory/scoped_vector.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -48,6 +49,13 @@ LanguageOptionsHandlerCommon::~LanguageOptionsHandlerCommon() {
 void LanguageOptionsHandlerCommon::GetLocalizedValues(
     base::DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
+
+#if defined(OS_CHROMEOS)
+  const int product_id = IDS_PRODUCT_OS_NAME;
+#else
+  const int product_id = IDS_PRODUCT_NAME;
+#endif
+
   static OptionsStringResource resources[] = {
     { "addButton", IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_BUTTON },
     { "languages", IDS_OPTIONS_SETTINGS_LANGUAGES_LANGUAGES },
@@ -55,13 +63,13 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
       IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_INSTRUCTIONS },
     { "cannotBeDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE,
-      IDS_PRODUCT_NAME },
+      product_id },
     { "isDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE,
-      IDS_PRODUCT_NAME },
+      product_id },
     { "displayInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
-      IDS_PRODUCT_NAME },
+      product_id },
     { "restartRequired", IDS_OPTIONS_RELAUNCH_REQUIRED },
   // OS X uses the OS native spellchecker so no need for these strings.
 #if !defined(OS_MACOSX)
@@ -125,6 +133,10 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
   localized_strings->SetBoolean("enableSpellingAutoCorrect",
                                 enable_spelling_auto_correct);
 
+  localized_strings->SetBoolean(
+      "enableMultilingualSpellChecker",
+      chrome::spellcheck_common::IsMultilingualSpellcheckEnabled());
+
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
   std::string default_target_language =
@@ -145,7 +157,7 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
 }
 
 void LanguageOptionsHandlerCommon::Uninitialize() {
-  if (hunspell_dictionary_.get())
+  if (hunspell_dictionary_)
     hunspell_dictionary_->RemoveObserver(this);
   hunspell_dictionary_.reset();
 }
@@ -218,6 +230,8 @@ void LanguageOptionsHandlerCommon::LanguageOptionsOpenCallback(
     const base::ListValue* args) {
   content::RecordAction(UserMetricsAction("LanguageOptions_Open"));
   RefreshHunspellDictionary();
+  if (!hunspell_dictionary_)
+    return;
   if (hunspell_dictionary_->IsDownloadInProgress())
     OnHunspellDictionaryDownloadBegin();
   else if (hunspell_dictionary_->IsDownloadFailure())
@@ -244,7 +258,6 @@ void LanguageOptionsHandlerCommon::SpellCheckLanguageChangeCallback(
     const base::ListValue* args) {
   const std::string language_code =
       base::UTF16ToASCII(ExtractStringValue(args));
-  CHECK(!language_code.empty());
   const std::string action = base::StringPrintf(
       "LanguageOptions_SpellCheckLanguageChange_%s", language_code.c_str());
   content::RecordComputedAction(action);
@@ -279,18 +292,22 @@ void LanguageOptionsHandlerCommon::RetrySpellcheckDictionaryDownload(
 }
 
 void LanguageOptionsHandlerCommon::RefreshHunspellDictionary() {
-  if (hunspell_dictionary_.get())
+  if (hunspell_dictionary_)
     hunspell_dictionary_->RemoveObserver(this);
   hunspell_dictionary_.reset();
   SpellcheckService* service = SpellcheckServiceFactory::GetForContext(
       Profile::FromWebUI(web_ui()));
-  hunspell_dictionary_ = service->GetHunspellDictionary()->AsWeakPtr();
-  hunspell_dictionary_->AddObserver(this);
+  const ScopedVector<SpellcheckHunspellDictionary>& dictionaries(
+      service->GetHunspellDictionaries());
+  if (!dictionaries.empty()) {
+    hunspell_dictionary_ = dictionaries.front()->AsWeakPtr();
+    hunspell_dictionary_->AddObserver(this);
+  }
 }
 
 base::WeakPtr<SpellcheckHunspellDictionary>&
     LanguageOptionsHandlerCommon::GetHunspellDictionary() {
-  if (!hunspell_dictionary_.get())
+  if (!hunspell_dictionary_)
     RefreshHunspellDictionary();
   return hunspell_dictionary_;
 }

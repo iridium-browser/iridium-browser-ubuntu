@@ -1,0 +1,15 @@
+/* Copyright 2015 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+* {
+  --downloads-item-width: 622px;
+  --downloads-shared-style: {
+  };
+  /* (1024 total width - 622 item width) / 2 = 201 room to play. */
+  --downloads-side-column-basis: 201px;
+}
+
+cr-button:not([lowercase]) {
+  font-weight: 500;
+}

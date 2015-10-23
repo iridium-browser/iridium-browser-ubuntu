@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "content/public/browser/stream_handle.h"
 #include "content/public/browser/stream_info.h"
 #include "extensions/browser/api/mime_handler_private/mime_handler_private.h"
@@ -42,7 +43,8 @@ class MimeHandlerServiceImplTest : public testing::Test {
     stream_info->original_url = GURL("test://extensions_unittests");
     stream_container_.reset(
         new StreamContainer(stream_info.Pass(), 1, true, GURL(), ""));
-    service_.reset(new MimeHandlerServiceImpl(stream_container_->GetWeakPtr()));
+    service_.reset(new MimeHandlerServiceImpl(stream_container_->GetWeakPtr(),
+                                              mojo::GetProxy(&service_ptr_)));
   }
   void TearDown() override {
     service_.reset();
@@ -54,7 +56,9 @@ class MimeHandlerServiceImplTest : public testing::Test {
     stream_info_ = stream_info.Pass();
   }
 
+  base::MessageLoop message_loop_;
   scoped_ptr<StreamContainer> stream_container_;
+  mime_handler::MimeHandlerServicePtr service_ptr_;
   scoped_ptr<mime_handler::MimeHandlerService> service_;
   bool abort_called_ = false;
   mime_handler::StreamInfoPtr stream_info_;

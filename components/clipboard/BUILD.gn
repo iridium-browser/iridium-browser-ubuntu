@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//third_party/mojo/src/mojo/public/mojo_application.gni")
+import("//mojo/public/mojo_application.gni")
 
 source_set("lib") {
   sources = [
@@ -27,10 +27,7 @@ mojo_native_application("clipboard") {
   deps = [
     ":lib",
     "//base",
-    "//mojo/application",
-    "//mojo/common",
-    "//mojo/environment:chromium",
-    "//third_party/mojo/src/mojo/public/cpp/bindings",
+    "//mojo/application/public/cpp",
     "//third_party/mojo/src/mojo/public/cpp/bindings:callback",
   ]
 }
@@ -47,11 +44,8 @@ mojo_native_application("apptests") {
   deps = [
     "//base",
     "//components/clipboard/public/interfaces",
-    "//mojo/application",
-    "//mojo/application:test_support",
-    "//mojo/common",
-    "//third_party/mojo/src/mojo/public/cpp/bindings",
+    "//mojo/application/public/cpp:test_support",
   ]
 
-  data_deps = [ ":clipboard($default_toolchain)" ]
+  data_deps = [ ":clipboard" ]
 }

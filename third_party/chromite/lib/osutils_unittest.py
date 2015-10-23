@@ -31,19 +31,20 @@ class TestOsutils(cros_test_lib.TempDirTestCase):
   def testSudoWrite(self):
     """Verify that we can write a file as sudo."""
     with osutils.TempDir(sudo_rm=True) as tempdir:
-      filename = os.path.join(tempdir, 'foo', 'bar')
-      self.assertTrue(osutils.SafeMakedirs(os.path.dirname(filename),
-                                           sudo=True))
-      self.assertRaises(IOError, osutils.WriteFile, filename, 'data')
+      root_owned_dir = os.path.join(tempdir, 'foo')
+      self.assertTrue(osutils.SafeMakedirs(root_owned_dir, sudo=True))
+      for atomic in (True, False):
+        filename = os.path.join(root_owned_dir,
+                                'bar.atomic' if atomic else 'bar')
+        self.assertRaises(IOError, osutils.WriteFile, filename, 'data')
 
-      osutils.WriteFile(filename, 'test', sudo=True)
-      self.assertEqual('test', osutils.ReadFile(filename))
-      self.assertEqual(0, os.stat(filename).st_uid)
+        osutils.WriteFile(filename, 'test', atomic=atomic, sudo=True)
+        self.assertEqual('test', osutils.ReadFile(filename))
+        self.assertEqual(0, os.stat(filename).st_uid)
 
-      # Appending to a file or atomic modifications are not supported with sudo.
-      self.assertRaises(ValueError, osutils.WriteFile, filename, 'data',
-                        sudo=True, atomic=True)
-      self.assertRaises(ValueError, osutils.WriteFile, filename, 'data',
+      # Appending to a file is not supported with sudo.
+      self.assertRaises(ValueError, osutils.WriteFile,
+                        os.path.join(root_owned_dir, 'nope'), 'data',
                         sudo=True, mode='a')
 
   def testSafeSymlink(self):
@@ -160,6 +161,18 @@ class TestOsutils(cros_test_lib.TempDirTestCase):
     osutils.Touch(path, makedirs=True)
     self.assertTrue(os.path.exists(path))
     self.assertEqual(os.path.getsize(path), 0)
+
+
+class TestProcess(cros_build_lib_unittest.RunCommandTestCase):
+  """Tests for osutils.IsChildProcess."""
+
+  def testIsChildProcess(self):
+    """Test IsChildProcess with no name."""
+    mock_pstree_output = 'a(1)-+-b(2)\n\t|-c(3)\n\t|-foo(4)-bar(5)'
+    self.rc.AddCmdResult(partial_mock.Ignore(), output=mock_pstree_output)
+    self.assertTrue(osutils.IsChildProcess(4))
+    self.assertTrue(osutils.IsChildProcess(4, name='foo'))
+    self.assertFalse(osutils.IsChildProcess(5, name='foo'))
 
 
 class TempDirTests(cros_test_lib.TestCase):
@@ -612,6 +625,75 @@ class MountImageTests(cros_test_lib.MockTempDirTestCase):
     self.assertEqual('/tmp', os.readlink(symlink))
 
 
+class MountOverlayTest(cros_test_lib.MockTempDirTestCase):
+  """Tests MountOverlayContext."""
+
+  def setUp(self):
+    self.upperdir = os.path.join(self.tempdir, 'first_level', 'upperdir')
+    self.lowerdir = os.path.join(self.tempdir, 'lowerdir')
+    self.mergeddir = os.path.join(self.tempdir, 'mergeddir')
+
+    for path in [self.upperdir, self.lowerdir, self.mergeddir]:
+      osutils.Touch(path, makedirs=True)
+
+  def testMountWriteUnmountRead(self):
+    mount_call = self.PatchObject(osutils, 'MountDir')
+    umount_call = self.PatchObject(osutils, 'UmountDir')
+    for cleanup in (True, False):
+      with osutils.MountOverlayContext(self.lowerdir, self.upperdir,
+                                       self.mergeddir, cleanup=cleanup):
+        mount_call.assert_any_call(
+            'overlay', self.mergeddir, fs_type='overlay', makedirs=False,
+            mount_opts=('lowerdir=%s' % self.lowerdir,
+                        'upperdir=%s' % self.upperdir,
+                        mock.ANY))
+      umount_call.assert_any_call(self.mergeddir, cleanup=cleanup)
+
+  def testMountFailFallback(self):
+    """Test that mount failure with overlay fs_type fallsback to overlayfs."""
+    def _FailOverlay(*_args, **kwargs):
+      if kwargs['fs_type'] == 'overlay':
+        raise cros_build_lib.RunCommandError(
+            'Phony failure',
+            cros_build_lib.CommandResult(cmd='MounDir', returncode=32))
+
+    mount_call = self.PatchObject(osutils, 'MountDir')
+    mount_call.side_effect = _FailOverlay
+    umount_call = self.PatchObject(osutils, 'UmountDir')
+    for cleanup in (True, False):
+      with osutils.MountOverlayContext(self.lowerdir, self.upperdir,
+                                       self.mergeddir, cleanup=cleanup):
+        mount_call.assert_any_call(
+            'overlay', self.mergeddir, fs_type='overlay', makedirs=False,
+            mount_opts=('lowerdir=%s' % self.lowerdir,
+                        'upperdir=%s' % self.upperdir,
+                        mock.ANY))
+        mount_call.assert_any_call(
+            'overlayfs', self.mergeddir, fs_type='overlayfs', makedirs=False,
+            mount_opts=('lowerdir=%s' % self.lowerdir,
+                        'upperdir=%s' % self.upperdir))
+      umount_call.assert_any_call(self.mergeddir, cleanup=cleanup)
+
+  def testNoValidWorkdirFallback(self):
+    """Test that we fallback to overlayfs when no valid workdir is found.."""
+    def _FailFileSystemCheck(_path1, _path2):
+      return False
+
+    check_filesystem = self.PatchObject(osutils, '_SameFileSystem')
+    check_filesystem.side_effect = _FailFileSystemCheck
+    mount_call = self.PatchObject(osutils, 'MountDir')
+    umount_call = self.PatchObject(osutils, 'UmountDir')
+
+    for cleanup in (True, False):
+      with osutils.MountOverlayContext(self.lowerdir, self.upperdir,
+                                       self.mergeddir, cleanup=cleanup):
+        mount_call.assert_any_call(
+            'overlayfs', self.mergeddir, fs_type='overlayfs', makedirs=False,
+            mount_opts=('lowerdir=%s' % self.lowerdir,
+                        'upperdir=%s' % self.upperdir))
+      umount_call.assert_any_call(self.mergeddir, cleanup=cleanup)
+
+
 class IterateMountPointsTests(cros_test_lib.TempDirTestCase):
   """Test for IterateMountPoints function."""
 
@@ -687,6 +769,9 @@ class IsInsideVmTest(cros_test_lib.MockTempDirTestCase):
     self.assertTrue(osutils.IsInsideVm())
     self.assertEqual(self.mock_glob.call_args[0][0],
                      "/sys/block/*/device/model")
+
+    osutils.WriteFile(self.model_file, "VMware")
+    self.assertTrue(osutils.IsInsideVm())
 
   def testIsNotInsideVm(self):
     osutils.WriteFile(self.model_file, "ST1000DM000-1CH1")

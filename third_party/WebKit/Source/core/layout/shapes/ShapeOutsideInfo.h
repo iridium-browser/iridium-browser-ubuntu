@@ -30,6 +30,7 @@
 #ifndef ShapeOutsideInfo_h
 #define ShapeOutsideInfo_h
 
+#include "core/layout/api/LineLayoutBlockFlow.h"
 #include "core/layout/shapes/Shape.h"
 #include "core/style/ComputedStyle.h"
 #include "core/style/ShapeValue.h"
@@ -44,6 +45,7 @@ class LayoutBox;
 class FloatingObject;
 
 class ShapeOutsideDeltas final {
+    DISALLOW_ALLOCATION();
 public:
     ShapeOutsideDeltas()
         : m_lineOverlapsShape(false)
@@ -95,7 +97,7 @@ public:
     static PassOwnPtr<ShapeOutsideInfo> createInfo(const LayoutBox& layoutBox) { return adoptPtr(new ShapeOutsideInfo(layoutBox)); }
     static bool isEnabledFor(const LayoutBox&);
 
-    ShapeOutsideDeltas computeDeltasForContainingBlockLine(const LayoutBlockFlow&, const FloatingObject&, LayoutUnit lineTop, LayoutUnit lineHeight);
+    ShapeOutsideDeltas computeDeltasForContainingBlockLine(const LineLayoutBlockFlow&, const FloatingObject&, LayoutUnit lineTop, LayoutUnit lineHeight);
 
     static ShapeOutsideInfo& ensureInfo(const LayoutBox& key)
     {

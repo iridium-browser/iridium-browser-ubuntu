@@ -53,6 +53,14 @@ typedef enum {
     DIFFERENCE_SK_CLIPTYPE,
 } sk_cliptype_t;
 
+typedef enum {
+    UNKNOWN_SK_PIXELGEOMETRY,
+    RGB_H_SK_PIXELGEOMETRY,
+    BGR_H_SK_PIXELGEOMETRY,
+    RGB_V_SK_PIXELGEOMETRY,
+    BGR_V_SK_PIXELGEOMETRY,
+} sk_pixelgeometry_t;
+
 sk_colortype_t sk_colortype_get_default_8888();
 
 typedef struct {
@@ -63,9 +71,20 @@ typedef struct {
 } sk_imageinfo_t;
 
 typedef struct {
+    sk_pixelgeometry_t pixelGeometry;
+} sk_surfaceprops_t;
+
+typedef struct {
     float   x;
     float   y;
 } sk_point_t;
+
+typedef struct {
+    int32_t left;
+    int32_t top;
+    int32_t right;
+    int32_t bottom;
+} sk_irect_t;
 
 typedef struct {
     float   left;
@@ -89,12 +108,39 @@ typedef struct sk_picture_recorder_t sk_picture_recorder_t;
 typedef struct sk_shader_t sk_shader_t;
 typedef struct sk_surface_t sk_surface_t;
 
-//////////////////////////////////////////////////////////////////////////////////////////
+typedef enum {
+    CLEAR_SK_XFERMODE_MODE,
+    SRC_SK_XFERMODE_MODE,
+    DST_SK_XFERMODE_MODE,
+    SRCOVER_SK_XFERMODE_MODE,
+    DSTOVER_SK_XFERMODE_MODE,
+    SRCIN_SK_XFERMODE_MODE,
+    DSTIN_SK_XFERMODE_MODE,
+    SRCOUT_SK_XFERMODE_MODE,
+    DSTOUT_SK_XFERMODE_MODE,
+    SRCATOP_SK_XFERMODE_MODE,
+    DSTATOP_SK_XFERMODE_MODE,
+    XOR_SK_XFERMODE_MODE,
+    PLUS_SK_XFERMODE_MODE,
+    MODULATE_SK_XFERMODE_MODE,
+    SCREEN_SK_XFERMODE_MODE,
+    OVERLAY_SK_XFERMODE_MODE,
+    DARKEN_SK_XFERMODE_MODE,
+    LIGHTEN_SK_XFERMODE_MODE,
+    COLORDODGE_SK_XFERMODE_MODE,
+    COLORBURN_SK_XFERMODE_MODE,
+    HARDLIGHT_SK_XFERMODE_MODE,
+    SOFTLIGHT_SK_XFERMODE_MODE,
+    DIFFERENCE_SK_XFERMODE_MODE,
+    EXCLUSION_SK_XFERMODE_MODE,
+    MULTIPLY_SK_XFERMODE_MODE,
+    HUE_SK_XFERMODE_MODE,
+    SATURATION_SK_XFERMODE_MODE,
+    COLOR_SK_XFERMODE_MODE,
+    LUMINOSITY_SK_XFERMODE_MODE,
+} sk_xfermode_mode_t;
 
-#ifdef __cplusplus
-    class SkCanvas;
-    void sk_test_capi(SkCanvas*);
-#endif
+//////////////////////////////////////////////////////////////////////////////////////////
 
 SK_C_PLUS_PLUS_END_GUARD
 

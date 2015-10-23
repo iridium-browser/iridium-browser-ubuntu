@@ -18,7 +18,6 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Toast;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.BaseSwitches;
@@ -31,7 +30,6 @@ import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.browser.DevToolsServer;
 import org.chromium.chrome.browser.FileProviderHelper;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.WebsiteSettingsPopup;
 import org.chromium.chrome.browser.appmenu.AppMenuHandler;
@@ -45,10 +43,11 @@ import org.chromium.chrome.browser.printing.PrintingControllerFactory;
 import org.chromium.chrome.browser.printing.TabPrinter;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.sync.SyncController;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.shell.sync.AccountChooserFragment;
-import org.chromium.chrome.shell.sync.SignoutFragment;
+import org.chromium.chrome.shell.signin.AccountChooserFragment;
+import org.chromium.chrome.shell.signin.SignoutFragment;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.service_tab_launcher.ServiceTabLauncher;
 import org.chromium.content.app.ContentApplication;
@@ -62,6 +61,7 @@ import org.chromium.sync.signin.AccountManagerHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.widget.Toast;
 
 /**
  * The {@link android.app.Activity} component of a basic test shell to test Chrome features.
@@ -106,14 +106,6 @@ public class ChromeShellActivity extends AppCompatActivity implements AppMenuPro
                 AppMenuPropertiesDelegate delegate, int menuResourceId);
     }
 
-    private static AppMenuHandlerFactory sAppMenuHandlerFactory =
-            new AppMenuHandlerFactory() {
-                @Override
-                public AppMenuHandler getAppMenuHandler(Activity activity,
-                        AppMenuPropertiesDelegate delegate, int menuResourceId) {
-                    return new AppMenuHandler(activity, delegate, menuResourceId);
-                }
-            };
     private AppMenuHandler mAppMenuHandler;
 
     @Override
@@ -189,7 +181,7 @@ public class ChromeShellActivity extends AppCompatActivity implements AppMenuPro
             mTabManager.setStartupUrl(startupUrl);
         }
         mToolbar = (ChromeShellToolbar) findViewById(R.id.toolbar);
-        mAppMenuHandler = sAppMenuHandlerFactory.getAppMenuHandler(this, this, R.menu.main_menu);
+        mAppMenuHandler = new AppMenuHandler(this, this, R.menu.chrome_shell_main_menu);
         mToolbar.setMenuHandler(mAppMenuHandler);
 
         mDevToolsServer = new DevToolsServer("chrome_shell");
@@ -349,7 +341,7 @@ public class ChromeShellActivity extends AppCompatActivity implements AppMenuPro
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_MENU && event.getRepeatCount() == 0) {
             if (mToolbar != null) mToolbar.hideSuggestions();
-            mAppMenuHandler.showAppMenu(findViewById(R.id.menu_button), true, false);
+            mAppMenuHandler.showAppMenu(findViewById(R.id.menu_button), false);
             return true;
         }
         return super.onKeyDown(keyCode, event);
@@ -433,6 +425,11 @@ public class ChromeShellActivity extends AppCompatActivity implements AppMenuPro
     }
 
     @Override
+    public int getFooterResourceId() {
+        return 0;
+    }
+
+    @Override
     public void prepareMenu(Menu menu) {
         menu.setGroupVisible(R.id.MAIN_MENU, true);
         ChromeShellTab activeTab = getActiveTab();
@@ -476,16 +473,6 @@ public class ChromeShellActivity extends AppCompatActivity implements AppMenuPro
     @VisibleForTesting
     public TabModelSelector getTabModelSelector() {
         return mTabManager.getTabModelSelector();
-    }
-
-    @VisibleForTesting
-    public static void setActivityWindowAndroidFactory(ActivityWindowAndroidFactory factory) {
-        sWindowAndroidFactory = factory;
-    }
-
-    @VisibleForTesting
-    public static void setAppMenuHandlerFactory(AppMenuHandlerFactory factory) {
-        sAppMenuHandlerFactory = factory;
     }
 
     /**

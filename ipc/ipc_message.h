@@ -19,13 +19,17 @@
 
 namespace IPC {
 
+namespace internal {
+class ChannelReader;
+}  // namespace internal
+
 //------------------------------------------------------------------------------
 
 struct LogData;
 class MessageAttachment;
 class MessageAttachmentSet;
 
-class IPC_EXPORT Message : public Pickle {
+class IPC_EXPORT Message : public base::Pickle {
  public:
   enum PriorityValue {
     PRIORITY_LOW = 1,
@@ -163,7 +167,7 @@ class IPC_EXPORT Message : public Pickle {
   // Find the end of the message data that starts at range_start.  Returns NULL
   // if the entire message is not found in the given data range.
   static const char* FindNext(const char* range_start, const char* range_end) {
-    return Pickle::FindNext(sizeof(Header), range_start, range_end);
+    return base::Pickle::FindNext(sizeof(Header), range_start, range_end);
   }
 
   // WriteAttachment appends |attachment| to the end of the set. It returns
@@ -171,12 +175,17 @@ class IPC_EXPORT Message : public Pickle {
   bool WriteAttachment(scoped_refptr<MessageAttachment> attachment);
   // ReadAttachment parses an attachment given the parsing state |iter| and
   // writes it to |*attachment|. It returns true on success.
-  bool ReadAttachment(PickleIterator* iter,
+  bool ReadAttachment(base::PickleIterator* iter,
                       scoped_refptr<MessageAttachment>* attachment) const;
   // Returns true if there are any attachment in this message.
   bool HasAttachments() const;
   // Returns true if there are any MojoHandleAttachments in this message.
   bool HasMojoHandles() const;
+  // Whether the message has any brokerable attachments.
+  bool HasBrokerableAttachments() const;
+
+  void set_sender_pid(base::ProcessId id) { sender_pid_ = id; }
+  base::ProcessId get_sender_pid() const { return sender_pid_; }
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
   // Adds the outgoing time from Time::Now() at the end of the message and sets
@@ -198,28 +207,18 @@ class IPC_EXPORT Message : public Pickle {
   bool dont_log() const { return dont_log_; }
 #endif
 
-  // Called to trace when message is sent.
-  void TraceMessageBegin() {
-    TRACE_EVENT_FLOW_BEGIN0(TRACE_DISABLED_BY_DEFAULT("ipc.flow"), "IPC",
-        header()->flags);
-  }
-  // Called to trace when message is received.
-  void TraceMessageEnd() {
-    TRACE_EVENT_FLOW_END0(TRACE_DISABLED_BY_DEFAULT("ipc.flow"), "IPC",
-        header()->flags);
-  }
-
  protected:
   friend class Channel;
   friend class ChannelMojo;
   friend class ChannelNacl;
   friend class ChannelPosix;
   friend class ChannelWin;
+  friend class internal::ChannelReader;
   friend class MessageReplyDeserializer;
   friend class SyncMessage;
 
 #pragma pack(push, 4)
-  struct Header : Pickle::Header {
+  struct Header : base::Pickle::Header {
     int32 routing;  // ID of the view that this message is destined for
     uint32 type;    // specifies the user-defined message type
     uint32 flags;   // specifies control flags for the message
@@ -255,6 +254,10 @@ class IPC_EXPORT Message : public Pickle {
   const MessageAttachmentSet* attachment_set() const {
     return attachment_set_.get();
   }
+
+  // The process id of the sender of the message. This member is populated with
+  // a valid value for every message dispatched to listeners.
+  base::ProcessId sender_pid_;
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
   // Used for logging.

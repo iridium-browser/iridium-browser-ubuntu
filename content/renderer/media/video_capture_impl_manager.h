@@ -12,7 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
@@ -97,27 +97,21 @@ class CONTENT_EXPORT VideoCaptureImplManager {
       VideoCaptureMessageFilter* filter) const;
 
  private:
-  void StopCapture(int client_id, media::VideoCaptureSessionId id);
+  void StopCapture(media::VideoCaptureSessionId id);
   void UnrefDevice(media::VideoCaptureSessionId id);
 
-  // The int is used to count clients of the corresponding VideoCaptureImpl.
   // VideoCaptureImpl objects are owned by this object. But they are
   // destroyed on the IO thread. These are raw pointers because we destroy
   // them manually.
-  typedef std::map<media::VideoCaptureSessionId,
-                   std::pair<int, VideoCaptureImpl*> >
+  typedef std::map<media::VideoCaptureSessionId, VideoCaptureImpl*>
       VideoCaptureDeviceMap;
   VideoCaptureDeviceMap devices_;
-
-  // This is an internal ID for identifying clients of VideoCaptureImpl.
-  // The ID is global for the render process.
-  int next_client_id_;
 
   const scoped_refptr<VideoCaptureMessageFilter> filter_;
 
   // Hold a pointer to the Render Main message loop to check we operate on the
   // right thread.
-  const scoped_refptr<base::MessageLoopProxy> render_main_message_loop_;
+  const scoped_refptr<base::SingleThreadTaskRunner> render_main_task_runner_;
 
   // Bound to the render thread.
   // NOTE: Weak pointers must be invalidated before all other member variables.

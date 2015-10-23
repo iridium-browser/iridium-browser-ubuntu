@@ -34,7 +34,7 @@ import org.chromium.chromoting.jni.JniInterface;
 /** GUI element that holds the drawing canvas. */
 public class DesktopView extends SurfaceView implements DesktopViewInterface,
         SurfaceHolder.Callback {
-    private RenderData mRenderData;
+    private final RenderData mRenderData;
     private TouchInputHandler mInputHandler;
 
     /** The parent Desktop activity. */
@@ -61,7 +61,7 @@ public class DesktopView extends SurfaceView implements DesktopViewInterface,
         private boolean mRunning = false;
 
         /** Lock to allow multithreaded access to {@link #mStartTime} and {@link #mRunning}. */
-        private Object mLock = new Object();
+        private final Object mLock = new Object();
 
         private Paint mPaint = new Paint();
 
@@ -115,7 +115,7 @@ public class DesktopView extends SurfaceView implements DesktopViewInterface,
     // Variables to control animation by the TouchInputHandler.
 
     /** Protects mInputAnimationRunning. */
-    private Object mAnimationLock = new Object();
+    private final Object mAnimationLock = new Object();
 
     /** Whether the TouchInputHandler has requested animation to be performed. */
     private boolean mInputAnimationRunning = false;
@@ -146,11 +146,6 @@ public class DesktopView extends SurfaceView implements DesktopViewInterface,
             mRepaintPending = true;
         }
         JniInterface.redrawGraphics();
-    }
-
-    /** Called whenever the screen configuration is changed. */
-    public void onScreenConfigurationChanged() {
-        mInputHandler.onScreenConfigurationChanged();
     }
 
     /**
@@ -266,14 +261,18 @@ public class DesktopView extends SurfaceView implements DesktopViewInterface,
             mRenderData.screenHeight = height;
         }
 
+        attachRedrawCallback();
+        mInputHandler.onClientSizeChanged(width, height);
+        requestRepaint();
+    }
+
+    public void attachRedrawCallback() {
         JniInterface.provideRedrawCallback(new Runnable() {
             @Override
             public void run() {
                 paint();
             }
         });
-        mInputHandler.onClientSizeChanged(width, height);
-        requestRepaint();
     }
 
     /** Called when the canvas is first created. */
@@ -290,9 +289,6 @@ public class DesktopView extends SurfaceView implements DesktopViewInterface,
      */
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
-        // Stop this canvas from being redrawn.
-        JniInterface.provideRedrawCallback(null);
-
         synchronized (mRenderData) {
             mSurfaceCreated = false;
         }

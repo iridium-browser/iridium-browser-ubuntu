@@ -22,10 +22,10 @@
 #include "media/video/picture.h"
 #include "media/video/video_decode_accelerator.h"
 #include "third_party/webrtc/modules/video_coding/codecs/interface/video_codec_interface.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace base {
 class WaitableEvent;
-class MessageLoopProxy;
 };
 
 namespace media {
@@ -90,12 +90,14 @@ class CONTENT_EXPORT RTCVideoDecoder
   struct BufferData {
     BufferData(int32 bitstream_buffer_id,
                uint32_t timestamp,
-               size_t size);
+               size_t size,
+               const gfx::Rect& visible_rect);
     BufferData();
     ~BufferData();
     int32 bitstream_buffer_id;
     uint32_t timestamp;  // in 90KHz
     size_t size;  // buffer size
+    gfx::Rect visible_rect;
   };
 
   FRIEND_TEST_ALL_PREFIXES(RTCVideoDecoderTest, IsBufferAfterReset);
@@ -134,7 +136,8 @@ class CONTENT_EXPORT RTCVideoDecoder
   scoped_refptr<media::VideoFrame> CreateVideoFrame(
       const media::Picture& picture,
       const media::PictureBuffer& pb,
-      uint32_t timestamp);
+      uint32_t timestamp,
+      const gfx::Rect& visible_rect);
 
   // Resets VDA.
   void ResetInternal();
@@ -163,13 +166,15 @@ class CONTENT_EXPORT RTCVideoDecoder
   // Returns a shared-memory segment to the available pool.
   void PutSHM_Locked(scoped_ptr<SHMBuffer> shm_buffer);
 
-  // Allocates |number| shared memory of at least |min_size| bytes.
-  void CreateSHM(int number, size_t min_size);
+  // Allocates |count| shared memory buffers of |size| bytes.
+  void CreateSHM(size_t count, size_t size);
 
   // Stores the buffer metadata to |input_buffer_data_|.
   void RecordBufferData(const BufferData& buffer_data);
   // Gets the buffer metadata from |input_buffer_data_|.
-  void GetBufferData(int32 bitstream_buffer_id, uint32_t* timestamp);
+  void GetBufferData(int32 bitstream_buffer_id,
+                     uint32_t* timestamp,
+                     gfx::Rect* visible_rect);
 
   // Records the result of InitDecode to UMA and returns |status|.
   int32_t RecordInitDecodeUMA(int32_t status);
@@ -181,6 +186,9 @@ class CONTENT_EXPORT RTCVideoDecoder
   // false otherwise. If true, also set resolution limits for |profile|
   // in min/max_resolution_.
   bool IsProfileSupported(media::VideoCodecProfile profile);
+
+  // Clear the pending_buffers_ queue, freeing memory.
+  void ClearPendingBuffers();
 
   enum State {
     UNINITIALIZED,  // The decoder has not initialized.
@@ -239,7 +247,7 @@ class CONTENT_EXPORT RTCVideoDecoder
   webrtc::DecodedImageCallback* decode_complete_callback_;
 
   // Total number of allocated SHM buffers. Guarded by |lock_|.
-  int num_shm_buffers_;
+  size_t num_shm_buffers_;
 
   // Shared-memory buffer pool.  Since allocating SHM segments requires a
   // round-trip to the browser process, we keep allocation out of the

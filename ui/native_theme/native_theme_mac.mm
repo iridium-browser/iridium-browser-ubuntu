@@ -10,11 +10,11 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/sdk_forward_declarations.h"
-#include "ui/native_theme/common_theme.h"
 #import "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/native_theme/common_theme.h"
 
 namespace {
 
@@ -331,7 +331,12 @@ void NativeThemeMac::PaintMenuPopupBackground(
     SkCanvas* canvas,
     const gfx::Size& size,
     const MenuBackgroundExtraParams& menu_background) const {
-  canvas->drawColor(kMenuPopupBackgroundColor, SkXfermode::kSrc_Mode);
+  SkPaint paint;
+  paint.setAntiAlias(true);
+  paint.setColor(kMenuPopupBackgroundColor);
+  const SkScalar radius = SkIntToScalar(menu_background.corner_radius);
+  SkRect rect = gfx::RectToSkRect(gfx::Rect(size));
+  canvas->drawRoundRect(rect, radius, radius, paint);
 }
 
 void NativeThemeMac::PaintMenuItemBackground(

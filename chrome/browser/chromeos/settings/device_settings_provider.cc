@@ -62,6 +62,7 @@ const char* const kKnownSettings[] = {
     kExtensionCacheSize,
     kHeartbeatEnabled,
     kHeartbeatFrequency,
+    kLogUploadEnabled,
     kPolicyMissingMitigationMode,
     kRebootOnShutdown,
     kReleaseChannel,
@@ -162,7 +163,7 @@ void DecodeLoginPolicies(
       policy.ephemeral_users_enabled().has_ephemeral_users_enabled() &&
       policy.ephemeral_users_enabled().ephemeral_users_enabled());
 
-  base::ListValue* list = new base::ListValue();
+  scoped_ptr<base::ListValue> list(new base::ListValue());
   const em::UserWhitelistProto& whitelist_proto = policy.user_whitelist();
   const RepeatedPtrField<std::string>& whitelist =
       whitelist_proto.user_whitelist();
@@ -170,7 +171,7 @@ void DecodeLoginPolicies(
        it != whitelist.end(); ++it) {
     list->Append(new base::StringValue(*it));
   }
-  new_values_cache->SetValue(kAccountsPrefUsers, list);
+  new_values_cache->SetValue(kAccountsPrefUsers, list.Pass());
 
   scoped_ptr<base::ListValue> account_list(new base::ListValue());
   const em::DeviceLocalAccountsProto device_local_accounts_proto =
@@ -206,10 +207,10 @@ void DecodeLoginPolicies(
           kAccountsPrefDeviceLocalAccountsKeyType,
           policy::DeviceLocalAccount::TYPE_PUBLIC_SESSION);
     }
-    account_list->Append(entry_dict.release());
+    account_list->Append(entry_dict.Pass());
   }
   new_values_cache->SetValue(kAccountsPrefDeviceLocalAccounts,
-                             account_list.release());
+                             account_list.Pass());
 
   if (policy.has_device_local_accounts()) {
     if (policy.device_local_accounts().has_auto_login_id()) {
@@ -232,14 +233,14 @@ void DecodeLoginPolicies(
       policy.device_local_accounts().prompt_for_network_when_offline());
 
   if (policy.has_start_up_flags()) {
-    base::ListValue* list = new base::ListValue();
+    scoped_ptr<base::ListValue> list(new base::ListValue());
     const em::StartUpFlagsProto& flags_proto = policy.start_up_flags();
     const RepeatedPtrField<std::string>& flags = flags_proto.flags();
     for (RepeatedPtrField<std::string>::const_iterator it = flags.begin();
          it != flags.end(); ++it) {
       list->Append(new base::StringValue(*it));
     }
-    new_values_cache->SetValue(kStartUpFlags, list);
+    new_values_cache->SetValue(kStartUpFlags, list.Pass());
   }
 
   if (policy.has_saml_settings()) {
@@ -286,12 +287,12 @@ void DecodeAutoUpdatePolicies(
     }
     const RepeatedField<int>& allowed_connection_types =
         au_settings_proto.allowed_connection_types();
-    base::ListValue* list = new base::ListValue();
+    scoped_ptr<base::ListValue> list(new base::ListValue());
     for (RepeatedField<int>::const_iterator i(allowed_connection_types.begin());
          i != allowed_connection_types.end(); ++i) {
       list->Append(new base::FundamentalValue(*i));
     }
-    new_values_cache->SetValue(kAllowedConnectionTypesForUpdate, list);
+    new_values_cache->SetValue(kAllowedConnectionTypesForUpdate, list.Pass());
   }
 }
 
@@ -438,6 +439,19 @@ void DecodeGenericPolicies(
     new_values_cache->SetInteger(
         kExtensionCacheSize,
         policy.extension_cache_size().extension_cache_size());
+  }
+}
+
+void DecodeLogUploadPolicies(const em::ChromeDeviceSettingsProto& policy,
+                             PrefValueMap* new_values_cache) {
+  if (!policy.has_device_log_upload_settings())
+    return;
+
+  const em::DeviceLogUploadSettingsProto& log_upload_policy =
+      policy.device_log_upload_settings();
+  if (log_upload_policy.has_log_upload_enabled()) {
+    new_values_cache->SetBoolean(kLogUploadEnabled,
+                                 log_upload_policy.log_upload_enabled());
   }
 }
 
@@ -634,6 +648,7 @@ void DeviceSettingsProvider::UpdateValuesCache(
   DecodeReportingPolicies(settings, &new_values_cache);
   DecodeHeartbeatPolicies(settings, &new_values_cache);
   DecodeGenericPolicies(settings, &new_values_cache);
+  DecodeLogUploadPolicies(settings, &new_values_cache);
   DecodeDeviceState(policy_data, &new_values_cache);
 
   // Collect all notifications but send them only after we have swapped the

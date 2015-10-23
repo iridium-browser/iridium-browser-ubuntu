@@ -35,9 +35,10 @@
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/PingLoader.h"
-#include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/network/NetworkHints.h"
+#include "platform/weborigin/SecurityPolicy.h"
 
 namespace blink {
 
@@ -73,18 +74,18 @@ bool HTMLAnchorElement::shouldHaveFocusAppearance() const
     return !m_wasFocusedByMouse || HTMLElement::supportsFocus();
 }
 
-void HTMLAnchorElement::dispatchFocusEvent(Element* oldFocusedElement, WebFocusType type)
+void HTMLAnchorElement::dispatchFocusEvent(Element* oldFocusedElement, WebFocusType type, InputDeviceCapabilities* sourceCapabilities)
 {
     if (type != WebFocusTypePage)
         m_wasFocusedByMouse = type == WebFocusTypeMouse;
-    HTMLElement::dispatchFocusEvent(oldFocusedElement, type);
+    HTMLElement::dispatchFocusEvent(oldFocusedElement, type, sourceCapabilities);
 }
 
-void HTMLAnchorElement::dispatchBlurEvent(Element* newFocusedElement, WebFocusType type)
+void HTMLAnchorElement::dispatchBlurEvent(Element* newFocusedElement, WebFocusType type, InputDeviceCapabilities* sourceCapabilities)
 {
     if (type != WebFocusTypePage)
         m_wasFocusedByMouse = false;
-    HTMLElement::dispatchBlurEvent(newFocusedElement, type);
+    HTMLElement::dispatchBlurEvent(newFocusedElement, type, sourceCapabilities);
 }
 
 bool HTMLAnchorElement::isMouseFocusable() const
@@ -102,7 +103,7 @@ bool HTMLAnchorElement::isKeyboardFocusable() const
     if (isFocusable() && Element::supportsFocus())
         return HTMLElement::isKeyboardFocusable();
 
-    if (isLink() && !document().frameHost()->chrome().client().tabsToLinks())
+    if (isLink() && !document().frameHost()->chromeClient().tabsToLinks())
         return false;
     return HTMLElement::isKeyboardFocusable();
 }
@@ -216,10 +217,11 @@ void HTMLAnchorElement::parseAttribute(const QualifiedName& name, const AtomicSt
         invalidateCachedVisitedLinkHash();
     } else if (name == nameAttr || name == titleAttr) {
         // Do nothing.
-    } else if (name == relAttr)
+    } else if (name == relAttr) {
         setRel(value);
-    else
+    } else {
         HTMLElement::parseAttribute(name, value);
+    }
 }
 
 void HTMLAnchorElement::accessKeyAction(bool sendMouseEvents)
@@ -348,6 +350,12 @@ void HTMLAnchorElement::handleClick(Event* event)
     ResourceRequest request(completedURL);
     request.setUIStartTime(event->uiCreateTime());
     request.setInputPerfMetricReportPolicy(InputToLoadPerfMetricReportPolicy::ReportLink);
+
+    ReferrerPolicy policy;
+    if (RuntimeEnabledFeatures::referrerPolicyAttributeEnabled() && hasAttribute(referrerpolicyAttr) && SecurityPolicy::referrerPolicyFromString(fastGetAttribute(referrerpolicyAttr), &policy) && !hasRel(RelationNoReferrer)) {
+        request.setHTTPReferrer(SecurityPolicy::generateReferrer(policy, completedURL, document().outgoingReferrer()));
+    }
+
     if (hasAttribute(downloadAttr)) {
         request.setRequestContext(WebURLRequest::RequestContextDownload);
         bool isSameOrigin = completedURL.protocolIsData() || document().securityOrigin()->canRequest(completedURL);

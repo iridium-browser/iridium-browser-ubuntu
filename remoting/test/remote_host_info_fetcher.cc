@@ -7,9 +7,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
-#include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -42,26 +40,15 @@ bool RemoteHostInfoFetcher::RetrieveRemoteHostInfo(
   DCHECK(!callback.is_null());
   DCHECK(remote_host_info_callback_.is_null());
 
-  DVLOG(2) << "RemoteHostInfoFetcher::RetrieveRemoteHostInfo() called";
+  VLOG(2) << "RemoteHostInfoFetcher::RetrieveRemoteHostInfo() called";
 
-  std::string service_url;
-  switch (service_environment) {
-    case kDeveloperEnvironment:
-      DVLOG(1) << "Configuring service request for dev environment";
-      service_url = base::StringPrintf(kDevServiceEnvironmentUrlFormat,
-                                       application_id.c_str());
-      break;
-
-    case kTestingEnvironment:
-      DVLOG(1) << "Configuring service request for test environment";
-      service_url = base::StringPrintf(kTestServiceEnvironmentUrlFormat,
-                                       application_id.c_str());
-      break;
-
-    default:
-      LOG(ERROR) << "Unrecognized service type: " << service_environment;
-      return false;
+  std::string service_url(
+      GetRunApplicationUrl(application_id, service_environment));
+  if (service_url.empty()) {
+    LOG(ERROR) << "Unrecognized service type: " << service_environment;
+    return false;
   }
+  VLOG(1) << "Using remote host service request url: " << service_url;
 
   remote_host_info_callback_ = callback;
 
@@ -82,7 +69,7 @@ bool RemoteHostInfoFetcher::RetrieveRemoteHostInfo(
 
 void RemoteHostInfoFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(source);
-  DVLOG(2) << "URL Fetch Completed for: " << source->GetOriginalURL();
+  VLOG(2) << "URL Fetch Completed for: " << source->GetOriginalURL();
 
   RemoteHostInfo remote_host_info;
   int response_code = request_->GetResponseCode();

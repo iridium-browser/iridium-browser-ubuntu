@@ -31,32 +31,31 @@ remoting.MockHostListApi = function() {
    */
   this.emailFromRegister = null;
 
-  /** @type {Array<remoting.Host>} */
-  this.hosts = [
-    {
-      'hostName': 'Online host',
-      'hostId': 'online-host-id',
-      'status': 'ONLINE',
-      'jabberId': 'online-jid',
-      'publicKey': 'online-public-key',
-      'tokenUrlPatterns': [],
-      'updatedTime': new Date().toISOString()
-    },
-    {
-      'hostName': 'Offline host',
-      'hostId': 'offline-host-id',
-      'status': 'OFFLINE',
-      'jabberId': 'offline-jid',
-      'publicKey': 'offline-public-key',
-      'tokenUrlPatterns': [],
-      'updatedTime': new Date(1970, 1, 1).toISOString()
-    }
-  ];
+  /**
+   * The host ID to return from register(), or null if it should fail.
+   * @type {?string}
+   */
+  this.hostIdFromRegister = null;
+
+  /** @type {!Array<!remoting.Host>} */
+  this.hosts = [];
+};
+
+/**
+ * Creates and adds a new mock host.
+ *
+ * @param {string} hostId The ID of the new host to add.
+ * @return {!remoting.Host} the new mock host
+ */
+remoting.MockHostListApi.prototype.addMockHost = function(hostId) {
+  var newHost = new remoting.Host(hostId);
+  this.hosts.push(newHost);
+  return newHost;
 };
 
 /** @override */
 remoting.MockHostListApi.prototype.register = function(
-    newHostId, hostName, publicKey, hostClientId) {
+    hostName, publicKey, hostClientId) {
   if (this.authCodeFromRegister === null || this.emailFromRegister === null) {
     return Promise.reject(
         new remoting.Error(
@@ -65,18 +64,15 @@ remoting.MockHostListApi.prototype.register = function(
   } else {
     return Promise.resolve({
       authCode: this.authCodeFromRegister,
-      email: this.emailFromRegister
+      email: this.emailFromRegister,
+      hostId: this.hostIdFromRegister
     });
   }
 };
 
 /** @override */
 remoting.MockHostListApi.prototype.get = function() {
-  var that = this;
-  return new Promise(function(resolve, reject) {
-    remoting.mockIdentity.validateTokenAndCall(
-        resolve, remoting.Error.handler(reject), [that.hosts]);
-  });
+  return Promise.resolve(this.hosts);
 };
 
 /**
@@ -90,22 +86,19 @@ remoting.MockHostListApi.prototype.put =
   /** @type {remoting.MockHostListApi} */
   var that = this;
   return new Promise(function(resolve, reject) {
-    var onTokenValid = function() {
-      for (var i = 0; i < that.hosts.length; ++i) {
-        /** type {remoting.Host} */
-        var host = that.hosts[i];
-        if (host.hostId == hostId) {
-          host.hostName = hostName;
-          host.hostPublicKey = hostPublicKey;
-          resolve(undefined);
-          return;
-        }
+    for (var i = 0; i < that.hosts.length; ++i) {
+      /** type {remoting.Host} */
+      var host = that.hosts[i];
+      if (host.hostId == hostId) {
+        host.hostName = hostName;
+        host.hostPublicKey = hostPublicKey;
+        resolve(undefined);
+        return;
       }
-      console.error('PUT request for unknown host: ' + hostId +
-                    ' (' + hostName + ')');
-      reject(remoting.Error.unexpected());
-    };
-    remoting.mockIdentity.validateTokenAndCall(onTokenValid, reject, []);
+    }
+    console.error('PUT request for unknown host: ' + hostId +
+                  ' (' + hostName + ')');
+    reject(remoting.Error.unexpected());
   });
 };
 
@@ -117,30 +110,22 @@ remoting.MockHostListApi.prototype.remove = function(hostId) {
   /** @type {remoting.MockHostListApi} */
   var that = this;
   return new Promise(function(resolve, reject) {
-    var onTokenValid = function() {
-      for (var i = 0; i < that.hosts.length; ++i) {
-        var host = that.hosts[i];
-        if (host.hostId == hostId) {
-          that.hosts.splice(i, 1);
-          resolve(undefined);
-          return;
-        }
+    for (var i = 0; i < that.hosts.length; ++i) {
+      var host = that.hosts[i];
+      if (host.hostId == hostId) {
+        that.hosts.splice(i, 1);
+        resolve(undefined);
+        return;
       }
-      console.error('DELETE request for unknown host: ' + hostId);
-      reject(remoting.Error.unexpected());
-    };
-    remoting.mockIdentity.validateTokenAndCall(onTokenValid, reject, []);
+    }
+    console.error('DELETE request for unknown host: ' + hostId);
+    reject(remoting.Error.unexpected());
   });
 };
 
 /** @override */
 remoting.MockHostListApi.prototype.getSupportHost = function(supportId) {
-  var that = this;
-  return new Promise(function(resolve, reject) {
-    remoting.mockIdentity.validateTokenAndCall(
-        resolve, remoting.Error.handler(reject), [that.hosts[0]]);
-  });
-
+  return Promise.resolve(this.hosts[0]);
 };
 
 /**

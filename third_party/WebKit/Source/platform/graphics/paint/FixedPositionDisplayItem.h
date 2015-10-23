@@ -12,42 +12,26 @@
 
 namespace blink {
 
-class PLATFORM_EXPORT BeginFixedPositionDisplayItem : public PairedBeginDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(BeginFixedPositionDisplayItem);
+class PLATFORM_EXPORT BeginFixedPositionDisplayItem final : public PairedBeginDisplayItem {
 public:
-    static PassOwnPtr<BeginFixedPositionDisplayItem> create(const DisplayItemClientWrapper& client)
-    {
-        return adoptPtr(new BeginFixedPositionDisplayItem(client));
-    }
-
     BeginFixedPositionDisplayItem(const DisplayItemClientWrapper& client)
-        : PairedBeginDisplayItem(client, BeginFixedPosition)
-    {
-    }
+        : PairedBeginDisplayItem(client, BeginFixedPosition, sizeof(*this)) { }
 
-    virtual void replay(GraphicsContext&) override final { }
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override final;
+    void replay(GraphicsContext&) final { }
+    void appendToWebDisplayItemList(WebDisplayItemList*) const final;
 };
 
-class PLATFORM_EXPORT EndFixedPositionDisplayItem : public PairedEndDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(EndFixedPositionDisplayItem);
+class PLATFORM_EXPORT EndFixedPositionDisplayItem final : public PairedEndDisplayItem {
 public:
-    static PassOwnPtr<EndFixedPositionDisplayItem> create(const DisplayItemClientWrapper& client)
-    {
-        return adoptPtr(new EndFixedPositionDisplayItem(client));
-    }
-
     EndFixedPositionDisplayItem(const DisplayItemClientWrapper& client)
-        : PairedEndDisplayItem(client, EndFixedPosition)
-    {
-    }
+        : PairedEndDisplayItem(client, EndFixedPosition, sizeof(*this)) { }
 
-    virtual void replay(GraphicsContext&) override final { }
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override final;
+    void replay(GraphicsContext&) final { }
+    void appendToWebDisplayItemList(WebDisplayItemList*) const final;
 
 private:
 #if ENABLE(ASSERT)
-    virtual bool isEndAndPairedWith(const DisplayItem& other) const override final { return other.type() == BeginFixedPosition; }
+    bool isEndAndPairedWith(DisplayItem::Type otherType) const final { return otherType == BeginFixedPosition; }
 #endif
 };
 

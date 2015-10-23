@@ -129,6 +129,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'courgette/third_party/bsdiff_create.cc': [  # http://crbug.com/98095
         'UNKNOWN',
     ],
+    'courgette/third_party/qsufsort.h': [  # http://crbug.com/98095
+        'UNKNOWN',
+    ],
     'native_client': [  # http://crbug.com/98099
         'UNKNOWN',
     ],
@@ -187,6 +190,115 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/devscripts': [
         'GPL (v2 or later)',
     ],
+    'third_party/catapult/tracing/third_party/devscripts': [
+        'GPL (v2 or later)',
+    ],
+
+    # https://github.com/shazow/apiclient/issues/8
+    # MIT license.
+    'third_party/catapult/third_party/apiclient': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/apiclient': [
+        'UNKNOWN',
+    ],
+
+    # https://bugs.launchpad.net/beautifulsoup/+bug/1481316
+    # MIT license.
+    'third_party/catapult/third_party/beautifulsoup': [
+        'UNKNOWN'
+    ],
+    'third_party/catapult/dashboard/third_party/beautifulsoup': [
+        'UNKNOWN'
+    ],
+
+    # https://code.google.com/p/graphy/issues/detail?id=6
+    # Apache (v2.0)
+    'third_party/catapult/third_party/graphy': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/graphy': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/html5lib/html5lib-python/issues/125
+    # MIT license.
+    'third_party/catapult/third_party/html5lib-python': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/jcgregorio/httplib2/issues/307
+    # MIT license.
+    'third_party/catapult/third_party/httplib2': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/httplib2': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/GoogleCloudPlatform/appengine-mapreduce/issues/71
+    # Apache (v2.0)
+    'third_party/catapult/third_party/mapreduce': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/mapreduce': [
+        'UNKNOWN',
+    ],
+
+    # https://code.google.com/p/webapp-improved/issues/detail?id=103
+    # Apache (v2.0).
+    'third_party/catapult/third_party/webapp2': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/webapp2': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/Pylons/webob/issues/211
+    # MIT license.
+    'third_party/catapult/third_party/WebOb': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/WebOb': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/Pylons/webtest/issues/141
+    # MIT license.
+    'third_party/catapult/third_party/webtest': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/webtest': [
+        'UNKNOWN',
+    ],
+
+    # https://bitbucket.org/ianb/paste/issues/12/add-license-headers-to-source-files
+    # MIT license.
+    'third_party/catapult/third_party/Paste': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/Paste': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/google/oauth2client/issues/231
+    # Apache v2.0.
+    'third_party/catapult/third_party/oauth2client': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/oauth2client': [
+        'UNKNOWN',
+    ],
+
+    # https://bitbucket.org/gutworth/six/issues/129/add-license-headers-to-source-files
+    # MIT license.
+    'third_party/catapult/third_party/six': [
+        'UNKNOWN',
+    ],
+    'third_party/catapult/dashboard/third_party/six': [
+        'UNKNOWN',
+    ],
+
     'third_party/expat/files/lib': [  # http://crbug.com/98121
         'UNKNOWN',
     ],
@@ -204,7 +316,7 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/freetype2': [ # http://crbug.com/177319
         'UNKNOWN',
     ],
-    'third_party/hunspell_new': [  # http://crbug.com/98134
+    'third_party/hunspell': [  # http://crbug.com/98134
         'UNKNOWN',
     ],
     'third_party/iccjpeg': [  # http://crbug.com/98137
@@ -411,9 +523,17 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'tools/symsrc/pefile.py': [
         'UNKNOWN',
     ],
+    # Not shipped, MIT license but the header files contain no licensing info.
+    'tools/telemetry/third_party/altgraph': [
+        'UNKNOWN',
+    ],
     # Not shipped, downloaded on trybots sometimes.
     'tools/telemetry/third_party/gsutil': [
         'BSD MIT/X11 (BSD like)',
+        'UNKNOWN',
+    ],
+    # Not shipped, MIT license but the header files contain no licensing info.
+    'tools/telemetry/third_party/modulegraph': [
         'UNKNOWN',
     ],
     'tools/telemetry/third_party/pyserial': [

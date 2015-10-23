@@ -4,15 +4,17 @@
 
 #include "chrome/browser/ui/webui/app_launcher_page_ui.h"
 
+#include <string>
+
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/app_launcher_login_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/app_resource_cache_factory.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
-#include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -38,9 +40,6 @@ using content::BrowserThread;
 AppLauncherPageUI::AppLauncherPageUI(content::WebUI* web_ui)
     : content::WebUIController(web_ui) {
   web_ui->OverrideTitle(l10n_util::GetStringUTF16(IDS_APP_LAUNCHER_TAB_TITLE));
-
-  if (NTPLoginHandler::ShouldShow(GetProfile()))
-    web_ui->AddMessageHandler(new NTPLoginHandler());
 
   if (!GetProfile()->IsOffTheRecord()) {
     ExtensionService* service =
@@ -76,6 +75,18 @@ base::RefCountedMemory* AppLauncherPageUI::GetFaviconResourceBytes(
                                     scale_factor);
 }
 
+bool AppLauncherPageUI::OverrideHandleWebUIMessage(
+    const GURL& source_url,
+    const std::string& message,
+    const base::ListValue& args) {
+  if (message == "getApps" &&
+      AppLauncherLoginHandler::ShouldShow(GetProfile())) {
+    web_ui()->AddMessageHandler(new AppLauncherLoginHandler());
+  }
+  return false;
+}
+
+
 Profile* AppLauncherPageUI::GetProfile() const {
   return Profile::FromWebUI(web_ui());
 }
@@ -99,7 +110,6 @@ void AppLauncherPageUI::HTMLSource::StartDataRequest(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   NTPResourceCache* resource = AppResourceCacheFactory::GetForProfile(profile_);
-  resource->set_should_show_most_visited_page(false);
   resource->set_should_show_other_devices_menu(false);
 
   content::RenderProcessHost* render_host =

@@ -14,8 +14,6 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
-#include "chrome/browser/infobars/infobar_responder.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,11 +25,14 @@
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/gcm_driver/common/gcm_messages.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
@@ -77,7 +78,6 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
   // InProcessBrowserTest:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnablePushMessagePayload);
-
     InProcessBrowserTest::SetUpCommandLine(command_line);
   }
 
@@ -143,6 +143,14 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
                                                   result);
   }
 
+  PermissionBubbleManager* GetPermissionBubbleManager() {
+    return PermissionBubbleManager::FromWebContents(
+        GetBrowser()->tab_strip_model()->GetActiveWebContents());
+  }
+
+  void RequestAndAcceptPermission();
+  void RequestAndDenyPermission();
+
   void TryToSubscribeSuccessfully(
       const std::string& expected_push_subscription_id);
 
@@ -155,7 +163,7 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
 
   void SendMessageAndWaitUntilHandled(
       const PushMessagingAppIdentifier& app_identifier,
-      const gcm::GCMClient::IncomingMessage& message);
+      const gcm::IncomingMessage& message);
 
   net::SpawnedTestServer* https_server() const { return https_server_.get(); }
 
@@ -192,11 +200,6 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
 
   virtual Browser* GetBrowser() const { return browser(); }
 
-  InfoBarService* GetInfoBarService() {
-    return InfoBarService::FromWebContents(
-        GetBrowser()->tab_strip_model()->GetActiveWebContents());
-  }
-
  private:
   scoped_ptr<net::SpawnedTestServer> https_server_;
   gcm::FakeGCMProfileService* gcm_service_;
@@ -209,19 +212,6 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(PushMessagingBrowserTest);
 };
 
-class PushMessagingBadManifestBrowserTest : public PushMessagingBrowserTest {
-  std::string GetTestURL() override {
-    return "files/push_messaging/test_bad_manifest.html";
-  }
-};
-
-class PushMessagingManifestUserVisibleOnlyTrueTest
-    : public PushMessagingBrowserTest {
-  std::string GetTestURL() override {
-    return "files/push_messaging/test_user_visible_only_manifest.html";
-  }
-};
-
 class PushMessagingBrowserTestEmptySubscriptionOptions
     : public PushMessagingBrowserTest {
   std::string GetTestURL() override {
@@ -229,15 +219,20 @@ class PushMessagingBrowserTestEmptySubscriptionOptions
   }
 };
 
-IN_PROC_BROWSER_TEST_F(PushMessagingBadManifestBrowserTest,
-                       SubscribeFailsNotVisibleMessages) {
+void PushMessagingBrowserTest::RequestAndAcceptPermission() {
   std::string script_result;
+  GetPermissionBubbleManager()->set_auto_response_for_test(
+      PermissionBubbleManager::ACCEPT_ALL);
+  EXPECT_TRUE(RunScript("requestNotificationPermission();", &script_result));
+  EXPECT_EQ("permission status - granted", script_result);
+}
 
-  ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
-  ASSERT_EQ("ok - service worker registered", script_result);
-  ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ("AbortError - Registration failed - permission denied",
-            script_result);
+void PushMessagingBrowserTest::RequestAndDenyPermission() {
+  std::string script_result;
+  GetPermissionBubbleManager()->set_auto_response_for_test(
+      PermissionBubbleManager::DENY_ALL);
+  EXPECT_TRUE(RunScript("requestNotificationPermission();", &script_result));
+  EXPECT_EQ("permission status - denied", script_result);
 }
 
 void PushMessagingBrowserTest::TryToSubscribeSuccessfully(
@@ -247,9 +242,7 @@ void PushMessagingBrowserTest::TryToSubscribeSuccessfully(
   EXPECT_TRUE(RunScript("registerServiceWorker()", &script_result));
   EXPECT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  EXPECT_TRUE(RunScript("requestNotificationPermission()", &script_result));
-  EXPECT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   EXPECT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ(GetEndpointForSubscriptionId(expected_push_subscription_id),
@@ -269,7 +262,7 @@ PushMessagingBrowserTest::GetAppIdentifierForServiceWorkerRegistration(
 
 void PushMessagingBrowserTest::SendMessageAndWaitUntilHandled(
     const PushMessagingAppIdentifier& app_identifier,
-    const gcm::GCMClient::IncomingMessage& message) {
+    const gcm::IncomingMessage& message) {
   base::RunLoop run_loop;
   push_service()->SetMessageCallbackForTesting(run_loop.QuitClosure());
   push_service()->OnMessage(app_identifier.app_id(), message);
@@ -293,10 +286,10 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
+  GetPermissionBubbleManager()->set_auto_response_for_test(
+      PermissionBubbleManager::ACCEPT_ALL);
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ(GetEndpointForSubscriptionId("1-0"),
-            script_result);
+  EXPECT_EQ(GetEndpointForSubscriptionId("1-0"), script_result);
 
   PushMessagingAppIdentifier app_identifier =
       GetAppIdentifierForServiceWorkerRegistration(0LL);
@@ -311,9 +304,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder cancelling_responder(GetInfoBarService(), false);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  ASSERT_EQ("permission status - denied", script_result);
+  RequestAndDenyPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ("AbortError - Registration failed - permission denied",
@@ -326,9 +317,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribeFailureNoManifest) {
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  ASSERT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   ASSERT_TRUE(RunScript("removeManifest()", &script_result));
   ASSERT_EQ("manifest removed", script_result);
@@ -347,51 +336,11 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTestEmptySubscriptionOptions,
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  ASSERT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ("AbortError - Registration failed - permission denied",
             script_result);
-}
-
-IN_PROC_BROWSER_TEST_F(PushMessagingBadManifestBrowserTest,
-                       RegisterFailsNotVisibleMessages) {
-  std::string script_result;
-
-  ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
-  ASSERT_EQ("ok - service worker registered", script_result);
-  ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ("AbortError - Registration failed - permission denied",
-            script_result);
-}
-
-IN_PROC_BROWSER_TEST_F(PushMessagingManifestUserVisibleOnlyTrueTest,
-                       ManifestKeyConsidered) {
-  // Chrome 42 introduced the "gcm_user_visible_only" manifest key, but Chrome
-  // 43 supersedes this by the standardized PushSubscriptionOptions.userVisible
-  // option. We maintain support for the manifest key without specifying the
-  // subscription option, so verify that it is still being considered.
-  std::string script_result;
-
-  ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
-  ASSERT_EQ("ok - service worker registered", script_result);
-
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  EXPECT_EQ("permission status - granted", script_result);
-
-  ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ(GetEndpointForSubscriptionId("1-0"), script_result);
-
-  // permissionState has been introduced later so it does not
-  // respect the manifest key.
-  ASSERT_TRUE(RunScript("permissionState()", &script_result));
-  EXPECT_EQ(
-      "NotSupportedError - Push subscriptions that don't enable"
-      " userVisibleOnly are not supported.",
-      script_result);
 }
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribePersisted) {
@@ -469,7 +418,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventSuccess) {
   ASSERT_TRUE(RunScript("isControlled()", &script_result));
   ASSERT_EQ("true - is controlled", script_result);
 
-  gcm::GCMClient::IncomingMessage message;
+  gcm::IncomingMessage message;
   message.sender_id = "1234567890";
   message.data["data"] = "testdata";
   push_service()->OnMessage(app_identifier.app_id(), message);
@@ -505,7 +454,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventNoServiceWorker) {
   gcm_service()->SetUnregisterCallback(base::Bind(&UnregistrationCallback::Run,
                                                   base::Unretained(&callback)));
 
-  gcm::GCMClient::IncomingMessage message;
+  gcm::IncomingMessage message;
   message.sender_id = "1234567890";
   message.data["data"] = "testdata";
   push_service()->OnMessage(app_identifier.app_id(), message);
@@ -548,7 +497,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
 
   // If the site is visible in an active tab, we should not force a notification
   // to be shown. Try it twice, since we allow one mistake per 10 push events.
-  gcm::GCMClient::IncomingMessage message;
+  gcm::IncomingMessage message;
   message.sender_id = "1234567890";
   for (int n = 0; n < 2; n++) {
     message.data["data"] = "testdata";
@@ -651,7 +600,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
 
   std::vector<size_t> number_of_notifications_shown;
 
-  gcm::GCMClient::IncomingMessage message;
+  gcm::IncomingMessage message;
   message.sender_id = "1234567890";
 
   {
@@ -703,7 +652,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   notification_manager()->SetNotificationAddedCallback(
       message_loop_runner->QuitClosure());
 
-  gcm::GCMClient::IncomingMessage message;
+  gcm::IncomingMessage message;
   message.sender_id = "1234567890";
   message.data["data"] = "shownotification-without-waituntil";
   push_service()->OnMessage(app_identifier.app_id(), message);
@@ -738,9 +687,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PermissionStateSaysGranted) {
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  EXPECT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ(GetEndpointForSubscriptionId("1-0"),
@@ -756,9 +703,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PermissionStateSaysDenied) {
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder cancelling_responder(GetInfoBarService(), false);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  EXPECT_EQ("permission status - denied", script_result);
+  RequestAndDenyPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ("AbortError - Registration failed - permission denied",
@@ -1147,6 +1092,27 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
       PushMessagingAppIdentifier::FindByAppId(GetBrowser()->profile(),
                                               app_identifier.app_id());
   EXPECT_TRUE(stored_app_identifier2.is_null());
+}
+
+IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, EncryptionKeyUniqueness) {
+  TryToSubscribeSuccessfully("1-0" /* expected_push_subscription_id */);
+
+  std::string first_public_key;
+  ASSERT_TRUE(RunScript("getCurve25519dh()", &first_public_key));
+  EXPECT_GE(first_public_key.size(), 32u);
+
+  std::string script_result;
+  gcm_service()->AddExpectedUnregisterResponse(gcm::GCMClient::SUCCESS);
+  ASSERT_TRUE(RunScript("unsubscribePush()", &script_result));
+  EXPECT_EQ("unsubscribe result: true", script_result);
+
+  TryToSubscribeSuccessfully("1-1" /* expected_push_subscription_id */);
+
+  std::string second_public_key;
+  ASSERT_TRUE(RunScript("getCurve25519dh()", &second_public_key));
+  EXPECT_GE(second_public_key.size(), 32u);
+
+  EXPECT_NE(first_public_key, second_public_key);
 }
 
 class PushMessagingIncognitoBrowserTest : public PushMessagingBrowserTest {

@@ -24,18 +24,14 @@
 #include "core/events/Event.h"
 
 #include "core/dom/StaticNodeList.h"
+#include "core/events/EventDispatchMediator.h"
 #include "core/events/EventTarget.h"
+#include "core/frame/OriginsUsingFeatures.h"
 #include "core/frame/UseCounter.h"
 #include "core/svg/SVGElement.h"
 #include "wtf/CurrentTime.h"
 
 namespace blink {
-
-EventInit::EventInit()
-    : bubbles(false)
-    , cancelable(false)
-{
-}
 
 Event::Event()
     : Event("", false, false)
@@ -51,6 +47,7 @@ Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableAr
     , m_defaultPrevented(false)
     , m_defaultHandled(false)
     , m_cancelBubble(false)
+    , m_isTrusted(false)
     , m_eventPhase(0)
     , m_currentTarget(nullptr)
     , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
@@ -59,11 +56,6 @@ Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableAr
 }
 
 Event::Event(const AtomicString& eventType, const EventInit& initializer)
-    : Event(eventType, initializer.bubbles, initializer.cancelable)
-{
-}
-
-Event::Event(const AtomicString& eventType, const EventInitDictionary& initializer)
     : Event(eventType, initializer.bubbles(), initializer.cancelable())
 {
 }
@@ -80,6 +72,7 @@ void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool 
     m_propagationStopped = false;
     m_immediatePropagationStopped = false;
     m_defaultPrevented = false;
+    m_isTrusted = false;
 
     m_type = eventTypeArg;
     m_canBubble = canBubbleArg;
@@ -212,8 +205,11 @@ void Event::initEventPath(Node& node)
     }
 }
 
-WillBeHeapVector<RefPtrWillBeMember<EventTarget>> Event::path() const
+WillBeHeapVector<RefPtrWillBeMember<EventTarget>> Event::path(ScriptState* scriptState) const
 {
+    if (m_target)
+        OriginsUsingFeatures::countOriginOrIsolatedWorldHumanReadableName(scriptState, *m_target, OriginsUsingFeatures::Feature::EventPath);
+
     if (!m_currentTarget) {
         ASSERT(m_eventPhase == Event::NONE);
         if (!m_eventPath) {
@@ -242,6 +238,11 @@ WillBeHeapVector<RefPtrWillBeMember<EventTarget>> Event::path() const
         return WillBeHeapVector<RefPtrWillBeMember<EventTarget>>(1, window);
 
     return WillBeHeapVector<RefPtrWillBeMember<EventTarget>>();
+}
+
+PassRefPtrWillBeRawPtr<EventDispatchMediator> Event::createMediator()
+{
+    return EventDispatchMediator::create(this);
 }
 
 EventTarget* Event::currentTarget() const

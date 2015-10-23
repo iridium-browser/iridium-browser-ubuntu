@@ -20,6 +20,7 @@ class TextBlobShaderGM : public skiagm::GM {
 public:
     TextBlobShaderGM(const char* txt) {
         SkPaint p;
+        sk_tool_utils::set_portable_typeface(&p);
         size_t txtLen = strlen(txt);
         fGlyphs.append(p.textToGlyphs(txt, txtLen, NULL));
         p.textToGlyphs(txt, txtLen, fGlyphs.begin());
@@ -33,6 +34,7 @@ protected:
         p.setSubpixelText(true);
         p.setTextSize(30);
         p.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+        sk_tool_utils::set_portable_typeface(&p);
 
         SkTextBlobBuilder builder;
         int glyphCount = fGlyphs.count();

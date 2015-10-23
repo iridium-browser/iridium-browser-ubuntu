@@ -17,11 +17,10 @@
 namespace rx
 {
 
-ProgramGL::ProgramGL(const FunctionsGL *functions, StateManagerGL *stateManager)
-    : ProgramImpl(),
-      mFunctions(functions),
-      mStateManager(stateManager),
-      mProgramID(0)
+ProgramGL::ProgramGL(const gl::Program::Data &data,
+                     const FunctionsGL *functions,
+                     StateManagerGL *stateManager)
+    : ProgramImpl(data), mFunctions(functions), mStateManager(stateManager), mProgramID(0)
 {
     ASSERT(mFunctions);
     ASSERT(mStateManager);
@@ -47,12 +46,6 @@ int ProgramGL::getShaderVersion() const
     return int();
 }
 
-GLenum ProgramGL::getTransformFeedbackBufferMode() const
-{
-    UNIMPLEMENTED();
-    return GLenum();
-}
-
 GLenum ProgramGL::getBinaryFormat()
 {
     UNIMPLEMENTED();
@@ -73,16 +66,14 @@ gl::Error ProgramGL::save(gl::BinaryOutputStream *stream)
 
 LinkResult ProgramGL::link(const gl::Data &data, gl::InfoLog &infoLog,
                            gl::Shader *fragmentShader, gl::Shader *vertexShader,
-                           const std::vector<std::string> &transformFeedbackVaryings,
-                           GLenum transformFeedbackBufferMode,
                            int *registers, std::vector<gl::LinkedVarying> *linkedVaryings,
                            std::map<int, gl::VariableLocation> *outputVariables)
 {
     // Reset the program state, delete the current program if one exists
     reset();
 
-    ShaderGL *vertexShaderGL = GetImplAs<ShaderGL>(vertexShader);
-    ShaderGL *fragmentShaderGL = GetImplAs<ShaderGL>(fragmentShader);
+    const ShaderGL *vertexShaderGL   = GetImplAs<ShaderGL>(vertexShader);
+    const ShaderGL *fragmentShaderGL = GetImplAs<ShaderGL>(fragmentShader);
 
     // Attach the shaders
     mFunctions->attachShader(mProgramID, vertexShaderGL->getShaderID());
@@ -132,28 +123,29 @@ LinkResult ProgramGL::link(const gl::Data &data, gl::InfoLog &infoLog,
         GLsizei uniformNameLength = 0;
         GLint uniformSize = 0;
         GLenum uniformType = GL_NONE;
-        mFunctions->getActiveUniform(mProgramID, i, uniformNameBuffer.size(), &uniformNameLength, &uniformSize, &uniformType, &uniformNameBuffer[0]);
+        mFunctions->getActiveUniform(mProgramID, i, static_cast<GLsizei>(uniformNameBuffer.size()),
+                                     &uniformNameLength, &uniformSize, &uniformType,
+                                     &uniformNameBuffer[0]);
 
-        std::string uniformName = gl::ParseUniformName(std::string(&uniformNameBuffer[0], uniformNameLength), nullptr);
+        size_t subscript = 0;
+        std::string uniformName = gl::ParseUniformName(std::string(&uniformNameBuffer[0], uniformNameLength), &subscript);
+
+        bool isArray = uniformSize > 1 || subscript != GL_INVALID_INDEX;
 
         for (size_t arrayIndex = 0; arrayIndex < static_cast<size_t>(uniformSize); arrayIndex++)
         {
             std::string locationName = uniformName;
-            if (uniformSize > 1)
+            if (isArray)
             {
-                locationName += "[" + Str(arrayIndex) + "]";
+                locationName += "[" + Str(static_cast<int>(arrayIndex)) + "]";
             }
 
             GLint location = mFunctions->getUniformLocation(mProgramID, locationName.c_str());
             if (location >= 0)
             {
-                // Make sure the uniform index array is large enough
-                if (static_cast<size_t>(location) >= mUniformIndex.size())
-                {
-                    mUniformIndex.resize(location + 1);
-                }
-
-                mUniformIndex[location] = gl::VariableLocation(uniformName, arrayIndex, static_cast<unsigned int>(mUniforms.size()));
+                mUniformIndex[location] =
+                    gl::VariableLocation(uniformName, static_cast<unsigned int>(arrayIndex),
+                                         static_cast<unsigned int>(mUniforms.size()));
 
                 // If the uniform is a sampler, track it in the sampler bindings array
                 if (gl::IsSamplerType(uniformType))
@@ -167,7 +159,7 @@ LinkResult ProgramGL::link(const gl::Data &data, gl::InfoLog &infoLog,
         }
 
         // ANGLE uses 0 to identify an non-array uniform.
-        unsigned int arraySize = (uniformSize > 1) ? static_cast<unsigned int>(uniformSize) : 0;
+        unsigned int arraySize = isArray ? static_cast<unsigned int>(uniformSize) : 0;
 
         // TODO: determine uniform precision
         mUniforms.push_back(new gl::LinkedUniform(uniformType, GL_NONE, uniformName, arraySize, -1, sh::BlockMemberInfo::getDefaultBlockInfo()));
@@ -195,7 +187,9 @@ LinkResult ProgramGL::link(const gl::Data &data, gl::InfoLog &infoLog,
         GLsizei attributeNameLength = 0;
         GLint attributeSize = 0;
         GLenum attributeType = GL_NONE;
-        mFunctions->getActiveAttrib(mProgramID, i, attributeNameBuffer.size(), &attributeNameLength, &attributeSize, &attributeType, &attributeNameBuffer[0]);
+        mFunctions->getActiveAttrib(mProgramID, i, static_cast<GLsizei>(attributeNameBuffer.size()),
+                                    &attributeNameLength, &attributeSize, &attributeType,
+                                    &attributeNameBuffer[0]);
 
         std::string attributeName(&attributeNameBuffer[0], attributeNameLength);
 
@@ -203,6 +197,8 @@ LinkResult ProgramGL::link(const gl::Data &data, gl::InfoLog &infoLog,
 
         // TODO: determine attribute precision
         setShaderAttribute(static_cast<size_t>(i), attributeType, GL_NONE, attributeName, attributeSize, location);
+
+        mActiveAttributesMask.set(location);
     }
 
     return LinkResult(true, gl::Error(GL_NO_ERROR));
@@ -393,8 +389,7 @@ bool ProgramGL::validateSamplers(gl::InfoLog *infoLog, const gl::Caps &caps)
     return true;
 }
 
-LinkResult ProgramGL::compileProgramExecutables(gl::InfoLog &infoLog, gl::Shader *fragmentShader, gl::Shader *vertexShader,
-                                                int registers)
+LinkResult ProgramGL::compileProgramExecutables(gl::InfoLog &infoLog, int registers)
 {
     //UNIMPLEMENTED();
     return LinkResult(true, gl::Error(GL_NO_ERROR));
@@ -416,8 +411,9 @@ bool ProgramGL::defineUniformBlock(gl::InfoLog &infoLog, const gl::Shader &shade
 
 gl::Error ProgramGL::applyUniforms()
 {
-    UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    //UNIMPLEMENTED();
+    // TODO(geofflang)
+    return gl::Error(GL_NO_ERROR);
 }
 
 gl::Error ProgramGL::applyUniformBuffers(const gl::Data &data, GLuint uniformBlockBindings[])
@@ -439,6 +435,7 @@ void ProgramGL::reset()
 
     mSamplerUniformMap.clear();
     mSamplerBindings.clear();
+    mActiveAttributesMask.reset();
 }
 
 GLuint ProgramGL::getProgramID() const
@@ -449,6 +446,11 @@ GLuint ProgramGL::getProgramID() const
 const std::vector<SamplerBindingGL> &ProgramGL::getAppliedSamplerUniforms() const
 {
     return mSamplerBindings;
+}
+
+const gl::AttributesMask &ProgramGL::getActiveAttributesMask() const
+{
+    return mActiveAttributesMask;
 }
 
 }

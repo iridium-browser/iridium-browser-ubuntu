@@ -33,6 +33,7 @@
 
 #include "../platform/WebCommon.h"
 #include "../platform/WebGestureDevice.h"
+#include "../platform/WebPointerProperties.h"
 #include "../platform/WebRect.h"
 #include "WebTouchPoint.h"
 
@@ -300,29 +301,27 @@ public:
 
 // WebMouseEvent --------------------------------------------------------------
 
-class WebMouseEvent : public WebInputEvent {
+class WebMouseEvent : public WebInputEvent, public WebPointerProperties {
 public:
-    enum Button {
-        ButtonNone = -1,
-        ButtonLeft,
-        ButtonMiddle,
-        ButtonRight
-    };
-
-    Button button;
+    // Window coordinate
     int x;
     int y;
+
+    // DEPRECATED (crbug.com/507787)
     int windowX;
     int windowY;
+
+    // Screen coordinate
     int globalX;
     int globalY;
+
     int movementX;
     int movementY;
     int clickCount;
 
     WebMouseEvent()
         : WebInputEvent(sizeof(WebMouseEvent))
-        , button(ButtonNone)
+        , WebPointerProperties()
         , x(0)
         , y(0)
         , windowX(0)
@@ -338,7 +337,7 @@ public:
 protected:
     explicit WebMouseEvent(unsigned sizeParam)
         : WebInputEvent(sizeParam)
-        , button(ButtonNone)
+        , WebPointerProperties()
         , x(0)
         , y(0)
         , windowX(0)
@@ -469,6 +468,9 @@ public:
             // May be redundant with deltaX/deltaY in the first scrollUpdate.
             float deltaXHint;
             float deltaYHint;
+            // If true, this event will skip hit testing to find a scroll
+            // target and instead just scroll the viewport.
+            bool targetViewport;
         } scrollBegin;
 
         struct {
@@ -489,6 +491,9 @@ public:
         struct {
             float velocityX;
             float velocityY;
+            // If true, this event will skip hit testing to find a scroll
+            // target and instead just scroll the viewport.
+            bool targetViewport;
         } flingStart;
 
         struct {
@@ -516,6 +521,7 @@ public:
 
 // WebTouchEvent --------------------------------------------------------------
 
+// TODO(e_hakkinen): Replace with WebPointerEvent. crbug.com/508283
 class WebTouchEvent : public WebInputEvent {
 public:
     // Maximum number of simultaneous touches supported on

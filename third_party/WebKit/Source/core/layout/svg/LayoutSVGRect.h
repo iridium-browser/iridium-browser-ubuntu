@@ -35,18 +35,20 @@ namespace blink {
 class LayoutSVGRect final : public LayoutSVGShape {
 public:
     explicit LayoutSVGRect(SVGRectElement*);
-    virtual ~LayoutSVGRect();
+    ~LayoutSVGRect() override;
 
-    virtual ShapeGeometryCodePath geometryCodePath() const override { return m_usePathFallback ? PathGeometry : RectGeometryFastPath; }
+    ShapeGeometryCodePath geometryCodePath() const override { return m_usePathFallback ? PathGeometry : RectGeometryFastPath; }
 
-    virtual const char* name() const override { return "LayoutSVGRect"; }
+    const char* name() const override { return "LayoutSVGRect"; }
 
 private:
-    virtual void updateShapeFromElement() override;
-    virtual bool isShapeEmpty() const override { return m_usePathFallback ? LayoutSVGShape::isShapeEmpty() : m_fillBoundingBox.isEmpty(); }
-    virtual bool shapeDependentStrokeContains(const FloatPoint&) override;
-    virtual bool shapeDependentFillContains(const FloatPoint&, const WindRule) const override;
-    bool definitelyHasSimpleStroke() const;
+    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+    void updateShapeFromElement() override;
+    void updateStrokeAndFillBoundingBoxes() override;
+    bool isShapeEmpty() const override { return m_usePathFallback ? LayoutSVGShape::isShapeEmpty() : m_fillBoundingBox.isEmpty(); }
+    bool shapeDependentStrokeContains(const FloatPoint&) override;
+    bool shapeDependentFillContains(const FloatPoint&, const WindRule) const override;
+    bool definitelyHasSimpleStroke(const SVGComputedStyle&) const;
 
 private:
     bool m_usePathFallback;

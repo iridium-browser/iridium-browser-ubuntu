@@ -46,7 +46,7 @@ IDBOpenDBRequest* IDBOpenDBRequest::create(ScriptState* scriptState, IDBDatabase
 }
 
 IDBOpenDBRequest::IDBOpenDBRequest(ScriptState* scriptState, IDBDatabaseCallbacks* callbacks, int64_t transactionId, int64_t version)
-    : IDBRequest(scriptState, IDBAny::createNull(), 0)
+    : IDBRequest(scriptState, IDBAny::createNull(), nullptr)
     , m_databaseCallbacks(callbacks)
     , m_transactionId(transactionId)
     , m_version(version)
@@ -162,7 +162,7 @@ bool IDBOpenDBRequest::shouldEnqueueEvent() const
     return true;
 }
 
-bool IDBOpenDBRequest::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
+bool IDBOpenDBRequest::dispatchEventInternal(PassRefPtrWillBeRawPtr<Event> event)
 {
     // If the connection closed between onUpgradeNeeded and the delivery of the "success" event,
     // an "error" event should be fired instead.
@@ -173,7 +173,7 @@ bool IDBOpenDBRequest::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
         return false;
     }
 
-    return IDBRequest::dispatchEvent(event);
+    return IDBRequest::dispatchEventInternal(event);
 }
 
 } // namespace blink

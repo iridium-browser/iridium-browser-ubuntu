@@ -5,16 +5,16 @@
 #ifndef SYNC_ENGINE_MODEL_TYPE_SYNC_PROXY_IMPL_H_
 #define SYNC_ENGINE_MODEL_TYPE_SYNC_PROXY_IMPL_H_
 
+#include "base/containers/scoped_ptr_map.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/stl_util.h"
 #include "base/threading/non_thread_safe.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 #include "sync/protocol/sync.pb.h"
 
-namespace syncer {
-
+namespace syncer_v2 {
 class SyncContextProxy;
 class ModelTypeEntity;
 class ModelTypeSyncWorker;
@@ -23,7 +23,7 @@ class ModelTypeSyncWorker;
 // communication between sync and model type threads.
 class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
  public:
-  ModelTypeSyncProxyImpl(ModelType type);
+  ModelTypeSyncProxyImpl(syncer::ModelType type);
   virtual ~ModelTypeSyncProxyImpl();
 
   // Returns true if this object believes that sync is preferred for this type.
@@ -42,7 +42,7 @@ class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
   bool IsConnected() const;
 
   // Returns the model type handled by this type sync proxy.
-  ModelType GetModelType() const;
+  syncer::ModelType GetModelType() const;
 
   // Starts the handshake with the sync thread.
   void Enable(scoped_ptr<SyncContextProxy> context_proxy);
@@ -89,8 +89,10 @@ class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
   base::WeakPtr<ModelTypeSyncProxyImpl> AsWeakPtrForUI();
 
  private:
-  typedef std::map<std::string, ModelTypeEntity*> EntityMap;
-  typedef std::map<std::string, UpdateResponseData*> UpdateMap;
+  typedef base::ScopedPtrMap<std::string, scoped_ptr<ModelTypeEntity>>
+      EntityMap;
+  typedef base::ScopedPtrMap<std::string, scoped_ptr<UpdateResponseData>>
+      UpdateMap;
 
   // Sends all commit requests that are due to be sent to the sync thread.
   void FlushPendingCommitRequests();
@@ -104,7 +106,7 @@ class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
   // account.  Useful when a user signs out of the current account.
   void ClearSyncState();
 
-  ModelType type_;
+  syncer::ModelType type_;
   DataTypeState data_type_state_;
 
   // Whether or not sync is preferred for this type.  This is a cached copy of
@@ -131,13 +133,11 @@ class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
 
   // The set of sync entities known to this object.
   EntityMap entities_;
-  STLValueDeleter<EntityMap> entities_deleter_;
 
   // A set of updates that can not be applied at this time.  These are never
   // used by the model.  They are kept here only so we can save and restore
   // them across restarts, and keep them in sync with our progress markers.
   UpdateMap pending_updates_map_;
-  STLValueDeleter<UpdateMap> pending_updates_map_deleter_;
 
   // We use two different WeakPtrFactories because we want the pointers they
   // issue to have different lifetimes.  When asked to disconnect from the sync

@@ -18,10 +18,10 @@
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/drive/fake_drive_service.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/file_system.h"
+#include "components/drive/service/fake_drive_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/event_router.h"
 #include "google_apis/drive/drive_api_parser.h"
@@ -329,8 +329,16 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTestForDrive,
       << message_;
 }
 
+#if defined(ADDRESS_SANITIZER)
+// Flaky when run under ASan: crbug.com/499233.
+#define MAYBE_FileSystemApiOpenDirectoryWithWriteTest \
+  DISABLED_FileSystemApiOpenDirectoryWithWriteTest
+#else
+#define MAYBE_FileSystemApiOpenDirectoryWithWriteTest \
+  FileSystemApiOpenDirectoryWithWriteTest
+#endif
 IN_PROC_BROWSER_TEST_F(FileSystemApiTestForDrive,
-                       FileSystemApiOpenDirectoryWithWriteTest) {
+                       MAYBE_FileSystemApiOpenDirectoryWithWriteTest) {
   base::FilePath test_directory =
       drive::util::GetDriveMountPointPath(browser()->profile()).AppendASCII(
           "root/subdir");

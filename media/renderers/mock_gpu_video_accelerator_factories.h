@@ -25,6 +25,7 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
  public:
   MockGpuVideoAcceleratorFactories();
 
+  bool IsGpuVideoAcceleratorEnabled() override;
   // CreateVideo{Decode,Encode}Accelerator returns scoped_ptr, which the mocking
   // framework does not want.  Trampoline them.
   MOCK_METHOD0(DoCreateVideoDecodeAccelerator, VideoDecodeAccelerator*());
@@ -46,10 +47,20 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
 
   scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
       const gfx::Size& size,
-      gfx::GpuMemoryBuffer::Format format,
-      gfx::GpuMemoryBuffer::Usage usage) override;
+      gfx::BufferFormat format,
+      gfx::BufferUsage usage) override;
 
-  MOCK_METHOD0(IsTextureRGSupported, bool());
+  bool ShouldUseGpuMemoryBuffersForVideoFrames() const override;
+  unsigned ImageTextureTarget() override;
+  VideoPixelFormat VideoFrameOutputFormat() override {
+    return video_frame_output_format_;
+  };
+
+  void SetVideoFrameOutputFormat(
+      const VideoPixelFormat video_frame_output_format) {
+    video_frame_output_format_ = video_frame_output_format;
+  };
+
   MOCK_METHOD0(GetGLES2Interface, gpu::gles2::GLES2Interface*());
 
   scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
@@ -62,6 +73,8 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
   ~MockGpuVideoAcceleratorFactories() override;
 
   DISALLOW_COPY_AND_ASSIGN(MockGpuVideoAcceleratorFactories);
+
+  VideoPixelFormat video_frame_output_format_ = PIXEL_FORMAT_I420;
 };
 
 }  // namespace media

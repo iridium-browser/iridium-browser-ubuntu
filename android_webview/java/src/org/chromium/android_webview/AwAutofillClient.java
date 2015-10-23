@@ -6,10 +6,11 @@ package org.chromium.android_webview;
 
 import android.view.ViewGroup;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.ui.DropdownItem;
+import org.chromium.ui.autofill.AutofillDelegate;
 import org.chromium.ui.autofill.AutofillPopup;
 import org.chromium.ui.autofill.AutofillSuggestion;
 
@@ -49,13 +50,15 @@ public class AwAutofillClient {
             mAutofillPopup = new AutofillPopup(
                 mContentViewCore.getContext(),
                 mContentViewCore.getViewAndroidDelegate(),
-                new AutofillPopup.AutofillPopupDelegate() {
+                new AutofillDelegate() {
                     @Override
                     public void dismissed() { }
                     @Override
                     public void suggestionSelected(int listIndex) {
                         nativeSuggestionSelected(mNativeAwAutofillClient, listIndex);
                     }
+                    @Override
+                    public void deleteSuggestion(int listIndex) { }
                 });
         }
         mAutofillPopup.setAnchorRect(x, y, width, height);
@@ -84,7 +87,7 @@ public class AwAutofillClient {
     @CalledByNative
     private static void addToAutofillSuggestionArray(AutofillSuggestion[] array, int index,
             String name, String label, int uniqueId) {
-        array[index] = new AutofillSuggestion(name, label, DropdownItem.NO_ICON, uniqueId);
+        array[index] = new AutofillSuggestion(name, label, DropdownItem.NO_ICON, uniqueId, false);
     }
 
     private native void nativeSuggestionSelected(long nativeAwAutofillClient,

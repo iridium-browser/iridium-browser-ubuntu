@@ -53,7 +53,6 @@ enum BackgroundBleedAvoidance {
     BackgroundBleedShrinkBackground,
     BackgroundBleedClipOnly,
     BackgroundBleedClipLayer,
-    BackgroundBleedBackgroundOverBorder,
 };
 
 enum ContentChangeType {
@@ -70,7 +69,7 @@ class InlineFlowBox;
 class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
 public:
     LayoutBoxModelObject(ContainerNode*);
-    virtual ~LayoutBoxModelObject();
+    ~LayoutBoxModelObject() override;
 
     // This is the only way layers should ever be destroyed.
     void destroyLayer();
@@ -102,6 +101,11 @@ public:
 
     // This will work on inlines to return the bounding box of all of the lines' border boxes.
     virtual IntRect borderBoundingBox() const = 0;
+
+    // Checks if this box, or any of it's descendants, or any of it's continuations,
+    // will take up space in the layout of the page.
+    bool hasNonEmptyLayoutSize() const;
+    bool usesCompositedScrolling() const;
 
     // These return the CSS computed padding values.
     LayoutUnit computedCSSPaddingTop() const { return computedCSSPadding(style()->paddingTop()); }
@@ -161,10 +165,10 @@ public:
     virtual LayoutUnit marginBottom() const = 0;
     virtual LayoutUnit marginLeft() const = 0;
     virtual LayoutUnit marginRight() const = 0;
-    virtual LayoutUnit marginBefore(const ComputedStyle* otherStyle = 0) const = 0;
-    virtual LayoutUnit marginAfter(const ComputedStyle* otherStyle = 0) const = 0;
-    virtual LayoutUnit marginStart(const ComputedStyle* otherStyle = 0) const = 0;
-    virtual LayoutUnit marginEnd(const ComputedStyle* otherStyle = 0) const = 0;
+    virtual LayoutUnit marginBefore(const ComputedStyle* otherStyle = nullptr) const = 0;
+    virtual LayoutUnit marginAfter(const ComputedStyle* otherStyle = nullptr) const = 0;
+    virtual LayoutUnit marginStart(const ComputedStyle* otherStyle = nullptr) const = 0;
+    virtual LayoutUnit marginEnd(const ComputedStyle* otherStyle = nullptr) const = 0;
     LayoutUnit marginHeight() const { return marginTop() + marginBottom(); }
     LayoutUnit marginWidth() const { return marginLeft() + marginRight(); }
     LayoutUnit marginLogicalHeight() const { return marginBefore() + marginAfter(); }
@@ -177,35 +181,40 @@ public:
 
     virtual void childBecameNonInline(LayoutObject* /*child*/) { }
 
-    virtual bool boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox* = 0) const;
+    virtual bool boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox* = nullptr) const;
 
     // Overridden by subclasses to determine line height and baseline position.
     virtual LayoutUnit lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const = 0;
     virtual int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const = 0;
 
-    virtual void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const override;
-    virtual const LayoutObject* pushMappingToContainer(const LayoutBoxModelObject* ancestorToStopAt, LayoutGeometryMap&) const override;
+    void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const override;
+    const LayoutObject* pushMappingToContainer(const LayoutBoxModelObject* ancestorToStopAt, LayoutGeometryMap&) const override;
 
-    virtual void setSelectionState(SelectionState) override;
+    void setSelectionState(SelectionState) override;
 
     void contentChanged(ContentChangeType);
     bool hasAcceleratedCompositing() const;
 
-    virtual void computeLayerHitTestRects(LayerHitTestRects&) const override;
+    void computeLayerHitTestRects(LayerHitTestRects&) const override;
 
     // Returns true if the background is painted opaque in the given rect.
     // The query rect is given in local coordinate system.
     virtual bool backgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const { return false; }
 
-    virtual void invalidateTreeIfNeeded(PaintInvalidationState&) override;
+    void invalidateTreeIfNeeded(PaintInvalidationState&) override;
 
     // Indicate that the contents of this layoutObject need to be repainted. Only has an effect if compositing is being used,
     void setBackingNeedsPaintInvalidationInRect(const LayoutRect&, PaintInvalidationReason) const; // r is in the coordinate space of this layout object
 
     void invalidateDisplayItemClientOnBacking(const DisplayItemClientWrapper&) const;
 
+    // http://www.w3.org/TR/css3-background/#body-background
+    // <html> root element with no background steals background from its first <body> child.
+    // The used background for such body element should be the initial value. (i.e. transparent)
+    bool backgroundStolenForBeingBody(const ComputedStyle* rootElementStyle = nullptr) const;
+
 protected:
-    virtual void willBeDestroyed() override;
+    void willBeDestroyed() override;
 
     LayoutPoint adjustedPositionRelativeToOffsetParent(const LayoutPoint&) const;
 
@@ -219,9 +228,10 @@ protected:
     bool hasAutoHeightOrContainingBlockWithAutoHeight() const;
     LayoutBlock* containingBlockForAutoHeightDetection(Length logicalHeight) const;
 
-    void addChildFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const;
+    void addOutlineRectsForNormalChildren(Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const;
+    void addOutlineRectsForDescendant(const LayoutObject& descendant, Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const;
 
-    virtual void addLayerHitTestRects(LayerHitTestRects&, const DeprecatedPaintLayer*, const LayoutPoint&, const LayoutRect&) const override;
+    void addLayerHitTestRects(LayerHitTestRects&, const DeprecatedPaintLayer*, const LayoutPoint&, const LayoutRect&) const override;
 
     void styleWillChange(StyleDifference, const ComputedStyle& newStyle) override;
     void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
@@ -258,9 +268,7 @@ private:
     void createLayer(DeprecatedPaintLayerType);
 
     LayoutUnit computedCSSPadding(const Length&) const;
-    virtual bool isBoxModelObject() const override final { return true; }
-
-    virtual bool isLayoutBoxModelObject() const override final { return true; }
+    bool isBoxModelObject() const final { return true; }
 
     OwnPtr<DeprecatedPaintLayer> m_layer;
 };

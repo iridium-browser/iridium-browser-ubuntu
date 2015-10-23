@@ -5,7 +5,6 @@
 #ifndef V8_HEAP_INCREMENTAL_MARKING_H_
 #define V8_HEAP_INCREMENTAL_MARKING_H_
 
-
 #include "src/execution.h"
 #include "src/heap/mark-compact.h"
 #include "src/objects.h"
@@ -25,6 +24,21 @@ class IncrementalMarking {
   enum ForceCompletionAction { FORCE_COMPLETION, DO_NOT_FORCE_COMPLETION };
 
   enum GCRequestType { COMPLETE_MARKING, OVERAPPROXIMATION };
+
+  struct StepActions {
+    StepActions(CompletionAction complete_action_,
+                ForceMarkingAction force_marking_,
+                ForceCompletionAction force_completion_)
+        : completion_action(complete_action_),
+          force_marking(force_marking_),
+          force_completion(force_completion_) {}
+
+    CompletionAction completion_action;
+    ForceMarkingAction force_marking;
+    ForceCompletionAction force_completion;
+  };
+
+  static StepActions IdleStepActions();
 
   explicit IncrementalMarking(Heap* heap);
 
@@ -67,13 +81,11 @@ class IncrementalMarking {
 
   bool WasActivated();
 
-  void Start();
-
-  void Stop();
+  void Start(int flags,
+             const GCCallbackFlags gc_callback_flags = kNoGCCallbackFlags,
+             const char* reason = nullptr);
 
   void MarkObjectGroups();
-
-  void PrepareForScavenge();
 
   void UpdateMarkingDequeAfterScavenge();
 
@@ -81,7 +93,7 @@ class IncrementalMarking {
 
   void Finalize();
 
-  void Abort();
+  void Stop();
 
   void OverApproximateWeakClosure(CompletionAction action);
 
@@ -187,6 +199,8 @@ class IncrementalMarking {
 
   Heap* heap() const { return heap_; }
 
+  GCCallbackFlags CallbackFlags() const { return gc_callback_flags_; }
+
  private:
   int64_t SpaceLeftInOldSpace();
 
@@ -244,6 +258,8 @@ class IncrementalMarking {
   int weak_closure_approximation_rounds_;
 
   GCRequestType request_type_;
+
+  GCCallbackFlags gc_callback_flags_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(IncrementalMarking);
 };

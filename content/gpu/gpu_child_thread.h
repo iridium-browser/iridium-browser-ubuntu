@@ -22,11 +22,16 @@
 #include "gpu/config/gpu_info.h"
 #include "ui/gfx/native_widget_types.h"
 
+namespace gpu {
+class SyncPointManager;
+}
+
 namespace sandbox {
 class TargetServices;
 }
 
 namespace content {
+class GpuMemoryBufferFactory;
 class GpuWatchdogThread;
 
 // The main thread of the GPU child process. There will only ever be one of
@@ -37,14 +42,20 @@ class GpuChildThread : public ChildThreadImpl {
  public:
   typedef std::queue<IPC::Message*> DeferredMessages;
 
-  explicit GpuChildThread(GpuWatchdogThread* gpu_watchdog_thread,
-                          bool dead_on_arrival,
-                          const gpu::GPUInfo& gpu_info,
-                          const DeferredMessages& deferred_messages);
+  GpuChildThread(GpuWatchdogThread* gpu_watchdog_thread,
+                 bool dead_on_arrival,
+                 const gpu::GPUInfo& gpu_info,
+                 const DeferredMessages& deferred_messages,
+                 GpuMemoryBufferFactory* gpu_memory_buffer_factory,
+                 gpu::SyncPointManager* sync_point_manager);
 
-  explicit GpuChildThread(const InProcessChildThreadParams& params);
+  GpuChildThread(const InProcessChildThreadParams& params,
+                 GpuMemoryBufferFactory* gpu_memory_buffer_factory,
+                 gpu::SyncPointManager* sync_point_manager);
 
   ~GpuChildThread() override;
+
+  static gfx::GpuMemoryBufferType GetGpuMemoryBufferFactoryType();
 
   void Shutdown() override;
 
@@ -83,6 +94,9 @@ class GpuChildThread : public ChildThreadImpl {
   sandbox::TargetServices* target_services_;
 #endif
 
+  // Non-owning.
+  gpu::SyncPointManager* sync_point_manager_;
+
   scoped_ptr<GpuChannelManager> gpu_channel_manager_;
 
   // Information about the GPU, such as device and vendor ID.
@@ -93,6 +107,9 @@ class GpuChildThread : public ChildThreadImpl {
 
   // Whether the GPU thread is running in the browser process.
   bool in_browser_process_;
+
+  // The GpuMemoryBufferFactory instance used to allocate GpuMemoryBuffers.
+  GpuMemoryBufferFactory* const gpu_memory_buffer_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChildThread);
 };

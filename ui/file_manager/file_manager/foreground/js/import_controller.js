@@ -249,6 +249,7 @@ importer.ImportController.prototype.onClick_ =
   switch (source) {
     case importer.ClickSource.MAIN:
       if (this.lastActivityState_ === importer.ActivityState.READY) {
+        this.commandWidget_.performMainButtonRippleAnimation();
         this.execute_();
       } else {
         this.commandWidget_.toggleDetails();
@@ -532,15 +533,31 @@ importer.RuntimeCommandWidget = function() {
     event.stopPropagation();
   };
 
-  /** @private {Element} */
-  this.mainButton_ = document.getElementById('cloud-import-button');
+  /** @private {!Element} */
+  this.comboButton_ = queryRequiredElement(
+      document, '#cloud-import-combo-button');
+
+  /** @private {!Element} */
+  this.mainButton_ = queryRequiredElement(
+      this.comboButton_, '#cloud-import-button');
   this.mainButton_.onclick = this.onButtonClicked_.bind(
       this, importer.ClickSource.MAIN);
 
+  /** @private {!PaperRipple}*/
+  this.mainButtonRipple_ =
+      /** @type {!PaperRipple} */ (queryRequiredElement(
+          this.comboButton_, '.ripples > paper-ripple'));
+
   /** @private {Element} */
-  this.sideButton_ = document.getElementById('cloud-import-details-button');
+  this.sideButton_ = queryRequiredElement(
+      this.comboButton_, '#cloud-import-details-button');
   this.sideButton_.onclick = this.onButtonClicked_.bind(
       this, importer.ClickSource.SIDE);
+
+  /** @private {!FilesToggleRipple} */
+  this.sideButtonRipple_ =
+      /** @type {!FilesToggleRipple} */ (queryRequiredElement(
+          this.comboButton_, '.ripples > files-toggle-ripple'));
 
   /** @private {Element} */
   this.importButton_ =
@@ -562,12 +579,19 @@ importer.RuntimeCommandWidget = function() {
 
   /** @private {Element} */
   this.toolbarIcon_ =
-      document.querySelector('#cloud-import-button core-icon');
+      document.querySelector('#cloud-import-button iron-icon');
   this.statusIcon_ =
-      document.querySelector('#cloud-import-details .status core-icon');
+      document.querySelector('#cloud-import-details .status iron-icon');
 
   /** @private {Element} */
   this.detailsBanner_ = document.querySelector('#cloud-import-details .banner');
+
+  /** @private {Element} */
+  this.progressContainer_ =
+      document.querySelector('#cloud-import-details .progress');
+  /** @private {Element} */
+  this.progressBar_ =
+      document.querySelector('#cloud-import-details .progress .value');
 
   /** @private {function(!importer.ClickSource)} */
   this.clickListener_;
@@ -653,9 +677,14 @@ importer.RuntimeCommandWidget.prototype.onButtonClicked_ =
   event.stopPropagation();
 };
 
+importer.RuntimeCommandWidget.prototype.performMainButtonRippleAnimation =
+    function() {
+  this.mainButtonRipple_.simulatedRipple();
+};
+
 /** @override */
 importer.RuntimeCommandWidget.prototype.toggleDetails = function() {
-    this.setDetailsVisible(this.detailsPanel_.className === 'hidden');
+  this.setDetailsVisible(this.detailsPanel_.className === 'hidden');
 };
 
 /** @override */
@@ -668,7 +697,21 @@ importer.RuntimeCommandWidget.prototype.setDetailsBannerVisible =
  * @param {boolean} visible
  */
 importer.RuntimeCommandWidget.prototype.setDetailsVisible = function(visible) {
+  this.sideButtonRipple_.activated = visible;
+
   if (visible) {
+    // Align the detail panel horizontally to the dropdown button.
+    if (document.documentElement.getAttribute('dir') === 'rtl') {
+      var anchorLeft = this.comboButton_.getBoundingClientRect().left;
+      if (anchorLeft)
+        this.detailsPanel_.style.left = anchorLeft + 'px';
+    } else {
+      var availableWidth = document.body.getBoundingClientRect().width;
+      var anchorRight = this.comboButton_.getBoundingClientRect().right;
+      if (anchorRight)
+        this.detailsPanel_.style.right = (availableWidth - anchorRight) + 'px';
+    }
+
     this.detailsPanel_.hidden = false;
 
     // The following line is a hacky way to force the container to lay out
@@ -710,8 +753,7 @@ importer.RuntimeCommandWidget.prototype.update =
     case importer.ActivityState.HIDDEN:
       this.setDetailsVisible(false);
 
-      this.mainButton_.hidden = true;
-      this.sideButton_.hidden = true;
+      this.comboButton_.hidden = true;
 
       this.toolbarIcon_.setAttribute('icon', 'cloud-off');
       this.statusIcon_.setAttribute('icon', 'cloud-off');
@@ -722,17 +764,17 @@ importer.RuntimeCommandWidget.prototype.update =
       console.assert(!!opt_scan, 'Scan not defined, but is required.');
       this.setDetailsVisible(false);
 
-      this.mainButton_.setAttribute('title', strf(
+      this.mainButton_.setAttribute('aria-label', strf(
           'CLOUD_IMPORT_TOOLTIP_IMPORTING',
           opt_scan.getFileEntries().length));
       this.statusContent_.innerHTML = strf(
           'CLOUD_IMPORT_STATUS_IMPORTING',
           opt_scan.getFileEntries().length);
 
-      this.mainButton_.hidden = false;
-      this.sideButton_.hidden = false;
+      this.comboButton_.hidden = false;
       this.importButton_.hidden = true;
       this.cancelButton_.hidden = false;
+      this.progressContainer_.hidden = true;
 
       this.toolbarIcon_.setAttribute('icon', 'autorenew');
       this.statusIcon_.setAttribute('icon', 'autorenew');
@@ -742,31 +784,31 @@ importer.RuntimeCommandWidget.prototype.update =
     case importer.ActivityState.INSUFFICIENT_SPACE:
       console.assert(!!opt_scan, 'Scan not defined, but is required.');
 
-      this.mainButton_.setAttribute('title', strf(
+      this.mainButton_.setAttribute('aria-label', strf(
           'CLOUD_IMPORT_TOOLTIP_INSUFFICIENT_SPACE'));
       this.statusContent_.innerHTML = strf(
           'CLOUD_IMPORT_STATUS_INSUFFICIENT_SPACE',
           opt_scan.getFileEntries().length);
 
-      this.mainButton_.hidden = false;
-      this.sideButton_.hidden = false;
+      this.comboButton_.hidden = false;
       this.importButton_.hidden = true;
       this.cancelButton_.hidden = true;
+      this.progressContainer_.hidden = true;
 
       this.toolbarIcon_.setAttribute('icon', 'cloud-off');
       this.statusIcon_.setAttribute('icon', 'image:photo');
       break;
 
     case importer.ActivityState.NO_MEDIA:
-      this.mainButton_.setAttribute('title', str(
+      this.mainButton_.setAttribute('aria-label', str(
           'CLOUD_IMPORT_TOOLTIP_NO_MEDIA'));
       this.statusContent_.innerHTML = str(
           'CLOUD_IMPORT_STATUS_NO_MEDIA');
 
-      this.mainButton_.hidden = false;
-      this.sideButton_.hidden = false;
+      this.comboButton_.hidden = false;
       this.importButton_.hidden = true;
       this.cancelButton_.hidden = true;
+      this.progressContainer_.hidden = true;
 
       this.toolbarIcon_.setAttribute('icon', 'cloud-done');
       this.statusIcon_.setAttribute('icon', 'cloud-done');
@@ -775,17 +817,17 @@ importer.RuntimeCommandWidget.prototype.update =
     case importer.ActivityState.READY:
       console.assert(!!opt_scan, 'Scan not defined, but is required.');
 
-      this.mainButton_.setAttribute('title', strf(
+      this.mainButton_.setAttribute('aria-label', strf(
           'CLOUD_IMPORT_TOOLTIP_READY',
           opt_scan.getFileEntries().length));
       this.statusContent_.innerHTML = strf(
           'CLOUD_IMPORT_STATUS_READY',
           opt_scan.getFileEntries().length);
 
-      this.mainButton_.hidden = false;
-      this.sideButton_.hidden = false;
+      this.comboButton_.hidden = false;
       this.importButton_.hidden = false;
       this.cancelButton_.hidden = true;
+      this.progressContainer_.hidden = true;
 
       this.toolbarIcon_.setAttribute('icon', 'cloud-upload');
       this.statusIcon_.setAttribute('icon', 'image:photo');
@@ -794,17 +836,20 @@ importer.RuntimeCommandWidget.prototype.update =
     case importer.ActivityState.SCANNING:
       console.assert(!!opt_scan, 'Scan not defined, but is required.');
 
-      this.mainButton_.setAttribute('title', str(
+      this.mainButton_.setAttribute('aria-label', str(
           'CLOUD_IMPORT_TOOLTIP_SCANNING'));
       this.statusContent_.innerHTML = strf(
           'CLOUD_IMPORT_STATUS_SCANNING',
           opt_scan.getFileEntries().length);
 
-      this.mainButton_.hidden = false;
-      this.sideButton_.hidden = false;
+      this.comboButton_.hidden = false;
       this.importButton_.hidden = true;
       // TODO(smckay): implement cancellation for scanning.
       this.cancelButton_.hidden = true;
+      this.progressContainer_.hidden = false;
+
+      var stats = opt_scan.getStatistics();
+      this.progressBar_.style.width = stats.progress + '%';
 
       this.toolbarIcon_.setAttribute('icon', 'autorenew');
       this.statusIcon_.setAttribute('icon', 'autorenew');
@@ -903,7 +948,7 @@ importer.ScanManager.prototype.isActiveScan = function(scan) {
  * Returns the existing selection scan or a new one for the supplied
  * selection.
  *
- * @param {!Array.<!FileEntry>} entries
+ * @param {!Array<!FileEntry>} entries
  *
  * @return {!importer.ScanResult}
  */
@@ -942,7 +987,7 @@ importer.ControllerEnvironment = function() {};
 
 /**
  * Returns the current file selection, if any. May be empty.
- * @return {!Array.<!Entry>}
+ * @return {!Array<!Entry>}
  */
 importer.ControllerEnvironment.prototype.getSelection;
 
@@ -1092,15 +1137,13 @@ importer.RuntimeControllerEnvironment.prototype.getFreeStorageSpace =
       function(resolve, reject) {
         chrome.fileManagerPrivate.getSizeStats(
             localVolumeInfo.volumeId,
-            /** @param {Object} stats */
             function(stats) {
-              if (stats && !chrome.runtime.lastError) {
-                resolve(stats.remainingSize);
-              } else {
+              if (chrome.runtime.lastError) {
                 reject('Failed to ascertain available free space: ' +
-                    chrome.runtime.lastError.message ||
-                    chrome.runtime.lastError);
+                    chrome.runtime.lastError.message);
+                return;
               }
+              resolve(assert(stats).remainingSize);
             });
       });
 };

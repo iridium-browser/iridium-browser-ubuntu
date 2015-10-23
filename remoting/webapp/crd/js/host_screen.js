@@ -42,8 +42,7 @@ remoting.tryShare = function() {
 function tryShareWithLogger_() {
   it2meLogger.setSessionId();
   it2meLogger.logClientSessionStateChange(
-      remoting.ClientSession.State.INITIALIZING,
-      remoting.Error.none());
+      remoting.ClientSession.State.INITIALIZING, remoting.Error.none(), null);
 
   /** @type {remoting.It2MeHostFacade} */
   var hostFacade = new remoting.It2MeHostFacade();
@@ -97,12 +96,11 @@ remoting.tryShareWithToken_ = function(hostFacade, token) {
   onNatTraversalPolicyChanged_(true);  // Hide warning by default.
   remoting.setMode(remoting.AppMode.HOST_WAITING_FOR_CODE);
   it2meLogger.logClientSessionStateChange(
-      remoting.ClientSession.State.CONNECTING,
-      remoting.Error.none());
+      remoting.ClientSession.State.CONNECTING, remoting.Error.none(), null);
   document.getElementById('cancel-share-button').disabled = false;
   disableTimeoutCountdown_();
 
-  base.debug.assert(hostSession_ === null);
+  console.assert(hostSession_ === null, '|hostSession_| already exists.');
   hostSession_ = new remoting.HostSession();
   remoting.identity.getEmail().then(
       function(/** string */ email) {
@@ -178,6 +176,11 @@ function onHostStateChanged_(state) {
     }
     cleanUp();
   } else if (state == remoting.HostSession.State.ERROR) {
+    // The processing of this message is identical to that of the "error"
+    // message (see it2me_host_facade.js); it is included only to support
+    // old native components that send errors as a host state message.
+    // TODO(jamiewalch): Remove this once there are sufficiently few old
+    //     installations deployed.
     console.error('Host state: ERROR');
     showShareError_(remoting.Error.unexpected());
   } else if (state == remoting.HostSession.State.INVALID_DOMAIN_ERROR) {
@@ -208,15 +211,15 @@ function showShareError_(error) {
     remoting.setMode(remoting.AppMode.HOME);
     it2meLogger.logClientSessionStateChange(
         remoting.ClientSession.State.CONNECTION_CANCELED,
-        remoting.Error.none());
+        remoting.Error.none(),
+        null);
   } else {
     var errorDiv = document.getElementById('host-plugin-error');
     l10n.localizeElementFromTag(errorDiv, error.getTag());
     console.error('Sharing error: ' + error.toString());
     remoting.setMode(remoting.AppMode.HOST_SHARE_FAILED);
     it2meLogger.logClientSessionStateChange(
-        remoting.ClientSession.State.FAILED,
-        error);
+        remoting.ClientSession.State.FAILED, error, null);
   }
 
   cleanUp();
@@ -228,10 +231,6 @@ function showShareError_(error) {
  * @return {void} Nothing.
  */
 function it2meConnectFailed_() {
-  // TODO (weitaosu): Instruct the user to install the native messaging host.
-  // We probably want to add a new error code (with the corresponding error
-  // message for sharing error.
-  console.error('Cannot share desktop.');
   showShareError_(remoting.Error.unexpected());
 }
 
@@ -253,7 +252,8 @@ remoting.cancelShare = function() {
     hostSession_.disconnect();
     it2meLogger.logClientSessionStateChange(
         remoting.ClientSession.State.CONNECTION_CANCELED,
-        remoting.Error.none());
+        remoting.Error.none(),
+        null);
   } catch (/** @type {*} */ error) {
     console.error('Error disconnecting: ' + error +
                   '. The host probably crashed.');
@@ -385,7 +385,7 @@ function ensureIT2MeLogger_() {
   var bufferedSignalStrategy =
       new remoting.BufferedSignalStrategy(xmppConnection);
   it2meLogger = new remoting.LogToServer(bufferedSignalStrategy, true);
-  it2meLogger.setLogEntryMode(remoting.ServerLogEntry.VALUE_MODE_IT2ME);
+  it2meLogger.setLogEntryMode(remoting.ChromotingEvent.Mode.IT2ME);
 
   return setHostVersion_();
 };

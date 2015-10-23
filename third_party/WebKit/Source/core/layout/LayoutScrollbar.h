@@ -41,10 +41,11 @@ class ComputedStyle;
 
 class LayoutScrollbar final : public Scrollbar {
 public:
-    static PassRefPtrWillBeRawPtr<Scrollbar> createCustomScrollbar(ScrollableArea*, ScrollbarOrientation, Node*, LocalFrame* owningFrame = 0);
-    virtual ~LayoutScrollbar();
+    static PassRefPtrWillBeRawPtr<Scrollbar> createCustomScrollbar(ScrollableArea*, ScrollbarOrientation, Node*, LocalFrame* owningFrame = nullptr);
+    ~LayoutScrollbar() override;
 
     LayoutBox* owningLayoutObject() const;
+    LayoutBox* owningLayoutObjectWithinFrame() const;
 
     IntRect buttonRect(ScrollbarPart);
     IntRect trackRect(int startLength, int endLength);
@@ -52,11 +53,11 @@ public:
 
     int minimumThumbLength();
 
-    virtual bool isOverlayScrollbar() const override { return false; }
+    bool isOverlayScrollbar() const override { return false; }
 
     LayoutScrollbarPart* getPart(ScrollbarPart partType) { return m_parts.get(partType); }
 
-    virtual void invalidateRect(const IntRect&) override;
+    void invalidateRect(const IntRect&) override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -66,15 +67,15 @@ protected:
 private:
     friend class Scrollbar;
 
-    virtual void setParent(Widget*) override;
-    virtual void setEnabled(bool) override;
+    void setParent(Widget*) override;
+    void setEnabled(bool) override;
 
-    virtual void setHoveredPart(ScrollbarPart) override;
-    virtual void setPressedPart(ScrollbarPart) override;
+    void setHoveredPart(ScrollbarPart) override;
+    void setPressedPart(ScrollbarPart) override;
 
-    virtual void styleChanged() override;
+    void styleChanged() override;
 
-    virtual bool isCustomScrollbar() const override { return true; }
+    bool isCustomScrollbar() const override { return true; }
 
     void updateScrollbarParts(bool destroy = false);
 

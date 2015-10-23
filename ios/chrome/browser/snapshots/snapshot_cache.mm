@@ -7,7 +7,6 @@
 #import <UIKit/UIKit.h>
 
 #include "base/critical_closure.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -141,42 +140,46 @@ void ConvertAndSaveGreyImage(
     DCHECK_CURRENTLY_ON_WEB_THREAD(web::WebThread::UI);
     propertyReleaser_SnapshotCache_.Init(self, [SnapshotCache class]);
 
-    // TODO(andybons): In the case where the cache grows, it is expensive.
-    // Make sure this doesn't suck when there are more than ten tabs.
-    imageDictionary_.reset(
-        [[NSMutableDictionary alloc] initWithCapacity:kCacheInitialCapacity]);
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(handleLowMemory)
-               name:UIApplicationDidReceiveMemoryWarningNotification
-             object:nil];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(handleEnterBackground)
-               name:UIApplicationDidEnterBackgroundNotification
-             object:nil];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(handleBecomeActive)
-               name:UIApplicationDidBecomeActiveNotification
-             object:nil];
+    if (!IsIPadIdiom()) {
+      // TODO(jbbegue): In the case where the cache grows, it is expensive.
+      // Make sure this doesn't suck when there are more than ten tabs.
+      imageDictionary_.reset(
+          [[NSMutableDictionary alloc] initWithCapacity:kCacheInitialCapacity]);
+      [[NSNotificationCenter defaultCenter]
+          addObserver:self
+             selector:@selector(handleLowMemory)
+                 name:UIApplicationDidReceiveMemoryWarningNotification
+               object:nil];
+      [[NSNotificationCenter defaultCenter]
+          addObserver:self
+             selector:@selector(handleEnterBackground)
+                 name:UIApplicationDidEnterBackgroundNotification
+               object:nil];
+      [[NSNotificationCenter defaultCenter]
+          addObserver:self
+             selector:@selector(handleBecomeActive)
+                 name:UIApplicationDidBecomeActiveNotification
+               object:nil];
+    }
   }
   return self;
 }
 
 - (void)dealloc {
-  [[NSNotificationCenter defaultCenter]
-      removeObserver:self
-                name:UIApplicationDidReceiveMemoryWarningNotification
-              object:nil];
-  [[NSNotificationCenter defaultCenter]
-      removeObserver:self
-                name:UIApplicationDidEnterBackgroundNotification
-              object:nil];
-  [[NSNotificationCenter defaultCenter]
-      removeObserver:self
-                name:UIApplicationDidBecomeActiveNotification
-              object:nil];
+  if (!IsIPadIdiom()) {
+    [[NSNotificationCenter defaultCenter]
+        removeObserver:self
+                  name:UIApplicationDidReceiveMemoryWarningNotification
+                object:nil];
+    [[NSNotificationCenter defaultCenter]
+        removeObserver:self
+                  name:UIApplicationDidEnterBackgroundNotification
+                object:nil];
+    [[NSNotificationCenter defaultCenter]
+        removeObserver:self
+                  name:UIApplicationDidBecomeActiveNotification
+                object:nil];
+  }
   [super dealloc];
 }
 
@@ -196,6 +199,11 @@ void ConvertAndSaveGreyImage(
                          callback:(void (^)(UIImage*))callback {
   DCHECK_CURRENTLY_ON_WEB_THREAD(web::WebThread::UI);
   DCHECK(sessionID);
+  // iPad does not cache images, so if there is no callback we can avoid an
+  // expensive read from storage.
+  if (IsIPadIdiom() && !callback)
+    return;
+
   UIImage* img = [imageDictionary_ objectForKey:sessionID];
   if (img) {
     if (callback)
@@ -204,16 +212,18 @@ void ConvertAndSaveGreyImage(
   }
 
   base::PostTaskAndReplyWithResult(
-      web::WebThread::GetMessageLoopProxyForThread(
-          web::WebThread::FILE_USER_BLOCKING).get(),
-      FROM_HERE,
-      base::BindBlock(^base::scoped_nsobject<UIImage>() {
+      web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE_USER_BLOCKING)
+          .get(),
+      FROM_HERE, base::BindBlock(^base::scoped_nsobject<UIImage>() {
         // Retrieve the image on a high priority thread.
         return base::scoped_nsobject<UIImage>([ReadImageFromDisk(
             [SnapshotCache imagePathForSessionID:sessionID]) retain]);
       }),
       base::BindBlock(^(base::scoped_nsobject<UIImage> image) {
-        if (image)
+        // The iPad tab switcher is currently using its own memory cache so the
+        // image is not stored in memory here if running on iPad.
+        // The same logic is used on image writes (code below).
+        if (!IsIPadIdiom() && image)
           [imageDictionary_ setObject:image forKey:sessionID];
         if (callback)
           callback(image);
@@ -225,7 +235,9 @@ void ConvertAndSaveGreyImage(
   if (!img || !sessionID)
     return;
 
-  // Color snapshots are not used on tablets, so don't keep them in memory.
+  // The iPad tab switcher is currently using its own memory cache so the image
+  // is not stored in memory here if running on iPad.
+  // The same logic is used on image reads (code above).
   if (!IsIPadIdiom()) {
     [imageDictionary_ setObject:img forKey:sessionID];
   }
@@ -347,6 +359,7 @@ void ConvertAndSaveGreyImage(
 }
 
 - (void)handleLowMemory {
+  DCHECK(!IsIPadIdiom());
   DCHECK_CURRENTLY_ON_WEB_THREAD(web::WebThread::UI);
   NSMutableDictionary* dictionary =
       [[NSMutableDictionary alloc] initWithCapacity:2];
@@ -359,11 +372,13 @@ void ConvertAndSaveGreyImage(
 }
 
 - (void)handleEnterBackground {
+  DCHECK(!IsIPadIdiom());
   DCHECK_CURRENTLY_ON_WEB_THREAD(web::WebThread::UI);
   [imageDictionary_ removeAllObjects];
 }
 
 - (void)handleBecomeActive {
+  DCHECK(!IsIPadIdiom());
   DCHECK_CURRENTLY_ON_WEB_THREAD(web::WebThread::UI);
   for (NSString* sessionID in pinnedIDs_)
     [self retrieveImageForSessionID:sessionID callback:nil];
@@ -386,10 +401,9 @@ void ConvertAndSaveGreyImage(
   // already in the cache, use it.
   UIImage* img = [imageDictionary_ objectForKey:sessionID];
   base::PostTaskAndReplyWithResult(
-      web::WebThread::GetMessageLoopProxyForThread(
-          web::WebThread::FILE_USER_BLOCKING).get(),
-      FROM_HERE,
-      base::BindBlock(^base::scoped_nsobject<UIImage>() {
+      web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE_USER_BLOCKING)
+          .get(),
+      FROM_HERE, base::BindBlock(^base::scoped_nsobject<UIImage>() {
         base::scoped_nsobject<UIImage> result([img retain]);
         // If the image is not in the cache, load it from disk.
         if (!result)
@@ -450,10 +464,9 @@ void ConvertAndSaveGreyImage(
   }
 
   base::PostTaskAndReplyWithResult(
-      web::WebThread::GetMessageLoopProxyForThread(
-          web::WebThread::FILE_USER_BLOCKING).get(),
-      FROM_HERE,
-      base::BindBlock(^base::scoped_nsobject<UIImage>() {
+      web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE_USER_BLOCKING)
+          .get(),
+      FROM_HERE, base::BindBlock(^base::scoped_nsobject<UIImage>() {
         // Retrieve the image on a high priority thread.
         // Loading the file into NSData is more reliable.
         // -imageWithContentsOfFile would ocassionally claim the image was not a

@@ -2,16 +2,55 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/**
+ * @typedef {?{
+ *   url: string,
+ *   title: string,
+ *   artist: string,
+ *   artwork: Object,
+ *   active: boolean
+ * }}
+ */
+var TrackInfo;
+
 (function() {
   'use strict';
 
-  /**
-   * @constructor
-   * @extends {PolymerElement}
-   */
-  var TrackListElement = function() {};
+  Polymer({
+    is: 'track-list',
 
-  TrackListElement.prototype = {
+    properties: {
+      /**
+       * List of tracks.
+       */
+      tracks: {
+        type: Array,
+        value: [],
+        observer: 'tracksChanged'
+      },
+
+      /**
+       * Track index of the current track.
+       * If the tracks property is empty, it should be -1. Otherwise, be a valid
+       * track number.
+       */
+      currentTrackIndex: {
+        type: Number,
+        value: -1,
+        observer: 'currentTrackIndexChanged',
+        notify: true
+      },
+
+      /**
+       * Whether shuffling play order is enabled or not.
+       */
+      shuffle: {
+        type: Boolean,
+        value: false,
+        observer: 'shuffleChanged'
+      }
+    },
+
     /**
      * Initializes an element. This method is called automatically when the
      * element is ready.
@@ -38,65 +77,37 @@
     },
 
     /**
-     * Registers handlers for changing of external variables
-     */
-    observe: {
-      'model.shuffle': 'onShuffleChanged',
-    },
-
-    /**
-     * Model object of the Audio Player.
-     * @type {AudioPlayerModel}
-     */
-    model: null,
-
-    /**
-     * List of tracks.
-     * @type {Array.<AudioPlayer.TrackInfo>}
-     */
-    tracks: [],
-
-    /**
      * Play order of the tracks. Each value is the index of 'this.tracks'.
-     * @type {Array.<number>}
+     * @type {Array<number>}
      */
     playOrder: [],
 
     /**
-     * Track index of the current track.
-     * If the tracks property is empty, it should be -1. Otherwise, be a valid
-     * track number.
-     *
-     * @type {number}
-     */
-    currentTrackIndex: -1,
-
-    /**
      * Invoked when 'shuffle' property is changed.
-     * @param {boolean} oldValue Old value.
      * @param {boolean} newValue New value.
+     * @param {boolean} oldValue Old value.
      */
-    onShuffleChanged: function(oldValue, newValue) {
+    shuffleChanged: function(newValue, oldValue) {
       this.generatePlayOrder(true /* keep the current track */);
     },
 
     /**
      * Invoked when the current track index is changed.
-     * @param {number} oldValue old value.
      * @param {number} newValue new value.
+     * @param {number} oldValue old value.
      */
-    currentTrackIndexChanged: function(oldValue, newValue) {
+    currentTrackIndexChanged: function(newValue, oldValue) {
       if (oldValue === newValue)
         return;
 
       if (!isNaN(oldValue) && 0 <= oldValue && oldValue < this.tracks.length)
-        this.tracks[oldValue].active = false;
+        this.set('tracks.' + oldValue + '.active', false);
 
       if (0 <= newValue && newValue < this.tracks.length) {
         var currentPlayOrder = this.playOrder.indexOf(newValue);
         if (currentPlayOrder !== -1) {
           // Success
-          this.tracks[newValue].active = true;
+          this.set('tracks.' + newValue + '.active', true);
 
           this.ensureTrackInViewport_(newValue /* trackIndex */);
           return;
@@ -112,10 +123,10 @@
 
     /**
      * Invoked when 'tracks' property is changed.
-     * @param {Array.<AudioPlayer.TrackInfo>} oldValue Old value.
-     * @param {Array.<AudioPlayer.TrackInfo>} newValue New value.
+     * @param {Array<!TrackInfo>} newValue New value.
+     * @param {Array<!TrackInfo>} oldValue Old value.
      */
-    tracksChanged: function(oldValue, newValue) {
+    tracksChanged: function(newValue, oldValue) {
       // Note: Sometimes both oldValue and newValue are null though the actual
       // values are not null. Maybe it's a bug of Polymer.
 
@@ -126,7 +137,7 @@
         // Restore the active track.
         if (this.currentTrackIndex !== -1 &&
             this.currentTrackIndex < this.tracks.length) {
-          this.tracks[this.currentTrackIndex].active = true;
+          this.set('tracks.' + this.currentTrackIndex + '.active', true);
         }
 
         // Reset play order and current index.
@@ -139,13 +150,13 @@
 
     /**
      * Invoked when the value in the 'tracks' is changed.
-     * @param {Array.<Object>} changes The detail of the change.
+     * @param {Array<Object>} changes The detail of the change.
      */
     tracksValueChanged_: function(changes) {
       if (this.tracks.length === 0)
         this.currentTrackIndex = -1;
       else
-        this.tracks[this.currentTrackIndex].active = true;
+        this.set('tracks.' + this.currentTrackIndex + '.active', true);
     },
 
     /**
@@ -212,7 +223,7 @@
           this.tracks.
           map(function(unused, index) { return index; });
 
-      if (this.model && this.model.shuffle) {
+      if (this.shuffle) {
         // Randomizes the play order array (Schwarzian-transform algorithm).
         this.playOrder = this.playOrder
             .map(function(a) {
@@ -237,7 +248,7 @@
 
     /**
      * Sets the current track.
-     * @param {AudioPlayer.TrackInfo} track TrackInfo to be set as the current
+     * @param {!TrackInfo} track TrackInfo to be set as the current
      *     track.
      */
     selectTrack: function(track) {
@@ -266,7 +277,7 @@
 
     /**
      * Returns the current track.
-     * @return {AudioPlayer.TrackInfo} track TrackInfo of the current track.
+     * @return {TrackInfo} track TrackInfo of the current track.
      */
     getCurrentTrack: function() {
       if (this.tracks.length === 0)
@@ -310,7 +321,5 @@
 
       return newTrackIndex;
     },
-  };  // TrackListElement.prototype for 'track-list'
-
-  Polymer('track-list', TrackListElement.prototype);
+  });
 })();  // Anonymous closure

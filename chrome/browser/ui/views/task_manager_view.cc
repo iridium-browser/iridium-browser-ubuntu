@@ -15,6 +15,8 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/browser/ui/views/new_task_manager_view.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -277,18 +279,23 @@ void TaskManagerView::Init() {
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_SHARED_MEM_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_CPU_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_NET_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PROCESS_ID_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
@@ -296,27 +303,34 @@ void TaskManagerView::Init() {
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_GDI_HANDLES_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_USER_HANDLES_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
 #endif
   columns_.push_back(ui::TableColumn(
       IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN,
       ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(
       IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN,
       ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   columns_.push_back(ui::TableColumn(
       IDS_TASK_MANAGER_NACL_DEBUG_STUB_PORT_COLUMN,
       ui::TableColumn::RIGHT, -1, 0));
@@ -325,11 +339,13 @@ void TaskManagerView::Init() {
       ui::TableColumn(IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN,
                       ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
   // TODO(port) http://crbug.com/120488 for non-Linux.
 #if defined(OS_LINUX)
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_IDLE_WAKEUPS_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.back().initial_sort_is_ascending = false;
 #endif
 
   tab_table_ = new views::TableView(
@@ -620,7 +636,7 @@ bool TaskManagerView::GetSavedAlwaysOnTopState(bool* always_on_top) const {
     return false;
 
   const base::DictionaryValue* dictionary =
-      g_browser_process->local_state()->GetDictionary(GetWindowName().c_str());
+      g_browser_process->local_state()->GetDictionary(GetWindowName());
   return dictionary &&
       dictionary->GetBoolean("always_on_top", always_on_top) && always_on_top;
 }
@@ -631,10 +647,20 @@ namespace chrome {
 
 // Declared in browser_dialogs.h so others don't need to depend on our header.
 void ShowTaskManager(Browser* browser) {
+  if (switches::NewTaskManagerEnabled()) {
+    task_management::NewTaskManagerView::Show(browser);
+    return;
+  }
+
   TaskManagerView::Show(browser);
 }
 
 void HideTaskManager() {
+  if (switches::NewTaskManagerEnabled()) {
+    task_management::NewTaskManagerView::Hide();
+    return;
+  }
+
   TaskManagerView::Hide();
 }
 

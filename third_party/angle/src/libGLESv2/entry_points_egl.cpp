@@ -171,7 +171,7 @@ EGLBoolean EGLAPIENTRY GetConfigs(EGLDisplay dpy, EGLConfig *configs, EGLint con
             configs[i] = const_cast<Config*>(filteredConfigs[i]);
         }
     }
-    *num_config = filteredConfigs.size();
+    *num_config = static_cast<EGLint>(filteredConfigs.size());
 
     SetGlobalError(Error(EGL_SUCCESS));
     return EGL_TRUE;
@@ -207,7 +207,7 @@ EGLBoolean EGLAPIENTRY ChooseConfig(EGLDisplay dpy, const EGLint *attrib_list, E
             configs[i] = const_cast<Config*>(filteredConfigs[i]);
         }
     }
-    *num_config = filteredConfigs.size();
+    *num_config = static_cast<EGLint>(filteredConfigs.size());
 
     SetGlobalError(Error(EGL_SUCCESS));
     return EGL_TRUE;
@@ -519,8 +519,7 @@ EGLBoolean EGLAPIENTRY MakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface r
     }
 
     // EGL 1.5 spec: dpy can be uninitialized if all other parameters are null
-    if (dpy != EGL_NO_DISPLAY && !display->isInitialized() &&
-        (ctx != EGL_NO_CONTEXT || draw != EGL_NO_SURFACE || read != EGL_NO_SURFACE))
+    if (!display->isInitialized() && (ctx != EGL_NO_CONTEXT || draw != EGL_NO_SURFACE || read != EGL_NO_SURFACE))
     {
         SetGlobalError(Error(EGL_NOT_INITIALIZED, "'dpy' not initialized"));
         return EGL_FALSE;
@@ -536,7 +535,7 @@ EGLBoolean EGLAPIENTRY MakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface r
         }
     }
 
-    if (dpy != EGL_NO_DISPLAY && display->isInitialized())
+    if (display->isInitialized())
     {
         if (display->testDeviceLost())
         {
@@ -573,9 +572,36 @@ EGLBoolean EGLAPIENTRY MakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface r
         }
     }
 
+    if (readSurface)
+    {
+        Error readCompatError = ValidateCompatibleConfigs(readSurface->getConfig(), context->getConfig(), readSurface->getType());
+        if (readCompatError.isError())
+        {
+            SetGlobalError(readCompatError);
+            return EGL_FALSE;
+        }
+    }
+
     if (draw != read)
     {
         UNIMPLEMENTED();   // FIXME
+
+        if (drawSurface)
+        {
+            Error drawCompatError = ValidateCompatibleConfigs(drawSurface->getConfig(), context->getConfig(), drawSurface->getType());
+            if (drawCompatError.isError())
+            {
+                SetGlobalError(drawCompatError);
+                return EGL_FALSE;
+            }
+        }
+    }
+
+    Error makeCurrentError = display->makeCurrent(drawSurface, readSurface, context);
+    if (makeCurrentError.isError())
+    {
+        SetGlobalError(makeCurrentError);
+        return EGL_FALSE;
     }
 
     gl::Context *previousContext = GetGlobalContext();
@@ -584,8 +610,6 @@ EGLBoolean EGLAPIENTRY MakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface r
     SetGlobalDrawSurface(drawSurface);
     SetGlobalReadSurface(readSurface);
     SetGlobalContext(context);
-
-    display->makeCurrent(drawSurface, readSurface, context);
 
     // Release the surface from the previously-current context, to allow
     // destroyed surfaces to delete themselves.
@@ -647,7 +671,7 @@ EGLBoolean EGLAPIENTRY QueryContext(EGLDisplay dpy, EGLContext ctx, EGLint attri
     switch (attribute)
     {
       case EGL_CONFIG_ID:
-        *value = context->getConfigID();
+        *value = context->getConfig()->configID;
         break;
       case EGL_CONTEXT_CLIENT_TYPE:
         *value = context->getClientType();
@@ -801,7 +825,7 @@ EGLBoolean EGLAPIENTRY BindTexImage(EGLDisplay dpy, EGLSurface surface, EGLint b
             return EGL_FALSE;
         }
 
-        egl::Error error = eglSurface->bindTexImage(textureObject, buffer);
+        error = eglSurface->bindTexImage(textureObject, buffer);
         if (error.isError())
         {
             SetGlobalError(error);
@@ -870,7 +894,7 @@ EGLBoolean EGLAPIENTRY ReleaseTexImage(EGLDisplay dpy, EGLSurface surface, EGLin
 
     if (texture)
     {
-        egl::Error error = eglSurface->releaseTexImage(buffer);
+        error = eglSurface->releaseTexImage(buffer);
         if (error.isError())
         {
             SetGlobalError(error);
@@ -1102,6 +1126,7 @@ __eglMustCastToProperFunctionPointerType EGLAPIENTRY GetProcAddress(const char *
         __eglMustCastToProperFunctionPointerType address;
     };
 
+    // clang-format off
     static const Extension extensions[] =
     {
         { "eglQueryDeviceAttribEXT", (__eglMustCastToProperFunctionPointerType)QueryDeviceAttribEXT },
@@ -1110,6 +1135,8 @@ __eglMustCastToProperFunctionPointerType EGLAPIENTRY GetProcAddress(const char *
         { "eglQuerySurfacePointerANGLE", (__eglMustCastToProperFunctionPointerType)QuerySurfacePointerANGLE },
         { "eglPostSubBufferNV", (__eglMustCastToProperFunctionPointerType)PostSubBufferNV },
         { "eglGetPlatformDisplayEXT", (__eglMustCastToProperFunctionPointerType)GetPlatformDisplayEXT },
+        { "eglCreateImageKHR", (__eglMustCastToProperFunctionPointerType)CreateImageKHR },
+        { "eglDestroyImageKHR", (__eglMustCastToProperFunctionPointerType)DestroyImageKHR },
         { "glBlitFramebufferANGLE", (__eglMustCastToProperFunctionPointerType)gl::BlitFramebufferANGLE },
         { "glRenderbufferStorageMultisampleANGLE", (__eglMustCastToProperFunctionPointerType)gl::RenderbufferStorageMultisampleANGLE },
         { "glDeleteFencesNV", (__eglMustCastToProperFunctionPointerType)gl::DeleteFencesNV },
@@ -1143,8 +1170,15 @@ __eglMustCastToProperFunctionPointerType EGLAPIENTRY GetProcAddress(const char *
         { "glUnmapBufferOES", (__eglMustCastToProperFunctionPointerType)gl::UnmapBufferOES },
         { "glMapBufferRangeEXT", (__eglMustCastToProperFunctionPointerType)gl::MapBufferRangeEXT },
         { "glFlushMappedBufferRangeEXT", (__eglMustCastToProperFunctionPointerType)gl::FlushMappedBufferRangeEXT },
+        { "glDiscardFramebufferEXT", (__eglMustCastToProperFunctionPointerType)gl::DiscardFramebufferEXT },
+        { "glInsertEventMarkerEXT", (__eglMustCastToProperFunctionPointerType)gl::InsertEventMarkerEXT },
+        { "glPushGroupMarkerEXT", (__eglMustCastToProperFunctionPointerType)gl::PushGroupMarkerEXT },
+        { "glPopGroupMarkerEXT", (__eglMustCastToProperFunctionPointerType)gl::PopGroupMarkerEXT },
+        { "glEGLImageTargetTexture2DOES", (__eglMustCastToProperFunctionPointerType)gl::EGLImageTargetTexture2DOES },
+        { "glEGLImageTargetRenderbufferStorageOES", (__eglMustCastToProperFunctionPointerType)gl::EGLImageTargetRenderbufferStorageOES },
         { "", NULL },
     };
+    // clang-format on
 
     for (const Extension *extension = &extensions[0]; extension->address != nullptr; extension++)
     {

@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,11 +20,9 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
-namespace base {
-class CommandLine;
-}
-
 namespace net {
+class HostPortPair;
+class HttpResponseHeaders;
 class URLFetcher;
 class URLRequestContextGetter;
 class URLRequestStatus;
@@ -39,6 +38,8 @@ class DataReductionProxyParams;
 class DataReductionProxyRequestOptions;
 class DataReductionProxyService;
 
+typedef base::Callback<void(const std::string&)> ConfigStorer;
+
 // Retrieves the default net::BackoffEntry::Policy for the Data Reduction Proxy
 // configuration service client.
 const net::BackoffEntry::Policy& GetBackoffPolicy();
@@ -50,10 +51,6 @@ class DataReductionProxyConfigServiceClient
     : public net::NetworkChangeNotifier::IPAddressObserver,
       public net::URLFetcherDelegate {
  public:
-  // Returns the URL from which the Data Reduction Proxy configuration should
-  // be retrieved.
-  static GURL GetConfigServiceURL(const base::CommandLine& command_line);
-
   // The caller must ensure that all parameters remain alive for the lifetime of
   // the |DataReductionProxyConfigClient|, with the exception of |params|
   // which this instance will own.
@@ -64,7 +61,8 @@ class DataReductionProxyConfigServiceClient
       DataReductionProxyMutableConfigValues* config_values,
       DataReductionProxyConfig* config,
       DataReductionProxyEventCreator* event_creator,
-      net::NetLog* net_log);
+      net::NetLog* net_log,
+      ConfigStorer config_storer);
 
   ~DataReductionProxyConfigServiceClient() override;
 
@@ -72,9 +70,24 @@ class DataReductionProxyConfigServiceClient
   void InitializeOnIOThread(
       net::URLRequestContextGetter* url_request_context_getter);
 
+  // Sets whether the configuration should be retrieved or not.
+  void SetEnabled(bool enabled);
+
   // Request the retrieval of the Data Reduction Proxy configuration. This
   // operation takes place asynchronously.
   void RetrieveConfig();
+
+  // Takes a serialized Data Reduction Proxy configuration and sets it as the
+  // current Data Reduction Proxy configuration. If a remote configuration has
+  // already been retrieved, the remote configuration takes precedence. If using
+  // a local configuration, then this method has no effect.
+  void ApplySerializedConfig(const std::string& config_value);
+
+  // Examines |response_headers| to determine if an authentication failure
+  // occurred on a Data Reduction Proxy.
+  bool ShouldRetryDueToAuthFailure(
+      const net::HttpResponseHeaders* response_headers,
+      const net::HostPortPair& proxy_server);
 
  protected:
   // Retrieves the backoff entry object being used to throttle request failures.
@@ -92,12 +105,30 @@ class DataReductionProxyConfigServiceClient
   // Constructs a synthetic response based on |params_|.
   std::string ConstructStaticResponse() const;
 
+  base::TimeDelta minimum_refresh_interval_on_success() const;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigServiceClientTest,
                            TestConstructStaticResponse);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigServiceClientTest,
                            OnIPAddressChange);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigServiceClientTest,
+                           OnIPAddressChangeDisabled);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigServiceClientTest,
+                           ClientConfigFieldTrialParams);
   friend class TestDataReductionProxyConfigServiceClient;
+
+  // Returns the duration after which the Data Reduction Proxy configuration
+  // should be retrieved. |backoff_delay| must be non-negative.
+  base::TimeDelta CalculateNextConfigRefreshTime(
+      bool fetch_succeeded,
+      const base::Time& config_expiration,
+      const base::Time& now,
+      const base::TimeDelta& backoff_delay) const;
+
+  // Populates the parameters for the client config field trial if the session
+  // is part of client config field trial.
+  void PopulateClientConfigParams();
 
   // Override of net::NetworkChangeNotifier::IPAddressObserver.
   void OnIPAddressChanged() override;
@@ -110,6 +141,9 @@ class DataReductionProxyConfigServiceClient
 
   // Retrieves the Data Reduction Proxy configuration from a remote service.
   void RetrieveRemoteConfig();
+
+  // Invalidates the current Data Reduction Proxy configuration.
+  void InvalidateConfig();
 
   // Returns a fetcher to retrieve the Data Reduction Proxy configuration.
   // |secure_proxy_check_url| is the url from which to retrieve the config.
@@ -127,7 +161,8 @@ class DataReductionProxyConfigServiceClient
                       int response_code);
 
   // Parses out the proxy configuration portion of |config| and applies it to
-  // |config_| and |request_options_|.
+  // |config_| and |request_options_|. Takes into account the field trials that
+  // this session belongs to.
   bool ParseAndApplyProxyConfig(const ClientConfig& config);
 
   // Contains the static configuration data to use.
@@ -148,16 +183,26 @@ class DataReductionProxyConfigServiceClient
   // The caller must ensure that the |net_log_| outlives this instance.
   net::NetLog* net_log_;
 
+  // Used to persist a serialized Data Reduction Proxy configuration.
+  ConfigStorer config_storer_;
+
   // Used to calculate the backoff time on request failures.
   net::BackoffEntry backoff_entry_;
 
   // The URL for retrieving the Data Reduction Proxy configuration.
   GURL config_service_url_;
 
+  // True if the Data Reduction Proxy configuration should be retrieved.
+  bool enabled_;
+
   // Whether to use |params_| to obtain the Data Reduction Proxy configuration
   // or the remote server specified by |config_service_url_|.
   // TODO(jeremyim): Remove this as part of bug 479282.
   bool use_local_config_;
+
+  // True if a remote Data Reduction Proxy configuration has been retrieved and
+  // successfully applied.
+  bool remote_config_applied_;
 
   // Used for setting up |fetcher_|.
   net::URLRequestContextGetter* url_request_context_getter_;
@@ -176,6 +221,17 @@ class DataReductionProxyConfigServiceClient
   // Used to determine the latency in retrieving the Data Reduction Proxy
   // configuration.
   base::Time config_fetch_start_time_;
+
+  // Keeps track of whether the previous request to a Data Reduction Proxy
+  // failed to authenticate. This is necessary in the situation where a new
+  // configuration with a bad session key is obtained, but the previous request
+  // failed to authenticate, since the new configuration marks |backoff_entry_|
+  // with a success, resulting in no net increase in the backoff timer.
+  bool previous_request_failed_authentication_;
+
+  // If the config is fetched successfully, next config can be proactively
+  // fetched only after at least |minimum_refresh_interval_on_success_|.
+  base::TimeDelta minimum_refresh_interval_on_success_;
 
   // Enforce usage on the IO thread.
   base::ThreadChecker thread_checker_;

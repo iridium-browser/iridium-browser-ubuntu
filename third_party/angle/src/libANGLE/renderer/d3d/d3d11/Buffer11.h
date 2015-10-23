@@ -17,6 +17,8 @@
 namespace rx
 {
 class Renderer11;
+struct SourceIndexData;
+struct TranslatedAttribute;
 
 enum BufferUsage
 {
@@ -27,6 +29,9 @@ enum BufferUsage
     BUFFER_USAGE_PIXEL_PACK,
     BUFFER_USAGE_UNIFORM,
     BUFFER_USAGE_SYSTEM_MEMORY,
+    BUFFER_USAGE_EMULATED_INDEXED_VERTEX,
+
+    BUFFER_USAGE_COUNT,
 };
 
 struct PackPixelsParams
@@ -53,10 +58,12 @@ class Buffer11 : public BufferD3D
     virtual ~Buffer11();
 
     ID3D11Buffer *getBuffer(BufferUsage usage);
+    ID3D11Buffer *getEmulatedIndexedBuffer(SourceIndexData *indexInfo, const TranslatedAttribute *attribute);
     ID3D11Buffer *getConstantBufferRange(GLintptr offset, GLsizeiptr size);
     ID3D11ShaderResourceView *getSRV(DXGI_FORMAT srvFormat);
     bool isMapped() const { return mMappedStorage != NULL; }
     gl::Error packPixels(ID3D11Texture2D *srcTexure, UINT srcSubresource, const PackPixelsParams &params);
+    size_t getTotalCPUBufferMemoryBytes() const;
 
     // BufferD3D implementation
     virtual size_t getSize() const { return mSize; }
@@ -74,6 +81,7 @@ class Buffer11 : public BufferD3D
 
   private:
     class BufferStorage;
+    class EmulatedIndexedStorage;
     class NativeStorage;
     class PackStorage;
     class SystemMemoryStorage;
@@ -83,7 +91,7 @@ class Buffer11 : public BufferD3D
 
     BufferStorage *mMappedStorage;
 
-    std::map<BufferUsage, BufferStorage*> mBufferStorages;
+    std::vector<BufferStorage*> mBufferStorages;
 
     struct ConstantBufferCacheEntry
     {
@@ -105,7 +113,6 @@ class Buffer11 : public BufferD3D
     std::map<DXGI_FORMAT, BufferSRVPair> mBufferResourceViews;
 
     unsigned int mReadUsageCount;
-    bool mHasSystemMemoryStorage;
 
     void markBufferUsage();
     NativeStorage *getStagingStorage();
@@ -116,7 +123,9 @@ class Buffer11 : public BufferD3D
     BufferStorage *getBufferStorage(BufferUsage usage);
     BufferStorage *getLatestBufferStorage() const;
 
-    BufferStorage *getContantBufferRangeStorage(GLintptr offset, GLsizeiptr size);
+    BufferStorage *getConstantBufferRangeStorage(GLintptr offset, GLsizeiptr size);
+
+    void invalidateEmulatedIndexedBuffer();
 };
 
 }

@@ -220,7 +220,7 @@ class WiFiServiceImpl : public WiFiService {
                         std::string* error) override;
 
   void SetEventObservers(
-      scoped_refptr<base::MessageLoopProxy> message_loop_proxy,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       const NetworkGuidListCallback& networks_changed_observer,
       const NetworkGuidListCallback& network_list_changed_observer) override;
 
@@ -465,8 +465,8 @@ class WiFiServiceImpl : public WiFiService {
   NetworkGuidListCallback network_list_changed_observer_;
   // Saved value of network location wizard show value.
   scoped_ptr<DWORD> saved_nw_category_wizard_;
-  // MessageLoopProxy to post events on UI thread.
-  scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
+  // Task runner to post events on UI thread.
+  scoped_refptr<base::SingleThreadTaskRunner> event_task_runner_;
   // Task runner for worker tasks.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   // If |false|, then |networks_changed_observer_| is not notified.
@@ -491,11 +491,12 @@ WiFiServiceImpl::WiFiServiceImpl()
       WlanGetProfile_function_(NULL),
       WlanOpenHandle_function_(NULL),
       WlanRegisterNotification_function_(NULL),
-      WlanSaveTemporaryProfile_function_(NULL),
       WlanScan_function_(NULL),
       WlanSetProfile_function_(NULL),
+      WlanSaveTemporaryProfile_function_(NULL),
       client_(NULL),
-      enable_notify_network_changed_(true) {}
+      enable_notify_network_changed_(true) {
+}
 
 WiFiServiceImpl::~WiFiServiceImpl() { UnInitialize(); }
 
@@ -780,13 +781,13 @@ void WiFiServiceImpl::GetKeyFromSystem(const std::string& network_guid,
 }
 
 void WiFiServiceImpl::SetEventObservers(
-    scoped_refptr<base::MessageLoopProxy> message_loop_proxy,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     const NetworkGuidListCallback& networks_changed_observer,
     const NetworkGuidListCallback& network_list_changed_observer) {
   DWORD error_code = EnsureInitialized();
   if (error_code != ERROR_SUCCESS)
     return;
-  message_loop_proxy_.swap(message_loop_proxy);
+  event_task_runner_.swap(task_runner);
   if (!networks_changed_observer_.is_null() ||
       !network_list_changed_observer_.is_null()) {
     // Stop listening to WLAN notifications.
@@ -834,7 +835,7 @@ void WiFiServiceImpl::OnWlanNotificationCallback(
 
 void WiFiServiceImpl::OnWlanNotification(
     PWLAN_NOTIFICATION_DATA wlan_notification_data) {
-  if (message_loop_proxy_.get() == NULL)
+  if (event_task_runner_.get() == NULL)
     return;
   switch (wlan_notification_data->NotificationCode) {
     case wlan_notification_acm_disconnected:
@@ -843,16 +844,15 @@ void WiFiServiceImpl::OnWlanNotification(
       PWLAN_CONNECTION_NOTIFICATION_DATA wlan_connection_data =
           reinterpret_cast<PWLAN_CONNECTION_NOTIFICATION_DATA>(
               wlan_notification_data->pData);
-      message_loop_proxy_->PostTask(
-          FROM_HERE,
-          base::Bind(&WiFiServiceImpl::NotifyNetworkChanged,
-                     base::Unretained(this),
-                     GUIDFromSSID(wlan_connection_data->dot11Ssid)));
+      event_task_runner_->PostTask(
+          FROM_HERE, base::Bind(&WiFiServiceImpl::NotifyNetworkChanged,
+                                base::Unretained(this),
+                                GUIDFromSSID(wlan_connection_data->dot11Ssid)));
       break;
     }
     case wlan_notification_acm_scan_complete:
     case wlan_notification_acm_interface_removal:
-      message_loop_proxy_->PostTask(
+      event_task_runner_->PostTask(
           FROM_HERE,
           base::Bind(&WiFiServiceImpl::OnNetworkScanCompleteOnMainThread,
                      base::Unretained(this)));
@@ -1142,7 +1142,7 @@ DWORD WiFiServiceImpl::FindAdapterIndexMapByGUID(
   base::string16 guid_string;
   const int kGUIDSize = 39;
   ::StringFromGUID2(
-      interface_guid, WriteInto(&guid_string, kGUIDSize), kGUIDSize);
+      interface_guid, base::WriteInto(&guid_string, kGUIDSize), kGUIDSize);
 
   ULONG buffer_length = 0;
   DWORD error = ::GetInterfaceInfo(NULL, &buffer_length);
@@ -1153,8 +1153,9 @@ DWORD WiFiServiceImpl::FindAdapterIndexMapByGUID(
     error = GetInterfaceInfo(interface_info, &buffer_length);
     if (error == ERROR_SUCCESS) {
       for (int adapter = 0; adapter < interface_info->NumAdapters; ++adapter) {
-        if (EndsWith(
-                interface_info->Adapter[adapter].Name, guid_string, false)) {
+        if (base::EndsWith(
+                interface_info->Adapter[adapter].Name, guid_string,
+                base::CompareCase::INSENSITIVE_ASCII)) {
           *adapter_index_map = interface_info->Adapter[adapter];
           break;
         }
@@ -1797,7 +1798,7 @@ bool WiFiServiceImpl::AuthEncryptionFromSecurity(
     *authentication = kAuthenticationOpen;
     *encryption = kEncryptionNone;
   } else if (security == onc::wifi::kWEP_PSK) {
-    *authentication = kAuthenticationOpen;
+    *authentication = kAuthenticationWepPsk;
     *encryption = kEncryptionWEP;
     *key_type = kKeyTypeNetwork;
   } else if (security == onc::wifi::kWPA_PSK) {
@@ -1879,18 +1880,16 @@ void WiFiServiceImpl::NotifyNetworkListChanged(const NetworkList& networks) {
     current_networks.push_back(it->guid);
   }
 
-  message_loop_proxy_->PostTask(
-      FROM_HERE,
-      base::Bind(network_list_changed_observer_, current_networks));
+  event_task_runner_->PostTask(
+      FROM_HERE, base::Bind(network_list_changed_observer_, current_networks));
 }
 
 void WiFiServiceImpl::NotifyNetworkChanged(const std::string& network_guid) {
   if (enable_notify_network_changed_ && !networks_changed_observer_.is_null()) {
     DVLOG(1) << "NotifyNetworkChanged: " << network_guid;
     NetworkGuidList changed_networks(1, network_guid);
-    message_loop_proxy_->PostTask(
-        FROM_HERE,
-        base::Bind(networks_changed_observer_, changed_networks));
+    event_task_runner_->PostTask(
+        FROM_HERE, base::Bind(networks_changed_observer_, changed_networks));
   }
 }
 

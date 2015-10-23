@@ -4,8 +4,11 @@
 
 #include "components/history/core/browser/web_history_service.h"
 
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -67,7 +70,7 @@ class TestingWebHistoryService : public WebHistoryService {
   }
 
   void SetExpectedPostData(const std::string& expected_data) {
-    current_expected_post_data_= expected_data;
+    current_expected_post_data_ = expected_data;
   }
 
   void EnsureNoPendingRequestsRemain() {
@@ -126,7 +129,7 @@ class TestRequest : public WebHistoryService::Request {
 
   void Start() override {
     is_pending_ = true;
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&TestRequest::MimicReturnFromFetch, base::Unretained(this)));
   }
@@ -195,12 +198,13 @@ std::string TestingWebHistoryService::GetExpectedAudioHistoryValue() {
   return "false";
 }
 
-static KeyedService* BuildWebHistoryService(content::BrowserContext* context) {
+static scoped_ptr<KeyedService> BuildWebHistoryService(
+    content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return new TestingWebHistoryService(
+  return make_scoped_ptr(new TestingWebHistoryService(
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
       SigninManagerFactory::GetForProfile(profile),
-      profile->GetRequestContext());
+      profile->GetRequestContext()));
 }
 
 }  // namespace
@@ -226,7 +230,7 @@ class WebHistoryServiceTest : public testing::Test {
     ProfileSyncServiceMock* sync_service = static_cast<ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->GetForProfile(&profile_));
     EXPECT_CALL(*sync_service,
-                SyncActive()).WillRepeatedly(Return(true));
+                IsSyncActive()).WillRepeatedly(Return(true));
     syncer::ModelTypeSet result;
     result.Put(syncer::HISTORY_DELETE_DIRECTIVES);
     EXPECT_CALL(*sync_service,
@@ -234,7 +238,8 @@ class WebHistoryServiceTest : public testing::Test {
   }
   void TearDown() override {
     base::RunLoop run_loop;
-    base::MessageLoop::current()->PostTask(FROM_HERE, run_loop.QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  run_loop.QuitClosure());
     run_loop.Run();
   }
   Profile* profile() { return &profile_; }
@@ -264,10 +269,10 @@ TEST_F(WebHistoryServiceTest, GetAudioHistoryEnabled) {
   web_history_service->GetAudioHistoryEnabled(
     base::Bind(&TestingWebHistoryService::GetAudioHistoryCallback,
     base::Unretained(web_history_service)));
-  base::MessageLoop::current()->PostTask(
-    FROM_HERE,
-    base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-    base::Unretained(web_history_service)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                 base::Unretained(web_history_service)));
 }
 
 TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledTrue) {
@@ -285,10 +290,10 @@ TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledTrue) {
       true,
       base::Bind(&TestingWebHistoryService::SetAudioHistoryCallback,
                  base::Unretained(web_history_service)));
-  base::MessageLoop::current()->PostTask(
-    FROM_HERE,
-    base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-               base::Unretained(web_history_service)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                 base::Unretained(web_history_service)));
 }
 
 TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledFalse) {
@@ -306,10 +311,10 @@ TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledFalse) {
     false,
     base::Bind(&TestingWebHistoryService::SetAudioHistoryCallback,
     base::Unretained(web_history_service)));
-  base::MessageLoop::current()->PostTask(
-    FROM_HERE,
-    base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-    base::Unretained(web_history_service)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                 base::Unretained(web_history_service)));
 }
 
 TEST_F(WebHistoryServiceTest, MultipleRequests) {
@@ -336,10 +341,10 @@ TEST_F(WebHistoryServiceTest, MultipleRequests) {
     base::Unretained(web_history_service)));
 
   // Check that both requests are no longer pending.
-  base::MessageLoop::current()->PostTask(
-    FROM_HERE,
-    base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-    base::Unretained(web_history_service)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                 base::Unretained(web_history_service)));
 }
 
 TEST_F(WebHistoryServiceTest, VerifyReadResponse) {

@@ -9,6 +9,7 @@
 #include "android_webview/browser/aw_contents_client_bridge_base.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_cookie_access_policy.h"
+#include "android_webview/browser/aw_locale_manager.h"
 #include "android_webview/browser/aw_printing_message_filter.h"
 #include "android_webview/browser/aw_quota_permission_context.h"
 #include "android_webview/browser/aw_web_preferences_populater.h"
@@ -59,6 +60,8 @@ public:
 
   void OnShouldOverrideUrlLoading(int routing_id,
                                   const base::string16& url,
+                                  bool has_user_gesture,
+                                  bool is_redirect,
                                   bool* ignore_navigation);
   void OnSubFrameCreated(int parent_render_frame_id, int child_render_frame_id);
 
@@ -79,7 +82,8 @@ AwContentsMessageFilter::~AwContentsMessageFilter() {
 }
 
 void AwContentsMessageFilter::OverrideThreadForMessage(
-    const IPC::Message& message, BrowserThread::ID* thread) {
+    const IPC::Message& message,
+    BrowserThread::ID* thread) {
   if (message.type() == AwViewHostMsg_ShouldOverrideUrlLoading::ID) {
     *thread = BrowserThread::UI;
   }
@@ -99,13 +103,16 @@ bool AwContentsMessageFilter::OnMessageReceived(const IPC::Message& message) {
 void AwContentsMessageFilter::OnShouldOverrideUrlLoading(
     int render_frame_id,
     const base::string16& url,
+    bool has_user_gesture,
+    bool is_redirect,
     bool* ignore_navigation) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   *ignore_navigation = false;
   AwContentsClientBridgeBase* client =
       AwContentsClientBridgeBase::FromID(process_id_, render_frame_id);
   if (client) {
-    *ignore_navigation = client->ShouldOverrideUrlLoading(url);
+    *ignore_navigation =
+        client->ShouldOverrideUrlLoading(url, has_user_gesture, is_redirect);
   } else {
     LOG(WARNING) << "Failed to find the associated render view host for url: "
                  << url;
@@ -138,20 +145,24 @@ class AwAccessTokenStore : public content::AccessTokenStore {
   DISALLOW_COPY_AND_ASSIGN(AwAccessTokenStore);
 };
 
+AwLocaleManager* g_locale_manager = NULL;
+
 }  // anonymous namespace
 
+// static
 std::string AwContentBrowserClient::GetAcceptLangsImpl() {
-  // Start with the currnet locale.
-  std::string langs = base::android::GetDefaultLocale();
+  // Start with the current locale.
+  std::string langs = g_locale_manager->GetLocale();
 
   // If we're not en-US, add in en-US which will be
   // used with a lower q-value.
-  if (base::StringToLowerASCII(langs) != "en-us") {
+  if (base::ToLowerASCII(langs) != "en-us") {
     langs += ",en-US";
   }
   return langs;
 }
 
+// static
 AwBrowserContext* AwContentBrowserClient::GetAwBrowserContext() {
   return AwBrowserContext::GetDefault();
 }
@@ -165,9 +176,12 @@ AwContentBrowserClient::AwContentBrowserClient(
   }
   browser_context_.reset(
       new AwBrowserContext(user_data_dir, native_factory_));
+  g_locale_manager = native_factory->CreateAwLocaleManager();
 }
 
 AwContentBrowserClient::~AwContentBrowserClient() {
+  delete g_locale_manager;
+  g_locale_manager = NULL;
 }
 
 void AwContentBrowserClient::AddCertificate(net::CertificateMimeType cert_type,
@@ -192,19 +206,11 @@ AwContentBrowserClient::GetWebContentsViewDelegate(
 
 void AwContentBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
-  // If WebView becomes multi-process capable, this may be insecure.
-  // More benefit can be derived from the ChildProcessSecurotyPolicy by
-  // deferring the GrantScheme calls until we know that a given child process
-  // really does need that priviledge. Check here to ensure we rethink this
-  // when the time comes. See crbug.com/156062.
-  CHECK(content::RenderProcessHost::run_renderer_in_process());
-
-  // Grant content: and file: scheme to the whole process, since we impose
-  // per-view access checks.
+  // Grant content: scheme access to the whole renderer process, since we impose
+  // per-view access checks, and access is granted by default (see
+  // AwSettings.mAllowContentUrlAccess).
   content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
-      host->GetID(), android_webview::kContentScheme);
-  content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
-      host->GetID(), url::kFileScheme);
+      host->GetID(), url::kContentScheme);
 
   host->AddFilter(new AwContentsMessageFilter(host->GetID()));
   host->AddFilter(new cdm::CdmMessageFilterAndroid());
@@ -233,6 +239,37 @@ AwContentBrowserClient::CreateRequestContextForStoragePartition(
   return browser_context_->CreateRequestContextForStoragePartition(
       partition_path, in_memory, protocol_handlers,
       request_interceptors.Pass());
+}
+
+bool AwContentBrowserClient::IsHandledURL(const GURL& url) {
+  if (!url.is_valid()) {
+    // We handle error cases.
+    return true;
+  }
+
+  const std::string scheme = url.scheme();
+  DCHECK_EQ(scheme, base::ToLowerASCII(scheme));
+  // See CreateJobFactory in aw_url_request_context_getter.cc for the
+  // list of protocols that are handled.
+  // TODO(mnaganov): Make this automatic.
+  static const char* const kProtocolList[] = {
+    url::kDataScheme,
+    url::kBlobScheme,
+    url::kFileSystemScheme,
+    content::kChromeUIScheme,
+    content::kChromeDevToolsScheme,
+    url::kContentScheme,
+  };
+  if (scheme == url::kFileScheme) {
+    // Return false for the "special" file URLs, so they can be loaded
+    // even if access to file: scheme is not granted to the child process.
+    return !IsAndroidSpecialFileUrl(url);
+  }
+  for (size_t i = 0; i < arraysize(kProtocolList); ++i) {
+    if (scheme == kProtocolList[i])
+      return true;
+  }
+  return net::URLRequest::IsHandledProtocol(scheme);
 }
 
 std::string AwContentBrowserClient::GetCanonicalEncodingNameByAliasName(
@@ -382,7 +419,8 @@ bool AwContentBrowserClient::CanCreateWindow(
     bool opener_suppressed,
     content::ResourceContext* context,
     int render_process_id,
-    int opener_id,
+    int opener_render_view_id,
+    int opener_render_frame_id,
     bool* no_javascript_access) {
   // We unconditionally allow popup windows at this stage and will give
   // the embedder the opporunity to handle displaying of the popup in

@@ -22,6 +22,7 @@
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -379,11 +380,19 @@ void PreferenceEventRouter::OnPrefChanged(PrefService* pref_service,
                      ep->HasIncognitoPrefValue(browser_pref));
   }
 
-  helpers::DispatchEventToExtensions(profile_,
-                                     event_name,
-                                     &args,
-                                     permission,
-                                     incognito,
+  // TODO(kalman): Have a histogram value for each pref type.
+  // This isn't so important for the current use case of these
+  // histograms, which is to track which event types are waking up event
+  // pages, or which are delivered to persistent background pages. Simply
+  // "a setting changed" is enough detail for that. However if we try to
+  // use these histograms for any fine-grained logic (like removing the
+  // string event name altogether), or if we discover this event is
+  // firing a lot and want to understand that better, then this will need
+  // to change.
+  events::HistogramValue histogram_value =
+      events::TYPES_CHROME_SETTING_ON_CHANGE;
+  helpers::DispatchEventToExtensions(profile_, histogram_value, event_name,
+                                     &args, permission, incognito,
                                      browser_pref);
 }
 

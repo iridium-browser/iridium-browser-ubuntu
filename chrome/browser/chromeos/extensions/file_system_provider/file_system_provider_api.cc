@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
 #include "chrome/browser/chromeos/file_system_provider/request_manager.h"
 #include "chrome/browser/chromeos/file_system_provider/request_value.h"
@@ -295,6 +296,16 @@ FileSystemProviderInternalGetMetadataRequestedSuccessFunction::RunWhenValid() {
   return FulfillRequest(
       RequestValue::CreateForGetMetadataSuccess(params.Pass()),
       false /* has_more */);
+}
+
+bool FileSystemProviderInternalGetActionsRequestedSuccessFunction::
+    RunWhenValid() {
+  using api::file_system_provider_internal::GetActionsRequestedSuccess::Params;
+  scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  return FulfillRequest(RequestValue::CreateForGetActionsSuccess(params.Pass()),
+                        false /* has_more */);
 }
 
 bool FileSystemProviderInternalReadDirectoryRequestedSuccessFunction::

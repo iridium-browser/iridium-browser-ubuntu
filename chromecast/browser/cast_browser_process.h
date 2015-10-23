@@ -15,8 +15,13 @@ namespace breakpad {
 class CrashDumpManager;
 }  // namespace breakpad
 
+namespace net {
+class NetLog;
+}  // namespace net
+
 namespace chromecast {
 class CastService;
+class CastScreen;
 class ConnectivityChecker;
 
 namespace metrics {
@@ -26,6 +31,7 @@ class CastMetricsServiceClient;
 
 namespace shell {
 class CastBrowserContext;
+class CastContentBrowserClient;
 class CastResourceDispatcherHostDelegate;
 class RemoteDebuggingServer;
 
@@ -39,7 +45,11 @@ class CastBrowserProcess {
   virtual ~CastBrowserProcess();
 
   void SetBrowserContext(scoped_ptr<CastBrowserContext> browser_context);
+  void SetCastContentBrowserClient(CastContentBrowserClient* browser_client);
   void SetCastService(scoped_ptr<CastService> cast_service);
+#if defined(USE_AURA)
+  void SetCastScreen(scoped_ptr<CastScreen> cast_screen);
+#endif  // defined(USE_AURA)
   void SetMetricsHelper(scoped_ptr<metrics::CastMetricsHelper> metrics_helper);
   void SetMetricsServiceClient(
       scoped_ptr<metrics::CastMetricsServiceClient> metrics_service_client);
@@ -54,9 +64,16 @@ class CastBrowserProcess {
 #endif  // defined(OS_ANDROID)
   void SetConnectivityChecker(
       scoped_refptr<ConnectivityChecker> connectivity_checker);
+  void SetNetLog(net::NetLog* net_log);
 
+  CastContentBrowserClient* browser_client() const {
+    return cast_content_browser_client_;
+  }
   CastBrowserContext* browser_context() const { return browser_context_.get(); }
   CastService* cast_service() const { return cast_service_.get(); }
+#if defined(USE_AURA)
+  CastScreen* cast_screen() const { return cast_screen_.get(); }
+#endif  // defined(USE_AURA)
   metrics::CastMetricsServiceClient* metrics_service_client() const {
     return metrics_service_client_.get();
   }
@@ -68,11 +85,15 @@ class CastBrowserProcess {
   ConnectivityChecker* connectivity_checker() const {
     return connectivity_checker_.get();
   }
+  net::NetLog* net_log() const { return net_log_; }
 
  private:
   // Note: The following order should match the order they are set in
   // CastBrowserMainParts.
   scoped_ptr<metrics::CastMetricsHelper> metrics_helper_;
+#if defined(USE_AURA)
+  scoped_ptr<CastScreen> cast_screen_;
+#endif  // defined(USE_AURA)
   scoped_ptr<PrefService> pref_service_;
   scoped_refptr<ConnectivityChecker> connectivity_checker_;
   scoped_ptr<CastBrowserContext> browser_context_;
@@ -83,6 +104,9 @@ class CastBrowserProcess {
   scoped_ptr<breakpad::CrashDumpManager> crash_dump_manager_;
 #endif  // defined(OS_ANDROID)
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
+
+  CastContentBrowserClient* cast_content_browser_client_;
+  net::NetLog* net_log_;
 
   // Note: CastService must be destroyed before others.
   scoped_ptr<CastService> cast_service_;

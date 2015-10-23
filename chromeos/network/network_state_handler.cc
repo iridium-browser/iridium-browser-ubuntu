@@ -56,7 +56,7 @@ std::string GetLogName(const ManagedState* state) {
 std::string ValueAsString(const base::Value& value) {
   std::string vstr;
   base::JSONWriter::WriteWithOptions(
-      &value, base::JSONWriter::OPTIONS_OMIT_BINARY_VALUES, &vstr);
+      value, base::JSONWriter::OPTIONS_OMIT_BINARY_VALUES, &vstr);
   return vstr.empty() ? "''" : vstr;
 }
 
@@ -370,8 +370,7 @@ void NetworkStateHandler::SetCheckPortalList(
 }
 
 void NetworkStateHandler::SetWakeOnLanEnabled(bool enabled) {
-  NET_LOG_EVENT("SetWakeOnLanEnabled",
-                base::StringPrintf("%s", enabled ? "true" : "false"));
+  NET_LOG_EVENT("SetWakeOnLanEnabled", enabled ? "true" : "false");
   shill_property_handler_->SetWakeOnLanEnabled(enabled);
 }
 

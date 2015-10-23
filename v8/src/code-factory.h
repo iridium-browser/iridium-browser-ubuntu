@@ -32,36 +32,48 @@ class Callable final BASE_EMBEDDED {
 class CodeFactory final {
  public:
   // Initial states for ICs.
-  static Callable LoadGlobalIC(Isolate* isolate, Handle<GlobalObject> global,
-                               Handle<String> name);
-  static Callable LoadIC(Isolate* isolate, ContextualMode mode);
-  static Callable LoadICInOptimizedCode(Isolate* isolate, ContextualMode mode,
+  static Callable LoadIC(Isolate* isolate, TypeofMode typeof_mode,
+                         LanguageMode language_mode);
+  static Callable LoadICInOptimizedCode(Isolate* isolate,
+                                        TypeofMode typeof_mode,
+                                        LanguageMode language_mode,
                                         InlineCacheState initialization_state);
-  static Callable KeyedLoadIC(Isolate* isolate);
+  static Callable KeyedLoadIC(Isolate* isolate, LanguageMode language_mode);
   static Callable KeyedLoadICInOptimizedCode(
-      Isolate* isolate, InlineCacheState initialization_state);
+      Isolate* isolate, LanguageMode language_mode,
+      InlineCacheState initialization_state);
   static Callable CallIC(Isolate* isolate, int argc,
                          CallICState::CallType call_type);
   static Callable CallICInOptimizedCode(Isolate* isolate, int argc,
                                         CallICState::CallType call_type);
   static Callable StoreIC(Isolate* isolate, LanguageMode mode);
+  static Callable StoreICInOptimizedCode(Isolate* isolate, LanguageMode mode,
+                                         InlineCacheState initialization_state);
   static Callable KeyedStoreIC(Isolate* isolate, LanguageMode mode);
   static Callable KeyedStoreICInOptimizedCode(
       Isolate* isolate, LanguageMode mode,
       InlineCacheState initialization_state);
 
-  static Callable CompareIC(Isolate* isolate, Token::Value op);
+  static Callable CompareIC(Isolate* isolate, Token::Value op,
+                            Strength strength);
 
   static Callable BinaryOpIC(Isolate* isolate, Token::Value op,
-                             LanguageMode language_mode);
+                             Strength strength);
 
   // Code stubs. Add methods here as needed to reduce dependency on
   // code-stubs.h.
+  static Callable LoadGlobalViaContext(Isolate* isolate, int depth);
+  static Callable StoreGlobalViaContext(Isolate* isolate, int depth,
+                                        LanguageMode language_mode);
+
+  static Callable Instanceof(Isolate* isolate, InstanceofStub::Flags flags);
+
   static Callable ToBoolean(
       Isolate* isolate, ToBooleanStub::ResultMode mode,
       ToBooleanStub::Types types = ToBooleanStub::Types());
 
   static Callable ToNumber(Isolate* isolate);
+  static Callable ToObject(Isolate* isolate);
 
   static Callable StringAdd(Isolate* isolate, StringAddFlags flags,
                             PretenureFlag pretenure_flag);

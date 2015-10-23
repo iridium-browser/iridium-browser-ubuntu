@@ -23,10 +23,8 @@
  */
 
 #include "config.h"
-
 #include "platform/graphics/Canvas2DLayerBridge.h"
 
-#include "SkDeferredCanvas.h"
 #include "SkSurface.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/test/MockWebGraphicsContext3D.h"
@@ -36,14 +34,14 @@
 #include "public/platform/WebThread.h"
 #include "third_party/skia/include/core/SkDevice.h"
 #include "wtf/RefPtr.h"
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-using namespace blink;
 using testing::InSequence;
 using testing::Return;
 using testing::Test;
+
+namespace blink {
 
 namespace {
 
@@ -59,12 +57,12 @@ public:
     MockWebGraphicsContext3DProvider(WebGraphicsContext3D* context3d)
         : m_context3d(context3d) { }
 
-    WebGraphicsContext3D* context3d()
+    WebGraphicsContext3D* context3d() override
     {
         return m_context3d;
     }
 
-    GrContext* grContext()
+    GrContext* grContext() override
     {
         return 0;
     }
@@ -92,22 +90,22 @@ private:
 
 class NullWebExternalBitmap : public WebExternalBitmap {
 public:
-    virtual WebSize size()
+    WebSize size() override
     {
         return WebSize();
     }
 
-    virtual void setSize(WebSize)
+    void setSize(WebSize) override
     {
     }
 
-    virtual uint8* pixels()
+    uint8* pixels() override
     {
-        return 0;
+        return nullptr;
     }
 };
 
-} // namespace
+} // anonymous namespace
 
 class Canvas2DLayerBridgeTest : public Test {
 protected:
@@ -116,17 +114,15 @@ protected:
         MockCanvasContext mainMock;
         OwnPtr<MockWebGraphicsContext3DProvider> mainMockProvider = adoptPtr(new MockWebGraphicsContext3DProvider(&mainMock));
         RefPtr<SkSurface> surface = adoptRef(SkSurface::NewRasterN32Premul(300, 150));
-        OwnPtr<SkDeferredCanvas> canvas = adoptPtr(SkDeferredCanvas::Create(surface.get()));
 
         ::testing::Mock::VerifyAndClearExpectations(&mainMock);
 
         {
-            Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), canvas.release(), surface, 0, NonOpaque)));
+            Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), surface, 0, NonOpaque)));
 
             ::testing::Mock::VerifyAndClearExpectations(&mainMock);
 
-            EXPECT_CALL(mainMock, flush());
-            unsigned textureId = bridge->getBackingTexture();
+            unsigned textureId = bridge->newImageSnapshot()->getTextureHandle(true);
             EXPECT_EQ(textureId, 0u);
 
             ::testing::Mock::VerifyAndClearExpectations(&mainMock);
@@ -140,12 +136,11 @@ protected:
         MockCanvasContext mainMock;
         OwnPtr<MockWebGraphicsContext3DProvider> mainMockProvider = adoptPtr(new MockWebGraphicsContext3DProvider(&mainMock));
         RefPtr<SkSurface> surface = adoptRef(SkSurface::NewRasterN32Premul(300, 150));
-        OwnPtr<SkDeferredCanvas> canvas = adoptPtr(SkDeferredCanvas::Create(surface.get()));
 
         ::testing::Mock::VerifyAndClearExpectations(&mainMock);
 
         {
-            Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), canvas.release(), surface, 0, NonOpaque)));
+            Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), surface, 0, NonOpaque)));
             ::testing::Mock::VerifyAndClearExpectations(&mainMock);
             EXPECT_TRUE(bridge->checkSurfaceValid());
             SkPaint paint;
@@ -160,7 +155,7 @@ protected:
             EXPECT_EQ(genID, surface->generationID());
             bridge->canvas()->drawRect(SkRect::MakeXYWH(0, 0, 1, 1), paint);
             EXPECT_EQ(genID, surface->generationID());
-            bridge->freeTransientResources();
+            bridge->flush();
             EXPECT_EQ(genID, surface->generationID());
             ::testing::Mock::VerifyAndClearExpectations(&mainMock);
         }
@@ -172,9 +167,8 @@ protected:
     {
         MockCanvasContext mainMock;
         RefPtr<SkSurface> surface = adoptRef(SkSurface::NewRasterN32Premul(300, 150));
-        OwnPtr<SkDeferredCanvas> canvas = adoptPtr(SkDeferredCanvas::Create(surface.get()));
         OwnPtr<MockWebGraphicsContext3DProvider> mainMockProvider = adoptPtr(new MockWebGraphicsContext3DProvider(&mainMock));
-        Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), canvas.release(), surface, 0, NonOpaque)));
+        Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), surface, 0, NonOpaque)));
         bridge->m_lastImageId = 1;
 
         NullWebExternalBitmap bitmap;
@@ -192,21 +186,19 @@ protected:
         // This test passes by not crashing and not triggering assertions.
         {
             WebExternalTextureMailbox mailbox;
-            OwnPtr<SkDeferredCanvas> canvas = adoptPtr(SkDeferredCanvas::Create(surface.get()));
             OwnPtr<MockWebGraphicsContext3DProvider> mainMockProvider = adoptPtr(new MockWebGraphicsContext3DProvider(&mainMock));
-            Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), canvas.release(), surface, 0, NonOpaque)));
+            Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), surface, 0, NonOpaque)));
             bridge->prepareMailbox(&mailbox, 0);
             bridge->mailboxReleased(mailbox, lostResource);
         }
 
         // Retry with mailbox released while bridge destruction is in progress
         {
-            OwnPtr<SkDeferredCanvas> canvas = adoptPtr(SkDeferredCanvas::Create(surface.get()));
             OwnPtr<MockWebGraphicsContext3DProvider> mainMockProvider = adoptPtr(new MockWebGraphicsContext3DProvider(&mainMock));
             WebExternalTextureMailbox mailbox;
             Canvas2DLayerBridge* rawBridge;
             {
-                Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), canvas.release(), surface, 0, NonOpaque)));
+                Canvas2DLayerBridgePtr bridge(adoptRef(new Canvas2DLayerBridge(mainMockProvider.release(), surface, 0, NonOpaque)));
                 bridge->prepareMailbox(&mailbox, 0);
                 rawBridge = bridge.get();
             } // bridge goes out of scope, but object is kept alive by self references
@@ -216,8 +208,6 @@ protected:
         }
     }
 };
-
-namespace {
 
 TEST_F(Canvas2DLayerBridgeTest, testFullLifecycleSingleThreaded)
 {
@@ -239,4 +229,4 @@ TEST_F(Canvas2DLayerBridgeTest, testPrepareMailboxAndLoseResource)
     prepareMailboxAndLoseResourceTest();
 }
 
-} // namespace
+} // namespace blink

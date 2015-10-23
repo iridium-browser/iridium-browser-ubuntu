@@ -11,7 +11,7 @@ import datetime
 import itertools
 import operator
 
-from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import config_lib
 from chromite.cbuildbot import constants
 
 
@@ -30,6 +30,8 @@ _PRECQ_STATUS_TO_ACTION = {
 
 _PRECQ_ACTION_TO_STATUS = dict(
     (v, k) for k, v in _PRECQ_STATUS_TO_ACTION.items())
+
+PRE_CQ_CL_STATUSES = set(_PRECQ_STATUS_TO_ACTION.keys())
 
 assert len(_PRECQ_STATUS_TO_ACTION) == len(_PRECQ_ACTION_TO_STATUS), \
     '_PRECQ_STATUS_TO_ACTION values are not unique.'
@@ -124,7 +126,7 @@ class CLAction(_CLActionTuple):
         constants.CQ or constants.PRE_CQ depending on who took the action.
     """
     build_config = self.build_config
-    if build_config.endswith('-%s' % cbuildbot_config.CONFIG_TYPE_PALADIN):
+    if build_config.endswith('-%s' % config_lib.CONFIG_TYPE_PALADIN):
       return constants.CQ
     else:
       return constants.PRE_CQ

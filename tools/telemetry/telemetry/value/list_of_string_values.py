@@ -24,9 +24,9 @@ class ListOfStringValues(value_module.Value):
 
   def __repr__(self):
     if self.page:
-      page_name = self.page.url
+      page_name = self.page.display_name
     else:
-      page_name = None
+      page_name = 'None'
     if self.same_page_merge_policy == value_module.CONCATENATE:
       merge_policy = 'CONCATENATE'
     else:
@@ -103,12 +103,10 @@ class ListOfStringValues(value_module.Value):
     return cls._MergeLikeValues(values, v0.page, v0.name, v0.tir_label)
 
   @classmethod
-  def MergeLikeValuesFromDifferentPages(cls, values,
-                                        group_by_name_suffix=False):
+  def MergeLikeValuesFromDifferentPages(cls, values):
     assert len(values) > 0
     v0 = values[0]
-    name = v0.name_suffix if group_by_name_suffix else v0.name
-    return cls._MergeLikeValues(values, None, name, v0.tir_label)
+    return cls._MergeLikeValues(values, None, v0.name, v0.tir_label)
 
   @classmethod
   def _MergeLikeValues(cls, values, page, name, tir_label):

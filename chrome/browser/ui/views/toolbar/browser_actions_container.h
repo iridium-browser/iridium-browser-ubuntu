@@ -168,7 +168,7 @@ class BrowserActionsContainer
   }
 
   // Returns the ID of the action represented by the view at |index|.
-  const std::string& GetIdAt(size_t index) const;
+  std::string GetIdAt(size_t index) const;
 
   // Returns the ToolbarActionView* associated with the given |extension|, or
   // NULL if none exists.
@@ -232,6 +232,7 @@ class BrowserActionsContainer
   bool ShownInsideMenu() const override;
   void OnToolbarActionViewDragDone() override;
   views::MenuButton* GetOverflowReferenceView() override;
+  void OnMouseEnteredToolbarActionView() override;
 
   // ToolbarActionsBarDelegate:
   void AddViewForAction(ToolbarActionViewController* action,
@@ -314,7 +315,8 @@ class BrowserActionsContainer
   ChevronMenuButton* chevron_;
 
   // The painter used when we are highlighting a subset of extensions.
-  scoped_ptr<views::Painter> highlight_painter_;
+  scoped_ptr<views::Painter> info_highlight_painter_;
+  scoped_ptr<views::Painter> warning_highlight_painter_;
 
   // The animation that happens when the container snaps to place.
   scoped_ptr<gfx::SlideAnimation> resize_animation_;
@@ -347,7 +349,7 @@ class BrowserActionsContainer
   // The extension bubble that is actively showing, if any.
   views::BubbleDelegateView* active_bubble_;
 
-  ObserverList<BrowserActionsContainerObserver> observers_;
+  base::ObserverList<BrowserActionsContainerObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserActionsContainer);
 };

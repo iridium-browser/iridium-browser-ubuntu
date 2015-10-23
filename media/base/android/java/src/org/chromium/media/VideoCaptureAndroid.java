@@ -6,7 +6,8 @@ package org.chromium.media;
 
 import android.content.Context;
 import android.graphics.ImageFormat;
-import android.util.Log;
+
+import org.chromium.base.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,7 +42,7 @@ public class VideoCaptureAndroid extends VideoCaptureCamera {
 
     private int mExpectedFrameSize;
     private static final int NUM_CAPTURE_BUFFERS = 3;
-    private static final String TAG = "VideoCaptureAndroid";
+    private static final String TAG = "cr.media";
 
     static int getNumberOfCameras() {
         return android.hardware.Camera.getNumberOfCameras();
@@ -62,12 +63,12 @@ public class VideoCaptureAndroid extends VideoCaptureCamera {
                 == android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT ? "front" : "back");
     }
 
-    static CaptureFormat[] getDeviceSupportedFormats(int id) {
+    static VideoCaptureFormat[] getDeviceSupportedFormats(int id) {
         android.hardware.Camera camera;
         try {
             camera = android.hardware.Camera.open(id);
         } catch (RuntimeException ex) {
-            Log.e(TAG, "Camera.open: " + ex);
+            Log.e(TAG, "Camera.open: ", ex);
             return null;
         }
         android.hardware.Camera.Parameters parameters = getCameraParameters(camera);
@@ -75,7 +76,7 @@ public class VideoCaptureAndroid extends VideoCaptureCamera {
             return null;
         }
 
-        ArrayList<CaptureFormat> formatList = new ArrayList<CaptureFormat>();
+        ArrayList<VideoCaptureFormat> formatList = new ArrayList<VideoCaptureFormat>();
         // getSupportedPreview{Formats,FpsRange,PreviewSizes}() returns Lists
         // with at least one element, but when the camera is in bad state, they
         // can return null pointers; in that case we use a 0 entry, so we can
@@ -112,7 +113,7 @@ public class VideoCaptureAndroid extends VideoCaptureCamera {
                     supportedSizes.add(camera.new Size(0, 0));
                 }
                 for (android.hardware.Camera.Size size : supportedSizes) {
-                    formatList.add(new CaptureFormat(size.width,
+                    formatList.add(new VideoCaptureFormat(size.width,
                                                      size.height,
                                                      (fpsRange[1] + 999) / 1000,
                                                      pixelFormat));
@@ -120,7 +121,7 @@ public class VideoCaptureAndroid extends VideoCaptureCamera {
             }
         }
         camera.release();
-        return formatList.toArray(new CaptureFormat[formatList.size()]);
+        return formatList.toArray(new VideoCaptureFormat[formatList.size()]);
     }
 
     VideoCaptureAndroid(Context context,
@@ -135,7 +136,7 @@ public class VideoCaptureAndroid extends VideoCaptureCamera {
             int height,
             int frameRate,
             android.hardware.Camera.Parameters cameraParameters) {
-        mCaptureFormat = new CaptureFormat(
+        mCaptureFormat = new VideoCaptureFormat(
                 width, height, frameRate, BuggyDeviceHack.getImageFormat());
     }
 

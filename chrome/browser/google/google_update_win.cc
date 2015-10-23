@@ -23,6 +23,7 @@
 #include "base/time/time.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/windows_version.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/helper.h"
@@ -59,6 +60,7 @@ const int64_t kGoogleUpdatePollIntervalMs = 250;
 
 // Constants from Google Update.
 const HRESULT GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY = 0x80040813;
+const HRESULT GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY_MANUAL = 0x8004081f;
 const HRESULT GOOPDATEINSTALL_E_INSTALLER_FAILED = 0x80040902;
 
 // Check if the currently running instance can be updated by Google Update.
@@ -67,9 +69,6 @@ const HRESULT GOOPDATEINSTALL_E_INSTALLER_FAILED = 0x80040902;
 GoogleUpdateErrorCode CanUpdateCurrentChrome(
     const base::FilePath& chrome_exe_path,
     bool system_level_install) {
-#if !defined(GOOGLE_CHROME_BUILD)
-  return CANNOT_UPGRADE_CHROME_IN_THIS_DIRECTORY;
-#else
   DCHECK_NE(InstallUtil::IsPerUserInstall(chrome_exe_path),
             system_level_install);
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
@@ -83,7 +82,6 @@ GoogleUpdateErrorCode CanUpdateCurrentChrome(
   }
 
   return GOOGLE_UPDATE_NO_ERROR;
-#endif
 }
 
 // Explicitly allow the Google Update service to impersonate the client since
@@ -217,9 +215,9 @@ class UpdateCheckDriver {
 
   // Sets status_ to UPGRADE_ERROR, error_code_ to |error_code|, hresult_ to
   // |hresult|, installer_exit_code_ to |installer_exit_code|, and
-  // error_message_ to a composition of all values suitable for display to the
-  // user. This call should be followed by deletion of the driver, which will
-  // result in the caller being notified via its delegate.
+  // html_error_message_ to a composition of all values suitable for display
+  // to the user. This call should be followed by deletion of the driver,
+  // which will result in the caller being notified via its delegate.
   void OnUpgradeError(GoogleUpdateErrorCode error_code,
                       HRESULT hresult,
                       int installer_exit_code,
@@ -318,7 +316,7 @@ class UpdateCheckDriver {
   // caller.
   GoogleUpdateUpgradeStatus status_;
   GoogleUpdateErrorCode error_code_;
-  base::string16 error_message_;
+  base::string16 html_error_message_;
   base::string16 new_version_;
   HRESULT hresult_;
   int installer_exit_code_;
@@ -382,7 +380,7 @@ UpdateCheckDriver::~UpdateCheckDriver() {
   }
   if (delegate_) {
     if (status_ == UPGRADE_ERROR)
-      delegate_->OnError(error_code_, error_message_, new_version_);
+      delegate_->OnError(error_code_, html_error_message_, new_version_);
     else if (install_update_if_possible_)
       delegate_->OnUpgradeComplete(new_version_);
     else
@@ -530,6 +528,8 @@ bool UpdateCheckDriver::IsErrorState(
     LONG code = 0;
     if (*hresult == GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY) {
       *error_code = GOOGLE_UPDATE_DISABLED_BY_POLICY;
+    } else if (*hresult == GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY_MANUAL) {
+      *error_code = GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY;
     } else if (*hresult == GOOPDATEINSTALL_E_INSTALLER_FAILED &&
                SUCCEEDED(current_state->get_installerResultCode(&code))) {
       *installer_exit_code = code;
@@ -674,7 +674,7 @@ void UpdateCheckDriver::PollGoogleUpdate() {
   } else if (IsFinalState(state, state_value, &upgrade_status, &new_version)) {
     status_ = upgrade_status;
     error_code_ = GOOGLE_UPDATE_NO_ERROR;
-    error_message_.clear();
+    html_error_message_.clear();
     if (!new_version.empty())
       new_version_ = new_version;
     hresult_ = S_OK;
@@ -722,18 +722,21 @@ void UpdateCheckDriver::OnUpgradeError(GoogleUpdateErrorCode error_code,
   error_code_ = error_code;
   hresult_ = hresult;
   installer_exit_code_ = installer_exit_code;
-  base::string16 error_msg =
-      base::StringPrintf(L"%d: 0x%x", error_code_, hresult_);
+  base::string16 html_error_msg =
+      base::StringPrintf(L"%d: <a href='%ls0x%X' target=_blank>0x%X</a>",
+                         error_code_, base::UTF8ToUTF16(
+                             chrome::kUpgradeHelpCenterBaseURL).c_str(),
+                         hresult_, hresult_);
   if (installer_exit_code_ != -1)
-    error_msg += base::StringPrintf(L": %d", installer_exit_code_);
+    html_error_msg += base::StringPrintf(L": %d", installer_exit_code_);
   if (system_level_install_)
-    error_msg += L" -- system level";
+    html_error_msg += L" -- system level";
   if (error_string.empty()) {
-    error_message_ = l10n_util::GetStringFUTF16(
-        IDS_ABOUT_BOX_ERROR_UPDATE_CHECK_FAILED, error_msg);
+    html_error_message_ = l10n_util::GetStringFUTF16(
+        IDS_ABOUT_BOX_ERROR_UPDATE_CHECK_FAILED, html_error_msg);
   } else {
-    error_message_ = l10n_util::GetStringFUTF16(
-        IDS_ABOUT_BOX_GOOGLE_UPDATE_ERROR, error_string, error_msg);
+    html_error_message_ = l10n_util::GetStringFUTF16(
+        IDS_ABOUT_BOX_GOOGLE_UPDATE_ERROR, error_string, html_error_msg);
   }
 }
 

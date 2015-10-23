@@ -18,6 +18,7 @@
 #include "ui/base/models/menu_model.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 
+class ExtensionToolbarMenuView;
 class BookmarkMenuDelegate;
 class Browser;
 class WrenchMenuObserver;
@@ -110,6 +111,10 @@ class WrenchMenu : public views::MenuDelegate,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
+  ExtensionToolbarMenuView* extension_toolbar_for_testing() {
+    return extension_toolbar_;
+  }
+
  private:
   class CutCopyPasteView;
   class RecentTabsMenuModelDelegate;
@@ -179,6 +184,10 @@ class WrenchMenu : public views::MenuDelegate,
   // Menu corresponding to IDC_TAKE_SCREENSHOT.
   views::MenuItemView* screenshot_menu_item_;
 
+  // The view within the IDC_EXTENSIONS_OVERFLOW_MENU item (only present with
+  // the toolbar action redesign enabled).
+  ExtensionToolbarMenuView* extension_toolbar_;
+
   // Used for managing "Recent tabs" menu items.
   scoped_ptr<RecentTabsMenuModelDelegate> recent_tabs_menu_model_delegate_;
 
@@ -187,7 +196,7 @@ class WrenchMenu : public views::MenuDelegate,
   // The bit mask of RunFlags.
   const int run_flags_;
 
-  ObserverList<WrenchMenuObserver> observer_list_;
+  base::ObserverList<WrenchMenuObserver> observer_list_;
 
   // Records the time from when menu opens to when the user selects a menu item.
   base::ElapsedTimer menu_opened_timer_;

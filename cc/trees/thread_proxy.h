@@ -13,12 +13,10 @@
 #include "cc/animation/animation_events.h"
 #include "cc/base/completion_event.h"
 #include "cc/base/delayed_unique_notifier.h"
-#include "cc/resources/resource_update_controller.h"
 #include "cc/scheduler/commit_earlyout_reason.h"
 #include "cc/scheduler/scheduler.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/proxy.h"
-#include "cc/trees/proxy_timing_history.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -30,15 +28,12 @@ class BeginFrameSource;
 class ContextProvider;
 class InputHandlerClient;
 class LayerTreeHost;
-class PrioritizedResourceManager;
-class ResourceUpdateQueue;
 class Scheduler;
 class ScopedThreadProxy;
 
 class CC_EXPORT ThreadProxy : public Proxy,
-                    NON_EXPORTED_BASE(LayerTreeHostImplClient),
-                    NON_EXPORTED_BASE(SchedulerClient),
-                    NON_EXPORTED_BASE(ResourceUpdateControllerClient) {
+                              NON_EXPORTED_BASE(LayerTreeHostImplClient),
+                              NON_EXPORTED_BASE(SchedulerClient) {
  public:
   static scoped_ptr<Proxy> Create(
       LayerTreeHost* layer_tree_host,
@@ -56,8 +51,17 @@ class CC_EXPORT ThreadProxy : public Proxy,
     BeginFrameArgs begin_frame_args;
     scoped_ptr<ScrollAndScaleSet> scroll_info;
     size_t memory_allocation_limit_bytes;
-    int memory_allocation_priority_cutoff;
     bool evicted_ui_resources;
+  };
+
+  // Commits between the main and impl threads are processed through a pipeline
+  // with the following stages. For efficiency we can early out at any stage if
+  // we decide that no further processing is necessary.
+  enum CommitPipelineStage {
+    NO_PIPELINE_STAGE,
+    ANIMATE_PIPELINE_STAGE,
+    UPDATE_LAYERS_PIPELINE_STAGE,
+    COMMIT_PIPELINE_STAGE,
   };
 
   struct MainThreadOnly {
@@ -66,16 +70,18 @@ class CC_EXPORT ThreadProxy : public Proxy,
 
     const int layer_tree_host_id;
 
-    // Set only when SetNeedsAnimate is called.
-    bool animate_requested;
-    // Set only when SetNeedsCommit is called.
-    bool commit_requested;
-    // Set by SetNeedsAnimate, SetNeedsUpdateLayers, and SetNeedsCommit.
-    bool commit_request_sent_to_impl_thread;
+    // The furthest pipeline stage which has been requested for the next
+    // commit.
+    CommitPipelineStage max_requested_pipeline_stage;
+    // The commit pipeline stage that is currently being processed.
+    CommitPipelineStage current_pipeline_stage;
+    // The commit pipeline stage at which processing for the current commit
+    // will stop. Only valid while we are executing the pipeline (i.e.,
+    // |current_pipeline_stage| is set to a pipeline stage).
+    CommitPipelineStage final_pipeline_stage;
 
     bool started;
     bool prepare_tiles_pending;
-    bool can_cancel_commit;
     bool defer_commits;
 
     RendererCapabilities renderer_capabilities_main_thread_copy;
@@ -87,8 +93,6 @@ class CC_EXPORT ThreadProxy : public Proxy,
   struct MainThreadOrBlockedMainThread {
     explicit MainThreadOrBlockedMainThread(LayerTreeHost* host);
     ~MainThreadOrBlockedMainThread();
-
-    PrioritizedResourceManager* contents_texture_manager();
 
     LayerTreeHost* layer_tree_host;
     bool commit_waits_for_activation;
@@ -105,10 +109,6 @@ class CC_EXPORT ThreadProxy : public Proxy,
 
     const int layer_tree_host_id;
 
-    // Copy of the main thread side contents texture manager for work
-    // that needs to be done on the compositor thread.
-    PrioritizedResourceManager* contents_texture_manager;
-
     scoped_ptr<Scheduler> scheduler;
 
     // Set when the main thread is waiting on a
@@ -121,8 +121,6 @@ class CC_EXPORT ThreadProxy : public Proxy,
     // Set when the main thread is waiting on a pending tree activation.
     CompletionEvent* completion_event_for_commit_held_on_tree_activation;
 
-    scoped_ptr<ResourceUpdateController> current_resource_update_controller;
-
     // Set when the next draw should post DidCommitAndDrawFrame to the main
     // thread.
     bool next_frame_is_newly_committed_frame;
@@ -131,17 +129,15 @@ class CC_EXPORT ThreadProxy : public Proxy,
 
     bool input_throttled_until_commit;
 
-    base::TimeTicks animation_time;
-
     // Whether a commit has been completed since the last time animations were
     // ticked. If this happens, we need to animate again.
     bool did_commit_after_animating;
 
     DelayedUniqueNotifier smoothness_priority_expiration_notifier;
 
-    ProxyTimingHistory timing_history;
-
     scoped_ptr<BeginFrameSource> external_begin_frame_source;
+
+    RenderingStatsInstrumentation* rendering_stats_instrumentation;
 
     // Values used to keep track of frame durations. Used only in frame timing.
     BeginFrameArgs last_begin_main_frame_args;
@@ -176,7 +172,6 @@ class CC_EXPORT ThreadProxy : public Proxy,
   void MainThreadHasStoppedFlinging() override;
   void Start() override;
   void Stop() override;
-  size_t MaxPartialTextureUpdates() const override;
   void ForceSerializeOnSwapBuffers() override;
   bool SupportsImplScrolling() const override;
   void SetDebugState(const LayerTreeDebugState& debug_state) override;
@@ -207,16 +202,20 @@ class CC_EXPORT ThreadProxy : public Proxy,
   void SetVideoNeedsBeginFrames(bool needs_begin_frames) override;
   void PostAnimationEventsToMainThreadOnImplThread(
       scoped_ptr<AnimationEventsVector> queue) override;
-  bool ReduceContentsTextureMemoryOnImplThread(size_t limit_bytes,
-                                               int priority_cutoff) override;
   bool IsInsideDraw() override;
   void RenewTreePriority() override;
   void PostDelayedAnimationTaskOnImplThread(const base::Closure& task,
                                             base::TimeDelta delay) override;
   void DidActivateSyncTree() override;
+  void WillPrepareTiles() override;
   void DidPrepareTiles() override;
   void DidCompletePageScaleAnimationOnImplThread() override;
   void OnDrawForOutputSurface() override;
+  // This should only be called by LayerTreeHostImpl::PostFrameTimingEvents.
+  void PostFrameTimingEventsOnImplThread(
+      scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
+      scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events)
+      override;
 
   // SchedulerClient implementation
   void WillBeginImplFrame(const BeginFrameArgs& args) override;
@@ -230,15 +229,8 @@ class CC_EXPORT ThreadProxy : public Proxy,
   void ScheduledActionBeginOutputSurfaceCreation() override;
   void ScheduledActionPrepareTiles() override;
   void ScheduledActionInvalidateOutputSurface() override;
-  void DidAnticipatedDrawTimeChange(base::TimeTicks time) override;
-  base::TimeDelta DrawDurationEstimate() override;
-  base::TimeDelta BeginMainFrameToCommitDurationEstimate() override;
-  base::TimeDelta CommitToActivateDurationEstimate() override;
   void SendBeginFramesToChildren(const BeginFrameArgs& args) override;
   void SendBeginMainFrameNotExpectedSoon() override;
-
-  // ResourceUpdateControllerClient implementation
-  void ReadyToFinalizeTextureUpdates() override;
 
  protected:
   ThreadProxy(
@@ -261,14 +253,16 @@ class CC_EXPORT ThreadProxy : public Proxy,
   void RequestNewOutputSurface();
   void DidInitializeOutputSurface(bool success,
                                   const RendererCapabilities& capabilities);
-  void SendCommitRequestToImplThreadIfNeeded();
+  // Returns |true| if the request was actually sent, |false| if one was
+  // already outstanding.
+  bool SendCommitRequestToImplThreadIfNeeded(
+      CommitPipelineStage required_stage);
   void DidCompletePageScaleAnimation();
 
   // Called on impl thread.
   struct SchedulerStateRequest;
 
-  void StartCommitOnImplThread(CompletionEvent* completion,
-                               ResourceUpdateQueue* queue);
+  void StartCommitOnImplThread(CompletionEvent* completion);
   void BeginMainFrameAbortedOnImplThread(CommitEarlyOutReason reason);
   void FinishAllRenderingOnImplThread(CompletionEvent* completion);
   void InitializeImplOnImplThread(CompletionEvent* completion);
@@ -292,6 +286,9 @@ class CC_EXPORT ThreadProxy : public Proxy,
   void SetInputThrottledUntilCommitOnImplThread(bool is_throttled);
   void SetDebugStateOnImplThread(const LayerTreeDebugState& debug_state);
   void SetDeferCommitsOnImplThread(bool defer_commits) const;
+  void PostFrameTimingEvents(
+      scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
+      scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events);
 
   LayerTreeHost* layer_tree_host();
   const LayerTreeHost* layer_tree_host() const;

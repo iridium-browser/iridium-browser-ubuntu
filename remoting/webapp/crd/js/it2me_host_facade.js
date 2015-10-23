@@ -22,7 +22,7 @@ remoting.It2MeHostFacade = function() {
   /** @private {number} */
   this.nextId_ = 0;
 
-  /** @private {?chrome.runtime.Port} */
+  /** @private {?Port} */
   this.port_ = null;
 
   /** @private {string} */
@@ -61,6 +61,11 @@ remoting.It2MeHostFacade = function() {
 
   /** @private {?function(boolean):void} */
   this.onNatPolicyChanged_ = function() {};
+
+  /** @private */
+  this.debugMessageHandler_ =
+      new remoting.NativeMessageHostDebugMessageHandler();
+
 };
 
 remoting.It2MeHostFacade.prototype.dispose = function() {
@@ -208,6 +213,10 @@ remoting.It2MeHostFacade.prototype.getClient = function() {
  */
 remoting.It2MeHostFacade.prototype.onIncomingMessage_ =
     function(message) {
+  if (this.debugMessageHandler_.handleMessage(message)) {
+    return;
+  }
+
   var type = base.getStringAttr(message, 'type');
 
   switch (type) {
@@ -237,7 +246,8 @@ remoting.It2MeHostFacade.prototype.onIncomingMessage_ =
 
     case 'hostStateChanged':
       var stateString = base.getStringAttr(message, 'state');
-      console.log('hostStateChanged received: ', stateString);
+      var errorMessage = base.getStringAttr(message, 'error_message', '');
+      console.log('hostStateChanged received: ' + stateString);
       var state = remoting.HostSession.State.fromString(stateString);
 
       switch (state) {

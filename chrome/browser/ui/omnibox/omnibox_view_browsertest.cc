@@ -11,7 +11,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -21,8 +20,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/test_toolbar_model.h"
 #include "chrome/common/chrome_paths.h"
@@ -36,8 +33,11 @@
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
-#include "components/omnibox/autocomplete_input.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/history_quick_provider.h"
+#include "components/omnibox/browser/omnibox_popup_model.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/notification_service.h"
@@ -48,6 +48,11 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/point.h"
+
+// For fine-grained suppression on flaky tests.
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
 
 using base::ASCIIToUTF16;
 using base::UTF16ToUTF8;
@@ -448,6 +453,11 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DISABLED_BrowserAccelerators) {
 #endif
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_PopupAccelerators) {
+#if defined(OS_WIN)
+  // Flaky on XP bot. http://crbug.com/499155
+  if (base::win::GetVersion() <= base::win::VERSION_XP)
+    return;
+#endif
   // Create a popup.
   Browser* popup = CreateBrowserForPopup(browser()->profile());
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(popup));
@@ -1865,4 +1875,89 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
   test_toolbar_model->set_text(url_c);
   omnibox_view->Update();
   EXPECT_EQ(url_c, omnibox_view->GetText());
+}
+
+namespace {
+
+// Returns the number of characters currently selected in |omnibox_view|.
+size_t GetSelectionSize(OmniboxView* omnibox_view) {
+  size_t start, end;
+  omnibox_view->GetSelectionBounds(&start, &end);
+  if (end >= start)
+    return end - start;
+  return start - end;
+}
+
+}  // namespace
+
+// Test that if the Omnibox has focus, and had everything selected before a
+// non-user-initiated update, then it retains the selection after the update.
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, SelectAllStaysAfterUpdate) {
+  OmniboxView* omnibox_view = nullptr;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  TestToolbarModel* test_toolbar_model = new TestToolbarModel;
+  scoped_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
+  browser()->swap_toolbar_models(&toolbar_model);
+
+  base::string16 url_a(ASCIIToUTF16("http://www.a.com/"));
+  base::string16 url_b(ASCIIToUTF16("http://www.b.com/"));
+  chrome::FocusLocationBar(browser());
+
+  test_toolbar_model->set_text(url_a);
+  omnibox_view->Update();
+  EXPECT_EQ(url_a, omnibox_view->GetText());
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+
+  // Updating while selected should retain SelectAll().
+  test_toolbar_model->set_text(url_b);
+  omnibox_view->Update();
+  EXPECT_EQ(url_b, omnibox_view->GetText());
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+
+  // Select nothing, then switch back. Shouldn't gain a selection.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, 0));
+  test_toolbar_model->set_text(url_a);
+  omnibox_view->Update();
+  EXPECT_EQ(url_a, omnibox_view->GetText());
+  EXPECT_FALSE(omnibox_view->IsSelectAll());
+
+  // Test behavior of the "reversed" attribute of OmniboxView::SelectAll().
+  test_toolbar_model->set_text(ASCIIToUTF16("AB"));
+  omnibox_view->Update();
+  // Should be at the end already. Shift+Left to select "reversed".
+  EXPECT_EQ(0u, GetSelectionSize(omnibox_view));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, ui::EF_SHIFT_DOWN));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, ui::EF_SHIFT_DOWN));
+  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+
+  test_toolbar_model->set_text(ASCIIToUTF16("CD"));
+  omnibox_view->Update();
+  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
+
+  // At the start, so Shift+Left should do nothing.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, ui::EF_SHIFT_DOWN));
+  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
+
+  // And Shift+Right should reduce by one character.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
+  EXPECT_EQ(1u, GetSelectionSize(omnibox_view));
+
+  // No go to start and select all to the right (not reversed).
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, 0));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, 0));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
+  test_toolbar_model->set_text(ASCIIToUTF16("AB"));
+  omnibox_view->Update();
+  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
+
+  // Now Shift+Right should do nothing, and Shift+Left should reduce.
+  // At the end, so Shift+Right should do nothing.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
+  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
+
+  // And Left should reduce by one character.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, ui::EF_SHIFT_DOWN));
+  EXPECT_EQ(1u, GetSelectionSize(omnibox_view));
 }

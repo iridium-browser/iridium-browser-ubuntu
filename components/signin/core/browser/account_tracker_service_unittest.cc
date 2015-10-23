@@ -5,11 +5,13 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/strings/stringprintf.h"
+#include "components/signin/core/browser/account_fetcher_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_account_fetcher_service.h"
 #include "components/signin/core/browser/test_signin_client.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "google_apis/gaia/fake_oauth2_token_service.h"
@@ -29,7 +31,8 @@ const std::string kTokenInfoResponseFormat =
       \"hd\": \"\",           \
       \"name\": \"%s\",       \
       \"given_name\": \"%s\", \
-      \"locale\": \"%s\"      \
+      \"locale\": \"%s\",     \
+      \"picture\": \"%s\"     \
     }";
 
 const std::string kTokenInfoIncompleteResponseFormat =
@@ -64,6 +67,10 @@ std::string AccountIdToLocale(const std::string account_id) {
   return "locale-" + account_id;
 }
 
+std::string AccountIdToPictureURL(const std::string account_id) {
+  return "picture_url-" + account_id;
+}
+
 void CheckAccountDetails(const std::string account_id,
                          const AccountTrackerService::AccountInfo& info) {
   EXPECT_EQ(account_id, info.account_id);
@@ -74,6 +81,15 @@ void CheckAccountDetails(const std::string account_id,
   EXPECT_EQ(AccountIdToFullName(account_id), info.full_name);
   EXPECT_EQ(AccountIdToGivenName(account_id), info.given_name);
   EXPECT_EQ(AccountIdToLocale(account_id), info.locale);
+}
+
+void FakeUserInfoFetchSuccess(FakeAccountFetcherService* fetcher,
+                              const std::string& account_id) {
+  fetcher->FakeUserInfoFetchSuccess(
+      account_id, AccountIdToEmail(account_id), AccountIdToGaiaId(account_id),
+      AccountTrackerService::kNoHostedDomainFound,
+      AccountIdToFullName(account_id), AccountIdToGivenName(account_id),
+      AccountIdToLocale(account_id), AccountIdToPictureURL(account_id));
 }
 
 class TrackingEvent {
@@ -245,21 +261,24 @@ class AccountTrackerServiceTest : public testing::Test {
         prefs::kAccountIdMigrationState,
         AccountTrackerService::MIGRATION_NOT_STARTED);
     pref_service_.registry()->RegisterInt64Pref(
-        AccountTrackerService::kAccountTrackerServiceLastUpdate, 0);
+        AccountFetcherService::kLastUpdatePref, 0);
     signin_client_.reset(new TestSigninClient(&pref_service_));
     signin_client_.get()->SetURLRequestContext(
-        new net::TestURLRequestContextGetter(
-            message_loop_.message_loop_proxy()));
+        new net::TestURLRequestContextGetter(message_loop_.task_runner()));
 
     account_tracker_.reset(new AccountTrackerService());
-    account_tracker_->Initialize(fake_oauth2_token_service_.get(),
-                                 signin_client_.get());
-    account_tracker_->EnableNetworkFetches();
-    account_tracker_->AddObserver(&observer_);
+    account_tracker_->Initialize(signin_client_.get());
+
+    account_fetcher_.reset(new AccountFetcherService());
+    account_fetcher_->Initialize(signin_client_.get(),
+                                 fake_oauth2_token_service_.get(),
+                                 account_tracker_.get(), nullptr);
+
+    account_fetcher_->EnableNetworkFetches();
   }
 
   void TearDown() override {
-    account_tracker_->RemoveObserver(&observer_);
+    account_fetcher_->Shutdown();
     account_tracker_->Shutdown();
   }
 
@@ -284,7 +303,8 @@ class AccountTrackerServiceTest : public testing::Test {
         AccountIdToEmail(account_id).c_str(),
         AccountIdToFullName(account_id).c_str(),
         AccountIdToGivenName(account_id).c_str(),
-        AccountIdToLocale(account_id).c_str());
+        AccountIdToLocale(account_id).c_str(),
+        AccountIdToPictureURL(account_id).c_str());
   }
 
   std::string GenerateIncompleteTokenInfoResponse(
@@ -301,8 +321,8 @@ class AccountTrackerServiceTest : public testing::Test {
   net::TestURLFetcherFactory* test_fetcher_factory() {
     return &test_fetcher_factory_;
   }
+  AccountFetcherService* account_fetcher() { return account_fetcher_.get(); }
   AccountTrackerService* account_tracker() { return account_tracker_.get(); }
-  AccountTrackerObserver* observer() { return &observer_; }
   OAuth2TokenService* token_service() {
     return fake_oauth2_token_service_.get();
   }
@@ -317,8 +337,8 @@ class AccountTrackerServiceTest : public testing::Test {
   net::TestURLFetcherFactory test_fetcher_factory_;
   scoped_ptr<FakeOAuth2TokenService> fake_oauth2_token_service_;
   TestingPrefServiceSimple pref_service_;
+  scoped_ptr<AccountFetcherService> account_fetcher_;
   scoped_ptr<AccountTrackerService> account_tracker_;
-  AccountTrackerObserver observer_;
   scoped_ptr<TestSigninClient> signin_client_;
 };
 
@@ -361,84 +381,113 @@ TEST_F(AccountTrackerServiceTest, Basic) {
 }
 
 TEST_F(AccountTrackerServiceTest, TokenAvailable) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
-  ASSERT_FALSE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents());
+  ASSERT_FALSE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents());
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, TokenAvailable_Revoked) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
   SimulateTokenRevoked("alpha");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents());
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents());
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, TokenAvailable_UserInfo) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
   ReturnOAuthUrlFetchSuccess("alpha");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "alpha")));
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "alpha")));
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, TokenAvailable_UserInfo_Revoked) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
   ReturnOAuthUrlFetchSuccess("alpha");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "alpha")));
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "alpha")));
   SimulateTokenRevoked("alpha");
-  ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(REMOVED, "alpha")));
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(REMOVED, "alpha")));
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, TokenAvailable_UserInfoFailed) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
   ReturnOAuthUrlFetchFailure("alpha");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents());
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents());
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, TokenAvailableTwice_UserInfoOnce) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
   ReturnOAuthUrlFetchSuccess("alpha");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "alpha")));
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "alpha")));
 
   SimulateTokenAvailable("alpha");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents());
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents());
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, TokenAlreadyExists) {
   SimulateTokenAvailable("alpha");
   AccountTrackerService tracker;
   AccountTrackerObserver observer;
+  AccountFetcherService fetcher;
+
   tracker.AddObserver(&observer);
-  tracker.Initialize(token_service(), signin_client());
-  tracker.EnableNetworkFetches();
-  ASSERT_FALSE(tracker.IsAllUserInfoFetched());
+  tracker.Initialize(signin_client());
+
+  fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+  fetcher.EnableNetworkFetches();
+  ASSERT_FALSE(fetcher.IsAllUserInfoFetched());
   ASSERT_TRUE(observer.CheckEvents());
   tracker.RemoveObserver(&observer);
   tracker.Shutdown();
+  fetcher.Shutdown();
 }
 
 TEST_F(AccountTrackerServiceTest, TwoTokenAvailable_TwoUserInfo) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
   SimulateTokenAvailable("beta");
   ReturnOAuthUrlFetchSuccess("alpha");
   ReturnOAuthUrlFetchSuccess("beta");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "alpha"),
-                                      TrackingEvent(UPDATED, "beta")));
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "alpha"),
+                                   TrackingEvent(UPDATED, "beta")));
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, TwoTokenAvailable_OneUserInfo) {
+  AccountTrackerObserver observer;
+  account_tracker()->AddObserver(&observer);
   SimulateTokenAvailable("alpha");
   SimulateTokenAvailable("beta");
   ReturnOAuthUrlFetchSuccess("beta");
-  ASSERT_FALSE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "beta")));
+  ASSERT_FALSE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "beta")));
   ReturnOAuthUrlFetchSuccess("alpha");
-  ASSERT_TRUE(account_tracker()->IsAllUserInfoFetched());
-  ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "alpha")));
+  ASSERT_TRUE(account_fetcher()->IsAllUserInfoFetched());
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "alpha")));
+  account_tracker()->RemoveObserver(&observer);
 }
 
 TEST_F(AccountTrackerServiceTest, GetAccounts) {
@@ -485,10 +534,14 @@ TEST_F(AccountTrackerServiceTest, GetAccountInfo_TokenAvailable_EnableNetwork) {
   // Shutdown the network-enabled tracker built into the test case.
   TearDown();
 
-  // Create an account tracker but do not enable network fetches.
+  // Create an account tracker and an account fetcher service but do not enable
+  // network fetches.
   AccountTrackerService tracker;
-  tracker.AddObserver(observer());
-  tracker.Initialize(token_service(), signin_client());
+  tracker.Initialize(signin_client());
+
+  AccountFetcherService fetcher_service;
+  fetcher_service.Initialize(signin_client(), token_service(), &tracker,
+                             nullptr);
 
   SimulateTokenAvailable("alpha");
   IssueAccessToken("alpha");
@@ -498,7 +551,7 @@ TEST_F(AccountTrackerServiceTest, GetAccountInfo_TokenAvailable_EnableNetwork) {
   ASSERT_FALSE(fetcher);
 
   // Enable the network to create the fetcher then issue the access token.
-  tracker.EnableNetworkFetches();
+  fetcher_service.EnableNetworkFetches();
 
   // Fetcher was created and executes properly.
   ReturnOAuthUrlFetchSuccess("alpha");
@@ -506,6 +559,7 @@ TEST_F(AccountTrackerServiceTest, GetAccountInfo_TokenAvailable_EnableNetwork) {
   AccountTrackerService::AccountInfo info =
       tracker.GetAccountInfo("alpha");
   CheckAccountDetails("alpha", info);
+  fetcher_service.Shutdown();
   tracker.Shutdown();
 }
 
@@ -552,8 +606,7 @@ TEST_F(AccountTrackerServiceTest, Persistence) {
   // to be saved to persistence.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
-    tracker.EnableNetworkFetches();
+    tracker.Initialize(signin_client());
     SimulateTokenAvailable("alpha");
     ReturnOAuthUrlFetchSuccess("alpha");
     SimulateTokenAvailable("beta");
@@ -565,11 +618,12 @@ TEST_F(AccountTrackerServiceTest, Persistence) {
   // persistence.
   {
     AccountTrackerService tracker;
-    tracker.AddObserver(observer());
-    tracker.Initialize(token_service(), signin_client());
-    tracker.EnableNetworkFetches();
-    ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "alpha"),
-                                        TrackingEvent(UPDATED, "beta")));
+    AccountTrackerObserver observer;
+    tracker.AddObserver(&observer);
+    tracker.Initialize(signin_client());
+    ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "alpha"),
+                                     TrackingEvent(UPDATED, "beta")));
+    tracker.RemoveObserver(&observer);
 
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
@@ -577,23 +631,30 @@ TEST_F(AccountTrackerServiceTest, Persistence) {
     CheckAccountDetails("alpha", infos[0]);
     CheckAccountDetails("beta", infos[1]);
 
-    // Remove account.
+    FakeAccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+    fetcher.EnableNetworkFetches();
+    // Remove an account.
+    // This will allow testing removal as well as child accounts which is only
+    // allowed for a single account.
     SimulateTokenRevoked("alpha");
-    tracker.RemoveObserver(observer());
+    fetcher.FakeSetIsChildAccount("beta", true);
+
+    fetcher.Shutdown();
     tracker.Shutdown();
  }
 
   // Create a new tracker and make sure it loads the single account from
-  // persistence.
+ // persistence. Also verify it is a child account.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
-    tracker.EnableNetworkFetches();
+    tracker.Initialize(signin_client());
 
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
     ASSERT_EQ(1u, infos.size());
     CheckAccountDetails("beta", infos[0]);
+    ASSERT_TRUE(infos[0].is_child_account);
     tracker.Shutdown();
   }
 }
@@ -621,17 +682,21 @@ TEST_F(AccountTrackerServiceTest, UpgradeToFullAccountInfo) {
   // prefs.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
-    tracker.EnableNetworkFetches();
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+    fetcher.EnableNetworkFetches();
     SimulateTokenAvailable("incomplete");
     ReturnOAuthUrlFetchSuccessIncomplete("incomplete");
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
 
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
-
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
     // Validate that the loaded AccountInfo from prefs is considered invalid.
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
@@ -640,7 +705,7 @@ TEST_F(AccountTrackerServiceTest, UpgradeToFullAccountInfo) {
 
     // Enable network fetches and simulate the same account getting a refresh
     // token containing all the info.
-    tracker.EnableNetworkFetches();
+    fetcher.EnableNetworkFetches();
     SimulateTokenAvailable("incomplete");
     ReturnOAuthUrlFetchSuccess("incomplete");
 
@@ -650,29 +715,34 @@ TEST_F(AccountTrackerServiceTest, UpgradeToFullAccountInfo) {
     ASSERT_TRUE(infos[0].IsValid());
 
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
 
   // Reinstantiate a tracker to validate that the AccountInfo saved to prefs is
   // now the upgraded one, considered valid.
   {
     AccountTrackerService tracker;
-    tracker.AddObserver(observer());
-    tracker.Initialize(token_service(), signin_client());
-    ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "incomplete")));
-    // Make sure there are no events in the observer
-    observer()->Clear();
+    AccountTrackerObserver observer;
+    tracker.AddObserver(&observer);
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+
+    ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, "incomplete")));
     // Enabling network fetches shouldn't cause any actual fetch since the
     // AccountInfos loaded from prefs should be valid.
-    tracker.EnableNetworkFetches();
+    fetcher.EnableNetworkFetches();
 
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
     ASSERT_EQ(1u, infos.size());
     ASSERT_TRUE(infos[0].IsValid());
     // Check that no network fetches were made.
-    ASSERT_TRUE(observer()->CheckEvents());
+    ASSERT_TRUE(observer.CheckEvents());
 
+    tracker.RemoveObserver(&observer);
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
 }
 
@@ -681,62 +751,71 @@ TEST_F(AccountTrackerServiceTest, TimerRefresh) {
   // prefs.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
-    tracker.EnableNetworkFetches();
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+    fetcher.EnableNetworkFetches();
     SimulateTokenAvailable("alpha");
     ReturnOAuthUrlFetchSuccess("alpha");
     SimulateTokenAvailable("beta");
     ReturnOAuthUrlFetchSuccess("beta");
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
 
   // Rewind the time by half a day, which shouldn't be enough to trigger a
   // network refresh.
   base::Time fake_update = base::Time::Now() - base::TimeDelta::FromHours(12);
   signin_client()->GetPrefs()->SetInt64(
-      AccountTrackerService::kAccountTrackerServiceLastUpdate,
+      AccountFetcherService::kLastUpdatePref,
       fake_update.ToInternalValue());
 
   // Instantiate a new ATS, making sure the persisted accounts are still there
   // and that no network fetches happen.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
 
-    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    ASSERT_TRUE(fetcher.IsAllUserInfoFetched());
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
     ASSERT_EQ(2u, infos.size());
     ASSERT_TRUE(infos[0].IsValid());
     ASSERT_TRUE(infos[1].IsValid());
 
-    tracker.EnableNetworkFetches();
-    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    fetcher.EnableNetworkFetches();
+    ASSERT_TRUE(fetcher.IsAllUserInfoFetched());
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
 
   // Rewind the last updated time enough to trigger a network refresh.
   fake_update = base::Time::Now() - base::TimeDelta::FromHours(25);
   signin_client()->GetPrefs()->SetInt64(
-      AccountTrackerService::kAccountTrackerServiceLastUpdate,
+      AccountFetcherService::kLastUpdatePref,
       fake_update.ToInternalValue());
 
   // Instantiate a new tracker and validate that even though the AccountInfos
   // are still valid, the network fetches are started.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
 
-    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    ASSERT_TRUE(fetcher.IsAllUserInfoFetched());
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
     ASSERT_EQ(2u, infos.size());
     ASSERT_TRUE(infos[0].IsValid());
     ASSERT_TRUE(infos[1].IsValid());
 
-    tracker.EnableNetworkFetches();
-    ASSERT_FALSE(tracker.IsAllUserInfoFetched());
+    fetcher.EnableNetworkFetches();
+    ASSERT_FALSE(fetcher.IsAllUserInfoFetched());
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
 }
 
@@ -746,13 +825,16 @@ TEST_F(AccountTrackerServiceTest, LegacyDottedAccountIds) {
   // a correct non-dotted account id for the same account.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
-    tracker.EnableNetworkFetches();
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+    fetcher.EnableNetworkFetches();
     SimulateTokenAvailable("foo.bar@gmail.com");
     SimulateTokenAvailable("foobar@gmail.com");
     ReturnOAuthUrlFetchSuccess("foo.bar@gmail.com");
     ReturnOAuthUrlFetchSuccess("foobar@gmail.com");
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
 
   // Remove the bad account now from the token service to simulate that it
@@ -763,13 +845,348 @@ TEST_F(AccountTrackerServiceTest, LegacyDottedAccountIds) {
   // it is the correct non dotted one.
   {
     AccountTrackerService tracker;
-    tracker.Initialize(token_service(), signin_client());
+    tracker.Initialize(signin_client());
+    AccountFetcherService fetcher;
+    fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
 
-    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    ASSERT_TRUE(fetcher.IsAllUserInfoFetched());
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
     ASSERT_EQ(1u, infos.size());
     ASSERT_STREQ("foobar@gmail.com", infos[0].account_id.c_str());
     tracker.Shutdown();
+    fetcher.Shutdown();
   }
+}
+
+TEST_F(AccountTrackerServiceTest, MigrateAccountIdToGaiaId) {
+  if (account_tracker()->GetMigrationState() !=
+      AccountTrackerService::MIGRATION_NOT_STARTED) {
+    AccountTrackerService tracker;
+    TestingPrefServiceSimple pref;
+    AccountTrackerService::AccountInfo account_info;
+
+    std::string email_alpha = AccountIdToEmail("alpha");
+    std::string gaia_alpha = AccountIdToGaiaId("alpha");
+    std::string email_beta = AccountIdToEmail("beta");
+    std::string gaia_beta = AccountIdToGaiaId("beta");
+
+    pref.registry()->RegisterListPref(AccountTrackerService::kAccountInfoPref);
+    pref.registry()->RegisterIntegerPref(
+        prefs::kAccountIdMigrationState,
+        AccountTrackerService::MIGRATION_NOT_STARTED);
+
+    ListPrefUpdate update(&pref, AccountTrackerService::kAccountInfoPref);
+
+    base::DictionaryValue* dict = new base::DictionaryValue();
+    update->Append(dict);
+    dict->SetString("account_id", base::UTF8ToUTF16(email_alpha));
+    dict->SetString("email", base::UTF8ToUTF16(email_alpha));
+    dict->SetString("gaia", base::UTF8ToUTF16(gaia_alpha));
+
+    dict = new base::DictionaryValue();
+    update->Append(dict);
+    dict->SetString("account_id", base::UTF8ToUTF16(email_beta));
+    dict->SetString("email", base::UTF8ToUTF16(email_beta));
+    dict->SetString("gaia", base::UTF8ToUTF16(gaia_beta));
+
+    scoped_ptr<TestSigninClient> client;
+    client.reset(new TestSigninClient(&pref));
+    tracker.Initialize(client.get());
+
+    ASSERT_EQ(tracker.GetMigrationState(),
+              AccountTrackerService::MIGRATION_IN_PROGRESS);
+
+    account_info = tracker.GetAccountInfo(gaia_alpha);
+    ASSERT_EQ(account_info.account_id, gaia_alpha);
+    ASSERT_EQ(account_info.gaia, gaia_alpha);
+    ASSERT_EQ(account_info.email, email_alpha);
+
+    account_info = tracker.GetAccountInfo(gaia_beta);
+    ASSERT_EQ(account_info.account_id, gaia_beta);
+    ASSERT_EQ(account_info.gaia, gaia_beta);
+    ASSERT_EQ(account_info.email, email_beta);
+
+    std::vector<AccountTrackerService::AccountInfo> accounts =
+        tracker.GetAccounts();
+    ASSERT_EQ(2u, accounts.size());
+  }
+}
+
+TEST_F(AccountTrackerServiceTest, CanNotMigrateAccountIdToGaiaId) {
+  if ((account_tracker()->GetMigrationState() !=
+       AccountTrackerService::MIGRATION_NOT_STARTED)) {
+    AccountTrackerService tracker;
+    TestingPrefServiceSimple pref;
+    AccountTrackerService::AccountInfo account_info;
+
+    std::string email_alpha = AccountIdToEmail("alpha");
+    std::string gaia_alpha = AccountIdToGaiaId("alpha");
+    std::string email_beta = AccountIdToEmail("beta");
+
+    pref.registry()->RegisterListPref(AccountTrackerService::kAccountInfoPref);
+    pref.registry()->RegisterIntegerPref(
+        prefs::kAccountIdMigrationState,
+        AccountTrackerService::MIGRATION_NOT_STARTED);
+
+    ListPrefUpdate update(&pref, AccountTrackerService::kAccountInfoPref);
+
+    base::DictionaryValue* dict = new base::DictionaryValue();
+    update->Append(dict);
+    dict->SetString("account_id", base::UTF8ToUTF16(email_alpha));
+    dict->SetString("email", base::UTF8ToUTF16(email_alpha));
+    dict->SetString("gaia", base::UTF8ToUTF16(gaia_alpha));
+
+    dict = new base::DictionaryValue();
+    update->Append(dict);
+    dict->SetString("account_id", base::UTF8ToUTF16(email_beta));
+    dict->SetString("email", base::UTF8ToUTF16(email_beta));
+    dict->SetString("gaia", base::UTF8ToUTF16(std::string()));
+
+    scoped_ptr<TestSigninClient> client;
+    client.reset(new TestSigninClient(&pref));
+    tracker.Initialize(client.get());
+
+    ASSERT_EQ(tracker.GetMigrationState(),
+              AccountTrackerService::MIGRATION_NOT_STARTED);
+
+    account_info = tracker.GetAccountInfo(email_alpha);
+    ASSERT_EQ(account_info.account_id, email_alpha);
+    ASSERT_EQ(account_info.gaia, gaia_alpha);
+    ASSERT_EQ(account_info.email, email_alpha);
+
+    account_info = tracker.GetAccountInfo(email_beta);
+    ASSERT_EQ(account_info.account_id, email_beta);
+    ASSERT_EQ(account_info.email, email_beta);
+
+    std::vector<AccountTrackerService::AccountInfo> accounts =
+        tracker.GetAccounts();
+    ASSERT_EQ(2u, accounts.size());
+  }
+}
+
+TEST_F(AccountTrackerServiceTest, GaiaIdMigrationCrashInTheMiddle) {
+  if (account_tracker()->GetMigrationState() !=
+      AccountTrackerService::MIGRATION_NOT_STARTED) {
+    AccountTrackerService tracker;
+    TestingPrefServiceSimple pref;
+    AccountTrackerService::AccountInfo account_info;
+
+    std::string email_alpha = AccountIdToEmail("alpha");
+    std::string gaia_alpha = AccountIdToGaiaId("alpha");
+    std::string email_beta = AccountIdToEmail("beta");
+    std::string gaia_beta = AccountIdToGaiaId("beta");
+
+    pref.registry()->RegisterListPref(AccountTrackerService::kAccountInfoPref);
+    pref.registry()->RegisterIntegerPref(
+        prefs::kAccountIdMigrationState,
+        AccountTrackerService::MIGRATION_IN_PROGRESS);
+
+    ListPrefUpdate update(&pref, AccountTrackerService::kAccountInfoPref);
+
+    base::DictionaryValue* dict = new base::DictionaryValue();
+    update->Append(dict);
+    dict->SetString("account_id", base::UTF8ToUTF16(email_alpha));
+    dict->SetString("email", base::UTF8ToUTF16(email_alpha));
+    dict->SetString("gaia", base::UTF8ToUTF16(gaia_alpha));
+
+    dict = new base::DictionaryValue();
+    update->Append(dict);
+    dict->SetString("account_id", base::UTF8ToUTF16(email_beta));
+    dict->SetString("email", base::UTF8ToUTF16(email_beta));
+    dict->SetString("gaia", base::UTF8ToUTF16(gaia_beta));
+
+    // Succeed miggrated account.
+    dict = new base::DictionaryValue();
+    update->Append(dict);
+    dict->SetString("account_id", base::UTF8ToUTF16(gaia_alpha));
+    dict->SetString("email", base::UTF8ToUTF16(email_alpha));
+    dict->SetString("gaia", base::UTF8ToUTF16(gaia_alpha));
+
+    scoped_ptr<TestSigninClient> client;
+    client.reset(new TestSigninClient(&pref));
+    tracker.Initialize(client.get());
+
+    ASSERT_EQ(tracker.GetMigrationState(),
+              AccountTrackerService::MIGRATION_IN_PROGRESS);
+
+    account_info = tracker.GetAccountInfo(gaia_alpha);
+    ASSERT_EQ(account_info.account_id, gaia_alpha);
+    ASSERT_EQ(account_info.gaia, gaia_alpha);
+    ASSERT_EQ(account_info.email, email_alpha);
+
+    account_info = tracker.GetAccountInfo(gaia_beta);
+    ASSERT_EQ(account_info.account_id, gaia_beta);
+    ASSERT_EQ(account_info.gaia, gaia_beta);
+    ASSERT_EQ(account_info.email, email_beta);
+
+    std::vector<AccountTrackerService::AccountInfo> accounts =
+        tracker.GetAccounts();
+    ASSERT_EQ(2u, accounts.size());
+
+    tracker.SetMigrationDone();
+    tracker.Shutdown();
+    tracker.Initialize(client.get());
+
+    ASSERT_EQ(tracker.GetMigrationState(),
+              AccountTrackerService::MIGRATION_DONE);
+
+    account_info = tracker.GetAccountInfo(gaia_alpha);
+    ASSERT_EQ(account_info.account_id, gaia_alpha);
+    ASSERT_EQ(account_info.gaia, gaia_alpha);
+    ASSERT_EQ(account_info.email, email_alpha);
+
+    account_info = tracker.GetAccountInfo(gaia_beta);
+    ASSERT_EQ(account_info.account_id, gaia_beta);
+    ASSERT_EQ(account_info.gaia, gaia_beta);
+    ASSERT_EQ(account_info.email, email_beta);
+
+    accounts.clear();
+    accounts = tracker.GetAccounts();
+    ASSERT_EQ(2u, accounts.size());
+  }
+}
+
+TEST_F(AccountTrackerServiceTest, ChildAccountBasic) {
+  AccountTrackerService tracker;
+  tracker.Initialize(signin_client());
+  FakeAccountFetcherService fetcher;
+  fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+  fetcher.EnableNetworkFetches();
+  AccountTrackerObserver observer;
+  tracker.AddObserver(&observer);
+  std::string child_id("child");
+  {
+    // Responses are processed iff there is a single account with a valid token
+    // and the response is for that account.
+    fetcher.FakeSetIsChildAccount(child_id, true);
+    ASSERT_TRUE(observer.CheckEvents());
+  }
+  {
+    SimulateTokenAvailable(child_id);
+    IssueAccessToken(child_id);
+    fetcher.FakeSetIsChildAccount(child_id, true);
+    // Response was processed but observer is not notified as the account state
+    // is invalid.
+    ASSERT_TRUE(observer.CheckEvents());
+    AccountTrackerService::AccountInfo info = tracker.GetAccountInfo(child_id);
+    ASSERT_TRUE(info.is_child_account);
+    SimulateTokenRevoked(child_id);
+  }
+  tracker.RemoveObserver(&observer);
+  fetcher.Shutdown();
+  tracker.Shutdown();
+}
+
+TEST_F(AccountTrackerServiceTest, ChildAccountUpdatedAndRevoked) {
+  AccountTrackerService tracker;
+  tracker.Initialize(signin_client());
+  FakeAccountFetcherService fetcher;
+  fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+  fetcher.EnableNetworkFetches();
+  AccountTrackerObserver observer;
+  tracker.AddObserver(&observer);
+  std::string child_id("child");
+
+  SimulateTokenAvailable(child_id);
+  IssueAccessToken(child_id);
+  fetcher.FakeSetIsChildAccount(child_id, false);
+  FakeUserInfoFetchSuccess(&fetcher, child_id);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, child_id)));
+  AccountTrackerService::AccountInfo info = tracker.GetAccountInfo(child_id);
+  ASSERT_FALSE(info.is_child_account);
+  SimulateTokenRevoked(child_id);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(REMOVED, child_id)));
+
+  tracker.RemoveObserver(&observer);
+  fetcher.Shutdown();
+  tracker.Shutdown();
+}
+
+TEST_F(AccountTrackerServiceTest, ChildAccountUpdatedAndRevokedWithUpdate) {
+  AccountTrackerService tracker;
+  tracker.Initialize(signin_client());
+  FakeAccountFetcherService fetcher;
+  fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+  fetcher.EnableNetworkFetches();
+  AccountTrackerObserver observer;
+  tracker.AddObserver(&observer);
+  std::string child_id("child");
+
+  SimulateTokenAvailable(child_id);
+  IssueAccessToken(child_id);
+  fetcher.FakeSetIsChildAccount(child_id, true);
+  FakeUserInfoFetchSuccess(&fetcher, child_id);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, child_id)));
+  AccountTrackerService::AccountInfo info = tracker.GetAccountInfo(child_id);
+  ASSERT_TRUE(info.is_child_account);
+  SimulateTokenRevoked(child_id);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, child_id),
+                                   TrackingEvent(REMOVED, child_id)));
+
+  tracker.RemoveObserver(&observer);
+  fetcher.Shutdown();
+  tracker.Shutdown();
+}
+
+TEST_F(AccountTrackerServiceTest, ChildAccountUpdatedTwiceThenRevoked) {
+  AccountTrackerService tracker;
+  tracker.Initialize(signin_client());
+  FakeAccountFetcherService fetcher;
+  fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+  fetcher.EnableNetworkFetches();
+  AccountTrackerObserver observer;
+  tracker.AddObserver(&observer);
+  std::string child_id("child");
+
+  SimulateTokenAvailable(child_id);
+  IssueAccessToken(child_id);
+  // Observers notified the first time.
+  FakeUserInfoFetchSuccess(&fetcher, child_id);
+  // Since the account state is already valid, this will notify the
+  // observers for the second time.
+  fetcher.FakeSetIsChildAccount(child_id, true);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, child_id),
+                                   TrackingEvent(UPDATED, child_id)));
+  SimulateTokenRevoked(child_id);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, child_id),
+                                   TrackingEvent(REMOVED, child_id)));
+
+  tracker.RemoveObserver(&observer);
+  fetcher.Shutdown();
+  tracker.Shutdown();
+}
+
+TEST_F(AccountTrackerServiceTest, ChildAccountGraduation) {
+  AccountTrackerService tracker;
+  tracker.Initialize(signin_client());
+  FakeAccountFetcherService fetcher;
+  fetcher.Initialize(signin_client(), token_service(), &tracker, nullptr);
+  fetcher.EnableNetworkFetches();
+  AccountTrackerObserver observer;
+  tracker.AddObserver(&observer);
+  std::string child_id("child");
+
+  SimulateTokenAvailable(child_id);
+  IssueAccessToken(child_id);
+
+  // Set and verify this is a child account.
+  fetcher.FakeSetIsChildAccount(child_id, true);
+  AccountTrackerService::AccountInfo info = tracker.GetAccountInfo(child_id);
+  ASSERT_TRUE(info.is_child_account);
+  FakeUserInfoFetchSuccess(&fetcher, child_id);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, child_id)));
+
+  // Now simulate child account graduation.
+  fetcher.FakeSetIsChildAccount(child_id, false);
+  info = tracker.GetAccountInfo(child_id);
+  ASSERT_FALSE(info.is_child_account);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(UPDATED, child_id)));
+
+  SimulateTokenRevoked(child_id);
+  ASSERT_TRUE(observer.CheckEvents(TrackingEvent(REMOVED, child_id)));
+
+  tracker.RemoveObserver(&observer);
+  fetcher.Shutdown();
+  tracker.Shutdown();
 }

@@ -21,6 +21,13 @@ import org.chromium.ui.resources.dynamics.ViewResourceAdapter;
  * Based on ToolbarControlContainer.
  */
 public class ContextualSearchControl extends LinearLayout {
+    /**
+     * Object Replacement Character that is used in place of HTML objects that cannot be represented
+     * as text (e.g. images). Contextual search panel should not be displaying such characters as
+     * they get shown as [obj] character.
+     */
+    private static final String OBJ_CHARACTER = "\uFFFC";
+
     private static final float RESOLVED_SEARCH_TERM_SIDE_PADDING_DP = 40.f;
     private final int mSidePaddingPx;
 
@@ -82,23 +89,6 @@ public class ContextualSearchControl extends LinearLayout {
     }
 
     /**
-     * Sets the text to display on top of the first-run promo.
-     * @param selection The portion of the text that represents the user's selection.
-     */
-    public void setFirstRunText(String selection) {
-        // TODO(pedrosimonetti): confirm that is okay to remove the experimental text
-//        String firstRunText = ContextualSearchFieldTrial.getEnglishExperimentFirstRunText(
-//                selection);
-//        if (firstRunText == null) {
-//            firstRunText =
-//                getContext().getString(R.string.contextual_search_action_bar, selection);
-//        }
-        String firstRunText =
-                getContext().getString(R.string.contextual_search_action_bar, selection);
-        setCentralText(firstRunText);
-    }
-
-    /**
      * Sets the search context to display in the control.
      * @param selection The portion of the context that represents the user's selection.
      * @param start The portion of the context from its start to the selection.
@@ -106,9 +96,9 @@ public class ContextualSearchControl extends LinearLayout {
      */
     public void setSearchContext(String selection, String start, String end) {
         mSelectionText.setPadding(0, 0, 0, 0);
-        mSelectionText.setText(selection);
-        mStartText.setText(start);
-        mEndText.setText(end);
+        mSelectionText.setText(sanitizeText(selection));
+        mStartText.setText(sanitizeText(start));
+        mEndText.setText(sanitizeText(end));
         mIsDirty = true;
     }
 
@@ -122,5 +112,10 @@ public class ContextualSearchControl extends LinearLayout {
         mStartText.setText("");
         mEndText.setText("");
         mIsDirty = true;
+    }
+
+    private String sanitizeText(String text) {
+        if (text == null) return null;
+        return text.replace(OBJ_CHARACTER, " ");
     }
 }

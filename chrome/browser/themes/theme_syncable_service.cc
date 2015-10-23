@@ -86,8 +86,11 @@ syncer::SyncMergeResult ThemeSyncableService::MergeDataAndStartSyncing(
       initial_sync_data.rbegin(); sync_data != initial_sync_data.rend();
       ++sync_data) {
     if (sync_data->GetSpecifics().has_theme()) {
-      MaybeSetTheme(current_specifics, *sync_data);
-      return merge_result;
+      if (!current_specifics.use_custom_theme() ||
+          sync_data->GetSpecifics().theme().use_custom_theme()) {
+        MaybeSetTheme(current_specifics, *sync_data);
+        return merge_result;
+      }
     }
   }
 
@@ -257,8 +260,7 @@ bool ThemeSyncableService::GetThemeSpecificsFromCurrentTheme(
           extensions::ExtensionSystem::Get(profile_)->extension_service()->
               GetExtensionById(theme_service_->GetThemeID(), false);
   if (current_theme && !extensions::sync_helper::IsSyncable(current_theme)) {
-    DVLOG(1) << "Ignoring extension from external source: " <<
-        current_theme->location();
+    DVLOG(1) << "Ignoring non-syncable extension: " << current_theme->id();
     return false;
   }
   bool use_custom_theme = (current_theme != NULL);

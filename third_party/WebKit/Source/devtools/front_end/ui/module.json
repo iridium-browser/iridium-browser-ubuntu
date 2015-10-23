@@ -37,13 +37,15 @@
         "SplitWidget.js",
         "StackView.js",
         "Toolbar.js",
+        "Tooltip.js",
         "SuggestBox.js",
         "TabbedPane.js",
         "SidebarPane.js",
         "TextPrompt.js",
         "UIUtils.js",
         "ViewportControl.js",
-        "ZoomManager.js"
+        "ZoomManager.js",
+        "ThrottledWidget.js"
     ],
     "resources": [
         "checkboxTextLabel.css",
@@ -54,6 +56,8 @@
         "filter.css",
         "helpScreen.css",
         "infobar.css",
+        "inspectorCommon.css",
+        "inspectorSyntaxHighlight.css",
         "panelEnablerView.css",
         "progressIndicator.css",
         "propertiesSection.css",
@@ -68,6 +72,7 @@
         "tabbedPane.css",
         "textButton.css",
         "textPrompt.css",
+        "tooltip.css",
         "treeoutline.css"
     ]
 }

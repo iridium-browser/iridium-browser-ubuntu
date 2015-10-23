@@ -47,11 +47,16 @@ class FakeTileTaskRunnerImpl : public TileTaskRunner, public TileTaskClient {
     }
     completed_tasks_.clear();
   }
-  ResourceFormat GetResourceFormat() override { return RGBA_8888; }
+  ResourceFormat GetResourceFormat() const override { return RGBA_8888; }
+  bool GetResourceRequiresSwizzle() const override {
+    return !PlatformColor::SameComponentOrder(GetResourceFormat());
+  }
 
   // Overridden from TileTaskClient:
   scoped_ptr<RasterBuffer> AcquireBufferForRaster(
-      const Resource* resource) override {
+      const Resource* resource,
+      uint64_t resource_content_id,
+      uint64_t previous_content_id) override {
     return nullptr;
   }
   void ReleaseBufferForRaster(scoped_ptr<RasterBuffer> buffer) override {}
@@ -67,18 +72,18 @@ base::LazyInstance<FakeTileTaskRunnerImpl> g_fake_tile_task_runner =
 FakeTileManager::FakeTileManager(TileManagerClient* client)
     : TileManager(client,
                   base::ThreadTaskRunnerHandle::Get(),
-                  nullptr,
-                  g_fake_tile_task_runner.Pointer(),
                   std::numeric_limits<size_t>::max()) {
+  SetResources(nullptr, g_fake_tile_task_runner.Pointer(),
+               std::numeric_limits<size_t>::max());
 }
 
 FakeTileManager::FakeTileManager(TileManagerClient* client,
                                  ResourcePool* resource_pool)
     : TileManager(client,
                   base::ThreadTaskRunnerHandle::Get(),
-                  resource_pool,
-                  g_fake_tile_task_runner.Pointer(),
                   std::numeric_limits<size_t>::max()) {
+  SetResources(resource_pool, g_fake_tile_task_runner.Pointer(),
+               std::numeric_limits<size_t>::max());
 }
 
 FakeTileManager::~FakeTileManager() {}

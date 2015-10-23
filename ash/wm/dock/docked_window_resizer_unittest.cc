@@ -5,6 +5,7 @@
 #include "ash/wm/dock/docked_window_resizer.h"
 
 #include "ash/ash_switches.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
@@ -100,8 +101,9 @@ class DockedWindowResizerTest
     } else {
       gfx::Display display =
           Shell::GetScreen()->GetDisplayMatching(bounds);
-      aura::Window* root = ash::Shell::GetInstance()->display_controller()->
-          GetRootWindowForDisplayId(display.id());
+      aura::Window* root = ash::Shell::GetInstance()
+                               ->window_tree_host_manager()
+                               ->GetRootWindowForDisplayId(display.id());
       gfx::Point origin = bounds.origin();
       ::wm::ConvertPointFromScreen(root, &origin);
       window->SetBounds(gfx::Rect(origin, bounds.size()));
@@ -1190,14 +1192,17 @@ TEST_P(DockedWindowResizerTest, ResizeOneOfTwoWindows) {
             ScreenUtil::GetDisplayWorkAreaBoundsInParent(w1.get()).width());
 }
 
-// Dock a window, resize it and test that undocking it preserves the width.
-TEST_P(DockedWindowResizerTest, ResizingKeepsWidth) {
+// Dock a window, resize it and test that undocking it restores the pre-docked
+// size.
+TEST_P(DockedWindowResizerTest, ResizingKeepsSize) {
   if (!SupportsHostWindowResize())
     return;
 
   // Wider display to start since panels are limited to half the display width.
   UpdateDisplay("1000x600");
-  scoped_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
+  const gfx::Size original_size(201, 201);
+  scoped_ptr<aura::Window> w1(
+      CreateTestWindow(gfx::Rect(gfx::Point(), original_size)));
 
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
   // Window should be docked at the right edge.
@@ -1230,10 +1235,8 @@ TEST_P(DockedWindowResizerTest, ResizingKeepsWidth) {
 
   // Undock by dragging almost to the left edge.
   DragToVerticalPositionRelativeToEdge(DOCKED_EDGE_LEFT, w1.get(), 100, 20);
-  // Width should be preserved.
-  EXPECT_EQ(previous_width + kResizeSpan1, w1->bounds().width());
-  // Height should be restored to what it was originally.
-  EXPECT_EQ(201, w1->bounds().height());
+  // Size should be restored to what it was originally.
+  EXPECT_EQ(original_size.ToString(), w1->bounds().size().ToString());
 
   // Dock again.
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
@@ -1242,10 +1245,8 @@ TEST_P(DockedWindowResizerTest, ResizingKeepsWidth) {
 
   // Undock again by dragging left.
   DragToVerticalPositionRelativeToEdge(DOCKED_EDGE_LEFT, w1.get(), 100, 20);
-  // Width should be reset to what it was last time the window was not docked.
-  EXPECT_EQ(previous_width + kResizeSpan1, w1->bounds().width());
-  // Height should be restored to what it was originally.
-  EXPECT_EQ(201, w1->bounds().height());
+  // Size should be restored to what it was originally.
+  EXPECT_EQ(original_size.ToString(), w1->bounds().size().ToString());
 }
 
 // Dock a window, resize it and test that it stays docked.

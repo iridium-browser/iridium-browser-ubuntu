@@ -16,9 +16,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "google_apis/google_api_keys.h"
 #include "jni/JniInterface_jni.h"
-#include "media/base/yuv_convert.h"
 #include "remoting/base/url_request_context_getter.h"
-#include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
@@ -189,7 +187,7 @@ ChromotingJniRuntime::ChromotingJniRuntime() {
   ui_loop_->Start();
 
   // TODO(solb) Stop pretending to control the managed UI thread's lifetime.
-  ui_task_runner_ = new AutoThreadTaskRunner(ui_loop_->message_loop_proxy(),
+  ui_task_runner_ = new AutoThreadTaskRunner(ui_loop_->task_runner(),
                                              base::MessageLoop::QuitClosure());
   network_task_runner_ = AutoThread::CreateWithType("native_net",
                                                     ui_task_runner_,
@@ -199,9 +197,6 @@ ChromotingJniRuntime::ChromotingJniRuntime() {
 
   url_requester_ =
       new URLRequestContextGetter(network_task_runner_, network_task_runner_);
-
-  // Allows later decoding of video frames.
-  media::InitializeCPUSpecificYUVConversions();
 }
 
 ChromotingJniRuntime::~ChromotingJniRuntime() {
@@ -324,9 +319,9 @@ void ChromotingJniRuntime::HandleExtensionMessage(const std::string& type,
 }
 
 base::android::ScopedJavaLocalRef<jobject> ChromotingJniRuntime::NewBitmap(
-    webrtc::DesktopSize size) {
+    int width, int height) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_JniInterface_newBitmap(env, size.width(), size.height());
+  return Java_JniInterface_newBitmap(env, width, height);
 }
 
 void ChromotingJniRuntime::UpdateFrameBitmap(jobject bitmap) {

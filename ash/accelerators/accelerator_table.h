@@ -51,8 +51,6 @@ namespace ash {
 // Please put if/def sections at the end of the bare section and keep the list
 // within each section in alphabetical order.
 enum AcceleratorAction {
-  ACCESSIBLE_FOCUS_NEXT,
-  ACCESSIBLE_FOCUS_PREVIOUS,
   CYCLE_BACKWARD_MRU,
   CYCLE_FORWARD_MRU,
   DEBUG_PRINT_LAYER_HIERARCHY,
@@ -114,6 +112,7 @@ enum AcceleratorAction {
   BRIGHTNESS_DOWN,
   BRIGHTNESS_UP,
   DEBUG_ADD_REMOVE_DISPLAY,
+  DEBUG_TOGGLE_UNIFIED_DESKTOP,
   DISABLE_CAPS_LOCK,
   DISABLE_GPU_WATCHDOG,
   KEYBOARD_BRIGHTNESS_DOWN,

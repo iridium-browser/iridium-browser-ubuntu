@@ -178,7 +178,8 @@ void DesktopProcessTest::ConnectNetworkChannel(
   network_channel_ = IPC::ChannelProxy::Create(channel_handle,
                                                IPC::Channel::MODE_CLIENT,
                                                &network_listener_,
-                                               io_task_runner_.get());
+                                               io_task_runner_.get(),
+                                               nullptr);
 }
 
 void DesktopProcessTest::OnDesktopAttached(
@@ -237,10 +238,10 @@ void DesktopProcessTest::RunDesktopProcess() {
   base::RunLoop run_loop;
   base::Closure quit_ui_task_runner = base::Bind(
       base::IgnoreResult(&base::SingleThreadTaskRunner::PostTask),
-      message_loop_.message_loop_proxy(),
+      message_loop_.task_runner(),
       FROM_HERE, run_loop.QuitClosure());
   scoped_refptr<AutoThreadTaskRunner> ui_task_runner = new AutoThreadTaskRunner(
-      message_loop_.message_loop_proxy(), quit_ui_task_runner);
+      message_loop_.task_runner(), quit_ui_task_runner);
 
   io_task_runner_ = AutoThread::CreateWithType(
       "IPC thread", ui_task_runner, base::MessageLoop::TYPE_IO);
@@ -249,7 +250,8 @@ void DesktopProcessTest::RunDesktopProcess() {
   daemon_channel_ = IPC::ChannelProxy::Create(IPC::ChannelHandle(channel_name),
                                               IPC::Channel::MODE_SERVER,
                                               &daemon_listener_,
-                                              io_task_runner_.get());
+                                              io_task_runner_.get(),
+                                              nullptr);
 
   scoped_ptr<MockDesktopEnvironmentFactory> desktop_environment_factory(
       new MockDesktopEnvironmentFactory());

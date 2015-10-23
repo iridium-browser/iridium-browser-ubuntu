@@ -39,7 +39,6 @@
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMapElement.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/TextRunConstructor.h"
 #include "core/page/Page.h"
@@ -47,7 +46,6 @@
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/fonts/Font.h"
 #include "platform/fonts/FontCache.h"
-#include "platform/geometry/DoubleRect.h"
 
 namespace blink {
 
@@ -64,7 +62,7 @@ LayoutImage::LayoutImage(Element* element)
 
 LayoutImage* LayoutImage::createAnonymous(Document* document)
 {
-    LayoutImage* image = new LayoutImage(0);
+    LayoutImage* image = new LayoutImage(nullptr);
     image->setDocumentForAnonymous(document);
     return image;
 }
@@ -73,14 +71,23 @@ LayoutImage::~LayoutImage()
 {
 }
 
-void LayoutImage::destroy()
+void LayoutImage::willBeDestroyed()
 {
     ASSERT(m_imageResource);
     m_imageResource->shutdown();
-    LayoutReplaced::destroy();
+    LayoutReplaced::willBeDestroyed();
 }
 
-void LayoutImage::setImageResource(PassOwnPtr<LayoutImageResource> imageResource)
+void LayoutImage::styleDidChange(StyleDifference diff, const ComputedStyle* oldStyle)
+{
+    LayoutReplaced::styleDidChange(diff, oldStyle);
+
+    RespectImageOrientationEnum oldOrientation = oldStyle ? oldStyle->respectImageOrientation() : ComputedStyle::initialRespectImageOrientation();
+    if (style() && style()->respectImageOrientation() != oldOrientation)
+        intrinsicSizeChanged();
+}
+
+void LayoutImage::setImageResource(PassOwnPtrWillBeRawPtr<LayoutImageResource> imageResource)
 {
     ASSERT(!m_imageResource);
     m_imageResource = imageResource;
@@ -89,6 +96,8 @@ void LayoutImage::setImageResource(PassOwnPtr<LayoutImageResource> imageResource
 
 void LayoutImage::imageChanged(WrappedImagePtr newImage, const IntRect* rect)
 {
+    ASSERT(view());
+    ASSERT(view()->frameView());
     if (documentBeingDestroyed())
         return;
 
@@ -101,10 +110,17 @@ void LayoutImage::imageChanged(WrappedImagePtr newImage, const IntRect* rect)
     if (newImage != m_imageResource->imagePtr())
         return;
 
+    if (isGeneratedContent() && isHTMLImageElement(node()) && m_imageResource->errorOccurred())  {
+        toHTMLImageElement(node())->ensureFallbackForGeneratedContent();
+        return;
+    }
+
     // Per the spec, we let the server-sent header override srcset/other sources of dpr.
     // https://github.com/igrigorik/http-client-hints/blob/master/draft-grigorik-http-client-hints-01.txt#L255
-    if (m_imageResource->cachedImage() && m_imageResource->cachedImage()->hasDevicePixelRatioHeaderValue())
+    if (m_imageResource->cachedImage() && m_imageResource->cachedImage()->hasDevicePixelRatioHeaderValue()) {
+        UseCounter::count(&(view()->frameView()->frame()), UseCounter::ClientHintsContentDPR);
         m_imageDevicePixelRatio = 1 / m_imageResource->cachedImage()->devicePixelRatioHeaderValue();
+    }
 
     if (!m_didIncrementVisuallyNonEmptyPixelCount) {
         // At a zoom level of 1 the image is guaranteed to have an integer size.
@@ -170,32 +186,14 @@ void LayoutImage::invalidatePaintAndMarkForLayoutIfNeeded()
         updateInnerContentRect();
     }
 
-    setShouldDoFullPaintInvalidation();
+    if (imageResource() && imageResource()->image() && imageResource()->image()->maybeAnimated())
+        setShouldDoFullPaintInvalidation(PaintInvalidationDelayedFull);
+    else
+        setShouldDoFullPaintInvalidation(PaintInvalidationFull);
 
     // Tell any potential compositing layers that the image needs updating.
     contentChanged(ImageChanged);
 }
-
-bool LayoutImage::intersectsVisibleViewport()
-{
-    LayoutRect rect = visualOverflowRect();
-    LayoutView* layoutView = view();
-    while (layoutView->frame()->ownerLayoutObject())
-        layoutView = layoutView->frame()->ownerLayoutObject()->view();
-    mapRectToPaintInvalidationBacking(layoutView, rect, 0);
-    return rect.intersects(LayoutRect(layoutView->frameView()->scrollableArea()->visibleContentRectDouble()));
-}
-
-PaintInvalidationReason LayoutImage::invalidatePaintIfNeeded(PaintInvalidationState& paintInvalidationState, const LayoutBoxModelObject& paintInvalidationContainer)
-{
-    if (!imageResource() || !imageResource()->image() || !imageResource()->image()->maybeAnimated()
-        || intersectsVisibleViewport()) {
-        return LayoutReplaced::invalidatePaintIfNeeded(paintInvalidationState, paintInvalidationContainer);
-    }
-
-    return PaintInvalidationDelayedFull;
-}
-
 
 void LayoutImage::notifyFinished(Resource* newImage)
 {
@@ -370,13 +368,13 @@ bool LayoutImage::needsPreferredWidthsRecalculation() const
 LayoutBox* LayoutImage::embeddedContentBox() const
 {
     if (!m_imageResource)
-        return 0;
+        return nullptr;
 
     ImageResource* cachedImage = m_imageResource->cachedImage();
     if (cachedImage && cachedImage->image() && cachedImage->image()->isSVGImage())
         return toSVGImage(cachedImage->image())->embeddedContentBox();
 
-    return 0;
+    return nullptr;
 }
 
 } // namespace blink

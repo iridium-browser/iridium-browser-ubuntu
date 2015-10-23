@@ -5,10 +5,14 @@
 #include "components/history/core/test/history_backend_db_base_test.h"
 
 #include "base/files/file_path.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/history/core/browser/download_constants.h"
 #include "components/history/core/browser/download_row.h"
 #include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_backend_client.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/in_memory_history_backend.h"
@@ -25,13 +29,16 @@ class BackendDelegate : public HistoryBackend::Delegate {
       : history_test_(history_test) {}
 
   // HistoryBackend::Delegate implementation.
-  void NotifyProfileError(sql::InitStatus init_status) override {}
+  void NotifyProfileError(sql::InitStatus init_status) override {
+    history_test_->last_profile_error_ = init_status;
+  }
   void SetInMemoryBackend(scoped_ptr<InMemoryHistoryBackend> backend) override {
     // Save the in-memory backend to the history test object, this happens
     // synchronously, so we don't have to do anything fancy.
     history_test_->in_mem_backend_.swap(backend);
   }
-  void NotifyFaviconChanged(const std::set<GURL>& url) override {}
+  void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
+                             const GURL& icon_url) override {}
   void NotifyURLVisited(ui::PageTransition transition,
                         const URLRow& row,
                         const RedirectList& redirects,
@@ -51,7 +58,9 @@ class BackendDelegate : public HistoryBackend::Delegate {
   HistoryBackendDBBaseTest* history_test_;
 };
 
-HistoryBackendDBBaseTest::HistoryBackendDBBaseTest() : db_(nullptr) {
+HistoryBackendDBBaseTest::HistoryBackendDBBaseTest()
+    : db_(nullptr),
+      last_profile_error_ (sql::INIT_OK) {
 }
 
 HistoryBackendDBBaseTest::~HistoryBackendDBBaseTest() {
@@ -68,18 +77,27 @@ void HistoryBackendDBBaseTest::TearDown() {
 
   // Make sure we don't have any event pending that could disrupt the next
   // test.
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::MessageLoop::QuitClosure());
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitClosure());
   base::MessageLoop::current()->Run();
 }
 
 void HistoryBackendDBBaseTest::CreateBackendAndDatabase() {
-  backend_ = new HistoryBackend(new BackendDelegate(this), nullptr);
+  backend_ = new HistoryBackend(new BackendDelegate(this), nullptr,
+                                base::ThreadTaskRunnerHandle::Get());
   backend_->Init(std::string(), false,
                  TestHistoryDatabaseParamsForPath(history_dir_));
   db_ = backend_->db_.get();
   DCHECK(in_mem_backend_) << "Mem backend should have been set by "
-                             "HistoryBackend::Init";
+      "HistoryBackend::Init";
+}
+
+void HistoryBackendDBBaseTest::CreateBackendAndDatabaseAllowFail() {
+  backend_ = new HistoryBackend(new BackendDelegate(this), nullptr,
+                                base::ThreadTaskRunnerHandle::Get());
+  backend_->Init(std::string(), false,
+                 TestHistoryDatabaseParamsForPath(history_dir_));
+  db_ = backend_->db_.get();
 }
 
 void HistoryBackendDBBaseTest::CreateDBVersion(int version) {

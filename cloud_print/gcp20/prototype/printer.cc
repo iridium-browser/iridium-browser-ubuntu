@@ -140,7 +140,7 @@ std::string GetDescription() {
 }
 
 scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() {
-  return base::MessageLoop::current()->message_loop_proxy();
+  return base::MessageLoop::current()->task_runner();
 }
 
 }  // namespace
@@ -193,7 +193,7 @@ void Printer::Stop() {
 
 std::string Printer::GetRawCdd() {
   std::string json_str;
-  base::JSONWriter::WriteWithOptions(&GetCapabilities(),
+  base::JSONWriter::WriteWithOptions(GetCapabilities(),
                                      base::JSONWriter::OPTIONS_PRETTY_PRINT,
                                      &json_str);
   return json_str;

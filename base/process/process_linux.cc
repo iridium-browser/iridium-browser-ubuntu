@@ -10,6 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
@@ -101,8 +102,8 @@ bool Process::IsProcessBackgrounded() const {
     if (base::ReadFileToString(
             base::FilePath(StringPrintf(kProcPath, process_)),
             &proc)) {
-      std::vector<std::string> proc_parts;
-      base::SplitString(proc, ':', &proc_parts);
+      std::vector<std::string> proc_parts = base::SplitString(
+          proc, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
       DCHECK_EQ(proc_parts.size(), 3u);
       bool ret = proc_parts[2] == std::string(kBackground);
       return ret;
@@ -119,7 +120,7 @@ bool Process::SetProcessBackgrounded(bool background) {
 
 #if defined(OS_CHROMEOS)
   if (cgroups.Get().enabled) {
-    std::string pid = StringPrintf("%d", process_);
+    std::string pid = IntToString(process_);
     const base::FilePath file =
         background ?
             cgroups.Get().background_file : cgroups.Get().foreground_file;

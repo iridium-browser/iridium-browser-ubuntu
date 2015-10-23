@@ -82,8 +82,8 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     }
 
     @Override
-    public void OnFrameCaptured(byte[] frame, int length, int rotation,
-        long timeStamp) {
+    public void OnFrameCaptured(byte[] frame, int length, int width, int height,
+        int rotation, long timeStamp) {
       synchronized (frameLock) {
         ++framesCaptured;
         frameSize = length;
@@ -91,6 +91,9 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
         frameLock.notify();
       }
     }
+
+    @Override
+    public void OnOutputFormatRequest(int width, int height, int fps) {}
 
     public boolean WaitForCapturerToStart() throws InterruptedException {
       synchronized (capturerStartLock) {
@@ -129,7 +132,8 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
 
   void starCapturerAndRender(String deviceName) throws InterruptedException {
     PeerConnectionFactory factory = new PeerConnectionFactory();
-    VideoCapturerAndroid capturer = VideoCapturerAndroid.create(deviceName);
+    VideoCapturerAndroid capturer =
+        VideoCapturerAndroid.create(deviceName, null);
     VideoSource source =
         factory.createVideoSource(capturer, new MediaConstraints());
     VideoTrack track = factory.createVideoTrack("dummy", source);
@@ -150,7 +154,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
 
   @SmallTest
   public void testCreateAndRelease() throws Exception {
-    VideoCapturerAndroid capturer = VideoCapturerAndroid.create("");
+    VideoCapturerAndroid capturer = VideoCapturerAndroid.create("", null);
     assertNotNull(capturer);
     capturer.dispose();
   }
@@ -158,7 +162,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
   @SmallTest
   public void testCreateNoneExistingCamera() throws Exception {
     VideoCapturerAndroid capturer = VideoCapturerAndroid.create(
-        "none existing camera");
+        "none existing camera", null);
     assertNull(capturer);
   }
 
@@ -195,7 +199,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
   // It tests both the Java and the C++ layer.
   public void testSwitchVideoCapturer() throws Exception {
     PeerConnectionFactory factory = new PeerConnectionFactory();
-    VideoCapturerAndroid capturer = VideoCapturerAndroid.create("");
+    VideoCapturerAndroid capturer = VideoCapturerAndroid.create("", null);
     VideoSource source =
         factory.createVideoSource(capturer, new MediaConstraints());
     VideoTrack track = factory.createVideoTrack("dummy", source);
@@ -222,7 +226,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
   // be stopped and restarted. It tests both the Java and the C++ layer.
   public void testStopRestartVideoSource() throws Exception {
     PeerConnectionFactory factory = new PeerConnectionFactory();
-    VideoCapturerAndroid capturer = VideoCapturerAndroid.create("");
+    VideoCapturerAndroid capturer = VideoCapturerAndroid.create("", null);
     VideoSource source =
         factory.createVideoSource(capturer, new MediaConstraints());
     VideoTrack track = factory.createVideoTrack("dummy", source);
@@ -251,7 +255,8 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     String deviceName = VideoCapturerAndroid.getDeviceName(0);
     ArrayList<CaptureFormat> formats =
         VideoCapturerAndroid.getSupportedFormats(0);
-    VideoCapturerAndroid capturer = VideoCapturerAndroid.create(deviceName);
+    VideoCapturerAndroid capturer =
+        VideoCapturerAndroid.create(deviceName, null);
 
     for(int i = 0; i < 3 ; ++i) {
       VideoCapturerAndroid.CaptureFormat format = formats.get(i);
@@ -275,7 +280,8 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     String deviceName = VideoCapturerAndroid.getDeviceName(0);
     ArrayList<CaptureFormat> formats =
         VideoCapturerAndroid.getSupportedFormats(0);
-    VideoCapturerAndroid capturer = VideoCapturerAndroid.create(deviceName);
+    VideoCapturerAndroid capturer =
+        VideoCapturerAndroid.create(deviceName, null);
 
     VideoCapturerAndroid.CaptureFormat format = formats.get(0);
     capturer.startCapture(format.width, format.height, format.maxFramerate,

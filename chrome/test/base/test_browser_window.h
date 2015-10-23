@@ -174,7 +174,6 @@ class TestBrowserWindow : public BrowserWindow {
     bool ShowPageActionPopup(const extensions::Extension* extension,
                              bool grant_active_tab) override;
     void UpdateOpenPDFInReaderPrompt() override {}
-    void UpdateGeneratedCreditCardView() override {}
     void SaveStateToContents(content::WebContents* contents) override {}
     void Revert() override {}
     const OmniboxView* GetOmniboxView() const override;
@@ -191,10 +190,26 @@ class TestBrowserWindow : public BrowserWindow {
   DISALLOW_COPY_AND_ASSIGN(TestBrowserWindow);
 };
 
+// Handles destroying a TestBrowserWindow when the Browser it is attached to is
+// destroyed.
+class TestBrowserWindowOwner : public chrome::BrowserListObserver {
+ public:
+  explicit TestBrowserWindowOwner(TestBrowserWindow* window);
+  ~TestBrowserWindowOwner() override;
+
+ private:
+  // Overridden from BrowserListObserver:
+  void OnBrowserRemoved(Browser* browser) override;
+  scoped_ptr<TestBrowserWindow> window_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestBrowserWindowOwner);
+};
+
 namespace chrome {
 
 // Helper that handle the lifetime of TestBrowserWindow instances.
-Browser* CreateBrowserWithTestWindowForParams(Browser::CreateParams* params);
+scoped_ptr<Browser> CreateBrowserWithTestWindowForParams(
+    Browser::CreateParams* params);
 
 }  // namespace chrome
 

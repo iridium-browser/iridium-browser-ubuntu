@@ -8,7 +8,6 @@
 
 #include "base/files/file.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/file_system_provider/abort_callback.h"
 #include "chrome/browser/chromeos/file_system_provider/fake_provided_file_system.h"
@@ -55,7 +54,8 @@ class FileSystemProviderThrottledFileSystemTest : public testing::Test {
 
     ProvidedFileSystemInfo file_system_info(
         kExtensionId, options, base::FilePath() /* mount_path */,
-        false /* configurable */, extensions::SOURCE_FILE);
+        false /* configurable */, true /* watchable */,
+        extensions::SOURCE_FILE);
 
     file_system_.reset(new ThrottledFileSystem(
         make_scoped_ptr(new FakeProvidedFileSystem(file_system_info))));

@@ -5,14 +5,13 @@
 import tempfile
 import unittest
 
-from telemetry.core import wpr_modes
 from telemetry.internal import story_runner
 from telemetry.page import page
-from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import shared_page_state
-from telemetry.unittest_util import options_for_unittests
-from telemetry.user_story import user_story_set
+from telemetry import story as story_module
+from telemetry.testing import options_for_unittests
+from telemetry.util import wpr_modes
 
 
 def SetUpPageRunnerArguments(options):
@@ -50,7 +49,7 @@ class SharedPageStateTests(unittest.TestCase):
   def TestUseLiveSitesFlag(self, expected_wpr_mode):
     with tempfile.NamedTemporaryFile() as f:
       run_state = shared_page_state.SharedPageState(
-          DummyTest(), self.options, page_set.PageSet())
+          DummyTest(), self.options, story_module.StorySet())
       fake_network_controller = FakeNetworkController()
       run_state._PrepareWpr(fake_network_controller, f.name, None)
       self.assertEquals(fake_network_controller.wpr_mode, expected_wpr_mode)
@@ -65,18 +64,19 @@ class SharedPageStateTests(unittest.TestCase):
 
   def testConstructorCallsSetOptions(self):
     test = DummyTest()
-    shared_page_state.SharedPageState(test, self.options, page_set.PageSet())
+    shared_page_state.SharedPageState(
+        test, self.options, story_module.StorySet())
     self.assertEqual(test.options, self.options)
 
   def assertUserAgentSetCorrectly(
       self, shared_page_state_class, expected_user_agent):
-    us = page.Page(
+    story = page.Page(
         'http://www.google.com',
         shared_page_state_class=shared_page_state_class)
     test = DummyTest()
-    uss = user_story_set.UserStorySet()
-    uss.AddUserStory(us)
-    us.shared_state_class(test, self.options, uss)
+    story_set = story_module.StorySet()
+    story_set.AddStory(story)
+    story.shared_state_class(test, self.options, story_set)
     browser_options = self.options.browser_options
     actual_user_agent = browser_options.browser_user_agent_type
     self.assertEqual(expected_user_agent, actual_user_agent)
@@ -90,3 +90,5 @@ class SharedPageStateTests(unittest.TestCase):
         shared_page_state.SharedTabletPageState, 'tablet')
     self.assertUserAgentSetCorrectly(
         shared_page_state.Shared10InchTabletPageState, 'tablet_10_inch')
+    self.assertUserAgentSetCorrectly(
+        shared_page_state.SharedPageState, None)

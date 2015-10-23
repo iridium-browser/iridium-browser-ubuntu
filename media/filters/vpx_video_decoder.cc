@@ -18,6 +18,10 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/sys_info.h"
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/memory_dump_provider.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
@@ -73,7 +77,8 @@ static int GetThreadCount(const VideoDecoderConfig& config) {
 }
 
 class VpxVideoDecoder::MemoryPool
-    : public base::RefCountedThreadSafe<VpxVideoDecoder::MemoryPool> {
+    : public base::RefCountedThreadSafe<VpxVideoDecoder::MemoryPool>,
+      public base::trace_event::MemoryDumpProvider {
  public:
   MemoryPool();
 
@@ -97,9 +102,12 @@ class VpxVideoDecoder::MemoryPool
   // to this pool.
   base::Closure CreateFrameCallback(void* fb_priv_data);
 
+  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                    base::trace_event::ProcessMemoryDump* pmd) override;
+
  private:
   friend class base::RefCountedThreadSafe<VpxVideoDecoder::MemoryPool>;
-  ~MemoryPool();
+  ~MemoryPool() override;
 
   // Reference counted frame buffers used for VP9 decoding. Reference counting
   // is done manually because both chromium and libvpx has to release this
@@ -186,6 +194,36 @@ base::Closure VpxVideoDecoder::MemoryPool::CreateFrameCallback(
                         frame_buffer));
 }
 
+bool VpxVideoDecoder::MemoryPool::OnMemoryDump(
+    const base::trace_event::MemoryDumpArgs& args,
+    base::trace_event::ProcessMemoryDump* pmd) {
+  base::trace_event::MemoryAllocatorDump* memory_dump =
+      pmd->CreateAllocatorDump("media/vpx/memory_pool");
+  base::trace_event::MemoryAllocatorDump* used_memory_dump =
+      pmd->CreateAllocatorDump("media/vpx/memory_pool/used");
+
+  pmd->AddSuballocation(memory_dump->guid(),
+                        base::trace_event::MemoryDumpManager::GetInstance()
+                            ->system_allocator_pool_name());
+  size_t bytes_used = 0;
+  size_t bytes_reserved = 0;
+  for (const VP9FrameBuffer* frame_buffer : frame_buffers_) {
+    if (frame_buffer->ref_cnt) {
+      bytes_used += frame_buffer->data.size();
+    }
+    bytes_reserved += frame_buffer->data.size();
+  }
+
+  memory_dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                         base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                         bytes_reserved);
+  used_memory_dump->AddScalar(
+      base::trace_event::MemoryAllocatorDump::kNameSize,
+      base::trace_event::MemoryAllocatorDump::kUnitsBytes, bytes_used);
+
+  return true;
+}
+
 void VpxVideoDecoder::MemoryPool::OnVideoFrameDestroyed(
     VP9FrameBuffer* frame_buffer) {
   --frame_buffer->ref_cnt;
@@ -209,15 +247,17 @@ std::string VpxVideoDecoder::GetDisplayName() const {
 
 void VpxVideoDecoder::Initialize(const VideoDecoderConfig& config,
                                  bool low_delay,
-                                 const PipelineStatusCB& status_cb,
+                                 const InitCB& init_cb,
                                  const OutputCB& output_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(config.IsValidConfig());
   DCHECK(!config.is_encrypted());
   DCHECK(decode_cb_.is_null());
 
+  InitCB bound_init_cb = BindToCurrentLoop(init_cb);
+
   if (!ConfigureDecoder(config)) {
-    status_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
+    bound_init_cb.Run(false);
     return;
   }
 
@@ -225,7 +265,7 @@ void VpxVideoDecoder::Initialize(const VideoDecoderConfig& config,
   config_ = config;
   state_ = kNormal;
   output_cb_ = BindToCurrentLoop(output_cb);
-  status_cb.Run(PIPELINE_OK);
+  bound_init_cb.Run(true);
 }
 
 static vpx_codec_ctx* InitializeVpxContext(vpx_codec_ctx* context,
@@ -254,10 +294,12 @@ bool VpxVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config) {
   if (config.codec() != kCodecVP8 && config.codec() != kCodecVP9)
     return false;
 
-  // In VP8 videos, only those with alpha are handled by VpxVideoDecoder. All
-  // other VP8 videos go to FFmpegVideoDecoder.
-  if (config.codec() == kCodecVP8 && config.format() != VideoFrame::YV12A)
+#if !defined(DISABLE_FFMPEG_VIDEO_DECODERS)
+  // When FFmpegVideoDecoder is available it handles VP8 that doesn't have
+  // alpha, and VpxVideoDecoder will handle VP8 with alpha.
+  if (config.codec() == kCodecVP8 && config.format() != PIXEL_FORMAT_YV12A)
     return false;
+#endif
 
   CloseDecoder();
 
@@ -269,6 +311,8 @@ bool VpxVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config) {
   // decoding.
   if (config.codec() == kCodecVP9) {
     memory_pool_ = new MemoryPool();
+    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+        memory_pool_.get(), task_runner_);
     if (vpx_codec_set_frame_buffer_functions(vpx_codec_,
                                              &MemoryPool::GetVP9FrameBuffer,
                                              &MemoryPool::ReleaseVP9FrameBuffer,
@@ -278,7 +322,7 @@ bool VpxVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config) {
     }
   }
 
-  if (config.format() == VideoFrame::YV12A) {
+  if (config.format() == PIXEL_FORMAT_YV12A) {
     vpx_codec_alpha_ = InitializeVpxContext(vpx_codec_alpha_, config);
     if (!vpx_codec_alpha_)
       return false;
@@ -292,6 +336,8 @@ void VpxVideoDecoder::CloseDecoder() {
     vpx_codec_destroy(vpx_codec_);
     delete vpx_codec_;
     vpx_codec_ = NULL;
+    base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+        memory_pool_.get());
     memory_pool_ = NULL;
   }
   if (vpx_codec_alpha_) {
@@ -457,21 +503,24 @@ void VpxVideoDecoder::CopyVpxImageTo(const vpx_image* vpx_image,
         vpx_image->fmt == VPX_IMG_FMT_YV12 ||
         vpx_image->fmt == VPX_IMG_FMT_I444);
 
-  VideoFrame::Format codec_format = VideoFrame::YV12;
+  VideoPixelFormat codec_format = PIXEL_FORMAT_YV12;
   int uv_rows = (vpx_image->d_h + 1) / 2;
 
   if (vpx_image->fmt == VPX_IMG_FMT_I444) {
     CHECK(!vpx_codec_alpha_);
-    codec_format = VideoFrame::YV24;
+    codec_format = PIXEL_FORMAT_YV24;
     uv_rows = vpx_image->d_h;
   } else if (vpx_codec_alpha_) {
-    // TODO(watk): A limitation of conflating color space with pixel format is
-    // that it's not possible to have BT709 with alpha.
-    // Until color space is separated from format, prefer YV12A over YV12HD.
-    codec_format = VideoFrame::YV12A;
-  } else if (vpx_image->cs == VPX_CS_BT_709) {
-    codec_format = VideoFrame::YV12HD;
+    codec_format = PIXEL_FORMAT_YV12A;
   }
+
+  // Default to the color space from the config, but if the bistream specifies
+  // one, prefer that instead.
+  ColorSpace color_space = config_.color_space();
+  if (vpx_image->cs == VPX_CS_BT_709)
+    color_space = COLOR_SPACE_HD_REC709;
+  else if (vpx_image->cs == VPX_CS_BT_601)
+    color_space = COLOR_SPACE_SD_REC601;
 
   // The mixed |w|/|d_h| in |coded_size| is intentional. Setting the correct
   // coded width is necessary to allow coalesced memory access, which may avoid
@@ -490,8 +539,11 @@ void VpxVideoDecoder::CopyVpxImageTo(const vpx_image* vpx_image,
         vpx_image->planes[VPX_PLANE_Y],
         vpx_image->planes[VPX_PLANE_U],
         vpx_image->planes[VPX_PLANE_V],
-        kNoTimestamp(),
+        kNoTimestamp());
+    video_frame->get()->AddDestructionObserver(
         memory_pool_->CreateFrameCallback(vpx_image->fb_priv));
+    video_frame->get()->metadata()->SetInteger(VideoFrameMetadata::COLOR_SPACE,
+                                               color_space);
     return;
   }
 
@@ -501,6 +553,8 @@ void VpxVideoDecoder::CopyVpxImageTo(const vpx_image* vpx_image,
       gfx::Rect(visible_size),
       config_.natural_size(),
       kNoTimestamp());
+  video_frame->get()->metadata()->SetInteger(VideoFrameMetadata::COLOR_SPACE,
+                                             color_space);
 
   CopyYPlane(vpx_image->planes[VPX_PLANE_Y],
              vpx_image->stride[VPX_PLANE_Y],

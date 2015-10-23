@@ -6,9 +6,12 @@
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/location.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -93,9 +96,9 @@ void PPAPITestBase::InfoBarObserver::Observe(
   // It's not safe to remove the infobar here, since other observers (e.g. the
   // InfoBarContainer) may still need to access it.  Instead, post a task to
   // do all necessary infobar manipulation as soon as this call stack returns.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&InfoBarObserver::VerifyInfoBarState,
-                            base::Unretained(this)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&InfoBarObserver::VerifyInfoBarState, base::Unretained(this)));
 }
 
 void PPAPITestBase::InfoBarObserver::VerifyInfoBarState() {
@@ -426,26 +429,10 @@ std::string PPAPINaClPNaClNonSfiTest::BuildQuery(
                             base.c_str(), test_case.c_str());
 }
 
-void PPAPINaClPNaClTransitionalNonSfiTest::SetUpCommandLine(
-    base::CommandLine* command_line) {
-  PPAPINaClPNaClNonSfiTest::SetUpCommandLine(command_line);
-#if !defined(DISABLE_NACL)
-  command_line->AppendSwitch(switches::kUseNaClHelperNonSfi);
-#endif
-}
-
 void PPAPIPrivateNaClPNaClNonSfiTest::SetUpCommandLine(
     base::CommandLine* command_line) {
   PPAPINaClPNaClNonSfiTest::SetUpCommandLine(command_line);
   AddPrivateSwitches(command_line);
-}
-
-void PPAPIPrivateNaClPNaClTransitionalNonSfiTest::SetUpCommandLine(
-    base::CommandLine* command_line) {
-  PPAPIPrivateNaClPNaClNonSfiTest::SetUpCommandLine(command_line);
-#if !defined(DISABLE_NACL)
-  command_line->AppendSwitch(switches::kUseNaClHelperNonSfi);
-#endif
 }
 
 void PPAPINaClTestDisallowedSockets::SetUpCommandLine(

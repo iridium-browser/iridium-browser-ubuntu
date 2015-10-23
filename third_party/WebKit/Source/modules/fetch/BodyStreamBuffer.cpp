@@ -6,215 +6,260 @@
 #include "modules/fetch/BodyStreamBuffer.h"
 
 #include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/DOMTypedArray.h"
+#include "core/dom/ExceptionCode.h"
+#include "modules/fetch/DataConsumerHandleUtil.h"
+#include "platform/blob/BlobData.h"
+#include "platform/network/FormData.h"
 
 namespace blink {
 
-namespace {
-
-class BlobCreator final : public BodyStreamBuffer::Observer {
+class BodyStreamBuffer::LoaderHolder final : public GarbageCollectedFinalized<LoaderHolder>, public ActiveDOMObject, public FetchDataLoader::Client {
+    WTF_MAKE_NONCOPYABLE(LoaderHolder);
+    USING_GARBAGE_COLLECTED_MIXIN(LoaderHolder);
 public:
-    BlobCreator(BodyStreamBuffer* buffer, const String& contentType, BodyStreamBuffer::BlobHandleCreatorClient* client)
-        : m_buffer(buffer)
+    LoaderHolder(ExecutionContext* executionContext, BodyStreamBuffer* buffer, FetchDataLoader* loader, FetchDataLoader::Client* client)
+        : ActiveDOMObject(executionContext)
+        , m_buffer(buffer)
+        , m_loader(loader)
         , m_client(client)
-        , m_blobData(BlobData::create())
     {
-        m_blobData->setContentType(contentType);
+        suspendIfNeeded();
     }
-    ~BlobCreator() override { }
-    DEFINE_INLINE_VIRTUAL_TRACE()
+
+    void start(PassOwnPtr<FetchDataConsumerHandle> handle) { m_loader->start(handle.get(), this); }
+
+    void didFetchDataLoadedBlobHandle(PassRefPtr<BlobDataHandle> blobDataHandle) override
+    {
+        m_loader.clear();
+        m_buffer->endLoading(this, EndLoadingDone);
+        m_client->didFetchDataLoadedBlobHandle(blobDataHandle);
+    }
+
+    void didFetchDataLoadedArrayBuffer(PassRefPtr<DOMArrayBuffer> arrayBuffer) override
+    {
+        m_loader.clear();
+        m_buffer->endLoading(this, EndLoadingDone);
+        m_client->didFetchDataLoadedArrayBuffer(arrayBuffer);
+    }
+
+    void didFetchDataLoadedString(const String& string) override
+    {
+        m_loader.clear();
+        m_buffer->endLoading(this, EndLoadingDone);
+        m_client->didFetchDataLoadedString(string);
+    }
+
+    void didFetchDataLoadedStream() override
+    {
+        m_loader.clear();
+        m_buffer->endLoading(this, EndLoadingDone);
+        m_client->didFetchDataLoadedStream();
+    }
+
+    void didFetchDataLoadFailed() override
+    {
+        m_loader.clear();
+        m_buffer->endLoading(this, EndLoadingErrored);
+        m_client->didFetchDataLoadFailed();
+    }
+
+    DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_buffer);
+        visitor->trace(m_loader);
         visitor->trace(m_client);
-        BodyStreamBuffer::Observer::trace(visitor);
+        ActiveDOMObject::trace(visitor);
+        FetchDataLoader::Client::trace(visitor);
     }
-    void onWrite() override
-    {
-        ASSERT(m_buffer);
-        while (RefPtr<DOMArrayBuffer> buf = m_buffer->read()) {
-            m_blobData->appendBytes(buf->data(), buf->byteLength());
-        }
-    }
-    void onClose() override
-    {
-        ASSERT(m_buffer);
-        const long long size = m_blobData->length();
-        m_client->didCreateBlobHandle(BlobDataHandle::create(m_blobData.release(), size));
-        cleanup();
-    }
-    void onError() override
-    {
-        ASSERT(m_buffer);
-        m_client->didFail(m_buffer->exception());
-        cleanup();
-    }
-    void start()
-    {
-        ASSERT(!m_buffer->isObserverRegistered());
-        m_buffer->registerObserver(this);
-        onWrite();
-        if (m_buffer->hasError()) {
-            return onError();
-        }
-        if (m_buffer->isClosed())
-            return onClose();
-    }
-    void cleanup()
-    {
-        m_buffer->unregisterObserver();
-        m_buffer.clear();
-        m_client.clear();
-        m_blobData.clear();
-    }
+
 private:
+    void stop() override
+    {
+        if (m_loader) {
+            m_loader->cancel();
+            m_loader.clear();
+            m_buffer->endLoading(this, EndLoadingErrored);
+        }
+    }
+
     Member<BodyStreamBuffer> m_buffer;
-    Member<BodyStreamBuffer::BlobHandleCreatorClient> m_client;
-    OwnPtr<BlobData> m_blobData;
+    Member<FetchDataLoader> m_loader;
+    Member<FetchDataLoader::Client> m_client;
 };
 
-class StreamTeePump : public BodyStreamBuffer::Observer {
-public:
-    StreamTeePump(BodyStreamBuffer* inBuffer, BodyStreamBuffer* outBuffer1, BodyStreamBuffer* outBuffer2)
-        : m_inBuffer(inBuffer)
-        , m_outBuffer1(outBuffer1)
-        , m_outBuffer2(outBuffer2)
-    {
-    }
-    void onWrite() override
-    {
-        while (RefPtr<DOMArrayBuffer> buf = m_inBuffer->read()) {
-            if (!m_outBuffer1->isClosed() && !m_outBuffer1->hasError())
-                m_outBuffer1->write(buf);
-            if (!m_outBuffer2->isClosed() && !m_outBuffer2->hasError())
-                m_outBuffer2->write(buf);
-        }
-    }
-    void onClose() override
-    {
-        if (!m_outBuffer1->isClosed() && !m_outBuffer1->hasError())
-            m_outBuffer1->close();
-        if (!m_outBuffer2->isClosed() && !m_outBuffer2->hasError())
-            m_outBuffer2->close();
-        cleanup();
-    }
-    void onError() override
-    {
-        if (!m_outBuffer1->isClosed() && !m_outBuffer1->hasError())
-            m_outBuffer1->error(m_inBuffer->exception());
-        if (!m_outBuffer2->isClosed() && !m_outBuffer2->hasError())
-            m_outBuffer2->error(m_inBuffer->exception());
-        cleanup();
-    }
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        BodyStreamBuffer::Observer::trace(visitor);
-        visitor->trace(m_inBuffer);
-        visitor->trace(m_outBuffer1);
-        visitor->trace(m_outBuffer2);
-    }
-    void start()
-    {
-        m_inBuffer->registerObserver(this);
-        onWrite();
-        if (m_inBuffer->hasError())
-            return onError();
-        if (m_inBuffer->isClosed())
-            return onClose();
-    }
-
-private:
-    void cleanup()
-    {
-        m_inBuffer->unregisterObserver();
-        m_inBuffer.clear();
-        m_outBuffer1.clear();
-        m_outBuffer2.clear();
-    }
-    Member<BodyStreamBuffer> m_inBuffer;
-    Member<BodyStreamBuffer> m_outBuffer1;
-    Member<BodyStreamBuffer> m_outBuffer2;
-};
-
-} // namespace
-
-PassRefPtr<DOMArrayBuffer> BodyStreamBuffer::read()
+BodyStreamBuffer::BodyStreamBuffer(PassOwnPtr<FetchDataConsumerHandle> handle)
+    : m_handle(handle)
+    , m_reader(m_handle ? m_handle->obtainReader(this) : nullptr)
+    , m_stream(new ReadableByteStream(this, new ReadableByteStream::StrictStrategy))
+    , m_lockLevel(0)
+    , m_hasBody(m_handle)
+    , m_streamNeedsMore(false)
 {
-    if (m_queue.isEmpty())
-        return PassRefPtr<DOMArrayBuffer>();
-    return m_queue.takeFirst();
+    if (m_hasBody) {
+        m_stream->didSourceStart();
+    } else {
+        // a null body corresponds to an empty stream.
+        close();
+    }
 }
 
-void BodyStreamBuffer::write(PassRefPtr<DOMArrayBuffer> chunk)
+PassRefPtr<BlobDataHandle> BodyStreamBuffer::drainAsBlobDataHandle(FetchDataConsumerHandle::Reader::BlobSizePolicy policy)
 {
-    ASSERT(!m_isClosed);
-    ASSERT(!m_exception);
-    ASSERT(chunk);
-    m_queue.append(chunk);
-    if (m_observer)
-        m_observer->onWrite();
+    ASSERT(!isLocked());
+    if (ReadableStream::Closed == m_stream->stateInternal() || ReadableStream::Errored == m_stream->stateInternal())
+        return nullptr;
+
+    RefPtr<BlobDataHandle> blobDataHandle = m_reader->drainAsBlobDataHandle(policy);
+    if (blobDataHandle) {
+        close();
+        return blobDataHandle.release();
+    }
+    return nullptr;
+}
+
+PassRefPtr<FormData> BodyStreamBuffer::drainAsFormData()
+{
+    ASSERT(!isLocked());
+    if (ReadableStream::Closed == m_stream->stateInternal() || ReadableStream::Errored == m_stream->stateInternal())
+        return nullptr;
+
+    RefPtr<FormData> formData = m_reader->drainAsFormData();
+    if (formData) {
+        close();
+        return formData.release();
+    }
+    return nullptr;
+}
+
+PassOwnPtr<FetchDataConsumerHandle> BodyStreamBuffer::lock(ExecutionContext* executionContext)
+{
+    ASSERT(!isLocked());
+    ++m_lockLevel;
+    m_reader = nullptr;
+    OwnPtr<FetchDataConsumerHandle> handle = m_handle.release();
+    if (ReadableStream::Closed == m_stream->stateInternal() || !m_hasBody)
+        return createFetchDataConsumerHandleFromWebHandle(createDoneDataConsumerHandle());
+    if (ReadableStream::Errored == m_stream->stateInternal())
+        return createFetchDataConsumerHandleFromWebHandle(createUnexpectedErrorDataConsumerHandle());
+
+    TrackExceptionState exceptionState;
+    m_streamReader = m_stream->getBytesReader(executionContext, exceptionState);
+    return handle.release();
+}
+
+void BodyStreamBuffer::startLoading(ExecutionContext* executionContext, FetchDataLoader* loader, FetchDataLoader::Client* client)
+{
+    OwnPtr<FetchDataConsumerHandle> handle = lock(executionContext);
+    auto holder = new LoaderHolder(executionContext, this, loader, client);
+    m_loaders.add(holder);
+    holder->start(handle.release());
+}
+
+void BodyStreamBuffer::pullSource()
+{
+    ASSERT(!m_streamNeedsMore);
+    m_streamNeedsMore = true;
+    processData();
+}
+
+ScriptPromise BodyStreamBuffer::cancelSource(ScriptState* scriptState, ScriptValue)
+{
+    close();
+    return ScriptPromise::cast(scriptState, v8::Undefined(scriptState->isolate()));
+}
+
+void BodyStreamBuffer::didGetReadable()
+{
+    if (!m_reader)
+        return;
+
+    if (!m_streamNeedsMore) {
+        // Perform zero-length read to call close()/error() early.
+        size_t readSize;
+        WebDataConsumerHandle::Result result = m_reader->read(nullptr, 0, WebDataConsumerHandle::FlagNone, &readSize);
+        switch (result) {
+        case WebDataConsumerHandle::Ok:
+        case WebDataConsumerHandle::ShouldWait:
+            return;
+        case WebDataConsumerHandle::Done:
+            close();
+            return;
+        case WebDataConsumerHandle::Busy:
+        case WebDataConsumerHandle::ResourceExhausted:
+        case WebDataConsumerHandle::UnexpectedError:
+            error();
+            return;
+        }
+        return;
+    }
+    processData();
 }
 
 void BodyStreamBuffer::close()
 {
-    ASSERT(!m_isClosed);
-    ASSERT(!m_exception);
-    m_isClosed = true;
-    if (m_observer)
-        m_observer->onClose();
+    m_reader = nullptr;
+    m_stream->close();
+    m_handle.clear();
 }
 
-void BodyStreamBuffer::error(DOMException* exception)
+void BodyStreamBuffer::error()
 {
-    ASSERT(exception);
-    ASSERT(!m_isClosed);
-    ASSERT(!m_exception);
-    m_exception = exception;
-    if (m_observer)
-        m_observer->onError();
+    m_reader = nullptr;
+    m_stream->error(DOMException::create(NetworkError, "network error"));
+    m_handle.clear();
 }
 
-bool BodyStreamBuffer::readAllAndCreateBlobHandle(const String& contentType, BlobHandleCreatorClient* client)
+void BodyStreamBuffer::processData()
 {
-    if (m_observer)
-        return false;
-    BlobCreator* blobCreator = new BlobCreator(this, contentType, client);
-    blobCreator->start();
-    return true;
+    ASSERT(m_reader);
+    while (m_streamNeedsMore) {
+        const void* buffer;
+        size_t available;
+        WebDataConsumerHandle::Result result = m_reader->beginRead(&buffer, WebDataConsumerHandle::FlagNone, &available);
+        switch (result) {
+        case WebDataConsumerHandle::Ok:
+            m_streamNeedsMore = m_stream->enqueue(DOMUint8Array::create(static_cast<const unsigned char*>(buffer), available));
+            m_reader->endRead(available);
+            break;
+
+        case WebDataConsumerHandle::Done:
+            close();
+            return;
+
+        case WebDataConsumerHandle::ShouldWait:
+            return;
+
+        case WebDataConsumerHandle::Busy:
+        case WebDataConsumerHandle::ResourceExhausted:
+        case WebDataConsumerHandle::UnexpectedError:
+            error();
+            return;
+        }
+    }
 }
 
-bool BodyStreamBuffer::startTee(BodyStreamBuffer* out1, BodyStreamBuffer* out2)
+void BodyStreamBuffer::unlock()
 {
-    if (m_observer)
-        return false;
-    StreamTeePump* teePump = new StreamTeePump(this, out1, out2);
-    teePump->start();
-    return true;
+    ASSERT(m_lockLevel > 0);
+    if (m_streamReader) {
+        m_streamReader->releaseLock();
+        m_streamReader = nullptr;
+    }
+    --m_lockLevel;
 }
 
-bool BodyStreamBuffer::registerObserver(Observer* observer)
+void BodyStreamBuffer::endLoading(FetchDataLoader::Client* client, EndLoadingMode mode)
 {
-    if (m_observer)
-        return false;
-    ASSERT(observer);
-    m_observer = observer;
-    return true;
-}
-
-void BodyStreamBuffer::unregisterObserver()
-{
-    m_observer.clear();
-}
-
-DEFINE_TRACE(BodyStreamBuffer)
-{
-    visitor->trace(m_exception);
-    visitor->trace(m_observer);
-    visitor->trace(m_canceller);
-}
-
-BodyStreamBuffer::BodyStreamBuffer(Canceller* canceller)
-    : m_isClosed(false)
-    , m_canceller(canceller)
-{
+    ASSERT(m_loaders.contains(client));
+    m_loaders.remove(client);
+    unlock();
+    if (mode == EndLoadingDone) {
+        close();
+    } else {
+        ASSERT(mode == EndLoadingErrored);
+        error();
+    }
 }
 
 } // namespace blink

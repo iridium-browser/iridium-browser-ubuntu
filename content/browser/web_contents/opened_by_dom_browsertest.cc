@@ -6,7 +6,6 @@
 #include "base/strings/stringprintf.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -44,7 +43,7 @@ class OpenedByDOMTest : public ContentBrowserTest {
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     // Use --site-per-process to force process swaps on cross-site navigations.
-    command_line->AppendSwitch(switches::kSitePerProcess);
+    IsolateAllSitesForTesting(command_line);
   }
 
   bool AttemptCloseFromJavaScript(WebContents* web_contents) {
@@ -114,8 +113,7 @@ IN_PROC_BROWSER_TEST_F(OpenedByDOMTest, Popup) {
 
 // Tests that window.close() works in a popup window that has navigated a few
 // times and swapped processes.
-// Crashes on all platforms. http://crbug.com/399709
-IN_PROC_BROWSER_TEST_F(OpenedByDOMTest, DISABLED_CrossProcessPopup) {
+IN_PROC_BROWSER_TEST_F(OpenedByDOMTest, CrossProcessPopup) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
 

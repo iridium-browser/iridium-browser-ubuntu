@@ -6,8 +6,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/public/common/content_switches.h"
@@ -50,19 +52,9 @@ PPB_Graphics3D_Impl::PPB_Graphics3D_Impl(PP_Instance instance)
       commit_pending_(false),
       sync_point_(0),
       has_alpha_(false),
-      command_buffer_(NULL),
       weak_ptr_factory_(this) {}
 
-PPB_Graphics3D_Impl::~PPB_Graphics3D_Impl() {
-  DestroyGLES2Impl();
-  if (command_buffer_) {
-    DCHECK(channel_.get());
-    channel_->DestroyCommandBuffer(command_buffer_);
-    command_buffer_ = NULL;
-  }
-
-  channel_ = NULL;
-}
+PPB_Graphics3D_Impl::~PPB_Graphics3D_Impl() {}
 
 // static
 PP_Resource PPB_Graphics3D_Impl::Create(PP_Instance instance,
@@ -165,17 +157,17 @@ void PPB_Graphics3D_Impl::ViewInitiatedPaint() {
     SwapBuffersACK(PP_OK);
 }
 
-int PPB_Graphics3D_Impl::GetCommandBufferRouteId() {
+CommandBufferProxyImpl* PPB_Graphics3D_Impl::GetCommandBufferProxy() {
   DCHECK(command_buffer_);
-  return command_buffer_->GetRouteID();
+  return command_buffer_.get();
 }
 
 gpu::CommandBuffer* PPB_Graphics3D_Impl::GetCommandBuffer() {
-  return command_buffer_;
+  return command_buffer_.get();
 }
 
 gpu::GpuControl* PPB_Graphics3D_Impl::GetGpuControl() {
-  return command_buffer_;
+  return command_buffer_.get();
 }
 
 int32 PPB_Graphics3D_Impl::DoSwapBuffers() {
@@ -294,11 +286,12 @@ bool PPB_Graphics3D_Impl::InitRaw(
   if (share_context) {
     PPB_Graphics3D_Impl* share_graphics =
         static_cast<PPB_Graphics3D_Impl*>(share_context);
-    share_buffer = share_graphics->command_buffer_;
+    share_buffer = share_graphics->GetCommandBufferProxy();
   }
 
   command_buffer_ = channel_->CreateOffscreenCommandBuffer(
-      surface_size, share_buffer, attribs, GURL::EmptyGURL(), gpu_preference);
+      surface_size, share_buffer, GpuChannelHost::kDefaultStreamId, attribs,
+      GURL::EmptyGURL(), gpu_preference);
   if (!command_buffer_)
     return false;
   if (!command_buffer_->Initialize())
@@ -354,10 +347,9 @@ void PPB_Graphics3D_Impl::OnContextLost() {
 
   // Send context lost to plugin. This may have been caused by a PPAPI call, so
   // avoid re-entering.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PPB_Graphics3D_Impl::SendContextLost,
-                 weak_ptr_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PPB_Graphics3D_Impl::SendContextLost,
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PPB_Graphics3D_Impl::SendContextLost() {

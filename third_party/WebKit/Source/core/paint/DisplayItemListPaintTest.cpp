@@ -15,7 +15,6 @@
 #include "core/paint/LayerClipRecorder.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/ScopeRecorder.h"
-#include "core/paint/SubtreeRecorder.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DrawingDisplayItem.h"
@@ -26,15 +25,16 @@ namespace blink {
 class DisplayItemListPaintTest : public RenderingTest {
 public:
     DisplayItemListPaintTest()
-        : m_layoutView(nullptr) { }
+        : m_layoutView(nullptr)
+        , m_originalSlimmingPaintEnabled(RuntimeEnabledFeatures::slimmingPaintEnabled()) { }
 
 protected:
     LayoutView& layoutView() { return *m_layoutView; }
     DisplayItemList& rootDisplayItemList() { return *layoutView().layer()->graphicsLayerBacking()->displayItemList(); }
-    const Vector<OwnPtr<DisplayItem>>& newPaintListBeforeUpdate() { return rootDisplayItemList().m_newDisplayItems; }
+    const DisplayItems& newPaintListBeforeUpdate() { return rootDisplayItemList().m_newDisplayItems; }
 
 private:
-    virtual void SetUp() override
+    void SetUp() override
     {
         RuntimeEnabledFeatures::setSlimmingPaintEnabled(true);
 
@@ -45,20 +45,56 @@ private:
         ASSERT_TRUE(m_layoutView);
     }
 
-    virtual void TearDown() override
+    void TearDown() override
     {
-        RuntimeEnabledFeatures::setSlimmingPaintEnabled(false);
+        RuntimeEnabledFeatures::setSlimmingPaintEnabled(m_originalSlimmingPaintEnabled);
     }
 
     LayoutView* m_layoutView;
+    bool m_originalSlimmingPaintEnabled;
 };
 
-class TestDisplayItem : public DisplayItem {
+// Slimming paint v2 has subtly different behavior on some paint tests. This
+// class is used to test only v2 behavior while maintaining v1 test coverage.
+class DisplayItemListPaintTestForSlimmingPaintV2 : public RenderingTest {
 public:
-    TestDisplayItem(const DisplayItemClientWrapper& client, Type type) : DisplayItem(client, type) { }
+    DisplayItemListPaintTestForSlimmingPaintV2()
+        : m_layoutView(nullptr)
+        , m_originalSlimmingPaintV2Enabled(RuntimeEnabledFeatures::slimmingPaintV2Enabled()) { }
 
-    virtual void replay(GraphicsContext&) override final { ASSERT_NOT_REACHED(); }
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override final { ASSERT_NOT_REACHED(); }
+protected:
+    LayoutView& layoutView() { return *m_layoutView; }
+    DisplayItemList& rootDisplayItemList() { return *layoutView().layer()->graphicsLayerBacking()->displayItemList(); }
+    const DisplayItems& newPaintListBeforeUpdate() { return rootDisplayItemList().m_newDisplayItems; }
+
+private:
+    void SetUp() override
+    {
+        ASSERT_TRUE(RuntimeEnabledFeatures::slimmingPaintEnabled());
+        RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(true);
+
+        RenderingTest::SetUp();
+        enableCompositing();
+
+        m_layoutView = document().view()->layoutView();
+        ASSERT_TRUE(m_layoutView);
+    }
+
+    void TearDown() override
+    {
+        RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(m_originalSlimmingPaintV2Enabled);
+    }
+
+    LayoutView* m_layoutView;
+    bool m_originalSlimmingPaintV2Enabled;
+};
+
+class TestDisplayItem final : public DisplayItem {
+public:
+    TestDisplayItem(const DisplayItemClientWrapper& client, Type type) : DisplayItem(client, type, sizeof(*this)) { }
+
+    void replay(GraphicsContext&) final { ASSERT_NOT_REACHED(); }
+    void appendToWebDisplayItemList(WebDisplayItemList*) const final { ASSERT_NOT_REACHED(); }
 };
 
 #ifndef NDEBUG
@@ -69,18 +105,28 @@ public:
 #define TRACE_DISPLAY_ITEMS(i, expected, actual)
 #endif
 
-#define EXPECT_DISPLAY_LIST(actual, expectedSize, ...) \
+#define EXPECT_DISPLAY_LIST_BASE(actual, expectedSize, ...) \
     do { \
         EXPECT_EQ((size_t)expectedSize, actual.size()); \
         if (expectedSize != actual.size()) \
             break; \
         const TestDisplayItem expected[] = { __VA_ARGS__ }; \
         for (size_t index = 0; index < std::min<size_t>(actual.size(), expectedSize); index++) { \
-            TRACE_DISPLAY_ITEMS(index, expected[index], *actual[index]); \
-            EXPECT_EQ(expected[index].client(), actual[index]->client()); \
-            EXPECT_EQ(expected[index].type(), actual[index]->type()); \
+            TRACE_DISPLAY_ITEMS(index, expected[index], actual[index]); \
+            EXPECT_EQ(expected[index].client(), actual[index].client()); \
+            EXPECT_EQ(expected[index].type(), actual[index].type()); \
         } \
     } while (false);
+
+#ifndef NDEBUG
+#define EXPECT_DISPLAY_LIST_WITH_RED_FILL_IN_DEBUG(actual, expectedSizeWithoutFill, ...) \
+    EXPECT_DISPLAY_LIST_BASE( \
+        actual, expectedSizeWithoutFill + 1, \
+        TestDisplayItem(*document().layoutView()->layer()->graphicsLayerBacking(), DisplayItem::DebugRedFill), \
+        __VA_ARGS__)
+#else
+#define EXPECT_DISPLAY_LIST_WITH_RED_FILL_IN_DEBUG EXPECT_DISPLAY_LIST_BASE
+#endif
 
 TEST_F(DisplayItemListPaintTest, FullDocumentPaintingWithCaret)
 {
@@ -89,30 +135,29 @@ TEST_F(DisplayItemListPaintTest, FullDocumentPaintingWithCaret)
     document().page()->focusController().setFocused(true);
     LayoutView& layoutView = *document().layoutView();
     DeprecatedPaintLayer& rootLayer = *layoutView.layer();
-    LayoutObject& htmlLayoutObject = *document().documentElement()->layoutObject();
     Element& div = *toElement(document().body()->firstChild());
     LayoutObject& divLayoutObject = *document().body()->firstChild()->layoutObject();
     InlineTextBox& textInlineBox = *toLayoutText(div.firstChild()->layoutObject())->firstTextBox();
 
     GraphicsContext context(&rootDisplayItemList());
-    DeprecatedPaintLayerPaintingInfo paintingInfo(&rootLayer, LayoutRect(0, 0, 800, 600), PaintBehaviorNormal, LayoutSize());
+    DeprecatedPaintLayerPaintingInfo paintingInfo(&rootLayer, LayoutRect(0, 0, 800, 600), GlobalPaintNormalPhase, LayoutSize());
     DeprecatedPaintLayerPainter(rootLayer).paintLayerContents(&context, paintingInfo, PaintLayerPaintingCompositingAllPhases);
     rootDisplayItemList().commitNewDisplayItems();
 
-    EXPECT_DISPLAY_LIST(rootDisplayItemList().displayItems(), 2,
-        TestDisplayItem(htmlLayoutObject, DisplayItem::BoxDecorationBackground),
+    EXPECT_DISPLAY_LIST_BASE(rootDisplayItemList().displayItems(), 2,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
         TestDisplayItem(textInlineBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)));
 
     div.focus();
-    document().view()->updateLayoutAndStyleForPainting();
-    EXPECT_TRUE(rootDisplayItemList().clientCacheIsValid(htmlLayoutObject.displayItemClient()));
+    document().view()->updateAllLifecyclePhases();
+    EXPECT_TRUE(rootDisplayItemList().clientCacheIsValid(layoutView.displayItemClient()));
     EXPECT_FALSE(rootDisplayItemList().clientCacheIsValid(divLayoutObject.displayItemClient()));
     EXPECT_TRUE(rootDisplayItemList().clientCacheIsValid(textInlineBox.displayItemClient()));
     DeprecatedPaintLayerPainter(rootLayer).paintLayerContents(&context, paintingInfo, PaintLayerPaintingCompositingAllPhases);
     rootDisplayItemList().commitNewDisplayItems();
 
-    EXPECT_DISPLAY_LIST(rootDisplayItemList().displayItems(), 3,
-        TestDisplayItem(htmlLayoutObject, DisplayItem::BoxDecorationBackground),
+    EXPECT_DISPLAY_LIST_BASE(rootDisplayItemList().displayItems(), 3,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
         TestDisplayItem(textInlineBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)),
         TestDisplayItem(divLayoutObject, DisplayItem::Caret)); // New!
 }
@@ -122,7 +167,6 @@ TEST_F(DisplayItemListPaintTest, InlineRelayout)
     setBodyInnerHTML("<div id='div' style='width:100px; height: 200px'>AAAAAAAAAA BBBBBBBBBB</div>");
     LayoutView& layoutView = *document().layoutView();
     DeprecatedPaintLayer& rootLayer = *layoutView.layer();
-    LayoutObject& htmlObject = *document().documentElement()->layoutObject();
     Element& div = *toElement(document().body()->firstChild());
     LayoutBlock& divBlock = *toLayoutBlock(document().body()->firstChild()->layoutObject());
     LayoutText& text = *toLayoutText(divBlock.firstChild());
@@ -130,17 +174,17 @@ TEST_F(DisplayItemListPaintTest, InlineRelayout)
     DisplayItemClient firstTextBoxDisplayItemClient = firstTextBox.displayItemClient();
 
     GraphicsContext context(&rootDisplayItemList());
-    DeprecatedPaintLayerPaintingInfo paintingInfo(&rootLayer, LayoutRect(0, 0, 800, 600), PaintBehaviorNormal, LayoutSize());
+    DeprecatedPaintLayerPaintingInfo paintingInfo(&rootLayer, LayoutRect(0, 0, 800, 600), GlobalPaintNormalPhase, LayoutSize());
     DeprecatedPaintLayerPainter(rootLayer).paintLayerContents(&context, paintingInfo, PaintLayerPaintingCompositingAllPhases);
     rootDisplayItemList().commitNewDisplayItems();
 
-    EXPECT_DISPLAY_LIST(rootDisplayItemList().displayItems(), 2,
-        TestDisplayItem(htmlObject, DisplayItem::BoxDecorationBackground),
+    EXPECT_DISPLAY_LIST_BASE(rootDisplayItemList().displayItems(), 2,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
         TestDisplayItem(firstTextBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)));
 
     div.setAttribute(HTMLNames::styleAttr, "width: 10px; height: 200px");
-    document().view()->updateLayoutAndStyleForPainting();
-    EXPECT_TRUE(rootDisplayItemList().clientCacheIsValid(htmlObject.displayItemClient()));
+    document().view()->updateAllLifecyclePhases();
+    EXPECT_TRUE(rootDisplayItemList().clientCacheIsValid(layoutView.displayItemClient()));
     EXPECT_FALSE(rootDisplayItemList().clientCacheIsValid(divBlock.displayItemClient()));
     EXPECT_FALSE(rootDisplayItemList().clientCacheIsValid(firstTextBoxDisplayItemClient));
     DeprecatedPaintLayerPainter(rootLayer).paintLayerContents(&context, paintingInfo, PaintLayerPaintingCompositingAllPhases);
@@ -150,10 +194,65 @@ TEST_F(DisplayItemListPaintTest, InlineRelayout)
     InlineTextBox& newFirstTextBox = *newText.firstTextBox();
     InlineTextBox& secondTextBox = *newText.firstTextBox()->nextTextBox();
 
-    EXPECT_DISPLAY_LIST(rootDisplayItemList().displayItems(), 3,
-        TestDisplayItem(htmlObject, DisplayItem::BoxDecorationBackground),
+    EXPECT_DISPLAY_LIST_BASE(rootDisplayItemList().displayItems(), 3,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
         TestDisplayItem(newFirstTextBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)),
         TestDisplayItem(secondTextBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)));
+}
+
+TEST_F(DisplayItemListPaintTestForSlimmingPaintV2, FullDocumentPaintingWithCaret)
+{
+    setBodyInnerHTML("<div id='div' contentEditable='true' style='outline:none'>XYZ</div>");
+    document().page()->focusController().setActive(true);
+    document().page()->focusController().setFocused(true);
+    LayoutView& layoutView = *document().layoutView();
+    Element& div = *toElement(document().body()->firstChild());
+    LayoutObject& divLayoutObject = *document().body()->firstChild()->layoutObject();
+    InlineTextBox& textInlineBox = *toLayoutText(div.firstChild()->layoutObject())->firstTextBox();
+
+    document().view()->updateAllLifecyclePhases();
+
+    EXPECT_DISPLAY_LIST_WITH_RED_FILL_IN_DEBUG(rootDisplayItemList().displayItems(), 2,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
+        TestDisplayItem(textInlineBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)));
+
+    div.focus();
+    document().view()->updateAllLifecyclePhases();
+
+    EXPECT_DISPLAY_LIST_WITH_RED_FILL_IN_DEBUG(rootDisplayItemList().displayItems(), 3,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
+        TestDisplayItem(textInlineBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)),
+        TestDisplayItem(divLayoutObject, DisplayItem::Caret)); // New!
+}
+
+TEST_F(DisplayItemListPaintTestForSlimmingPaintV2, InlineRelayout)
+{
+    setBodyInnerHTML("<div id='div' style='width:100px; height: 200px'>AAAAAAAAAA BBBBBBBBBB</div>");
+    LayoutView& layoutView = *document().layoutView();
+    Element& div = *toElement(document().body()->firstChild());
+    LayoutBlock& divBlock = *toLayoutBlock(document().body()->firstChild()->layoutObject());
+    LayoutText& text = *toLayoutText(divBlock.firstChild());
+    InlineTextBox& firstTextBox = *text.firstTextBox();
+
+    document().view()->updateAllLifecyclePhases();
+
+    EXPECT_DISPLAY_LIST_WITH_RED_FILL_IN_DEBUG(rootDisplayItemList().displayItems(), 2,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
+        TestDisplayItem(firstTextBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)));
+
+    div.setAttribute(HTMLNames::styleAttr, "width: 10px; height: 200px");
+    document().view()->updateAllLifecyclePhases();
+
+    LayoutText& newText = *toLayoutText(divBlock.firstChild());
+    InlineTextBox& newFirstTextBox = *newText.firstTextBox();
+    InlineTextBox& secondTextBox = *newText.firstTextBox()->nextTextBox();
+
+    EXPECT_DISPLAY_LIST_WITH_RED_FILL_IN_DEBUG(rootDisplayItemList().displayItems(), 5,
+        TestDisplayItem(layoutView, DisplayItem::BoxDecorationBackground),
+        TestDisplayItem(divBlock, DisplayItem::paintPhaseToBeginSubtreeType(PaintPhaseForeground)),
+        TestDisplayItem(newFirstTextBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)),
+        TestDisplayItem(secondTextBox, DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground)),
+        TestDisplayItem(divBlock, DisplayItem::paintPhaseToEndSubtreeType(PaintPhaseForeground)));
 }
 
 } // namespace blink

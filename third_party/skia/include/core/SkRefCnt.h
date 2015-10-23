@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -6,13 +5,11 @@
  * found in the LICENSE file.
  */
 
-
 #ifndef SkRefCnt_DEFINED
 #define SkRefCnt_DEFINED
 
 #include "SkAtomics.h"
-#include "SkInstCnt.h"
-#include "SkTemplates.h"
+#include "SkTypes.h"
 
 /** \class SkRefCntBase
 
@@ -26,8 +23,6 @@
 */
 class SK_API SkRefCntBase : SkNoncopyable {
 public:
-    SK_DECLARE_INST_COUNT(SkRefCntBase)
-
     /** Default construct, initializing the reference count to 1.
     */
     SkRefCntBase() : fRefCnt(1) {}

@@ -57,7 +57,11 @@ bool AudioOutputStreamSink::SetVolume(double volume) {
   audio_task_runner_->PostTask(
       FROM_HERE, base::Bind(&AudioOutputStreamSink::DoSetVolume, this, volume));
   return true;
-};
+}
+
+OutputDevice* AudioOutputStreamSink::GetOutputDevice() {
+  return nullptr;
+}
 
 int AudioOutputStreamSink::OnMoreData(AudioBus* dest,
                                       uint32 total_bytes_delay) {

@@ -23,7 +23,7 @@ class BoxReader;
 struct MEDIA_EXPORT Box {
   virtual ~Box();
 
-  // Parse errors may be logged using the BoxReader's log callback.
+  // Parse errors may be logged using the BoxReader's media log.
   virtual bool Parse(BoxReader* reader) = 0;
 
   virtual FourCC BoxType() const = 0;
@@ -85,7 +85,7 @@ class MEDIA_EXPORT BoxReader : public BufferReader {
   // |buf| is retained but not owned, and must outlive the BoxReader instance.
   static BoxReader* ReadTopLevelBox(const uint8* buf,
                                     const int buf_size,
-                                    const LogCB& log_cb,
+                                    const scoped_refptr<MediaLog>& media_log,
                                     bool* err);
 
   // Read the box header from the current buffer. This function returns true if
@@ -96,16 +96,24 @@ class MEDIA_EXPORT BoxReader : public BufferReader {
   // |buf| is not retained.
   static bool StartTopLevelBox(const uint8* buf,
                                const int buf_size,
-                               const LogCB& log_cb,
+                               const scoped_refptr<MediaLog>& media_log,
                                FourCC* type,
                                int* box_size,
                                bool* err) WARN_UNUSED_RESULT;
+
+  // Create a BoxReader from a buffer. |buf| must be the complete buffer, as
+  // errors are returned when sufficient data is not available. |buf| can start
+  // with any type of box -- it does not have to be IsValidTopLevelBox().
+  //
+  // |buf| is retained but not owned, and must outlive the BoxReader instance.
+  static BoxReader* ReadConcatentatedBoxes(const uint8* buf,
+                                           const int buf_size);
 
   // Returns true if |type| is recognized to be a top-level box, false
   // otherwise. This returns true for some boxes which we do not parse.
   // Helpful in debugging misaligned appends.
   static bool IsValidTopLevelBox(const FourCC& type,
-                                 const LogCB& log_cb);
+                                 const scoped_refptr<MediaLog>& media_log);
 
   // Scan through all boxes within the current box, starting at the current
   // buffer position. Must be called before any of the *Child functions work.
@@ -132,9 +140,18 @@ class MEDIA_EXPORT BoxReader : public BufferReader {
 
   // Read all children, regardless of FourCC. This is used from exactly one box,
   // corresponding to a rather significant inconsistency in the BMFF spec.
-  // Note that this method is mutually exclusive with ScanChildren().
-  template<typename T> bool ReadAllChildren(
-      std::vector<T>* children) WARN_UNUSED_RESULT;
+  // Note that this method is mutually exclusive with ScanChildren() and
+  // ReadAllChildrenAndCheckFourCC().
+  template <typename T>
+  bool ReadAllChildren(std::vector<T>* children) WARN_UNUSED_RESULT;
+
+  // Read all children and verify that the FourCC matches what is expected.
+  // Returns true if all children are successfully parsed and have the correct
+  // box type for |T|. Note that this method is mutually exclusive with
+  // ScanChildren() and ReadAllChildren().
+  template <typename T>
+  bool ReadAllChildrenAndCheckFourCC(std::vector<T>* children)
+      WARN_UNUSED_RESULT;
 
   // Populate the values of 'version()' and 'flags()' from a full box header.
   // Many boxes, but not all, use these values. This call should happen after
@@ -145,10 +162,15 @@ class MEDIA_EXPORT BoxReader : public BufferReader {
   uint8 version() const { return version_; }
   uint32 flags() const  { return flags_; }
 
-  const LogCB& log_cb() const { return log_cb_; }
+  const scoped_refptr<MediaLog>& media_log() const { return media_log_; }
 
  private:
-  BoxReader(const uint8* buf, const int size, const LogCB& log_cb);
+  // Create a BoxReader from |buf|. |is_EOS| should be true if |buf| is
+  // complete stream (i.e. no additional data is expected to be appended).
+  BoxReader(const uint8* buf,
+            const int size,
+            const scoped_refptr<MediaLog>& media_log,
+            bool is_EOS);
 
   // Must be called immediately after init. If the return is false, this
   // indicates that the box header and its contents were not available in the
@@ -159,7 +181,14 @@ class MEDIA_EXPORT BoxReader : public BufferReader {
   // true, the error is unrecoverable and the stream should be aborted.
   bool ReadHeader(bool* err);
 
-  LogCB log_cb_;
+  // Read all children, optionally checking FourCC. Returns true if all
+  // children are successfully parsed and, if |check_box_type|, have the
+  // correct box type for |T|. Note that this method is mutually exclusive
+  // with ScanChildren().
+  template <typename T>
+  bool ReadAllChildrenInternal(std::vector<T>* children, bool check_box_type);
+
+  scoped_refptr<MediaLog> media_log_;
   FourCC type_;
   uint8 version_;
   uint32 flags_;
@@ -170,6 +199,9 @@ class MEDIA_EXPORT BoxReader : public BufferReader {
   // valid if scanned_ is true.
   ChildMap children_;
   bool scanned_;
+
+  // True if the buffer provided to the reader is the complete stream.
+  const bool is_EOS_;
 };
 
 // Template definitions
@@ -201,16 +233,28 @@ bool BoxReader::MaybeReadChildren(std::vector<T>* children) {
   return true;
 }
 
-template<typename T>
+template <typename T>
 bool BoxReader::ReadAllChildren(std::vector<T>* children) {
+  return ReadAllChildrenInternal(children, false);
+}
+
+template <typename T>
+bool BoxReader::ReadAllChildrenAndCheckFourCC(std::vector<T>* children) {
+  return ReadAllChildrenInternal(children, true);
+}
+
+template <typename T>
+bool BoxReader::ReadAllChildrenInternal(std::vector<T>* children,
+                                        bool check_box_type) {
   DCHECK(!scanned_);
   scanned_ = true;
 
   bool err = false;
-  while (pos() < size()) {
-    BoxReader child_reader(&buf_[pos_], size_ - pos_, log_cb_);
+  while (pos_ < size_) {
+    BoxReader child_reader(&buf_[pos_], size_ - pos_, media_log_, is_EOS_);
     if (!child_reader.ReadHeader(&err)) break;
     T child;
+    RCHECK(!check_box_type || child_reader.type() == child.BoxType());
     RCHECK(child.Parse(&child_reader));
     children->push_back(child);
     pos_ += child_reader.size();

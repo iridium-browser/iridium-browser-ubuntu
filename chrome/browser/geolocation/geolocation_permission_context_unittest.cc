@@ -20,6 +20,7 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/geolocation/geolocation_permission_context_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/permissions/permission_request_id.h"
 #include "chrome/browser/ui/website_settings/mock_permission_bubble_view.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
@@ -27,7 +28,6 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/content_settings/core/common/permission_request_id.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/browser_thread.h"
@@ -36,6 +36,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_renderer_host.h"
@@ -115,8 +116,8 @@ class GeolocationPermissionContextTests
   void SetUp() override;
   void TearDown() override;
 
-  PermissionRequestID RequestID(int bridge_id);
-  PermissionRequestID RequestIDForTab(int tab, int bridge_id);
+  PermissionRequestID RequestID(int request_id);
+  PermissionRequestID RequestIDForTab(int tab, int request_id);
   InfoBarService* infobar_service() {
     return InfoBarService::FromWebContents(web_contents());
   }
@@ -131,10 +132,10 @@ class GeolocationPermissionContextTests
 
   void PermissionResponse(const PermissionRequestID& id,
                           ContentSetting content_setting);
-  void CheckPermissionMessageSent(int bridge_id, bool allowed);
-  void CheckPermissionMessageSentForTab(int tab, int bridge_id, bool allowed);
+  void CheckPermissionMessageSent(int request_id, bool allowed);
+  void CheckPermissionMessageSentForTab(int tab, int request_id, bool allowed);
   void CheckPermissionMessageSentInternal(MockRenderProcessHost* process,
-                                          int bridge_id,
+                                          int request_id,
                                           bool allowed);
   void AddNewTab(const GURL& url);
   void CheckTabContentsState(const GURL& requesting_frame,
@@ -146,11 +147,14 @@ class GeolocationPermissionContextTests
   void BubbleManagerDocumentLoadCompleted();
   void BubbleManagerDocumentLoadCompleted(content::WebContents* web_contents);
   ContentSetting GetGeolocationContentSetting(GURL frame_0, GURL frame_1);
+  bool BubbleEnabled() const;
+  size_t GetNumberOfPrompts();
+  void AcceptPrompt();
+  base::string16 GetPromptText();
 
   // owned by the browser context
   GeolocationPermissionContext* geolocation_permission_context_;
   ClosedInfoBarTracker closed_infobar_tracker_;
-  MockPermissionBubbleView bubble_view_;
   ScopedVector<content::WebContents> extra_tabs_;
 
   // A map between renderer child id and a pair represending the bridge id and
@@ -159,21 +163,21 @@ class GeolocationPermissionContextTests
 };
 
 PermissionRequestID GeolocationPermissionContextTests::RequestID(
-    int bridge_id) {
+    int request_id) {
   return PermissionRequestID(
       web_contents()->GetRenderProcessHost()->GetID(),
-      web_contents()->GetRenderViewHost()->GetRoutingID(),
-      bridge_id,
+      web_contents()->GetMainFrame()->GetRoutingID(),
+      request_id,
       GURL());
 }
 
 PermissionRequestID GeolocationPermissionContextTests::RequestIDForTab(
     int tab,
-    int bridge_id) {
+    int request_id) {
   return PermissionRequestID(
       extra_tabs_[tab]->GetRenderProcessHost()->GetID(),
-      extra_tabs_[tab]->GetRenderViewHost()->GetRoutingID(),
-      bridge_id,
+      extra_tabs_[tab]->GetMainFrame()->GetRoutingID(),
+      request_id,
       GURL());
 }
 
@@ -193,30 +197,30 @@ void GeolocationPermissionContextTests::PermissionResponse(
     const PermissionRequestID& id,
     ContentSetting content_setting) {
   responses_[id.render_process_id()] =
-      std::make_pair(id.bridge_id(), content_setting == CONTENT_SETTING_ALLOW);
+      std::make_pair(id.request_id(), content_setting == CONTENT_SETTING_ALLOW);
 }
 
 void GeolocationPermissionContextTests::CheckPermissionMessageSent(
-    int bridge_id,
+    int request_id,
     bool allowed) {
-  CheckPermissionMessageSentInternal(process(), bridge_id, allowed);
+  CheckPermissionMessageSentInternal(process(), request_id, allowed);
 }
 
 void GeolocationPermissionContextTests::CheckPermissionMessageSentForTab(
     int tab,
-    int bridge_id,
+    int request_id,
     bool allowed) {
   CheckPermissionMessageSentInternal(static_cast<MockRenderProcessHost*>(
       extra_tabs_[tab]->GetRenderProcessHost()),
-      bridge_id, allowed);
+      request_id, allowed);
 }
 
 void GeolocationPermissionContextTests::CheckPermissionMessageSentInternal(
     MockRenderProcessHost* process,
-    int bridge_id,
+    int request_id,
     bool allowed) {
   ASSERT_EQ(responses_.count(process->GetID()), 1U);
-  EXPECT_EQ(bridge_id, responses_[process->GetID()].first);
+  EXPECT_EQ(request_id, responses_[process->GetID()].first);
   EXPECT_EQ(allowed, responses_[process->GetID()].second);
   responses_.erase(process->GetID());
 }
@@ -235,7 +239,10 @@ void GeolocationPermissionContextTests::AddNewTab(const GURL& url) {
 #endif
   InfoBarService::CreateForWebContents(new_tab);
   PermissionBubbleManager::CreateForWebContents(new_tab);
-  PermissionBubbleManager::FromWebContents(new_tab)->SetView(&bubble_view_);
+  PermissionBubbleManager* permission_bubble_manager =
+      PermissionBubbleManager::FromWebContents(new_tab);
+  MockPermissionBubbleView::SetFactory(permission_bubble_manager, false);
+  permission_bubble_manager->DisplayPendingRequests(nullptr);
 
   extra_tabs_.push_back(new_tab);
 }
@@ -275,8 +282,10 @@ void GeolocationPermissionContextTests::SetUp() {
   MockLocationSettings::SetLocationStatus(true, true);
 #endif
   PermissionBubbleManager::CreateForWebContents(web_contents());
-  PermissionBubbleManager::FromWebContents(web_contents())->SetView(
-      &bubble_view_);
+  PermissionBubbleManager* permission_bubble_manager =
+      PermissionBubbleManager::FromWebContents(web_contents());
+  MockPermissionBubbleView::SetFactory(permission_bubble_manager, false);
+  permission_bubble_manager->DisplayPendingRequests(nullptr);
 }
 
 void GeolocationPermissionContextTests::TearDown() {
@@ -321,78 +330,52 @@ ContentSetting GeolocationPermissionContextTests::GetGeolocationContentSetting(
       frame_0, frame_1, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string());
 }
 
-// Needed to parameterize the tests for both infobars & permission bubbles.
-class GeolocationPermissionContextParamTests :
-      public GeolocationPermissionContextTests,
-      public ::testing::WithParamInterface<bool> {
- protected:
-  GeolocationPermissionContextParamTests() {}
-  ~GeolocationPermissionContextParamTests() override {}
-
-  bool BubbleEnabled() const {
+bool GeolocationPermissionContextTests::BubbleEnabled() const {
 #if defined (OS_ANDROID)
-    return false;
+  return false;
 #else
-    return GetParam();
+  return true;
 #endif
-  }
+}
 
-  void SetUp() override {
-    GeolocationPermissionContextTests::SetUp();
-#if !defined(OS_ANDROID)
-    if (BubbleEnabled()) {
-      base::CommandLine::ForCurrentProcess()->AppendSwitch(
-          switches::kEnablePermissionsBubbles);
-      EXPECT_TRUE(PermissionBubbleManager::Enabled());
-    } else {
-      base::CommandLine::ForCurrentProcess()->AppendSwitch(
-          switches::kDisablePermissionsBubbles);
-      EXPECT_FALSE(PermissionBubbleManager::Enabled());
-    }
-#endif
+size_t GeolocationPermissionContextTests::GetNumberOfPrompts() {
+  if (BubbleEnabled()) {
+    PermissionBubbleManager* manager =
+        PermissionBubbleManager::FromWebContents(web_contents());
+    return GetBubblesQueueSize(manager);
+  } else {
+    return infobar_service()->infobar_count();
   }
+}
 
-  size_t GetNumberOfPrompts() {
-    if (BubbleEnabled()) {
-      PermissionBubbleManager* manager =
-          PermissionBubbleManager::FromWebContents(web_contents());
-      return GetBubblesQueueSize(manager);
-    } else {
-      return infobar_service()->infobar_count();
-    }
-  }
-
-  void AcceptPrompt() {
-    if (BubbleEnabled()) {
-      PermissionBubbleManager* manager =
-          PermissionBubbleManager::FromWebContents(web_contents());
-      AcceptBubble(manager);
-    } else {
-      infobars::InfoBar* infobar = infobar_service()->infobar_at(0);
-      ConfirmInfoBarDelegate* infobar_delegate =
-          infobar->delegate()->AsConfirmInfoBarDelegate();
-      infobar_delegate->Accept();
-    }
-  }
-
-  base::string16 GetPromptText() {
-    if (BubbleEnabled()) {
-      PermissionBubbleManager* manager =
-          PermissionBubbleManager::FromWebContents(web_contents());
-      return manager->requests_.front()->GetMessageText();
-    }
+void GeolocationPermissionContextTests::AcceptPrompt() {
+  if (BubbleEnabled()) {
+    PermissionBubbleManager* manager =
+        PermissionBubbleManager::FromWebContents(web_contents());
+    AcceptBubble(manager);
+  } else {
     infobars::InfoBar* infobar = infobar_service()->infobar_at(0);
     ConfirmInfoBarDelegate* infobar_delegate =
         infobar->delegate()->AsConfirmInfoBarDelegate();
-    return infobar_delegate->GetMessageText();
+    infobar_delegate->Accept();
   }
- private:
-  DISALLOW_COPY_AND_ASSIGN(GeolocationPermissionContextParamTests);
-};
+}
+
+base::string16 GeolocationPermissionContextTests::GetPromptText() {
+  if (BubbleEnabled()) {
+    PermissionBubbleManager* manager =
+        PermissionBubbleManager::FromWebContents(web_contents());
+    return manager->requests_.front()->GetMessageText();
+  }
+  infobars::InfoBar* infobar = infobar_service()->infobar_at(0);
+  ConfirmInfoBarDelegate* infobar_delegate =
+      infobar->delegate()->AsConfirmInfoBarDelegate();
+  return infobar_delegate->GetMessageText();
+}
 
 // Tests ----------------------------------------------------------------------
 
-TEST_P(GeolocationPermissionContextParamTests, SinglePermissionInfobar) {
+TEST_F(GeolocationPermissionContextTests, SinglePermissionInfobar) {
   if (BubbleEnabled()) return;
 
   GURL requesting_frame("http://www.example.com/geolocation");
@@ -411,7 +394,7 @@ TEST_P(GeolocationPermissionContextParamTests, SinglePermissionInfobar) {
   EXPECT_TRUE(closed_infobar_tracker_.Contains(infobar));
 }
 
-TEST_P(GeolocationPermissionContextParamTests, SinglePermissionBubble) {
+TEST_F(GeolocationPermissionContextTests, SinglePermissionBubble) {
   if (!BubbleEnabled()) return;
 
   GURL requesting_frame("http://www.example.com/geolocation");
@@ -475,7 +458,7 @@ TEST_F(GeolocationPermissionContextTests, MasterEnabledGoogleAppsDisabled) {
 }
 #endif
 
-TEST_P(GeolocationPermissionContextParamTests, QueuedPermission) {
+TEST_F(GeolocationPermissionContextTests, QueuedPermission) {
   GURL requesting_frame_0("http://www.example.com/geolocation");
   GURL requesting_frame_1("http://www.example-2.com/geolocation");
   EXPECT_EQ(
@@ -541,7 +524,7 @@ TEST_P(GeolocationPermissionContextParamTests, QueuedPermission) {
       GetGeolocationContentSetting(requesting_frame_1, requesting_frame_0));
 }
 
-TEST_P(GeolocationPermissionContextParamTests, HashIsIgnored) {
+TEST_F(GeolocationPermissionContextTests, HashIsIgnored) {
   GURL url_a("http://www.example.com/geolocation#a");
   GURL url_b("http://www.example.com/geolocation#b");
 
@@ -574,7 +557,7 @@ TEST_P(GeolocationPermissionContextParamTests, HashIsIgnored) {
   }
 }
 
-TEST_P(GeolocationPermissionContextParamTests, PermissionForFileScheme) {
+TEST_F(GeolocationPermissionContextTests, PermissionForFileScheme) {
   // TODO(felt): The bubble is rejecting file:// permission requests.
   // Fix and enable this test. crbug.com/444047
   if (BubbleEnabled()) return;
@@ -600,8 +583,7 @@ TEST_P(GeolocationPermissionContextParamTests, PermissionForFileScheme) {
       GetGeolocationContentSetting(requesting_frame, requesting_frame));
 }
 
-TEST_P(GeolocationPermissionContextParamTests,
-    CancelGeolocationPermissionRequest) {
+TEST_F(GeolocationPermissionContextTests, CancelGeolocationPermissionRequest) {
   GURL frame_0("http://www.example.com/geolocation");
   GURL frame_1("http://www.example-2.com/geolocation");
   EXPECT_EQ(
@@ -651,7 +633,7 @@ TEST_P(GeolocationPermissionContextParamTests,
       CONTENT_SETTING_ALLOW, GetGeolocationContentSetting(frame_1, frame_0));
 }
 
-TEST_P(GeolocationPermissionContextParamTests, InvalidURL) {
+TEST_F(GeolocationPermissionContextTests, InvalidURL) {
   // Navigate to the first url.
   GURL invalid_embedder("about:blank");
   GURL requesting_frame;
@@ -666,7 +648,7 @@ TEST_P(GeolocationPermissionContextParamTests, InvalidURL) {
   CheckPermissionMessageSent(0, false);
 }
 
-TEST_P(GeolocationPermissionContextParamTests, SameOriginMultipleTabs) {
+TEST_F(GeolocationPermissionContextTests, SameOriginMultipleTabs) {
   GURL url_a("http://www.example.com/geolocation");
   GURL url_b("http://www.example-2.com/geolocation");
   NavigateAndCommit(url_a);  // Tab A0
@@ -729,7 +711,7 @@ TEST_P(GeolocationPermissionContextParamTests, SameOriginMultipleTabs) {
     ASSERT_EQ(1U, infobar_service_for_tab(0)->infobar_count());
 }
 
-TEST_P(GeolocationPermissionContextParamTests, QueuedOriginMultipleTabs) {
+TEST_F(GeolocationPermissionContextTests, QueuedOriginMultipleTabs) {
   GURL url_a("http://www.example.com/geolocation");
   GURL url_b("http://www.example-2.com/geolocation");
   NavigateAndCommit(url_a);  // Tab A0.
@@ -803,7 +785,7 @@ TEST_P(GeolocationPermissionContextParamTests, QueuedOriginMultipleTabs) {
   }
 }
 
-TEST_P(GeolocationPermissionContextParamTests, TabDestroyed) {
+TEST_F(GeolocationPermissionContextTests, TabDestroyed) {
   GURL requesting_frame_0("http://www.example.com/geolocation");
   GURL requesting_frame_1("http://www.example-2.com/geolocation");
   EXPECT_EQ(
@@ -842,7 +824,7 @@ TEST_P(GeolocationPermissionContextParamTests, TabDestroyed) {
       GetGeolocationContentSetting(requesting_frame_1, requesting_frame_0));
 }
 
-TEST_P(GeolocationPermissionContextParamTests, LastUsageAudited) {
+TEST_F(GeolocationPermissionContextTests, LastUsageAudited) {
   GURL requesting_frame("http://www.example.com/geolocation");
   NavigateAndCommit(requesting_frame);
   if (BubbleEnabled()) BubbleManagerDocumentLoadCompleted();
@@ -885,7 +867,7 @@ TEST_P(GeolocationPermissionContextParamTests, LastUsageAudited) {
             13);
 }
 
-TEST_P(GeolocationPermissionContextParamTests, LastUsageAuditedMultipleFrames) {
+TEST_F(GeolocationPermissionContextTests, LastUsageAuditedMultipleFrames) {
   base::SimpleTestClock* test_clock = new base::SimpleTestClock;
   test_clock->SetNow(base::Time::UnixEpoch() +
                      base::TimeDelta::FromSeconds(10));
@@ -974,7 +956,3 @@ TEST_P(GeolocationPermissionContextParamTests, LastUsageAuditedMultipleFrames) {
                               CONTENT_SETTINGS_TYPE_GEOLOCATION).ToDoubleT(),
             11);
 }
-
-INSTANTIATE_TEST_CASE_P(GeolocationPermissionContextTestsWithAndWithoutBubbles,
-                        GeolocationPermissionContextParamTests,
-                        ::testing::Values(false, true));

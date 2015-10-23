@@ -22,14 +22,15 @@
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
 #include "chrome/browser/ui/webui/version_handler.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/url_data_source.h"
@@ -84,6 +85,12 @@ void AddPair(base::ListValue* list,
              const base::StringPiece& key,
              const base::StringPiece& value) {
   AddPair16(list, UTF8ToUTF16(key), UTF8ToUTF16(value));
+}
+
+void AddPairBool(base::ListValue* list,
+                 const base::StringPiece& key,
+                 bool value) {
+  AddPair(list, key, value ? "Yes" : "No");
 }
 
 // Generate an empty data-pair which acts as a line break.
@@ -203,14 +210,13 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
   // Adds information regarding the system and chrome version info to list.
   void AddOperatingSystemInfo(base::ListValue* list)  {
     // Obtain the Chrome version info.
-    chrome::VersionInfo version_info;
     AddPair(list,
             l10n_util::GetStringUTF8(IDS_PRODUCT_NAME),
-            version_info.Version() + " (" +
-            chrome::VersionInfo::GetVersionStringModifier() + ")");
+            version_info::GetVersionNumber() + " (" +
+            chrome::GetChannelString() + ")");
 
     // OS version information.
-    std::string os_label = version_info.OSType();
+    std::string os_label = version_info::GetOSType();
 #if defined(OS_WIN)
     base::win::OSInfo* os = base::win::OSInfo::GetInstance();
     switch (os->version()) {
@@ -271,14 +277,11 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
 
     HotwordService* hotword_service =
         HotwordServiceFactory::GetForProfile(profile_);
-    AddPair(list, "Microphone Present",
-            hotword_service && hotword_service->microphone_available() ? "Yes"
-                                                                       : "No");
+    AddPairBool(list, "Microphone Present",
+                hotword_service && hotword_service->microphone_available());
 
-    std::string audio_capture = "No";
-    if (profile_->GetPrefs()->GetBoolean(prefs::kAudioCaptureAllowed))
-      audio_capture = "Yes";
-    AddPair(list, "Audio Capture Allowed", audio_capture);
+    AddPairBool(list, "Audio Capture Allowed",
+                profile_->GetPrefs()->GetBoolean(prefs::kAudioCaptureAllowed));
 
     AddLineBreak(list);
   }
@@ -305,29 +308,18 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
   void AddHotwordInfo(base::ListValue* list)  {
     HotwordService* hotword_service =
         HotwordServiceFactory::GetForProfile(profile_);
-    std::string hotword_allowed = "No";
-    if (hotword_service && hotword_service->IsHotwordAllowed())
-      hotword_allowed = "Yes";
-    AddPair(list, "Hotword Module Installable", hotword_allowed);
+    AddPairBool(list, "Hotword Module Installable",
+                hotword_service && hotword_service->IsHotwordAllowed());
 
-    std::string search_enabled = "No";
-    if (profile_->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled))
-      search_enabled = "Yes";
-    AddPair(list, "Hotword Search Enabled", search_enabled);
+    AddPairBool(list, "Hotword Search Enabled",
+                profile_->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled));
 
-    std::string always_on_search_enabled = "No";
-    if (profile_->GetPrefs()->GetBoolean(prefs::kHotwordAlwaysOnSearchEnabled))
-      always_on_search_enabled = "Yes";
-    AddPair(list, "Always-on Hotword Search Enabled", always_on_search_enabled);
+    AddPairBool(
+        list, "Always-on Hotword Search Enabled",
+        profile_->GetPrefs()->GetBoolean(prefs::kHotwordAlwaysOnSearchEnabled));
 
-    std::string audio_logging_enabled = "No";
-    if (hotword_service && hotword_service->IsOptedIntoAudioLogging())
-      audio_logging_enabled = "Yes";
-    AddPair(list, "Hotword Audio Logging Enabled", audio_logging_enabled);
-
-    std::string group = base::FieldTrialList::FindFullName(
-        hotword_internal::kHotwordFieldTrialName);
-    AddPair(list, "Field trial", group);
+    AddPairBool(list, "Hotword Audio Logging Enabled",
+                hotword_service && hotword_service->IsOptedIntoAudioLogging());
 
     AddLineBreak(list);
   }

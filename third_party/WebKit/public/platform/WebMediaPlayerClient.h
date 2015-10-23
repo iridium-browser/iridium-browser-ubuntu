@@ -31,27 +31,17 @@
 #ifndef WebMediaPlayerClient_h
 #define WebMediaPlayerClient_h
 
+#include "WebCommon.h"
 #include "WebMediaPlayer.h"
-#include "public/platform/WebEncryptedMediaTypes.h"
 
 namespace blink {
 
 class WebInbandTextTrack;
 class WebLayer;
 class WebMediaSource;
-class WebURL;
 
-class WebMediaPlayerClient {
+class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
 public:
-    enum MediaKeyErrorCode {
-        MediaKeyErrorCodeUnknown = 1,
-        MediaKeyErrorCodeClient,
-        MediaKeyErrorCodeService,
-        MediaKeyErrorCodeOutput,
-        MediaKeyErrorCodeHardwareChange,
-        MediaKeyErrorCodeDomain,
-    };
-
     enum VideoTrackKind {
         VideoTrackKindNone,
         VideoTrackKindAlternative,
@@ -79,12 +69,6 @@ public:
     virtual void durationChanged() = 0;
     virtual void sizeChanged() = 0;
     virtual void playbackStateChanged() = 0;
-    virtual void keyAdded(const WebString& keySystem, const WebString& sessionId) = 0;
-    virtual void keyError(const WebString& keySystem, const WebString& sessionId, MediaKeyErrorCode, unsigned short systemCode) = 0;
-    virtual void keyMessage(const WebString& keySystem, const WebString& sessionId, const unsigned char* message, unsigned messageLength, const WebURL& defaultURL) = 0;
-    virtual void encrypted(WebEncryptedMediaInitDataType, const unsigned char* initData, unsigned initDataLength) = 0;
-    virtual void didBlockPlaybackWaitingForKey() = 0;
-    virtual void didResumePlaybackBlockedForKey() = 0;
     virtual void setWebLayer(WebLayer*) = 0;
     virtual WebMediaPlayer::TrackId addAudioTrack(const WebString& id, AudioTrackKind, const WebString& label, const WebString& language, bool enabled) = 0;
     virtual void removeAudioTrack(WebMediaPlayer::TrackId) = 0;
@@ -93,7 +77,6 @@ public:
     virtual void addTextTrack(WebInbandTextTrack*) = 0;
     virtual void removeTextTrack(WebInbandTextTrack*) = 0;
     virtual void mediaSourceOpened(WebMediaSource*) = 0;
-    virtual void requestFullscreen() = 0;
     virtual void requestSeek(double) = 0;
     virtual void remoteRouteAvailabilityChanged(bool) = 0;
     virtual void connectedToRemoteDevice() = 0;

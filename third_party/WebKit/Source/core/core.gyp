@@ -217,7 +217,7 @@
           # In generated bindings code: 'switch contains default but no case'.
           # Disable c4267 warnings until we fix size_t to int truncations.
           # 4701 and 4702 are disabled because of issues in Bison-generated
-          # XPathGrammar.cpp and CSSGrammar.cpp.
+          # XPathGrammar.cpp.cpp.
           'msvs_disabled_warnings': [ 4065, 4267, 4701, 4702 ],
         }],
         ['OS in ("linux", "android") and "WTF_USE_WEBAUDIO_IPP=1" in feature_defines', {
@@ -568,7 +568,7 @@
           ],
         }, { # OS!="mac"
           'sources!': [
-            'editing/SmartReplaceCF.cpp',
+            'editing/commands/SmartReplaceCF.cpp',
           ],
         }],
         ['OS=="win" and chromium_win_pch==1', {
@@ -649,6 +649,8 @@
       'type': 'static_library',
       'dependencies': [
         '../config.gyp:config',
+        '../wtf/wtf_tests.gyp:wtf_unittest_helpers',
+        'webcore_prerequisites',
       ],
       'defines': [
         'BLINK_IMPLEMENTATION=1',
@@ -774,9 +776,9 @@
               # case'.
               # Disable c4267 warnings until we fix size_t to int truncations.
               # 4701 and 4702 are disabled because of issues in Bison-generated
-              # XPathGrammar.cpp and CSSGrammar.cpp.
+              # XPathGrammar.cpp.cpp.
               # Disable c4267 warnings until we fix size_t to int truncations.
-              'msvs_disabled_warnings': [ 4065, 4267, 4305, 4334, 4701, 4702 ],
+              'msvs_disabled_warnings': [ 4065, 4267, 4305, 4334, 4701, 4702, 4910 ],
               # Disable incremental link when building debug binary to avoid
               # "LNK1210: exceeded internal ILK size limit;".
               'configurations': {
@@ -797,15 +799,6 @@
               'libraries': [
                 '-lm -lstdc++',
               ],
-            }],
-            # Enable bigobj to fix fatal error C1128: number of sections
-            # exceeded object file format limit while compiling Document.cpp.
-            ['OS=="win" and target_arch=="x64"', {
-              'msvs_settings': {
-                'VCCLCompilerTool': {
-                  'AdditionalOptions': ['/bigobj'],
-                },
-              },
             }],
             ['OS=="win" and chromium_win_pch==1', {
               'sources/': [
@@ -830,7 +823,7 @@
               },
             },{ # OS!="mac"
               'sources!': [
-                'editing/SmartReplaceCF.cpp',
+                'editing/commands/SmartReplaceCF.cpp',
                 'layout/LayoutThemeMac.h',
                 'layout/LayoutThemeMac.mm',
               ],

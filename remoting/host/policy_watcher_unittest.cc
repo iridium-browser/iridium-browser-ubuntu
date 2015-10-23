@@ -27,11 +27,11 @@ MATCHER_P(IsPolicies, dict, "") {
   if (!equal) {
     std::string actual_value;
     base::JSONWriter::WriteWithOptions(
-        arg, base::JSONWriter::OPTIONS_PRETTY_PRINT, &actual_value);
+        *arg, base::JSONWriter::OPTIONS_PRETTY_PRINT, &actual_value);
 
     std::string expected_value;
     base::JSONWriter::WriteWithOptions(
-        dict, base::JSONWriter::OPTIONS_PRETTY_PRINT, &expected_value);
+        *dict, base::JSONWriter::OPTIONS_PRETTY_PRINT, &expected_value);
 
     *result_listener << "Policies are not equal. ";
     *result_listener << "Expected policy: " << expected_value << ". ";
@@ -729,7 +729,13 @@ void OnPolicyUpdatedDumpPolicy(scoped_ptr<base::DictionaryValue> policies) {
 
 // To dump policy contents, run unit tests with the following flags:
 // out/Debug/remoting_unittests --gtest_filter=*TestRealChromotingPolicy* -v=1
-TEST_F(PolicyWatcherTest, TestRealChromotingPolicy) {
+#if defined(ADDRESS_SANITIZER)
+// http://crbug.com/517918
+#define MAYBE_TestRealChromotingPolicy DISABLED_TestRealChromotingPolicy
+#else
+#define MAYBE_TestRealChromotingPolicy TestRealChromotingPolicy
+#endif
+TEST_F(PolicyWatcherTest, MAYBE_TestRealChromotingPolicy) {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       base::MessageLoop::current()->task_runner();
   scoped_ptr<PolicyWatcher> policy_watcher(

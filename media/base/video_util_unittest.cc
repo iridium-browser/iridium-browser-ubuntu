@@ -38,9 +38,8 @@ class VideoUtilTest : public testing::Test {
 
   void CreateDestinationFrame(int width, int height) {
     gfx::Size size(width, height);
-    destination_frame_ =
-        VideoFrame::CreateFrame(VideoFrame::YV12, size, gfx::Rect(size), size,
-                                base::TimeDelta());
+    destination_frame_ = VideoFrame::CreateFrame(
+        PIXEL_FORMAT_YV12, size, gfx::Rect(size), size, base::TimeDelta());
   }
 
   void CopyPlanes() {
@@ -331,13 +330,13 @@ INSTANTIATE_TEST_CASE_P(, VideoUtilRotationTest,
 // Tests the ComputeLetterboxRegion function.  Also, because of shared code
 // internally, this also tests ScaleSizeToFitWithinTarget().
 TEST_F(VideoUtilTest, ComputeLetterboxRegion) {
-  EXPECT_EQ(gfx::Rect(167, 0, 666, 500),
+  EXPECT_EQ(gfx::Rect(166, 0, 667, 500),
             ComputeLetterboxRegion(gfx::Rect(0, 0, 1000, 500),
                                    gfx::Size(640, 480)));
   EXPECT_EQ(gfx::Rect(0, 312, 500, 375),
             ComputeLetterboxRegion(gfx::Rect(0, 0, 500, 1000),
                                    gfx::Size(640, 480)));
-  EXPECT_EQ(gfx::Rect(56, 0, 888, 500),
+  EXPECT_EQ(gfx::Rect(55, 0, 889, 500),
             ComputeLetterboxRegion(gfx::Rect(0, 0, 1000, 500),
                                    gfx::Size(1920, 1080)));
   EXPECT_EQ(gfx::Rect(0, 12, 100, 75),
@@ -357,15 +356,15 @@ TEST_F(VideoUtilTest, ScaleSizeToEncompassTarget) {
   EXPECT_EQ(gfx::Size(1333, 1000),
             ScaleSizeToEncompassTarget(gfx::Size(640, 480),
                                        gfx::Size(500, 1000)));
-  EXPECT_EQ(gfx::Size(1000, 562),
+  EXPECT_EQ(gfx::Size(1000, 563),
             ScaleSizeToEncompassTarget(gfx::Size(1920, 1080),
                                        gfx::Size(1000, 500)));
   EXPECT_EQ(gfx::Size(133, 100),
             ScaleSizeToEncompassTarget(gfx::Size(400, 300),
                                        gfx::Size(100, 100)));
-  EXPECT_EQ(gfx::Size(2666666666, 2000000000),
+  EXPECT_EQ(gfx::Size(266666667, 200000000),
             ScaleSizeToEncompassTarget(gfx::Size(40000, 30000),
-                                       gfx::Size(2000000000, 2000000000)));
+                                       gfx::Size(200000000, 200000000)));
   EXPECT_TRUE(ScaleSizeToEncompassTarget(
       gfx::Size(0, 0), gfx::Size(2000000000, 2000000000)).IsEmpty());
 }
@@ -396,9 +395,8 @@ TEST_F(VideoUtilTest, LetterboxYUV) {
   int width = 40;
   int height = 30;
   gfx::Size size(width, height);
-  scoped_refptr<VideoFrame> frame(
-      VideoFrame::CreateFrame(VideoFrame::YV12, size, gfx::Rect(size), size,
-                              base::TimeDelta()));
+  scoped_refptr<VideoFrame> frame(VideoFrame::CreateFrame(
+      PIXEL_FORMAT_YV12, size, gfx::Rect(size), size, base::TimeDelta()));
 
   for (int left_margin = 0; left_margin <= 10; left_margin += 10) {
     for (int right_margin = 0; right_margin <= 10; right_margin += 10) {

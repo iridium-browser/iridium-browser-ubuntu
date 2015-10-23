@@ -97,9 +97,7 @@ ui::ThreePartImage& GetStrokeImage(bool active) {
         [[GTMFadeTruncatingTextFieldCell alloc] initTextCell:@"Label"]);
     [labelCell setControlSize:NSSmallControlSize];
     CGFloat fontSize = [NSFont systemFontSizeForControlSize:NSSmallControlSize];
-    NSFont* font = [NSFont fontWithName:[[labelCell font] fontName]
-                                   size:fontSize];
-    [labelCell setFont:font];
+    [labelCell setFont:[NSFont systemFontOfSize:fontSize]];
     [titleView_ setCell:labelCell];
     titleViewCell_ = labelCell;
 
@@ -182,11 +180,6 @@ ui::ThreePartImage& GetStrokeImage(bool active) {
   NSRect maskRect = [self bounds];
   maskRect.size.height = kFillHeight;
   return GetMaskImage().HitTest(viewPoint, maskRect) ? self : nil;
-}
-
-// Returns |YES| if this tab can be torn away into a new window.
-- (BOOL)canBeDragged {
-  return [controller_ tabCanBeDragged:controller_];
 }
 
 // Handle clicks and drags in this button. We get here because we have
@@ -452,6 +445,7 @@ ui::ThreePartImage& GetStrokeImage(bool active) {
     return;
 
   [titleView_ setStringValue:title];
+  [closeButton_ setAccessibilityTitle:title];
 
   base::string16 title16 = base::SysNSStringToUTF16(title);
   bool isRTL = base::i18n::GetFirstStrongCharacterDirection(title16) ==
@@ -529,6 +523,19 @@ ui::ThreePartImage& GetStrokeImage(bool active) {
     [self resetLastGlowUpdateTime];
     [self adjustGlowValue];
   }
+}
+
+- (int)widthOfLargestSelectableRegion {
+  // Assume the entire region to the left of the media indicator and/or close
+  // buttons is available for click-to-select.  If neither are visible, the
+  // entire tab region is available.
+  MediaIndicatorButton* const indicator = [controller_ mediaIndicatorButton];
+  const int indicatorLeft = (!indicator || [indicator isHidden]) ?
+      NSWidth([self frame]) : NSMinX([indicator frame]);
+  HoverCloseButton* const closeButton = [controller_ closeButton];
+  const int closeButtonLeft = (!closeButton || [closeButton isHidden]) ?
+      NSWidth([self frame]) : NSMinX([closeButton frame]);
+  return std::min(indicatorLeft, closeButtonLeft);
 }
 
 - (BOOL)accessibilityIsIgnored {

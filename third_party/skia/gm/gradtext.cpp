@@ -66,7 +66,7 @@ private:
 };
 
 
-// Replicate chrome layout test - switching between solid & gadient text
+// Replicate chrome layout test - switching between solid & gradient text
 class ChromeGradTextGM2 : public GM {
 public:
     ChromeGradTextGM2() { }

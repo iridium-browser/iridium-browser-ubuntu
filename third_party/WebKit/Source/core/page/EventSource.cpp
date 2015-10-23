@@ -74,7 +74,7 @@ inline EventSource::EventSource(ExecutionContext* context, const KURL& url, cons
 {
 }
 
-PassRefPtrWillBeRawPtr<EventSource> EventSource::create(ExecutionContext* context, const String& url, const EventSourceInit& eventSourceInit, ExceptionState& exceptionState)
+EventSource* EventSource::create(ExecutionContext* context, const String& url, const EventSourceInit& eventSourceInit, ExceptionState& exceptionState)
 {
     if (url.isEmpty()) {
         exceptionState.throwDOMException(SyntaxError, "Cannot open an EventSource to an empty URL.");
@@ -94,12 +94,11 @@ PassRefPtrWillBeRawPtr<EventSource> EventSource::create(ExecutionContext* contex
         return nullptr;
     }
 
-    RefPtrWillBeRawPtr<EventSource> source = adoptRefWillBeNoop(new EventSource(context, fullURL, eventSourceInit));
+    EventSource* source = new EventSource(context, fullURL, eventSourceInit);
 
     source->scheduleInitialConnect();
     source->suspendIfNeeded();
-
-    return source.release();
+    return source;
 }
 
 EventSource::~EventSource()
@@ -139,7 +138,7 @@ void EventSource::connect()
     options.contentSecurityPolicyEnforcement = ContentSecurityPolicy::shouldBypassMainWorld(&executionContext) ? DoNotEnforceContentSecurityPolicy : EnforceConnectSrcDirective;
 
     ResourceLoaderOptions resourceLoaderOptions;
-    resourceLoaderOptions.allowCredentials = (origin->canRequest(m_url) || m_withCredentials) ? AllowStoredCredentials : DoNotAllowStoredCredentials;
+    resourceLoaderOptions.allowCredentials = (origin->canRequestNoSuborigin(m_url) || m_withCredentials) ? AllowStoredCredentials : DoNotAllowStoredCredentials;
     resourceLoaderOptions.credentialsRequested = m_withCredentials ? ClientRequestedCredentials : ClientDidNotRequestCredentials;
     resourceLoaderOptions.dataBufferingPolicy = DoNotBufferData;
     resourceLoaderOptions.securityOrigin = origin;
@@ -408,9 +407,9 @@ void EventSource::parseEventStreamLine(unsigned bufPos, int fieldLength, int lin
         } else if (field == "id") {
             m_currentlyParsedEventId = valueLength ? AtomicString(&m_receiveBuf[bufPos], valueLength) : "";
         } else if (field == "retry") {
-            if (!valueLength)
+            if (!valueLength) {
                 m_reconnectDelay = defaultReconnectDelay;
-            else {
+            } else {
                 String value(&m_receiveBuf[bufPos], valueLength);
                 bool ok;
                 unsigned long long retry = value.toUInt64(&ok);
@@ -424,6 +423,13 @@ void EventSource::parseEventStreamLine(unsigned bufPos, int fieldLength, int lin
 void EventSource::stop()
 {
     close();
+
+    // (Non)Oilpan: In order to make Worker shutdowns clean,
+    // deref the loader. This will in turn deref its
+    // RefPtr<WorkerGlobalScope>.
+    //
+    // Worth doing regardless, it is no longer of use.
+    m_loader = nullptr;
 }
 
 bool EventSource::hasPendingActivity() const
@@ -441,7 +447,7 @@ PassRefPtrWillBeRawPtr<MessageEvent> EventSource::createMessageEvent()
 
 DEFINE_TRACE(EventSource)
 {
-    EventTargetWithInlineData::trace(visitor);
+    RefCountedGarbageCollectedEventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
 

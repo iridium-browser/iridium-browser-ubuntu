@@ -120,12 +120,12 @@ NSAttributedString* WebSubstringUtil::attributedWordAtPoint(WebView* view, WebPo
     LocalFrame* frame = result.innerNode()->document().frame();
     FrameView* frameView = frame->view();
 
-    RefPtrWillBeRawPtr<Range> range = frame->rangeForPoint(result.roundedPointInInnerNodeFrame());
-    if (!range)
+    EphemeralRange range = frame->rangeForPoint(result.roundedPointInInnerNodeFrame());
+    if (range.isNull())
         return nil;
 
     // Expand to word under point.
-    VisibleSelection selection(range.get());
+    VisibleSelection selection(range);
     selection.expandUsingGranularity(WordGranularity);
     RefPtrWillBeRawPtr<Range> wordRange = selection.toNormalizedRange();
 
@@ -158,10 +158,11 @@ NSAttributedString* WebSubstringUtil::attributedSubstringInRange(WebLocalFrame* 
     Element* editable = frame->selection().rootEditableElementOrDocumentElement();
     if (!editable)
         return nil;
-    RefPtrWillBeRawPtr<Range> range(PlainTextRange(location, location + length).createRange(*editable));
-    if (!range)
+    const EphemeralRange ephemeralRange(PlainTextRange(location, location + length).createRange(*editable));
+    if (ephemeralRange.isNull())
         return nil;
 
+    RefPtrWillBeRawPtr<Range> range = Range::create(ephemeralRange.document(), ephemeralRange.startPosition(), ephemeralRange.endPosition());
     return attributedSubstringFromRange(range.get());
 }
 

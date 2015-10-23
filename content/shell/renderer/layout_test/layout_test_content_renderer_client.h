@@ -19,11 +19,14 @@ namespace web_cache {
 class WebCacheRenderProcessObserver;
 }
 
+namespace test_runner {
+class WebTestProxyBase;
+}
+
 namespace content {
 
 class LayoutTestRenderProcessObserver;
 class MockWebClipboardImpl;
-class WebTestProxyBase;
 
 class LayoutTestContentRendererClient : public ShellContentRendererClient {
  public:
@@ -43,9 +46,14 @@ class LayoutTestContentRendererClient : public ShellContentRendererClient {
   blink::WebAudioDevice* OverrideCreateAudioDevice(double sample_rate) override;
   blink::WebClipboard* OverrideWebClipboard() override;
   blink::WebThemeEngine* OverrideThemeEngine() override;
+  scoped_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
+      RenderFrame* render_frame) override;
+  scoped_ptr<MediaStreamRendererFactory> CreateMediaStreamRendererFactory()
+      override;
 
  private:
-  void WebTestProxyCreated(RenderView* render_view, WebTestProxyBase* proxy);
+  void WebTestProxyCreated(RenderView* render_view,
+                           test_runner::WebTestProxyBase* proxy);
 
   scoped_ptr<LayoutTestRenderProcessObserver> shell_observer_;
   scoped_ptr<MockWebClipboardImpl> clipboard_;

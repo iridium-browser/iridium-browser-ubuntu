@@ -201,14 +201,14 @@ importer.PersistentImportHistory = function(hashGenerator, storage) {
    * An in-memory representation of local copy history.
    * The first value is the "key" (as generated internally
    * from a file entry).
-   * @private {!Object.<string, !Object.<!importer.Destination, importer.Urls>>}
+   * @private {!Object<!Object<!importer.Destination, importer.Urls>>}
    */
   this.copiedEntries_ = {};
 
   /**
    * An in-memory index from destination URL to key.
    *
-   * @private {!Object.<string, string>}
+   * @private {!Object<string>}
    */
   this.copyKeyIndex_ = {};
 
@@ -216,7 +216,7 @@ importer.PersistentImportHistory = function(hashGenerator, storage) {
    * An in-memory representation of import history.
    * The first value is the "key" (as generated internally
    * from a file entry).
-   * @private {!Object.<string, !Array<importer.Destination>>}
+   * @private {!Object<!Array<importer.Destination>>}
    */
   this.importedEntries_ = {};
 
@@ -1030,34 +1030,39 @@ importer.DriveSyncWatcher.prototype.checkSyncStatus_ =
  *     file has been synced to the named destination.
  * @private
  */
-importer.DriveSyncWatcher.prototype.getSyncStatus_ =
-    function(url) {
-  return new Promise(
-      /** @this {importer.DriveSyncWatcher} */
-      function(resolve, reject) {
-        // TODO(smckay): User Metadata Cache...once it is available
-        // in the background.
-        chrome.fileManagerPrivate.getEntryProperties(
-            [url],
-            ['dirty'],
-            /**
-             * @param {!Array<Object>} propertiesList
-             * @this {importer.DriveSyncWatcher}
-             */
-            function(propertiesList) {
-              console.assert(
-                  propertiesList.length === 1,
-                  'Got an unexpected number of results.');
-              if (chrome.runtime.lastError) {
-                reject(chrome.runtime.lastError);
-              } else {
-                var data = propertiesList[0];
-                resolve(!data['dirty']);
-              }
-            }.bind(this));
-      }.bind(this))
-      .catch(
-          importer.getLogger().catcher('drive-sync-watcher-get-sync-status'));
+importer.DriveSyncWatcher.prototype.getSyncStatus_ = function(url) {
+  return util.URLsToEntries([url])
+    .then(
+        /** @this {importer.DriveSyncWatcher} */
+        function(results) {
+          if (results.entries.length !== 1)
+            return Promise.reject();
+          return new Promise(
+              /** @this {importer.DriveSyncWatcher} */
+              function(resolve, reject) {
+                // TODO(smckay): User Metadata Cache...once it is available
+                // in the background.
+                chrome.fileManagerPrivate.getEntryProperties(
+                    [results.entries[0]],
+                    ['dirty'],
+                    /**
+                     * @param {!Array<Object>} propertiesList
+                     * @this {importer.DriveSyncWatcher}
+                     */
+                    function(propertiesList) {
+                      console.assert(
+                          propertiesList.length === 1,
+                          'Got an unexpected number of results.');
+                      if (chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                      } else {
+                        var data = propertiesList[0];
+                        resolve(!data['dirty']);
+                      }
+                    }.bind(this));
+              }.bind(this));
+        })
+    .catch(importer.getLogger().catcher('drive-sync-watcher-get-sync-status'));
 };
 
 /**

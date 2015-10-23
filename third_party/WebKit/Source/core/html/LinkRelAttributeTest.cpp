@@ -30,32 +30,27 @@
 
 #include "config.h"
 #include "core/html/LinkRelAttribute.h"
-#include "platform/RuntimeEnabledFeatures.h"
 
+#include "platform/RuntimeEnabledFeatures.h"
 #include "wtf/text/CString.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 class LinkRelAttributeTest : public testing::Test {
 protected:
-    virtual void SetUp()
+    void SetUp() override
     {
         m_touchIconLoadingEnabled = RuntimeEnabledFeatures::touchIconLoadingEnabled();
-        m_presentationEnabled = RuntimeEnabledFeatures::presentationEnabled();
     }
 
-    virtual void TearDown()
+    void TearDown() override
     {
         RuntimeEnabledFeatures::setTouchIconLoadingEnabled(m_touchIconLoadingEnabled);
-        RuntimeEnabledFeatures::setPresentationEnabled(m_presentationEnabled);
     }
 
 private:
     bool m_touchIconLoadingEnabled;
-    bool m_presentationEnabled;
 };
 
 static inline void testLinkRelAttribute(String value, bool isStyleSheet, IconType iconType, bool isAlternate, bool isDNSPrefetch, bool isLinkSubresource, bool isLinkPrerender, bool isImport = false, bool isPreconnect = false)
@@ -146,13 +141,4 @@ TEST_F(LinkRelAttributeTest, ConstructorTouchIconLoadingEnabled)
     testLinkRelAttribute("pReCoNnEcT", false, InvalidIcon, false, false, false, false, false, true);
 }
 
-TEST_F(LinkRelAttributeTest, ConstructorDefaultPresentation)
-{
-    RuntimeEnabledFeatures::setPresentationEnabled(false);
-    EXPECT_FALSE(LinkRelAttribute("default-presentation").isDefaultPresentation());
-
-    RuntimeEnabledFeatures::setPresentationEnabled(true);
-    EXPECT_TRUE(LinkRelAttribute("default-presentation").isDefaultPresentation());
-}
-
-} // namespace
+} // namespace blink

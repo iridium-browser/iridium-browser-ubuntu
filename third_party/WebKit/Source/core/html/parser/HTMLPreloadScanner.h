@@ -46,18 +46,20 @@ class HTMLTokenizer;
 class SegmentedString;
 
 struct CORE_EXPORT CachedDocumentParameters {
-    static PassOwnPtr<CachedDocumentParameters> create(Document* document, PassRefPtr<MediaValues> mediaValues = nullptr)
+    static PassOwnPtr<CachedDocumentParameters> create(Document* document, PassRefPtrWillBeRawPtr<MediaValues> mediaValues = nullptr)
     {
         return adoptPtr(new CachedDocumentParameters(document, mediaValues));
     }
 
-    RefPtr<MediaValues> mediaValues;
+    bool doHtmlPreloadScanning;
+    RefPtrWillBeCrossThreadPersistent<MediaValues> mediaValues;
     Length defaultViewportMinWidth;
     bool viewportMetaZeroValuesQuirk;
     bool viewportMetaEnabled;
+    ReferrerPolicy referrerPolicy;
 
 private:
-    CachedDocumentParameters(Document*, PassRefPtr<MediaValues>);
+    CachedDocumentParameters(Document*, PassRefPtrWillBeRawPtr<MediaValues>);
 };
 
 class TokenPreloadScanner {
@@ -85,7 +87,7 @@ public:
 private:
     class StartTagScanner;
 
-    template<typename Token>
+    template <typename Token>
     inline void scanCommon(const Token&, const SegmentedString&, PreloadRequestStream& requests);
 
     template<typename Token>
@@ -108,6 +110,19 @@ private:
         size_t templateCount;
     };
 
+    struct PictureData {
+        PictureData()
+            : sourceSize(0.0)
+            , sourceSizeSet(false)
+            , picked(false)
+        {
+        }
+        String sourceURL;
+        float sourceSize;
+        bool sourceSizeSet;
+        bool picked;
+    };
+
     CSSPreloadScanner m_cssScanner;
     const KURL m_documentURL;
     KURL m_predictedBaseElementURL;
@@ -115,7 +130,7 @@ private:
     bool m_inPicture;
     bool m_isAppCacheEnabled;
     bool m_isCSPEnabled;
-    String m_pictureSourceURL;
+    PictureData m_pictureData;
     size_t m_templateCount;
     OwnPtr<CachedDocumentParameters> m_documentParameters;
     ClientHintsPreferences m_clientHintsPreferences;

@@ -5,14 +5,12 @@
 #include "config.h"
 #include "platform/heap/CallbackStack.h"
 
-#include "platform/heap/Heap.h"
-
 namespace blink {
 
 void CallbackStack::Block::clear()
 {
     m_current = &m_buffer[0];
-    m_next = 0;
+    m_next = nullptr;
     clearUnused();
 }
 
@@ -22,23 +20,6 @@ void CallbackStack::Block::invokeEphemeronCallbacks(Visitor* visitor)
     // iteration starts.
     for (unsigned i = 0; m_buffer + i < m_current; i++) {
         Item& item = m_buffer[i];
-
-        // We don't need to check for orphaned pages when popping an ephemeron
-        // callback since the callback is only pushed after the object containing
-        // it has been traced. There are basically three cases to consider:
-        // 1. Member<EphemeronCollection>
-        // 2. EphemeronCollection is part of a containing object
-        // 3. EphemeronCollection is a value object in a collection
-        //
-        // Ad. 1. In this case we push the start of the ephemeron on the
-        // marking stack and do the orphaned page check when popping it off
-        // the marking stack.
-        // Ad. 2. The containing object cannot be on an orphaned page since
-        // in that case we wouldn't have traced its parts. This also means
-        // the ephemeron collection is not on the orphaned page.
-        // Ad. 3. Is the same as 2. The collection containing the ephemeron
-        // collection as a value object cannot be on an orphaned page since
-        // it would not have traced its values in that case.
         item.call(visitor);
     }
 }
@@ -71,8 +52,8 @@ CallbackStack::~CallbackStack()
 {
     clear();
     delete m_first;
-    m_first = 0;
-    m_last = 0;
+    m_first = nullptr;
+    m_last = nullptr;
 }
 
 void CallbackStack::clear()
@@ -103,13 +84,13 @@ CallbackStack::Item* CallbackStack::popSlow()
     ASSERT(m_first->isEmptyBlock());
 
     for (;;) {
-        if (hasJustOneBlock()) {
+        Block* next = m_first->next();
+        if (!next) {
 #if ENABLE(ASSERT)
             m_first->clear();
 #endif
-            return 0;
+            return nullptr;
         }
-        Block* next = m_first->next();
         delete m_first;
         m_first = next;
         if (Item* item = m_first->pop())
@@ -126,8 +107,8 @@ void CallbackStack::invokeEphemeronCallbacks(Visitor* visitor)
     // has been prepended to the chain. This will be very rare, but we can
     // handle the situation by starting again and calling all the callbacks
     // on the prepended blocks.
-    Block* from = 0;
-    Block* upto = 0;
+    Block* from = nullptr;
+    Block* upto = nullptr;
     while (from != m_first) {
         upto = from;
         from = m_first;
@@ -148,16 +129,6 @@ void CallbackStack::invokeOldestCallbacks(Block* from, Block* upto, Visitor* vis
 bool CallbackStack::hasJustOneBlock() const
 {
     return !m_first->next();
-}
-
-void CallbackStack::swap(CallbackStack* other)
-{
-    Block* tmp = m_first;
-    m_first = other->m_first;
-    other->m_first = tmp;
-    tmp = m_last;
-    m_last = other->m_last;
-    other->m_last = tmp;
 }
 
 #if ENABLE(ASSERT)

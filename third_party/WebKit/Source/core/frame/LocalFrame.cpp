@@ -32,13 +32,12 @@
 
 #include "bindings/core/v8/ScriptController.h"
 #include "core/dom/DocumentType.h"
-#include "core/dom/WeakIdentifierMap.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/InputMethodController.h"
-#include "core/editing/SpellChecker.h"
-#include "core/editing/htmlediting.h"
-#include "core/editing/markup.h"
+#include "core/editing/serializers/Serialization.h"
+#include "core/editing/spellcheck/SpellChecker.h"
 #include "core/events/Event.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/frame/EventHandlerRegistry.h"
@@ -49,15 +48,15 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/html/HTMLPlugInElement.h"
+#include "core/input/EventHandler.h"
 #include "core/inspector/ConsoleMessageStorage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InstrumentingAgents.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
+#include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoaderClient.h"
-#include "core/page/Chrome.h"
-#include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
@@ -65,13 +64,15 @@
 #include "core/paint/TransformRecorder.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "platform/DragImage.h"
+#include "platform/PluginScriptForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ScriptForbiddenScope.h"
 #include "platform/graphics/GraphicsContext.h"
-#include "platform/graphics/ImageBuffer.h"
+#include "platform/graphics/StaticBitmapImage.h"
 #include "platform/graphics/paint/ClipRecorder.h"
-#include "platform/graphics/paint/DisplayItemListContextRecorder.h"
+#include "platform/graphics/paint/SkPictureBuilder.h"
 #include "platform/text/TextStream.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/StdLibExtras.h"
 
@@ -82,10 +83,11 @@ using namespace HTMLNames;
 namespace {
 
 struct ScopedFramePaintingState {
+    STACK_ALLOCATED();
+public:
     ScopedFramePaintingState(LocalFrame* frame, Node* node)
         : frame(frame)
         , node(node)
-        , paintBehavior(frame->view()->paintBehavior())
     {
         ASSERT(!node || node->layoutObject());
         if (node)
@@ -96,13 +98,11 @@ struct ScopedFramePaintingState {
     {
         if (node && node->layoutObject())
             node->layoutObject()->updateDragState(false);
-        frame->view()->setPaintBehavior(paintBehavior);
         frame->view()->setNodeToDraw(0);
     }
 
-    LocalFrame* frame;
-    Node* node;
-    PaintBehavior paintBehavior;
+    RawPtrWillBeMember<LocalFrame> frame;
+    RawPtrWillBeMember<Node> node;
 };
 
 inline float parentPageZoomFactor(LocalFrame* frame)
@@ -233,28 +233,59 @@ WindowProxy* LocalFrame::windowProxy(DOMWrapperWorld& world)
     return m_script->windowProxy(world);
 }
 
-void LocalFrame::navigate(Document& originDocument, const KURL& url, bool lockBackForwardList)
+void LocalFrame::navigate(Document& originDocument, const KURL& url, bool replaceCurrentItem, UserGestureStatus userGestureStatus)
 {
-    m_navigationScheduler.scheduleLocationChange(&originDocument, url.string(), lockBackForwardList);
+    // TODO(dcheng): Special case for window.open("about:blank") to ensure it loads synchronously into
+    // a new window. This is our historical behavior, and it's consistent with the creation of
+    // a new iframe with src="about:blank". Perhaps we could get rid of this if we started reporting
+    // the initial empty document's url as about:blank? See crbug.com/471239.
+    // TODO(japhet): This special case is also necessary for behavior asserted by some extensions tests.
+    // Using NavigationScheduler::scheduleNavigationChange causes the navigation to be flagged as a
+    // client redirect, which is observable via the webNavigation extension api.
+    if (isMainFrame() && !m_loader.stateMachine()->committedFirstRealDocumentLoad()) {
+        FrameLoadRequest request(&originDocument, url);
+        request.resourceRequest().setHasUserGesture(userGestureStatus == UserGestureStatus::Active);
+        m_loader.load(request);
+    } else {
+        m_navigationScheduler.scheduleLocationChange(&originDocument, url.string(), replaceCurrentItem);
+    }
 }
 
-void LocalFrame::reload(ReloadPolicy reloadPolicy, ClientRedirectPolicy clientRedirectPolicy)
+void LocalFrame::navigate(const FrameLoadRequest& request)
 {
-    ASSERT(clientRedirectPolicy == NotClientRedirect || reloadPolicy == NormalReload);
-    if (clientRedirectPolicy == NotClientRedirect)
-        m_loader.reload(reloadPolicy);
-    else
+    m_loader.load(request);
+}
+
+void LocalFrame::reload(FrameLoadType loadType, ClientRedirectPolicy clientRedirectPolicy)
+{
+    ASSERT(loadType == FrameLoadTypeReload || loadType == FrameLoadTypeReloadFromOrigin);
+    ASSERT(clientRedirectPolicy == NotClientRedirect || loadType == FrameLoadTypeReload);
+    if (clientRedirectPolicy == NotClientRedirect) {
+        if (!m_loader.currentItem())
+            return;
+        FrameLoadRequest request = FrameLoadRequest(
+            nullptr, m_loader.resourceRequestForReload(loadType, KURL(), clientRedirectPolicy));
+        request.setClientRedirect(clientRedirectPolicy);
+        m_loader.load(request, loadType);
+    } else {
         m_navigationScheduler.scheduleReload();
+    }
 }
 
-void LocalFrame::detach()
+void LocalFrame::detach(FrameDetachType type)
 {
+    PluginScriptForbiddenScope forbidPluginDestructorScripting;
     // A lot of the following steps can result in the current frame being
     // detached, so protect a reference to it.
     RefPtrWillBeRawPtr<LocalFrame> protect(this);
     m_loader.stopAllLoaders();
     m_loader.dispatchUnloadEvent();
     detachChildren();
+
+    // All done if detaching the subframes brought about a detach of this frame also.
+    if (!client())
+        return;
+
     // stopAllLoaders() needs to be called after detachChildren(), because detachChildren()
     // will trigger the unload event handlers of any child frames, and those event
     // handlers might start a new subresource load in this frame.
@@ -273,13 +304,18 @@ void LocalFrame::detach()
     setView(nullptr);
     willDetachFrameHost();
     InspectorInstrumentation::frameDetachedFromParent(this);
-    Frame::detach();
+    Frame::detach(type);
 
     // Signal frame destruction here rather than in the destructor.
     // Main motivation is to avoid being dependent on its exact timing (Oilpan.)
     LocalFrameLifecycleNotifier::notifyContextDestroyed();
     m_supplements.clear();
     WeakIdentifierMap<LocalFrame>::notifyObjectDestroyed(this);
+}
+
+bool LocalFrame::prepareForCommit()
+{
+    return loader().prepareForCommit();
 }
 
 SecurityContext* LocalFrame::securityContext() const
@@ -295,11 +331,6 @@ void LocalFrame::printNavigationErrorMessage(const Frame& targetFrame, const cha
     String message = "Unsafe JavaScript attempt to initiate navigation for frame " + targetFrameDescription + " from frame with URL '" + document()->url().string() + "'. " + reason + "\n";
 
     localDOMWindow()->printErrorMessage(message);
-}
-
-bool LocalFrame::isLoadingAsChild() const
-{
-    return isLoading() || !document()->isLoadCompleted();
 }
 
 WindowProxyManager* LocalFrame::windowProxyManager() const
@@ -321,6 +352,13 @@ void LocalFrame::disconnectOwnerElement()
 #endif
     }
     Frame::disconnectOwnerElement();
+}
+
+bool LocalFrame::shouldClose()
+{
+    // TODO(dcheng): This should be fixed to dispatch beforeunload events to
+    // both local and remote frames.
+    return m_loader.shouldClose();
 }
 
 void LocalFrame::willDetachFrameHost()
@@ -403,19 +441,6 @@ LocalFrame* LocalFrame::localFrameRoot()
     return curFrame;
 }
 
-bool LocalFrame::inScope(TreeScope* scope) const
-{
-    ASSERT(scope);
-    Document* doc = document();
-    if (!doc)
-        return false;
-    // FIXME: This check is broken in for OOPI.
-    HTMLFrameOwnerElement* owner = doc->ownerElement();
-    if (!owner)
-        return false;
-    return owner->treeScope() == scope;
-}
-
 String LocalFrame::layerTreeAsText(LayerTreeFlags flags) const
 {
     TextStream textStream;
@@ -450,8 +475,11 @@ void LocalFrame::setPrinting(bool printing, const FloatSize& pageSize, const Flo
     if (shouldUsePrintingLayout()) {
         view()->forceLayoutForPagination(pageSize, originalPageSize, maximumShrinkRatio);
     } else {
-        if (LayoutView* layoutView = view()->layoutView())
-            layoutView->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::PrintingChanged);
+        if (LayoutView* layoutView = view()->layoutView()) {
+            layoutView->setPreferredLogicalWidthsDirty();
+            layoutView->setNeedsLayout(LayoutInvalidationReason::PrintingChanged);
+            layoutView->setShouldDoFullPaintInvalidationForViewAndAllDescendants();
+        }
         view()->layout();
         view()->adjustViewSize();
     }
@@ -525,7 +553,9 @@ void LocalFrame::setPageAndTextZoomFactors(float pageZoomFactor, float textZoomF
             // Update the scroll position when doing a full page zoom, so the content stays in relatively the same position.
             LayoutPoint scrollPosition = view->scrollPosition();
             float percentDifference = (pageZoomFactor / m_pageZoomFactor);
-            view->setScrollPosition(DoublePoint(scrollPosition.x() * percentDifference, scrollPosition.y() * percentDifference));
+            view->setScrollPosition(
+                DoublePoint(scrollPosition.x() * percentDifference, scrollPosition.y() * percentDifference),
+                ProgrammaticScroll);
         }
     }
 
@@ -561,34 +591,40 @@ double LocalFrame::devicePixelRatio() const
 }
 
 PassOwnPtr<DragImage> LocalFrame::paintIntoDragImage(
-    const DisplayItemClientWrapper& displayItemClient, DisplayItem::Type clipType, RespectImageOrientationEnum shouldRespectImageOrientation, IntRect paintingRect)
+    const DisplayItemClientWrapper& displayItemClient,
+    RespectImageOrientationEnum shouldRespectImageOrientation,
+    const GlobalPaintFlags globalPaintFlags, IntRect paintingRect, float opacity)
 {
     ASSERT(document()->isActive());
+    // Not flattening compositing layers will result in a broken image being painted.
+    ASSERT(globalPaintFlags & GlobalPaintFlattenCompositingLayers);
+
     float deviceScaleFactor = m_host->deviceScaleFactor();
     paintingRect.setWidth(paintingRect.width() * deviceScaleFactor);
     paintingRect.setHeight(paintingRect.height() * deviceScaleFactor);
 
-    OwnPtr<ImageBuffer> buffer = ImageBuffer::create(paintingRect.size());
-    if (!buffer)
-        return nullptr;
-
+    // The content is shifted to origin, to fit within the image bounds - which are the same
+    // as the picture bounds.
+    SkRect pictureBounds = SkRect::MakeIWH(paintingRect.width(), paintingRect.height());
+    SkPictureBuilder pictureBuilder(pictureBounds);
     {
-        DisplayItemListContextRecorder contextRecorder(*buffer->context());
-        GraphicsContext& paintContext = contextRecorder.context();
+        GraphicsContext& paintContext = pictureBuilder.context();
 
         AffineTransform transform;
         transform.scale(deviceScaleFactor, deviceScaleFactor);
         transform.translate(-paintingRect.x(), -paintingRect.y());
         TransformRecorder transformRecorder(paintContext, displayItemClient, transform);
 
-        ClipRecorder clipRecorder(paintContext, displayItemClient, clipType,
-            LayoutRect(0, 0, paintingRect.maxX(), paintingRect.maxY()));
+        m_view->paintContents(&paintContext, globalPaintFlags, paintingRect);
 
-        m_view->paintContents(&paintContext, paintingRect);
     }
+    RefPtr<const SkPicture> recording = pictureBuilder.endRecording();
+    RefPtr<SkImage> skImage = adoptRef(SkImage::NewFromPicture(recording.get(),
+        SkISize::Make(paintingRect.width(), paintingRect.height()), nullptr, nullptr));
+    RefPtr<Image> image = StaticBitmapImage::create(skImage.release());
 
-    RefPtr<Image> image = buffer->copyImage();
-    return DragImage::create(image.get(), shouldRespectImageOrientation, deviceScaleFactor);
+    return DragImage::create(image.get(), shouldRespectImageOrientation, deviceScaleFactor,
+        InterpolationHigh, opacity);
 }
 
 PassOwnPtr<DragImage> LocalFrame::nodeImage(Node& node)
@@ -598,9 +634,7 @@ PassOwnPtr<DragImage> LocalFrame::nodeImage(Node& node)
 
     const ScopedFramePaintingState state(this, &node);
 
-    m_view->updateLayoutAndStyleForPainting();
-
-    m_view->setPaintBehavior(state.paintBehavior | PaintBehaviorFlattenCompositingLayers);
+    m_view->updateAllLifecyclePhases();
 
     m_view->setNodeToDraw(&node); // Enable special sub-tree drawing mode.
 
@@ -611,20 +645,21 @@ PassOwnPtr<DragImage> LocalFrame::nodeImage(Node& node)
 
     IntRect rect;
 
-    return paintIntoDragImage(*layoutObject, DisplayItem::ClipNodeImage, layoutObject->shouldRespectImageOrientation(),
-        layoutObject->paintingRootRect(rect));
+    return paintIntoDragImage(*layoutObject, layoutObject->shouldRespectImageOrientation(),
+        GlobalPaintFlattenCompositingLayers, layoutObject->paintingRootRect(rect));
 }
 
-PassOwnPtr<DragImage> LocalFrame::dragImageForSelection()
+PassOwnPtr<DragImage> LocalFrame::dragImageForSelection(float opacity)
 {
     if (!selection().isRange())
         return nullptr;
 
     const ScopedFramePaintingState state(this, 0);
-    m_view->setPaintBehavior(PaintBehaviorSelectionOnly | PaintBehaviorFlattenCompositingLayers);
-    m_view->updateLayoutAndStyleForPainting();
+    m_view->updateAllLifecyclePhases();
 
-    return paintIntoDragImage(*this, DisplayItem::ClipSelectionImage, DoNotRespectImageOrientation, enclosingIntRect(selection().bounds()));
+    return paintIntoDragImage(*this, DoNotRespectImageOrientation,
+        GlobalPaintSelectionOnly | GlobalPaintFlattenCompositingLayers,
+        enclosingIntRect(selection().bounds()), opacity);
 }
 
 String LocalFrame::selectedText() const
@@ -665,28 +700,29 @@ Document* LocalFrame::documentAtPoint(const IntPoint& pointInRootFrame)
     return result.innerNode() ? &result.innerNode()->document() : nullptr;
 }
 
-PassRefPtrWillBeRawPtr<Range> LocalFrame::rangeForPoint(const IntPoint& framePoint)
+EphemeralRange LocalFrame::rangeForPoint(const IntPoint& framePoint)
 {
     VisiblePosition position = visiblePositionForPoint(framePoint);
     if (position.isNull())
-        return nullptr;
+        return EphemeralRange();
 
     VisiblePosition previous = position.previous();
     if (previous.isNotNull()) {
-        RefPtrWillBeRawPtr<Range> previousCharacterRange = makeRange(previous, position);
-        IntRect rect = editor().firstRectForRange(previousCharacterRange.get());
+        const EphemeralRange previousCharacterRange = makeRange(previous, position);
+        IntRect rect = editor().firstRectForRange(previousCharacterRange);
         if (rect.contains(framePoint))
-            return previousCharacterRange.release();
+            return EphemeralRange(previousCharacterRange);
     }
 
     VisiblePosition next = position.next();
-    if (RefPtrWillBeRawPtr<Range> nextCharacterRange = makeRange(position, next)) {
-        IntRect rect = editor().firstRectForRange(nextCharacterRange.get());
+    const EphemeralRange nextCharacterRange = makeRange(position, next);
+    if (nextCharacterRange.isNotNull()) {
+        IntRect rect = editor().firstRectForRange(nextCharacterRange);
         if (rect.contains(framePoint))
-            return nextCharacterRange.release();
+            return EphemeralRange(nextCharacterRange);
     }
 
-    return nullptr;
+    return EphemeralRange();
 }
 
 bool LocalFrame::isURLAllowed(const KURL& url) const
@@ -716,21 +752,21 @@ void LocalFrame::removeSpellingMarkersUnderWords(const Vector<String>& words)
     spellChecker().removeSpellingMarkersUnderWords(words);
 }
 
-static bool scrollAreaOnBothAxes(const FloatSize& delta, ScrollableArea& view)
+static ScrollResult scrollAreaOnBothAxes(const FloatSize& delta, ScrollableArea& view)
 {
-    bool scrolledHorizontal = view.scroll(ScrollLeft, ScrollByPrecisePixel, delta.width());
-    bool scrolledVertical = view.scroll(ScrollUp, ScrollByPrecisePixel, delta.height());
-    return scrolledHorizontal || scrolledVertical;
+    ScrollResultOneDimensional scrolledHorizontal = view.userScroll(ScrollLeft, ScrollByPrecisePixel, delta.width());
+    ScrollResultOneDimensional scrolledVertical = view.userScroll(ScrollUp, ScrollByPrecisePixel, delta.height());
+    return ScrollResult(scrolledHorizontal.didScroll, scrolledVertical.didScroll, scrolledHorizontal.unusedScrollDelta, scrolledVertical.unusedScrollDelta);
 }
 
 // Returns true if a scroll occurred.
-bool LocalFrame::applyScrollDelta(const FloatSize& delta, bool isScrollBegin)
+ScrollResult LocalFrame::applyScrollDelta(const FloatSize& delta, bool isScrollBegin)
 {
     if (isScrollBegin)
         host()->topControls().scrollBegin();
 
     if (!view() || delta.isZero())
-        return false;
+        return ScrollResult(false, false, delta.width(), delta.height());
 
     FloatSize remainingDelta = delta;
 
@@ -739,14 +775,13 @@ bool LocalFrame::applyScrollDelta(const FloatSize& delta, bool isScrollBegin)
         remainingDelta = host()->topControls().scrollBy(remainingDelta);
 
     if (remainingDelta.isZero())
-        return true;
+        return ScrollResult(delta.width(), delta.height(), 0.0f, 0.0f);
 
-    bool consumed = remainingDelta != delta;
+    ScrollResult result = scrollAreaOnBothAxes(remainingDelta, *view()->scrollableArea());
+    result.didScrollX = result.didScrollX || (remainingDelta.width() != delta.width());
+    result.didScrollY = result.didScrollY || (remainingDelta.height() != delta.height());
 
-    if (scrollAreaOnBothAxes(remainingDelta, *view()->scrollableArea()))
-        return true;
-
-    return consumed;
+    return result;
 }
 
 bool LocalFrame::shouldScrollTopControls(const FloatSize& delta) const
@@ -759,9 +794,9 @@ bool LocalFrame::shouldScrollTopControls(const FloatSize& delta) const
     // direction to hide the top controls, only give the delta to the
     // top controls when the frame can scroll.
     DoublePoint maximumScrollPosition =
-        host()->pinchViewport().maximumScrollPositionDouble() +
+        host()->visualViewport().maximumScrollPositionDouble() +
         toDoubleSize(view()->maximumScrollPositionDouble());
-    DoublePoint scrollPosition = host()->pinchViewport()
+    DoublePoint scrollPosition = host()->visualViewport()
         .visibleRectInDocument().location();
     return delta.height() > 0 || scrollPosition.y() < maximumScrollPosition.y();
 }
@@ -782,7 +817,7 @@ void LocalFrame::clearWeakMembers(Visitor* visitor)
 {
     Vector<HTMLPlugInElement*> deadPlugins;
     for (const auto& pluginElement : m_pluginElements) {
-        if (!visitor->isHeapObjectAlive(pluginElement)) {
+        if (!Heap::isHeapObjectAlive(pluginElement)) {
             pluginElement->shouldDisposePlugin();
             deadPlugins.append(pluginElement);
         }
@@ -820,5 +855,7 @@ inline LocalFrame::LocalFrame(FrameLoaderClient* client, FrameHost* host, FrameO
     else
         m_instrumentingAgents = localFrameRoot()->m_instrumentingAgents;
 }
+
+DEFINE_WEAK_IDENTIFIER_MAP(LocalFrame);
 
 } // namespace blink

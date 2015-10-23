@@ -11,16 +11,17 @@ namespace blink {
 
 class PLATFORM_EXPORT StaticBitmapImage : public Image {
 public:
-    virtual ~StaticBitmapImage();
+    ~StaticBitmapImage() override;
+
+    bool currentFrameIsComplete() override { return true; }
 
     static PassRefPtr<Image> create(PassRefPtr<SkImage>);
     virtual void destroyDecodedData(bool destroyAll) { }
     virtual bool currentFrameKnownToBeOpaque();
     virtual IntSize size() const;
-    void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, SkXfermode::Mode, RespectImageOrientationEnum) override;
+    void draw(SkCanvas*, const SkPaint&, const FloatRect& dstRect, const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode) override;
 
-
-    PassRefPtr<SkImage> skImage() override { return m_image; }
+    PassRefPtr<SkImage> imageForCurrentFrame() override { return m_image; }
 
 protected:
     StaticBitmapImage(PassRefPtr<SkImage>);

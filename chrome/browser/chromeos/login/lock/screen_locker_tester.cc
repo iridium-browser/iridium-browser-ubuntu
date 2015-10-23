@@ -118,7 +118,7 @@ class WebUIScreenLockerTester : public ScreenLockerTester {
 };
 
 void WebUIScreenLockerTester::SetPassword(const std::string& password) {
-  webui()->GetWebContents()->GetMainFrame()->ExecuteJavaScript(
+  webui()->GetWebContents()->GetMainFrame()->ExecuteJavaScriptForTests(
       base::ASCIIToUTF16(base::StringPrintf(
           "$('pod-row').pods[0].passwordElement.value = '%s';",
           password.c_str())));
@@ -140,11 +140,11 @@ void WebUIScreenLockerTester::EnterPassword(const std::string& password) {
   // Verify password is set.
   ASSERT_EQ(password, GetPassword());
 
-  // Verify that "signin" button is hidden.
+  // Verify that "reauth" warning is hidden.
   scoped_ptr<base::Value> v = content::ExecuteScriptAndGetValue(
       RenderViewHost()->GetMainFrame(),
       "window.getComputedStyle("
-      "    $('pod-row').pods[0].querySelector('.signin-button-container'))"
+      "    $('pod-row').pods[0].querySelector('.reauth-hint-container'))"
       "        .display == 'none'");
   ASSERT_TRUE(v->GetAsBoolean(&result));
   ASSERT_TRUE(result);

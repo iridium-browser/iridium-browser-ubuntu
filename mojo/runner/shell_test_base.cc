@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "build/build_config.h"
+#include "mojo/shell/capability_filter.h"
 #include "mojo/util/filename_util.h"
 #include "url/gurl.h"
 
@@ -48,8 +49,11 @@ ScopedMessagePipeHandle ShellTestBase::ConnectToService(
     const GURL& application_url,
     const std::string& service_name) {
   ServiceProviderPtr services;
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  request->url = mojo::String::From(application_url.spec());
   shell_context_.application_manager()->ConnectToApplication(
-      application_url, GURL(), GetProxy(&services), nullptr,
+      nullptr, request.Pass(), std::string(), GURL(), GetProxy(&services),
+      nullptr, shell::GetPermissiveCapabilityFilter(),
       base::Bind(&QuitIfRunning));
   MessagePipe pipe;
   services->ConnectToService(service_name, pipe.handle1.Pass());
@@ -60,7 +64,7 @@ ScopedMessagePipeHandle ShellTestBase::ConnectToService(
 void ShellTestBase::SetUpTestApplications() {
   // Set the URLResolver origin to be the same as the base file path for
   // local files. This is primarily for test convenience, so that references
-  // to unknown mojo: urls that do not have specific local file or custom
+  // to unknown mojo: URLs that do not have specific local file or custom
   // mappings registered on the URL resolver are treated as shared libraries.
   base::FilePath service_dir;
   CHECK(PathService::Get(base::DIR_MODULE, &service_dir));

@@ -18,7 +18,7 @@ ProtocolHandler::ProtocolHandler(const std::string& protocol,
 ProtocolHandler ProtocolHandler::CreateProtocolHandler(
     const std::string& protocol,
     const GURL& url) {
-  std::string lower_protocol = base::StringToLowerASCII(protocol);
+  std::string lower_protocol = base::ToLowerASCII(protocol);
   return ProtocolHandler(lower_protocol, url);
 }
 
@@ -53,7 +53,7 @@ ProtocolHandler ProtocolHandler::CreateProtocolHandler(
 
 GURL ProtocolHandler::TranslateUrl(const GURL& url) const {
   std::string translatedUrlSpec(url_.spec());
-  ReplaceSubstringsAfterOffset(&translatedUrlSpec, 0, "%s",
+  base::ReplaceSubstringsAfterOffset(&translatedUrlSpec, 0, "%s",
       net::EscapeQueryParamValue(url.spec(), true));
   return GURL(translatedUrlSpec);
 }

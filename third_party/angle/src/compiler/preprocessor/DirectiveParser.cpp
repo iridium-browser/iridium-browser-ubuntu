@@ -215,7 +215,8 @@ DirectiveParser::DirectiveParser(Tokenizer *tokenizer,
       mTokenizer(tokenizer),
       mMacroSet(macroSet),
       mDiagnostics(diagnostics),
-      mDirectiveHandler(directiveHandler)
+      mDirectiveHandler(directiveHandler),
+      mShaderVersion(100)
 {
 }
 
@@ -630,8 +631,7 @@ void DirectiveParser::parsePragma(Token *token)
             break;
           case PRAGMA_VALUE:
             value = token->text;
-            // Pragma value validation is handled in DirectiveHandler::handlePragma
-            // because the proper pragma value is dependent on the pragma name.
+            valid = valid && (token->type == Token::IDENTIFIER);
             break;
           case RIGHT_PAREN:
             valid = valid && (token->type == ')');
@@ -648,7 +648,7 @@ void DirectiveParser::parsePragma(Token *token)
                       (state == RIGHT_PAREN + 1));  // With value.
     if (!valid)
     {
-        mDiagnostics->report(Diagnostics::PP_INVALID_PRAGMA,
+        mDiagnostics->report(Diagnostics::PP_UNRECOGNIZED_PRAGMA,
                              token->location, name);
     }
     else if (state > PRAGMA_NAME)  // Do not notify for empty pragma.
@@ -722,8 +722,17 @@ void DirectiveParser::parseExtension(Token *token)
     }
     if (valid && mSeenNonPreprocessorToken)
     {
-        mDiagnostics->report(Diagnostics::PP_NON_PP_TOKEN_BEFORE_EXTENSION,
-                             token->location, token->text);
+        if (mShaderVersion >= 300)
+        {
+            mDiagnostics->report(Diagnostics::PP_NON_PP_TOKEN_BEFORE_EXTENSION_ESSL3,
+                                 token->location, token->text);
+            valid = false;
+        }
+        else
+        {
+            mDiagnostics->report(Diagnostics::PP_NON_PP_TOKEN_BEFORE_EXTENSION_ESSL1,
+                                 token->location, token->text);
+        }
     }
     if (valid)
         mDirectiveHandler->handleExtension(token->location, name, behavior);
@@ -801,9 +810,18 @@ void DirectiveParser::parseVersion(Token *token)
         valid = false;
     }
 
+    if (valid && version >= 300 && token->location.line > 1)
+    {
+        mDiagnostics->report(Diagnostics::PP_VERSION_NOT_FIRST_LINE_ESSL3,
+                             token->location, token->text);
+        valid = false;
+    }
+
     if (valid)
     {
         mDirectiveHandler->handleVersion(token->location, version);
+        mShaderVersion = version;
+        PredefineMacro(mMacroSet, "__VERSION__", version);
     }
 }
 

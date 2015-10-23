@@ -4,13 +4,23 @@
 
 source_set("managed") {
   sources = [
+    "managed_bookmark_service.cc",
+    "managed_bookmark_service.h",
+    "managed_bookmark_util.cc",
+    "managed_bookmark_util.h",
     "managed_bookmarks_tracker.cc",
     "managed_bookmarks_tracker.h",
   ]
 
   deps = [
+    "//base",
+    "//base:prefs",
     "//components/bookmarks/browser",
+    "//components/bookmarks/common",
+    "//components/keyed_service/core",
     "//components/strings",
+    "//ui/base",
+    "//url",
   ]
 }
 
@@ -24,9 +34,16 @@ source_set("unit_tests") {
 
   deps = [
     ":managed",
+    "//base",
+    "//base:prefs",
+    "//base:prefs_test_support",
+    "//components/bookmarks/browser",
+    "//components/bookmarks/common",
     "//components/bookmarks/test",
     "//components/strings",
     "//testing/gmock",
     "//testing/gtest",
+    "//ui/base",
+    "//url",
   ]
 }

@@ -8,6 +8,7 @@ import android.accounts.Account;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SyncStatusObserver;
+import android.os.Bundle;
 import android.os.StrictMode;
 
 import org.chromium.base.ObserverList;
@@ -21,7 +22,9 @@ import javax.annotation.concurrent.ThreadSafe;
  *
  * It also provides an observer to be used whenever Android sync settings change.
  *
- * To retrieve an instance of this class, call AndroidSyncSettings.get(someContext).
+ * This class is a collection of static methods so that no references to its object can be
+ * stored. This is important because tests need to be able to overwrite the object with a
+ * mock content resolver and know that no references to the old one are cached.
  *
  * This class must be initialized via updateAccount() on startup if the user is signed in.
  */
@@ -35,7 +38,7 @@ public class AndroidSyncSettings {
      */
     private static final Object CLASS_LOCK = new Object();
 
-    private static AndroidSyncSettings sAndroidSyncSettings;
+    private static AndroidSyncSettings sInstance;
 
     private final Object mLock = new Object();
 
@@ -63,37 +66,26 @@ public class AndroidSyncSettings {
         public void androidSyncSettingsChanged();
     }
 
-    /**
-     * A factory method for the AndroidSyncSettings.
-     *
-     * It is possible to override the {@link SyncContentResolverDelegate} to use in tests for the
-     * instance of the AndroidSyncSettings by calling overrideForTests(...) with
-     * your {@link SyncContentResolverDelegate}.
-     *
-     * @param context the ApplicationContext is retrieved from the context used as an argument.
-     * @return a singleton instance of the AndroidSyncSettings
-     */
-    public static AndroidSyncSettings get(Context context) {
+    private static void ensureInitialized(Context context) {
         synchronized (CLASS_LOCK) {
-            if (sAndroidSyncSettings == null) {
+            if (sInstance == null) {
                 SyncContentResolverDelegate contentResolver =
                         new SystemSyncContentResolverDelegate();
-                sAndroidSyncSettings = new AndroidSyncSettings(context, contentResolver);
+                sInstance = new AndroidSyncSettings(context, contentResolver);
             }
         }
-        return sAndroidSyncSettings;
     }
 
     @VisibleForTesting
     public static void overrideForTests(Context context,
             SyncContentResolverDelegate contentResolver) {
         synchronized (CLASS_LOCK) {
-            sAndroidSyncSettings = new AndroidSyncSettings(context, contentResolver);
+            sInstance = new AndroidSyncSettings(context, contentResolver);
         }
     }
 
     /**
-     * @param context the context
+     * @param context the context the ApplicationContext will be retrieved from.
      * @param syncContentResolverDelegate an implementation of {@link SyncContentResolverDelegate}.
      */
     private AndroidSyncSettings(Context context,
@@ -117,8 +109,9 @@ public class AndroidSyncSettings {
      *
      * @return true if sync is on, false otherwise
      */
-    public boolean isSyncEnabled() {
-        return mMasterSyncEnabled && mChromeSyncEnabled;
+    public static boolean isSyncEnabled(Context context) {
+        ensureInitialized(context);
+        return sInstance.mMasterSyncEnabled && sInstance.mChromeSyncEnabled;
     }
 
     /**
@@ -129,66 +122,74 @@ public class AndroidSyncSettings {
      *
      * @return true if sync is on, false otherwise
      */
-    public boolean isChromeSyncEnabled() {
-        return mChromeSyncEnabled;
+    public static boolean isChromeSyncEnabled(Context context) {
+        ensureInitialized(context);
+        return sInstance.mChromeSyncEnabled;
     }
 
     /**
      * Checks whether the master sync flag for Android is currently enabled.
      */
-    public boolean isMasterSyncEnabled() {
-        return mMasterSyncEnabled;
+    public static boolean isMasterSyncEnabled(Context context) {
+        ensureInitialized(context);
+        return sInstance.mMasterSyncEnabled;
     }
 
     /**
      * Make sure Chrome is syncable, and enable sync.
      */
-    public void enableChromeSync() {
-        setChromeSyncEnabled(true);
+    public static void enableChromeSync(Context context) {
+        ensureInitialized(context);
+        sInstance.setChromeSyncEnabled(true);
     }
 
     /**
      * Disables Android Chrome sync
      */
-    public void disableChromeSync() {
-        setChromeSyncEnabled(false);
+    public static void disableChromeSync(Context context) {
+        ensureInitialized(context);
+        sInstance.setChromeSyncEnabled(false);
     }
 
     /**
      * Must be called when a new account is signed in.
      */
-    public void updateAccount(Account account) {
-        synchronized (mLock) {
-            mAccount = account;
-            updateSyncability();
+    public static void updateAccount(Context context, Account account) {
+        ensureInitialized(context);
+        synchronized (sInstance.mLock) {
+            sInstance.mAccount = account;
+            sInstance.updateSyncability();
         }
-        if (updateCachedSettings()) {
-            notifyObservers();
+        if (sInstance.updateCachedSettings()) {
+            sInstance.notifyObservers();
         }
     }
 
     /**
      * Returns the contract authority to use when requesting sync.
      */
-    public String getContractAuthority() {
-        return mApplicationContext.getPackageName();
+    public static String getContractAuthority(Context context) {
+        ensureInitialized(context);
+        return sInstance.getContractAuthority();
     }
 
     /**
      * Add a new AndroidSyncSettingsObserver.
      */
-    public void registerObserver(AndroidSyncSettingsObserver observer) {
-        synchronized (mLock) {
-            mObservers.addObserver(observer);
+    public static void registerObserver(Context context, AndroidSyncSettingsObserver observer) {
+        ensureInitialized(context);
+        synchronized (sInstance.mLock) {
+            sInstance.mObservers.addObserver(observer);
         }
     }
 
     /**
      * Remove an AndroidSyncSettingsObserver that was previously added.
      */
-    public void unregisterObserver(AndroidSyncSettingsObserver observer) {
-        synchronized (mLock) {
-            mObservers.removeObserver(observer);
+    public static void unregisterObserver(Context context, AndroidSyncSettingsObserver observer) {
+        ensureInitialized(context);
+        synchronized (sInstance.mLock) {
+            sInstance.mObservers.removeObserver(observer);
         }
     }
 
@@ -221,6 +222,9 @@ public class AndroidSyncSettings {
         // Make account syncable if there is one.
         if (shouldBeSyncable) {
             mSyncContentResolverDelegate.setIsSyncable(mAccount, mContractAuthority, 1);
+            // This reduces unnecessary resource usage. See http://crbug.com/480688 for details.
+            mSyncContentResolverDelegate.removePeriodicSync(
+                    mAccount, mContractAuthority, Bundle.EMPTY);
         }
 
         // Disable the syncability of Chrome for all other accounts. Don't use
@@ -289,5 +293,9 @@ public class AndroidSyncSettings {
         for (AndroidSyncSettingsObserver observer : mObservers) {
             observer.androidSyncSettingsChanged();
         }
+    }
+
+    private String getContractAuthority() {
+        return mApplicationContext.getPackageName();
     }
 }

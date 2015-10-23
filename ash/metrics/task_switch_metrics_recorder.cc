@@ -10,6 +10,11 @@ namespace ash {
 
 namespace {
 
+const char kAshTaskSwitchHistogramName[] = "Ash.TimeBetweenTaskSwitches";
+
+const char kDesktopHistogramName[] =
+    "Ash.Desktop.TimeBetweenNavigateToTaskSwitches";
+
 const char kShelfHistogramName[] =
     "Ash.Shelf.TimeBetweenNavigateToTaskSwitches";
 
@@ -19,15 +24,28 @@ const char kTabStripHistogramName[] =
 const char kAcceleratorWindowCycleHistogramName[] =
     "Ash.WindowCycleController.TimeBetweenTaskSwitches";
 
+const char kAppListHistogramName[] = "Ash.AppList.TimeBetweenTaskSwitches";
+
+const char kOverviewModeHistogramName[] =
+    "Ash.WindowSelector.TimeBetweenActiveWindowChanges";
+
 // Returns the histogram name for the given |task_switch_source|.
 const char* GetHistogramName(
     TaskSwitchMetricsRecorder::TaskSwitchSource task_switch_source) {
   switch (task_switch_source) {
-    case TaskSwitchMetricsRecorder::kShelf:
+    case TaskSwitchMetricsRecorder::ANY:
+      return kAshTaskSwitchHistogramName;
+    case TaskSwitchMetricsRecorder::APP_LIST:
+      return kAppListHistogramName;
+    case TaskSwitchMetricsRecorder::DESKTOP:
+      return kDesktopHistogramName;
+    case TaskSwitchMetricsRecorder::OVERVIEW_MODE:
+      return kOverviewModeHistogramName;
+    case TaskSwitchMetricsRecorder::SHELF:
       return kShelfHistogramName;
-    case TaskSwitchMetricsRecorder::kTabStrip:
+    case TaskSwitchMetricsRecorder::TAB_STRIP:
       return kTabStripHistogramName;
-    case TaskSwitchMetricsRecorder::kWindowCycleController:
+    case TaskSwitchMetricsRecorder::WINDOW_CYCLE_CONTROLLER:
       return kAcceleratorWindowCycleHistogramName;
   }
   NOTREACHED();
@@ -43,6 +61,15 @@ TaskSwitchMetricsRecorder::~TaskSwitchMetricsRecorder() {
 }
 
 void TaskSwitchMetricsRecorder::OnTaskSwitch(
+    TaskSwitchSource task_switch_source) {
+  DCHECK_NE(task_switch_source, ANY);
+  if (task_switch_source != ANY) {
+    OnTaskSwitchInternal(task_switch_source);
+    OnTaskSwitchInternal(ANY);
+  }
+}
+
+void TaskSwitchMetricsRecorder::OnTaskSwitchInternal(
     TaskSwitchSource task_switch_source) {
   TaskSwitchTimeTracker* task_switch_time_tracker =
       FindTaskSwitchTimeTracker(task_switch_source);

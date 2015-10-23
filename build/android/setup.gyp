@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 {
   'conditions': [
-    ['component == "shared_library"', {
+    ['android_must_copy_system_libraries == 1', {
       'targets': [
         {
           # These libraries from the Android ndk are required to be packaged with
@@ -16,7 +16,7 @@
             {
               'destination': '<(SHARED_LIB_DIR)/',
               'files': [
-                '<(android_stlport_libs_dir)/libstlport_shared.so',
+                '<(android_libcpp_libs_dir)/libc++_shared.so',
               ],
             },
           ],
@@ -77,6 +77,35 @@
         },
       ],
     }, # build_output_dirs
+    {
+      'target_name': 'sun_tools_java',
+      'type': 'none',
+      'variables': {
+        'found_jar_path': '<(PRODUCT_DIR)/sun_tools_java/tools.jar',
+        'jar_path': '<(found_jar_path)',
+      },
+      'includes': [
+        '../../build/host_prebuilt_jar.gypi',
+      ],
+      'actions': [
+        {
+          'action_name': 'find_sun_tools_jar',
+          'variables' : {
+          },
+          'inputs' : [
+            'gyp/find_sun_tools_jar.py',
+            'gyp/util/build_utils.py',
+          ],
+          'outputs': [
+            '<(found_jar_path)',
+          ],
+          'action': [
+            'python', 'gyp/find_sun_tools_jar.py',
+            '--output', '<(found_jar_path)',
+          ],
+        },
+      ],
+    }, # sun_tools_java
   ]
 }
 

@@ -1,0 +1,75 @@
+{
+    "CaptivePortalInterstitial": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "ReportCertificateErrors": [
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "1.0"
+            }
+        },
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "-1.0"
+            }
+        },
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "0.0"
+            }
+        },
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "abcdef"
+            }
+        },
+        {
+            "group_name": "DontShowAndDontSend"
+        }
+    ],
+    "SdchPersistence": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "SyncHttpContentCompression": [
+        {
+            "group_name": "Enabled"
+        },
+        {
+            "group_name": "Disabled"
+        }
+    ],
+    "AutofillFieldMetadata": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "UseDelayAgnosticAEC": [
+        {
+            "group_name": "DefaultEnabled"
+        }
+    ],
+    "QUIC": [
+        {
+            "group_name": "Enabled",
+            "params": {
+              "alternate_protocol_probability_threshold": "0.01"
+            }
+        }
+    ],
+    "VarationsServiceControl": [
+        {
+            "group_name": "Interval_30min",
+            "params": {
+                "fetch_period_min": "30"
+            }
+        }
+    ]
+}

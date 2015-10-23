@@ -19,6 +19,12 @@ struct FrameMsg_CompositorFrameSwapped_Params;
 
 namespace blink {
 class WebInputEvent;
+struct WebRect;
+}
+
+namespace cc {
+struct SurfaceId;
+struct SurfaceSequence;
 }
 
 namespace content {
@@ -26,7 +32,6 @@ namespace content {
 class ChildFrameCompositingHelper;
 class RenderFrameImpl;
 class RenderViewImpl;
-enum class SandboxFlags;
 struct FrameReplicationState;
 
 // When a page's frames are rendered by multiple processes, each renderer has a
@@ -61,7 +66,8 @@ class CONTENT_EXPORT RenderFrameProxy
   // proxy will eventually swap places with.
   static RenderFrameProxy* CreateProxyToReplaceFrame(
       RenderFrameImpl* frame_to_replace,
-      int routing_id);
+      int routing_id,
+      blink::WebTreeScopeType scope);
 
   // This method should be used to create a RenderFrameProxy, when there isn't
   // an existing RenderFrame. It should be called to construct a local
@@ -112,7 +118,7 @@ class CONTENT_EXPORT RenderFrameProxy
   blink::WebRemoteFrame* web_frame() { return web_frame_; }
 
   // blink::WebRemoteFrameClient implementation:
-  virtual void frameDetached();
+  virtual void frameDetached(DetachType type);
   virtual void postMessageEvent(
       blink::WebLocalFrame* sourceFrame,
       blink::WebRemoteFrame* targetFrame,
@@ -124,6 +130,7 @@ class CONTENT_EXPORT RenderFrameProxy
   virtual void navigate(const blink::WebURLRequest& request,
                         bool should_replace_current_entry);
   virtual void forwardInputEvent(const blink::WebInputEvent* event);
+  virtual void frameRectsChanged(const blink::WebRect& frame_rect);
 
   // IPC handlers
   void OnDidStartLoading();
@@ -140,9 +147,13 @@ class CONTENT_EXPORT RenderFrameProxy
   void OnDeleteProxy();
   void OnChildFrameProcessGone();
   void OnCompositorFrameSwapped(const IPC::Message& message);
+  void OnSetChildFrameSurface(const cc::SurfaceId& surface_id,
+                              const gfx::Size& frame_size,
+                              float scale_factor,
+                              const cc::SurfaceSequence& sequence);
   void OnDisownOpener();
   void OnDidStopLoading();
-  void OnDidUpdateSandboxFlags(SandboxFlags flags);
+  void OnDidUpdateSandboxFlags(blink::WebSandboxFlags flags);
   void OnDispatchLoad();
   void OnDidUpdateName(const std::string& name);
   void OnDidUpdateOrigin(const url::Origin& origin);

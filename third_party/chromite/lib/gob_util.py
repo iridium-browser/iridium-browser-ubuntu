@@ -139,7 +139,7 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
 
 
 def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
-             ignore_404=True):
+             ignore_204=False, ignore_404=True):
   """Fetches the http response from the specified URL into a string buffer.
 
   Args:
@@ -149,6 +149,9 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
     reqtype: The request type. Can be GET or POST.
     headers: A mapping of extra HTTP headers to pass in with the request.
     body: A string of data to send after the headers are finished.
+    ignore_204: for some requests gerrit-on-borg will return 204 to confirm
+                proper processing of the request. When processing responses to
+                these requests we should expect this status.
     ignore_404: For many requests, gerrit-on-borg will return 404 if the request
                 doesn't match the database contents.  In most such cases, we
                 want the API to return None rather than raise an Exception.
@@ -163,11 +166,14 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
                             body=body)
       response = conn.getresponse()
     except socket.error as ex:
-      logging.warn('%s%s', err_prefix, str(ex))
+      logging.warning('%s%s', err_prefix, str(ex))
       raise
 
     # Normal/good responses.
     response_body = response.read()
+    if response.status == 204 and ignore_204:
+      # This exception is used to confirm expected response status.
+      raise GOBError(response.status, response.reason)
     if response.status == 404 and ignore_404:
       return StringIO()
     elif response.status == 200:
@@ -184,7 +190,7 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
     # Ones we can retry.
     if response.status >= 500:
       # A status >=500 is assumed to be a possible transient error; retry.
-      logging.warn('%s%s', err_prefix, msg)
+      logging.warning('%s%s', err_prefix, msg)
       raise InternalGOBError(response.status, response.reason)
 
     # Ones we cannot retry.
@@ -203,15 +209,15 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
 
     if response.status >= 400:
       # The 'X-ErrorId' header is set only on >= 400 response code.
-      logging.warn('%s\n%s\nX-ErrorId: %s', err_prefix, msg,
-                   response.getheader('X-ErrorId'))
+      logging.warning('%s\n%s\nX-ErrorId: %s', err_prefix, msg,
+                      response.getheader('X-ErrorId'))
     else:
-      logging.warn('%s\n%s', err_prefix, msg)
+      logging.warning('%s\n%s', err_prefix, msg)
 
     try:
-      logging.warn('conn.sock.getpeername(): %s', conn.sock.getpeername())
+      logging.warning('conn.sock.getpeername(): %s', conn.sock.getpeername())
     except AttributeError:
-      logging.warn('peer name unavailable')
+      logging.warning('peer name unavailable')
     raise GOBError(response.status, response.reason)
 
   return retry_util.RetryException((socket.error, InternalGOBError), TRY_LIMIT,
@@ -361,12 +367,11 @@ def RestoreChange(host, change, msg=''):
   return FetchUrlJson(host, path, reqtype='POST', body=body, ignore_404=False)
 
 
-def DeleteDraft(host, change, msg=''):
+def DeleteDraft(host, change):
   """Delete a gerrit draft patch set."""
   path = _GetChangePath(change)
-  body = {'message': msg}
   try:
-    FetchUrl(host, path, reqtype='DELETE', body=body, ignore_404=False)
+    FetchUrl(host, path, reqtype='DELETE', ignore_204=True, ignore_404=False)
   except GOBError as e:
     # On success, gerrit returns status 204; anything else is an error.
     if e.http_status != 204:

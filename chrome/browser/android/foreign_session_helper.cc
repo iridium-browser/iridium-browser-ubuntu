@@ -13,13 +13,13 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/sessions/session_restore.h"
-#include "chrome/browser/sync/open_tabs_ui_delegate.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/sync_driver/open_tabs_ui_delegate.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -32,8 +32,8 @@ using base::android::AttachCurrentThread;
 using base::android::ConvertUTF16ToJavaString;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertJavaStringToUTF8;
-using browser_sync::OpenTabsUIDelegate;
-using browser_sync::SyncedSession;
+using sync_driver::OpenTabsUIDelegate;
+using sync_driver::SyncedSession;
 
 namespace {
 
@@ -42,7 +42,7 @@ OpenTabsUIDelegate* GetOpenTabsUIDelegate(Profile* profile) {
       GetForProfile(profile);
 
   // Only return the delegate if it exists and it is done syncing sessions.
-  if (!service || !service->SyncActive())
+  if (!service || !service->IsSyncActive())
     return NULL;
 
   return service->GetOpenTabsUIDelegate();
@@ -53,7 +53,7 @@ bool ShouldSkipTab(const sessions::SessionTab& session_tab) {
       return true;
 
     int selected_index = session_tab.normalized_navigation_index();
-    const ::sessions::SerializedNavigationEntry& current_navigation =
+    const sessions::SerializedNavigationEntry& current_navigation =
         session_tab.navigations.at(selected_index);
 
     if (current_navigation.virtual_url().is_empty())
@@ -72,7 +72,7 @@ bool ShouldSkipWindow(const sessions::SessionWindow& window) {
   return true;
 }
 
-bool ShouldSkipSession(const browser_sync::SyncedSession& session) {
+bool ShouldSkipSession(const sync_driver::SyncedSession& session) {
   for (SyncedSession::SyncedWindowMap::const_iterator it =
       session.windows.begin(); it != session.windows.end(); ++it) {
     const sessions::SessionWindow  &window = *(it->second);
@@ -82,7 +82,28 @@ bool ShouldSkipSession(const browser_sync::SyncedSession& session) {
   return true;
 }
 
-void CopyTabsToJava(
+void CopyTabToJava(
+    JNIEnv* env,
+    const sessions::SessionTab& tab,
+    ScopedJavaLocalRef<jobject>& j_window) {
+  int selected_index = tab.normalized_navigation_index();
+  DCHECK_GE(selected_index, 0);
+  DCHECK_LT(selected_index, static_cast<int>(tab.navigations.size()));
+
+  const sessions::SerializedNavigationEntry& current_navigation =
+      tab.navigations.at(selected_index);
+
+  GURL tab_url = current_navigation.virtual_url();
+
+  Java_ForeignSessionHelper_pushTab(
+      env, j_window.obj(),
+      ConvertUTF8ToJavaString(env, tab_url.spec()).obj(),
+      ConvertUTF16ToJavaString(env, current_navigation.title()).obj(),
+      tab.timestamp.ToJavaTime(),
+      tab.tab_id.id());
+}
+
+void CopyWindowToJava(
     JNIEnv* env,
     const sessions::SessionWindow& window,
     ScopedJavaLocalRef<jobject>& j_window) {
@@ -91,27 +112,13 @@ void CopyTabsToJava(
     const sessions::SessionTab &session_tab = **tab_it;
 
     if (ShouldSkipTab(session_tab))
-      continue;
+      return;
 
-    int selected_index = session_tab.normalized_navigation_index();
-    DCHECK(selected_index >= 0);
-    DCHECK(selected_index < static_cast<int>(session_tab.navigations.size()));
-
-    const ::sessions::SerializedNavigationEntry& current_navigation =
-        session_tab.navigations.at(selected_index);
-
-    GURL tab_url = current_navigation.virtual_url();
-
-    Java_ForeignSessionHelper_pushTab(
-        env, j_window.obj(),
-        ConvertUTF8ToJavaString(env, tab_url.spec()).obj(),
-        ConvertUTF16ToJavaString(env, current_navigation.title()).obj(),
-        session_tab.timestamp.ToJavaTime(),
-        session_tab.tab_id.id());
+    CopyTabToJava(env, session_tab, j_window);
   }
 }
 
-void CopyWindowsToJava(
+void CopySessionToJava(
     JNIEnv* env,
     const SyncedSession& session,
     ScopedJavaLocalRef<jobject>& j_session) {
@@ -129,7 +136,7 @@ void CopyWindowsToJava(
             window.timestamp.ToJavaTime(),
             window.window_id.id()));
 
-    CopyTabsToJava(env, window, last_pushed_window);
+    CopyWindowToJava(env, window, last_pushed_window);
   }
 }
 
@@ -210,7 +217,7 @@ jboolean ForeignSessionHelper::GetForeignSessions(JNIEnv* env,
   if (!open_tabs)
     return false;
 
-  std::vector<const browser_sync::SyncedSession*> sessions;
+  std::vector<const sync_driver::SyncedSession*> sessions;
   if (!open_tabs->GetAllForeignSessions(&sessions))
     return false;
 
@@ -225,11 +232,10 @@ jboolean ForeignSessionHelper::GetForeignSessions(JNIEnv* env,
   pref_collapsed_sessions->Clear();
 
   ScopedJavaLocalRef<jobject> last_pushed_session;
-  ScopedJavaLocalRef<jobject> last_pushed_window;
 
   // Note: we don't own the SyncedSessions themselves.
   for (size_t i = 0; i < sessions.size(); ++i) {
-    const browser_sync::SyncedSession &session = *(sessions[i]);
+    const sync_driver::SyncedSession& session = *(sessions[i]);
     if (ShouldSkipSession(session))
       continue;
 
@@ -247,7 +253,26 @@ jboolean ForeignSessionHelper::GetForeignSessions(JNIEnv* env,
             session.device_type,
             session.modified_time.ToJavaTime()));
 
-    CopyWindowsToJava(env, session, last_pushed_session);
+    const std::string group_name =
+        base::FieldTrialList::FindFullName("TabSyncByRecency");
+    if (group_name == "Enabled") {
+      // Create a custom window with tabs from all windows included and ordered
+      // by recency (GetForeignSessionTabs will do ordering automatically).
+      std::vector<const sessions::SessionTab*> tabs;
+      open_tabs->GetForeignSessionTabs(session.session_tag, &tabs);
+      ScopedJavaLocalRef<jobject> last_pushed_window(
+          Java_ForeignSessionHelper_pushWindow(
+              env, last_pushed_session.obj(),
+              session.modified_time.ToJavaTime(), 0));
+      for (const sessions::SessionTab* tab : tabs) {
+         if (ShouldSkipTab(*tab))
+           continue;
+         CopyTabToJava(env, *tab, last_pushed_window);
+      }
+    } else {
+      // Push the full session, with tabs ordered by visual position.
+      CopySessionToJava(env, session, last_pushed_session);
+    }
   }
 
   return true;

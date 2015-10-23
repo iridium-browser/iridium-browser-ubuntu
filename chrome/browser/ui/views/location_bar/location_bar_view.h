@@ -12,9 +12,9 @@
 #include "base/prefs/pref_member.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
+#include "chrome/browser/ui/omnibox/chrome_omnibox_edit_controller.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
-#include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
 #include "chrome/browser/ui/views/dropdown_bar_host.h"
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
@@ -35,7 +35,6 @@ class ContentSettingImageView;
 class EVBubbleView;
 class ExtensionAction;
 class GURL;
-class GeneratedCreditCardView;
 class InstantController;
 class KeywordHintView;
 class LocationIconView;
@@ -76,7 +75,7 @@ class LocationBarView : public LocationBar,
                         public views::ButtonListener,
                         public views::DragController,
                         public gfx::AnimationDelegate,
-                        public OmniboxEditController,
+                        public ChromeOmniboxEditController,
                         public DropdownBarHostDelegate,
                         public TemplateURLServiceObserver,
                         public SearchModelObserver,
@@ -92,9 +91,6 @@ class LocationBarView : public LocationBar,
    public:
     // Should return the current web contents.
     virtual content::WebContents* GetWebContents() = 0;
-
-    // Returns the InstantController, or NULL if there isn't one.
-    virtual InstantController* GetInstant() = 0;
 
     virtual ToolbarModel* GetToolbarModel() = 0;
     virtual const ToolbarModel* GetToolbarModel() const = 0;
@@ -146,7 +142,7 @@ class LocationBarView : public LocationBar,
 
   // Returns the appropriate color for the desired kind, based on the user's
   // system theme.
-  SkColor GetColor(ConnectionSecurityHelper::SecurityLevel security_level,
+  SkColor GetColor(connection_security::SecurityLevel security_level,
                    ColorKind kind) const;
 
   // Returns the delegate.
@@ -219,8 +215,6 @@ class LocationBarView : public LocationBar,
   OmniboxViewViews* omnibox_view() { return omnibox_view_; }
   const OmniboxViewViews* omnibox_view() const { return omnibox_view_; }
 
-  views::View* generated_credit_card_view();
-
   // Returns the height of the control without the top and bottom
   // edges(i.e.  the height of the edit control inside).  If
   // |use_preferred_size| is true this will be the preferred height,
@@ -234,6 +228,10 @@ class LocationBarView : public LocationBar,
                                       int* popup_width,
                                       int* left_margin,
                                       int* right_margin);
+
+  // Updates the controller, and, if |contents| is non-null, restores saved
+  // state that the tab holds.
+  void Update(const content::WebContents* contents);
 
   // Clears the location bar's state for |contents|.
   void ResetTabState(content::WebContents* contents);
@@ -249,8 +247,8 @@ class LocationBarView : public LocationBar,
   gfx::Size GetPreferredSize() const override;
   void Layout() override;
 
-  // OmniboxEditController:
-  void Update(const content::WebContents* contents) override;
+  // ChromeOmniboxEditController:
+  void UpdateWithoutTabRestore() override;
   void ShowURL() override;
   ToolbarModel* GetToolbarModel() override;
   content::WebContents* GetWebContents() override;
@@ -258,18 +256,6 @@ class LocationBarView : public LocationBar,
   // ZoomEventManagerObserver:
   // Updates the view for the zoom icon when default zoom levels change.
   void OnDefaultZoomLevelChanged() override;
-
-  // Thickness of the edges of the omnibox background images, in normal mode.
-  static const int kNormalEdgeThickness;
-  // The same, but for popup mode.
-  static const int kPopupEdgeThickness;
-  // Space between items in the location bar, as well as between items and the
-  // edges.
-  static const int kItemPadding;
-  // Amount of padding built into the standard omnibox icons.
-  static const int kIconInternalPadding;
-  // Space between the edge and a bubble.
-  static const int kBubblePadding;
 
  private:
   typedef std::vector<ContentSettingImageView*> ContentSettingViews;
@@ -281,15 +267,16 @@ class LocationBarView : public LocationBar,
 
   // Helper for GetMinimumWidth().  Calculates the incremental minimum width
   // |view| should add to the trailing width after the omnibox.
-  static int IncrementalMinimumWidth(views::View* view);
+  int IncrementalMinimumWidth(views::View* view) const;
 
   // Returns the thickness of any visible left and right edge, in pixels.
   int GetHorizontalEdgeThickness() const;
 
   // The same, but for the top and bottom edges.
-  int vertical_edge_thickness() const {
-    return is_popup_mode_ ? kPopupEdgeThickness : kNormalEdgeThickness;
-  }
+  int GetVerticalEdgeThickness() const;
+
+  // The vertical padding to be applied to all contained views.
+  int VerticalPadding() const;
 
   // Updates the visibility state of the Content Blocked icons to reflect what
   // is actually blocked on the current page. Returns true if the visibility
@@ -353,7 +340,6 @@ class LocationBarView : public LocationBar,
   bool ShowPageActionPopup(const extensions::Extension* extension,
                            bool grant_active_tab) override;
   void UpdateOpenPDFInReaderPrompt() override;
-  void UpdateGeneratedCreditCardView() override;
   void SaveStateToContents(content::WebContents* contents) override;
   const OmniboxView* GetOmniboxView() const override;
   LocationBarTesting* GetLocationBarForTesting() override;
@@ -389,10 +375,9 @@ class LocationBarView : public LocationBar,
   void AnimationProgressed(const gfx::Animation* animation) override;
   void AnimationEnded(const gfx::Animation* animation) override;
 
-  // OmniboxEditController:
+  // ChromeOmniboxEditController:
   void OnChanged() override;
   void OnSetFocus() override;
-  InstantController* GetInstant() override;
   const ToolbarModel* GetToolbarModel() const override;
 
   // DropdownBarHostDelegate:
@@ -455,9 +440,6 @@ class LocationBarView : public LocationBar,
 
   // The zoom icon.
   ZoomView* zoom_view_;
-
-  // A bubble that shows after successfully generating a new credit card number.
-  GeneratedCreditCardView* generated_credit_card_view_;
 
   // The icon to open a PDF in Reader.
   OpenPDFInReaderView* open_pdf_in_reader_view_;

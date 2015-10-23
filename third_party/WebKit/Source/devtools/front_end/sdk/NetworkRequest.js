@@ -117,7 +117,8 @@ WebInspector.NetworkRequest.prototype = {
      * @param {!WebInspector.NetworkRequest} other
      * @return {number}
      */
-    indentityCompare: function(other) {
+    indentityCompare: function(other)
+    {
         if (this._requestId > other._requestId)
             return 1;
         if (this._requestId < other._requestId)
@@ -1011,6 +1012,32 @@ WebInspector.NetworkRequest.prototype = {
 
         this._initiatorInfo = {type: type, url: url, lineNumber: lineNumber, columnNumber: columnNumber};
         return this._initiatorInfo;
+    },
+
+    /**
+     * @return {?WebInspector.NetworkRequest}
+     */
+    initiatorRequest: function()
+    {
+        if (this._initiatorRequest === undefined)
+            this._initiatorRequest = this.target().networkLog.requestForURL(this.initiatorInfo().url);
+        return this._initiatorRequest;
+    },
+
+    /**
+     * @return {!Set<!WebInspector.NetworkRequest>}
+     */
+    initiatorChain: function()
+    {
+        if (this._initiatorChain)
+            return this._initiatorChain;
+        this._initiatorChain = new Set();
+        var request = this;
+        while (request) {
+            this._initiatorChain.add(request);
+            request = request.initiatorRequest();
+        }
+        return this._initiatorChain;
     },
 
     /**

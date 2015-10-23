@@ -8,9 +8,11 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "chromeos/chromeos_switches.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -383,7 +385,7 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
   }
 
   dbus::ObjectProxy* update_engine_proxy_;
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
   Status last_status_;
 
   // Note: This should remain the last member so it'll be destroyed and
@@ -471,10 +473,9 @@ class UpdateEngineClientFakeImpl : public UpdateEngineClientStubImpl {
     last_status_.download_progress = 0.0;
     last_status_.last_checked_time = 0;
     last_status_.new_size = 0;
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&UpdateEngineClientFakeImpl::StateTransition,
-                   weak_factory_.GetWeakPtr()),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&UpdateEngineClientFakeImpl::StateTransition,
+                              weak_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(kStateTransitionDefaultDelayMs));
   }
 
@@ -517,15 +518,14 @@ class UpdateEngineClientFakeImpl : public UpdateEngineClientStubImpl {
     last_status_.status = next_status;
     FOR_EACH_OBSERVER(Observer, observers_, UpdateStatusChanged(last_status_));
     if (last_status_.status != UPDATE_STATUS_IDLE) {
-      base::MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&UpdateEngineClientFakeImpl::StateTransition,
-                     weak_factory_.GetWeakPtr()),
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&UpdateEngineClientFakeImpl::StateTransition,
+                                weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMilliseconds(delay_ms));
     }
   }
 
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
   Status last_status_;
 
   base::WeakPtrFactory<UpdateEngineClientFakeImpl> weak_factory_;

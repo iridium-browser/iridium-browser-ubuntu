@@ -5,6 +5,8 @@
 #ifndef CHROMECAST_MEDIA_CMA_PIPELINE_MEDIA_PIPELINE_H_
 #define CHROMECAST_MEDIA_CMA_PIPELINE_MEDIA_PIPELINE_H_
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/macros.h"
 #include "base/time/time.h"
@@ -47,7 +49,7 @@ class MediaPipeline {
       scoped_ptr<CodedFrameProvider> frame_provider,
       const ::media::PipelineStatusCB& status_cb) = 0;
   virtual void InitializeVideo(
-      const ::media::VideoDecoderConfig& config,
+      const std::vector<::media::VideoDecoderConfig>& configs,
       scoped_ptr<CodedFrameProvider> frame_provider,
       const ::media::PipelineStatusCB& status_cb) = 0;
 

@@ -47,8 +47,8 @@ using namespace cricket;
 static const int kTimeout = 1000;
 static const SocketAddress kLocalAddr1("192.168.1.2", 0);
 static const SocketAddress kLocalAddr2("192.168.1.3", 0);
-static const SocketAddress kNatAddr1("77.77.77.77", rtc::NAT_SERVER_PORT);
-static const SocketAddress kNatAddr2("88.88.88.88", rtc::NAT_SERVER_PORT);
+static const SocketAddress kNatAddr1("77.77.77.77", rtc::NAT_SERVER_UDP_PORT);
+static const SocketAddress kNatAddr2("88.88.88.88", rtc::NAT_SERVER_UDP_PORT);
 static const SocketAddress kStunAddr("99.99.99.1", STUN_SERVER_PORT);
 static const SocketAddress kRelayUdpIntAddr("99.99.99.2", 5000);
 static const SocketAddress kRelayUdpExtAddr("99.99.99.3", 5001);
@@ -135,13 +135,13 @@ class TestPort : public Port {
 
   virtual void PrepareAddress() {
     rtc::SocketAddress addr(ip(), min_port());
-    AddAddress(addr, addr, rtc::SocketAddress(), "udp", "", Type(),
+    AddAddress(addr, addr, rtc::SocketAddress(), "udp", "", "", Type(),
                ICE_TYPE_PREFERENCE_HOST, 0, true);
   }
 
   // Exposed for testing candidate building.
   void AddCandidateAddress(const rtc::SocketAddress& addr) {
-    AddAddress(addr, addr, rtc::SocketAddress(), "udp", "", Type(),
+    AddAddress(addr, addr, rtc::SocketAddress(), "udp", "", "", Type(),
                type_preference_, 0, false);
   }
   void AddCandidateAddress(const rtc::SocketAddress& addr,
@@ -149,7 +149,7 @@ class TestPort : public Port {
                            const std::string& type,
                            int type_preference,
                            bool final) {
-    AddAddress(addr, base_address, rtc::SocketAddress(), "udp", "", type,
+    AddAddress(addr, base_address, rtc::SocketAddress(), "udp", "", "", type,
                type_preference, 0, final);
   }
 
@@ -343,8 +343,8 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
         ss_scope_(ss_.get()),
         network_("unittest", "unittest", rtc::IPAddress(INADDR_ANY), 32),
         socket_factory_(rtc::Thread::Current()),
-        nat_factory1_(ss_.get(), kNatAddr1),
-        nat_factory2_(ss_.get(), kNatAddr2),
+        nat_factory1_(ss_.get(), kNatAddr1, SocketAddress()),
+        nat_factory2_(ss_.get(), kNatAddr2, SocketAddress()),
         nat_socket_factory1_(&nat_factory1_),
         nat_socket_factory2_(&nat_factory2_),
         stun_server_(TestStunServer::Create(main_, kStunAddr)),
@@ -507,7 +507,7 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
   }
   rtc::NATServer* CreateNatServer(const SocketAddress& addr,
                                         rtc::NATType type) {
-    return new rtc::NATServer(type, ss_.get(), addr, ss_.get(), addr);
+    return new rtc::NATServer(type, ss_.get(), addr, addr, ss_.get(), addr);
   }
   static const char* StunName(NATType type) {
     switch (type) {
@@ -537,6 +537,8 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
   }
 
   void TestCrossFamilyPorts(int type);
+
+  void ExpectPortsCanConnect(bool can_connect, Port* p1, Port* p2);
 
   // This does all the work and then deletes |port1| and |port2|.
   void TestConnectivity(const char* name1, Port* port1,
@@ -1392,6 +1394,49 @@ TEST_F(PortTest, TestSkipCrossFamilyTcp) {
 
 TEST_F(PortTest, TestSkipCrossFamilyUdp) {
   TestCrossFamilyPorts(SOCK_DGRAM);
+}
+
+void PortTest::ExpectPortsCanConnect(bool can_connect, Port* p1, Port* p2) {
+  Connection* c = p1->CreateConnection(GetCandidate(p2),
+                                       Port::ORIGIN_MESSAGE);
+  if (can_connect) {
+    EXPECT_FALSE(NULL == c);
+    EXPECT_EQ(1U, p1->connections().size());
+  } else {
+    EXPECT_TRUE(NULL == c);
+    EXPECT_EQ(0U, p1->connections().size());
+  }
+}
+
+TEST_F(PortTest, TestUdpV6CrossTypePorts) {
+  FakePacketSocketFactory factory;
+  scoped_ptr<Port> ports[4];
+  SocketAddress addresses[4] = {SocketAddress("2001:db8::1", 0),
+                                SocketAddress("fe80::1", 0),
+                                SocketAddress("fe80::2", 0),
+                                SocketAddress("::1", 0)};
+  for (int i = 0; i < 4; i++) {
+    FakeAsyncPacketSocket *socket = new FakeAsyncPacketSocket();
+    factory.set_next_udp_socket(socket);
+    ports[i].reset(CreateUdpPort(addresses[i], &factory));
+    socket->set_state(AsyncPacketSocket::STATE_BINDING);
+    socket->SignalAddressReady(socket, addresses[i]);
+    ports[i]->PrepareAddress();
+  }
+
+  Port* standard = ports[0].get();
+  Port* link_local1 = ports[1].get();
+  Port* link_local2 = ports[2].get();
+  Port* localhost = ports[3].get();
+
+  ExpectPortsCanConnect(false, link_local1, standard);
+  ExpectPortsCanConnect(false, standard, link_local1);
+  ExpectPortsCanConnect(false, link_local1, localhost);
+  ExpectPortsCanConnect(false, localhost, link_local1);
+
+  ExpectPortsCanConnect(true, link_local1, link_local2);
+  ExpectPortsCanConnect(true, localhost, standard);
+  ExpectPortsCanConnect(true, standard, localhost);
 }
 
 // This test verifies DSCP value set through SetOption interface can be

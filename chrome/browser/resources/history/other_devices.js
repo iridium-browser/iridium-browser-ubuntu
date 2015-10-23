@@ -14,7 +14,6 @@
 /** @const */ var NB_ENTRIES_OTHER_ROWS_COLUMN = 0;
 
 // Histogram buckets for UMA tracking of menu usage.
-// Using the same values as the Other Devices button in the NTP.
 /** @const */ var HISTOGRAM_EVENT = {
   INITIALIZED: 0,
   SHOW_MENU: 1,
@@ -43,10 +42,6 @@ function recordUmaEvent_(eventId) {
 
 /**
  * Controller for the context menu for device names in the list of sessions.
- * This class is designed to be used as a singleton. Also copied from existing
- * other devices button in NTP.
- * TODO(mad): Should we extract/reuse/share with ntp4/other_sessions.js?
- *
  * @constructor
  */
 function DeviceContextMenuController() {
@@ -287,7 +282,9 @@ Device.prototype.createSessionContents_ = function(maxNumTabs) {
         a.addEventListener('click', makeClickHandler(sessionTag,
                                                      String(win.sessionId),
                                                      String(tab.sessionId)));
-        contents.appendChild(a);
+        var wrapper = createElementWithClassName('div', 'device-tab-wrapper');
+        wrapper.appendChild(a);
+        contents.appendChild(wrapper);
       } else {
         numTabsHidden++;
       }
@@ -300,7 +297,9 @@ Device.prototype.createSessionContents_ = function(maxNumTabs) {
     moreLink.addEventListener('click', this.view_.increaseRowHeight.bind(
         this.view_, this.row_, numTabsHidden));
     moreLink.textContent = loadTimeData.getStringF('xMore', numTabsHidden);
-    contents.appendChild(moreLink);
+    var moreWrapper = createElementWithClassName('div', 'more-wrapper');
+    moreWrapper.appendChild(moreLink);
+    contents.appendChild(moreWrapper);
   }
 
   return contents;
@@ -427,31 +426,19 @@ DevicesView.prototype.increaseRowHeight = function(row, height) {
 // DevicesView, Private -------------------------------------------------------
 
 /**
- * Provides an implementation for a single column grid.
+ * @param {!Element} root
+ * @param {?Node} boundary
  * @constructor
  * @extends {cr.ui.FocusRow}
  */
-function DevicesViewFocusRow() {}
+function DevicesViewFocusRow(root, boundary) {
+  cr.ui.FocusRow.call(this, root, boundary);
+  assert(this.addItem('menu-button', 'button.drop-down') ||
+         this.addItem('device-tab', '.device-tab-entry') ||
+         this.addItem('more-tabs', '.device-show-more-tabs'));
+}
 
-/**
- * Decorates |rowElement| so that it can be treated as a DevicesViewFocusRow.
- * @param {Element} rowElement The element representing this row.
- * @param {Node} boundary Focus events are ignored outside of this node.
- */
-DevicesViewFocusRow.decorate = function(rowElement, boundary) {
-  rowElement.__proto__ = DevicesViewFocusRow.prototype;
-  rowElement.decorate(boundary);
-  rowElement.addFocusableElement(rowElement);
-};
-
-DevicesViewFocusRow.prototype = {
-  __proto__: cr.ui.FocusRow.prototype,
-
-  /** @override */
-  getEquivalentElement: function(element) {
-    return this;
-  },
-};
+DevicesViewFocusRow.prototype = {__proto__: cr.ui.FocusRow.prototype};
 
 /**
  * Update the page with results.
@@ -508,14 +495,14 @@ DevicesView.prototype.displayResults_ = function() {
 
   var devices = this.resultDiv_.querySelectorAll('.device-contents');
   for (var i = 0; i < devices.length; ++i) {
-    var rows = devices[i].querySelectorAll('.device-tab-entry, button');
+    var rows = devices[i].querySelectorAll(
+        'h3, .device-tab-wrapper, .more-wrapper');
     if (!rows.length)
       continue;
 
     var grid = new cr.ui.FocusGrid();
     for (var j = 0; j < rows.length; ++j) {
-      DevicesViewFocusRow.decorate(rows[j], devices[i]);
-      grid.addRow(rows[j]);
+      grid.addRow(new DevicesViewFocusRow(rows[j], devices[i]));
     }
     grid.ensureRowActive();
     this.focusGrids_.push(grid);
@@ -540,15 +527,10 @@ function setForeignSessions(sessionList, isTabSyncEnabled) {
 }
 
 /**
- * Called when this element is initialized, and from the new tab page when
- * the user's signed in state changes,
- * @param {string} header The first line of text (unused here).
- * @param {string} subHeader The second line of text (unused here).
- * @param {string} iconURL The url for the login status icon. If this is null
- then the login status icon is hidden (unused here).
+ * Called when initialized or the user's signed in state changes,
  * @param {boolean} isUserSignedIn Is the user currently signed in?
  */
-function updateLogin(header, subHeader, iconURL, isUserSignedIn) {
+function updateSignInState(isUserSignedIn) {
   if (devicesView)
     devicesView.updateSignInState(isUserSignedIn);
 }
@@ -562,15 +544,6 @@ function load() {
   if (!loadTimeData.getBoolean('isInstantExtendedApiEnabled'))
     return;
 
-  // We must use this namespace to reuse the handler code for foreign session
-  // and login.
-  cr.define('ntp', function() {
-    return {
-      setForeignSessions: setForeignSessions,
-      updateLogin: updateLogin
-    };
-  });
-
   devicesView = new DevicesView();
 
   // Create the context menu that appears when the user right clicks
@@ -582,6 +555,8 @@ function load() {
   };
   $('search-field').addEventListener('search', doSearch);
   $('search-button').addEventListener('click', doSearch);
+
+  chrome.send('otherDevicesInitialized');
 }
 
 // Add handlers to HTML elements.

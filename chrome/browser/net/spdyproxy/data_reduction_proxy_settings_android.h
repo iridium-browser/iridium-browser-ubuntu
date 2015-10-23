@@ -38,7 +38,13 @@ class DataReductionProxySettingsAndroid {
   jboolean IsDataReductionProxyPromoAllowed(JNIEnv* env, jobject obj);
   jboolean IsIncludedInAltFieldTrial(JNIEnv* env, jobject obj);
   jboolean IsDataReductionProxyEnabled(JNIEnv* env, jobject obj);
+  jboolean CanUseDataReductionProxy(JNIEnv* env, jobject obj, jstring url);
+  jboolean WasLoFiModeActiveOnMainFrame(JNIEnv* env, jobject obj);
+  jboolean WasLoFiLoadImageRequestedBefore(JNIEnv* env, jobject obj);
+  void SetLoFiLoadImageRequested(JNIEnv* env, jobject obj);
   jboolean IsDataReductionProxyManaged(JNIEnv* env, jobject obj);
+  void IncrementLoFiSnackbarShown(JNIEnv* env, jobject obj);
+  void IncrementLoFiUserRequestsForImages(JNIEnv* env, jobject obj);
   void SetDataReductionProxyEnabled(JNIEnv* env, jobject obj, jboolean enabled);
 
   jlong GetDataReductionLastUpdateTime(JNIEnv* env, jobject obj);
@@ -62,6 +68,18 @@ class DataReductionProxySettingsAndroid {
                                                        jstring host,
                                                        jstring realm);
 
+  // Returns a Java string of the Data Reduction Proxy proxy list for HTTP
+  // origins as a semi-colon delimited list.
+  ScopedJavaLocalRef<jstring> GetHttpProxyList(JNIEnv* env, jobject obj);
+
+  // Returns a Java string of the Data Reduction Proxy proxy list for HTTPS
+  // origins as a semi-colon delimited list.
+  ScopedJavaLocalRef<jstring> GetHttpsProxyList(JNIEnv* env, jobject obj);
+
+  // Returns a Java string of the last Data Reduction Proxy bypass event as
+  // a JSON object.
+  ScopedJavaLocalRef<jstring> GetLastBypassEvent(JNIEnv* env, jobject obj);
+
   // Registers the native methods to be call from Java.
   static bool Register(JNIEnv* env);
 
@@ -69,7 +87,6 @@ class DataReductionProxySettingsAndroid {
   friend class DataReductionProxySettingsAndroidTest;
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsAndroidTest,
                            TestGetDailyContentLengths);
-
 
   ScopedJavaLocalRef<jlongArray> GetDailyContentLengths(JNIEnv* env,
                                                         const char* pref_name);

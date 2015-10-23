@@ -74,12 +74,15 @@ class PpapiThread : public ChildThreadImpl,
 
   // PluginDispatcher::PluginDelegate implementation.
   std::set<PP_Instance>* GetGloballySeenInstanceIDSet() override;
-  base::MessageLoopProxy* GetIPCMessageLoop() override;
+  base::SingleThreadTaskRunner* GetIPCTaskRunner() override;
   base::WaitableEvent* GetShutdownEvent() override;
   IPC::PlatformFileForTransit ShareHandleWithRemote(
       base::PlatformFile handle,
       base::ProcessId peer_pid,
       bool should_close_source) override;
+  base::SharedMemoryHandle ShareSharedMemoryHandleWithRemote(
+      const base::SharedMemoryHandle& handle,
+      base::ProcessId remote_pid) override;
   uint32 Register(ppapi::proxy::PluginDispatcher* plugin_dispatcher) override;
   void Unregister(uint32 plugin_dispatcher_id) override;
 
@@ -88,7 +91,7 @@ class PpapiThread : public ChildThreadImpl,
   // long as the main PpapiThread outlives it.
   IPC::Sender* GetBrowserSender() override;
   std::string GetUILanguage() override;
-  void PreCacheFont(const void* logfontw) override;
+  void PreCacheFontForFlash(const void* logfontw) override;
   void SetActiveURL(const std::string& url) override;
   PP_Resource CreateBrowserFont(ppapi::proxy::Connection connection,
                                 PP_Instance instance,
@@ -120,6 +123,10 @@ class PpapiThread : public ChildThreadImpl,
   // Reports |error| to UMA when plugin load fails.
   void ReportLoadErrorCode(const base::FilePath& path,
                            const base::NativeLibraryLoadError& error);
+
+  // Reports time to load the plugin.
+  void ReportLoadTime(const base::FilePath& path,
+                      const base::TimeDelta load_time);
 
   // True if running in a broker process rather than a normal plugin process.
   bool is_broker_;

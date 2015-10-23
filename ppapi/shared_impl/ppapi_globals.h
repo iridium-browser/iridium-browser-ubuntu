@@ -5,9 +5,7 @@
 #ifndef PPAPI_SHARED_IMPL_PPAPI_GLOBALS_H_
 #define PPAPI_SHARED_IMPL_PPAPI_GLOBALS_H_
 
-#include <map>
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -17,10 +15,9 @@
 #include "ppapi/c/ppb_console.h"
 #include "ppapi/shared_impl/api_id.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
-#include "ui/events/latency_info.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 class TaskRunner;
 }
 
@@ -101,9 +98,9 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   // failure.
   virtual PP_Module GetModuleForInstance(PP_Instance instance) = 0;
 
-  // Returns the base::MessageLoopProxy for the main thread. This is set in the
-  // constructor, so PpapiGlobals must be created on the main thread.
-  base::MessageLoopProxy* GetMainThreadMessageLoop();
+  // Returns the base::SingleThreadTaskRunner for the main thread. This is set
+  // in the constructor, so PpapiGlobals must be created on the main thread.
+  base::SingleThreadTaskRunner* GetMainThreadMessageLoop();
 
   // In tests, the PpapiGlobals object persists across tests but the MLP pointer
   // it hangs on will go stale and the next PPAPI test will crash because of
@@ -137,25 +134,13 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   // renderer process will have no effect.
   virtual void MarkPluginIsActive();
 
-  // Caches an input event's |latency_info| for the plugin |instance|.
-  void AddLatencyInfo(const ui::LatencyInfo& latency_info,
-                      PP_Instance instance);
-  // Transfers plugin |instance|'s latency info into |latency_info|.
-  void TransferLatencyInfoTo(std::vector<ui::LatencyInfo>* latency_info,
-                             PP_Instance instance);
-
  private:
   // Return the thread-local pointer which is used only for unit testing. It
   // should always be NULL when running in production. It allows separate
   // threads to have distinct "globals".
   static PpapiGlobals* GetThreadLocalPointer();
 
-  scoped_refptr<base::MessageLoopProxy> main_loop_proxy_;
-
-  // If an input event is believed to have caused rendering damage, its latency
-  // info is cached in |latency_info_for_frame_| indexed by instance. These
-  // latency info will be passed back to renderer with the next plugin frame.
-  std::map<PP_Instance, std::vector<ui::LatencyInfo> > latency_info_for_frame_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(PpapiGlobals);
 };

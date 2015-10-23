@@ -14,7 +14,6 @@
 #include <string.h>
 
 #include "webrtc/modules/audio_device/audio_device_config.h"
-#include "webrtc/modules/audio_device/audio_device_utility.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -131,8 +130,6 @@ int32_t AudioDeviceBuffer::InitRecording()
 
 int32_t AudioDeviceBuffer::SetRecordingSampleRate(uint32_t fsHz)
 {
-    WEBRTC_TRACE(kTraceMemory, kTraceAudioDevice, _id, "AudioDeviceBuffer::SetRecordingSampleRate(fsHz=%u)", fsHz);
-
     CriticalSectionScoped lock(&_critSect);
     _recSampleRate = fsHz;
     return 0;
@@ -144,8 +141,6 @@ int32_t AudioDeviceBuffer::SetRecordingSampleRate(uint32_t fsHz)
 
 int32_t AudioDeviceBuffer::SetPlayoutSampleRate(uint32_t fsHz)
 {
-    WEBRTC_TRACE(kTraceMemory, kTraceAudioDevice, _id, "AudioDeviceBuffer::SetPlayoutSampleRate(fsHz=%u)", fsHz);
-
     CriticalSectionScoped lock(&_critSect);
     _playSampleRate = fsHz;
     return 0;
@@ -175,8 +170,6 @@ int32_t AudioDeviceBuffer::PlayoutSampleRate() const
 
 int32_t AudioDeviceBuffer::SetRecordingChannels(uint8_t channels)
 {
-    WEBRTC_TRACE(kTraceMemory, kTraceAudioDevice, _id, "AudioDeviceBuffer::SetRecordingChannels(channels=%u)", channels);
-
     CriticalSectionScoped lock(&_critSect);
     _recChannels = channels;
     _recBytesPerSample = 2*channels;  // 16 bits per sample in mono, 32 bits in stereo
@@ -189,8 +182,6 @@ int32_t AudioDeviceBuffer::SetRecordingChannels(uint8_t channels)
 
 int32_t AudioDeviceBuffer::SetPlayoutChannels(uint8_t channels)
 {
-    WEBRTC_TRACE(kTraceMemory, kTraceAudioDevice, _id, "AudioDeviceBuffer::SetPlayoutChannels(channels=%u)", channels);
-
     CriticalSectionScoped lock(&_critSect);
     _playChannels = channels;
     // 16 bits per sample in mono, 32 bits in stereo
@@ -407,12 +398,6 @@ int32_t AudioDeviceBuffer::SetRecordedBuffer(const void* audioBuffer,
         return -1;
     }
 
-    if (nSamples != _recSamples)
-    {
-        WEBRTC_TRACE(kTraceWarning, kTraceAudioDevice, _id, "invalid number of recorded samples (%d)", nSamples);
-        return -1;
-    }
-
     if (_recChannel == AudioDeviceModule::kChannelBoth)
     {
         // (default) copy the complete input buffer to the local buffer
@@ -564,7 +549,7 @@ int32_t AudioDeviceBuffer::RequestPlayoutData(uint32_t nSamples)
         }
     }
 
-    return nSamplesOut;
+    return static_cast<int32_t>(nSamplesOut);
 }
 
 // ----------------------------------------------------------------------------
@@ -577,8 +562,9 @@ int32_t AudioDeviceBuffer::GetPlayoutData(void* audioBuffer)
 
     if (_playSize > kMaxBufferSizeBytes)
     {
-       WEBRTC_TRACE(kTraceError, kTraceUtility, _id, "_playSize %i exceeds "
-       "kMaxBufferSizeBytes in AudioDeviceBuffer::GetPlayoutData", _playSize);
+       WEBRTC_TRACE(kTraceError, kTraceUtility, _id,
+                    "_playSize %i exceeds kMaxBufferSizeBytes in "
+                    "AudioDeviceBuffer::GetPlayoutData", _playSize);
        assert(false);
        return -1;
     }
@@ -591,7 +577,7 @@ int32_t AudioDeviceBuffer::GetPlayoutData(void* audioBuffer)
         _playFile.Write(&_playBuffer[0], _playSize);
     }
 
-    return _playSamples;
+    return static_cast<int32_t>(_playSamples);
 }
 
 }  // namespace webrtc

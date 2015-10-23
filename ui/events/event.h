@@ -94,10 +94,7 @@ class EVENTS_EXPORT Event {
   bool IsRepeat() const { return (flags_ & EF_IS_REPEAT) != 0; }
 
   bool IsKeyEvent() const {
-    return type_ == ET_KEY_PRESSED ||
-           type_ == ET_KEY_RELEASED ||
-           type_ == ET_TRANSLATED_KEY_PRESS ||
-           type_ == ET_TRANSLATED_KEY_RELEASE;
+    return type_ == ET_KEY_PRESSED || type_ == ET_KEY_RELEASED;
   }
 
   bool IsMouseEvent() const {
@@ -325,6 +322,60 @@ class EVENTS_EXPORT LocatedEvent : public Event {
   gfx::PointF root_location_;
 };
 
+// Structure for handling common fields between touch and mouse to support
+// PointerEvents API.
+class EVENTS_EXPORT PointerDetails {
+ public:
+  PointerDetails() {}
+  explicit PointerDetails(EventPointerType pointer_type)
+      : pointer_type_(pointer_type) {}
+  PointerDetails(EventPointerType pointer_type,
+                 float radius_x,
+                 float radius_y,
+                 float force,
+                 float tilt_x,
+                 float tilt_y)
+      : pointer_type_(pointer_type),
+        radius_x_(radius_x),
+        radius_y_(radius_y),
+        force_(force),
+        tilt_x_(tilt_x),
+        tilt_y_(tilt_y) {}
+
+  EventPointerType pointer_type() const { return pointer_type_; };
+
+  // If we aren't provided with a radius on one axis, use the
+  // information from the other axis.
+  float radius_x() const { return radius_x_ > 0 ? radius_x_ : radius_y_; }
+  float radius_y() const { return radius_y_ > 0 ? radius_y_ : radius_x_; }
+  float force() const { return force_; }
+  float tilt_x() const { return tilt_x_; }
+  float tilt_y() const { return tilt_y_; }
+
+ private:
+  // For the mutators of the members on this class.
+  friend class TouchEvent;
+  friend class MouseEvent;
+
+  // The type of pointer device.
+  EventPointerType pointer_type_ = EventPointerType::POINTER_TYPE_UNKNOWN;
+
+  // Radius of the X (major) axis of the touch ellipse. 0.0 if unknown.
+  float radius_x_ = 0.0;
+
+  // Radius of the Y (minor) axis of the touch ellipse. 0.0 if unknown.
+  float radius_y_ = 0.0;
+
+  // Force (pressure) of the touch. Normalized to be [0, 1]. Default to be 0.0.
+  float force_ = 0.0;
+
+  // Angle of tilt of the X (major) axis. 0.0 if unknown.
+  float tilt_x_ = 0.0;
+
+  // Angle of tilt of the Y (minor) axis. 0.0 if unknown.
+  float tilt_y_ = 0.0;
+};
+
 class EVENTS_EXPORT MouseEvent : public LocatedEvent {
  public:
   explicit MouseEvent(const base::NativeEvent& native_event);
@@ -336,8 +387,8 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
   template <class T>
   MouseEvent(const MouseEvent& model, T* source, T* target)
       : LocatedEvent(model, source, target),
-        changed_button_flags_(model.changed_button_flags_) {
-  }
+        changed_button_flags_(model.changed_button_flags_),
+        pointer_details_(model.pointer_details_) {}
 
   template <class T>
   MouseEvent(const MouseEvent& model,
@@ -346,7 +397,8 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
              EventType type,
              int flags)
       : LocatedEvent(model, source, target),
-        changed_button_flags_(model.changed_button_flags_) {
+        changed_button_flags_(model.changed_button_flags_),
+        pointer_details_(model.pointer_details_) {
     SetType(type);
     set_flags(flags);
   }
@@ -410,6 +462,23 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
   // Updates the button that changed.
   void set_changed_button_flags(int flags) { changed_button_flags_ = flags; }
 
+  // Replace the pointer type (e.g. to EventPointerType::POINTER_TYPE_PEN) for
+  // stylus devices.
+  void set_pointer_type(EventPointerType type) {
+    pointer_details_.pointer_type_ = type;
+  }
+
+  // Update properties for stylus devices exposed through the Pointer Events
+  // spec.
+  void set_force(const float f) { pointer_details_.force_ = f; }
+  void set_tilt_x(const float t) { pointer_details_.tilt_x_ = t; }
+  void set_tilt_y(const float t) { pointer_details_.tilt_y_ = t; }
+  void set_radius_x(const float r) { pointer_details_.radius_x_ = r; }
+  void set_radius_y(const float r) { pointer_details_.radius_y_ = r; }
+
+  // Event details common to MouseEvent and TouchEvent.
+  const PointerDetails& pointer_details() { return pointer_details_; }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(EventTest, DoubleClickRequiresRelease);
   FRIEND_TEST_ALL_PREFIXES(EventTest, SingleClickRightLeft);
@@ -437,6 +506,9 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
   // to true when the next event either has a different timestamp or we see a
   // release signalling that the press (click) event was completed.
   static bool last_click_complete_;
+
+  // Structure for holding pointer details for implementing PointerEvents API.
+  PointerDetails pointer_details_;
 };
 
 class ScrollEvent;
@@ -489,12 +561,10 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
       : LocatedEvent(model, source, target),
         touch_id_(model.touch_id_),
         unique_event_id_(model.unique_event_id_),
-        radius_x_(model.radius_x_),
-        radius_y_(model.radius_y_),
         rotation_angle_(model.rotation_angle_),
-        force_(model.force_),
         may_cause_scrolling_(model.may_cause_scrolling_),
-        should_remove_native_touch_id_mapping_(false) {}
+        should_remove_native_touch_id_mapping_(false),
+        pointer_details_(model.pointer_details_) {}
 
   TouchEvent(EventType type,
              const gfx::PointF& location,
@@ -518,20 +588,22 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   // The id of the pointer this event modifies.
   int touch_id() const { return touch_id_; }
   // A unique identifier for this event.
-  uint64 unique_event_id() const { return unique_event_id_; }
-  // If we aren't provided with a radius on one axis, use the
-  // information from the other axis.
-  float radius_x() const { return radius_x_ > 0 ? radius_x_ : radius_y_; }
-  float radius_y() const { return radius_y_ > 0 ? radius_y_ : radius_x_; }
+  uint32 unique_event_id() const { return unique_event_id_; }
+
+  // TODO(robert.bradford): Drop these shims.
+  float radius_x() const { return pointer_details_.radius_x(); }
+  float radius_y() const { return pointer_details_.radius_y(); }
+  float force() const { return pointer_details_.force(); }
+
   float rotation_angle() const { return rotation_angle_; }
-  float force() const { return force_; }
 
   void set_may_cause_scrolling(bool causes) { may_cause_scrolling_ = causes; }
   bool may_cause_scrolling() const { return may_cause_scrolling_; }
 
-  // Used for unit tests.
-  void set_radius_x(const float r) { radius_x_ = r; }
-  void set_radius_y(const float r) { radius_y_ = r; }
+  // TODO(robert.bradford): ozone_platform_egltest.cc could use
+  // UpdateForRootTransform() instead: crbug.com/519337
+  void set_radius_x(const float r) { pointer_details_.radius_x_ = r; }
+  void set_radius_y(const float r) { pointer_details_.radius_y_ = r; }
 
   void set_should_remove_native_touch_id_mapping(
       bool should_remove_native_touch_id_mapping) {
@@ -549,6 +621,9 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
     return !!(result() & ER_DISABLE_SYNC_HANDLING);
   }
 
+  // Event details common to MouseEvent and TouchEvent.
+  const PointerDetails& pointer_details() { return pointer_details_; }
+
  private:
   // Adjusts rotation_angle_ to within the acceptable range.
   void FixRotationAngle();
@@ -558,20 +633,11 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   const int touch_id_;
 
   // A unique identifier for the touch event.
-  const uint64 unique_event_id_;
-
-  // Radius of the X (major) axis of the touch ellipse. 0.0 if unknown.
-  float radius_x_;
-
-  // Radius of the Y (minor) axis of the touch ellipse. 0.0 if unknown.
-  float radius_y_;
+  const uint32 unique_event_id_;
 
   // Clockwise angle (in degrees) of the major axis from the X axis. Must be
   // less than 180 and non-negative.
   float rotation_angle_;
-
-  // Force (pressure) of the touch. Normalized to be [0, 1]. Default to be 0.0.
-  float force_;
 
   // Whether the (unhandled) touch event will produce a scroll event (e.g., a
   // touchmove that exceeds the platform slop region, or a touchend that
@@ -583,6 +649,9 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   // release and cancel events where the associated touch press event
   // created a mapping between the native id and the touch_id_.
   bool should_remove_native_touch_id_mapping_;
+
+  // Structure for holding pointer details for implementing PointerEvents API.
+  PointerDetails pointer_details_;
 };
 
 // An interface that individual platforms can use to store additional data on
@@ -602,8 +671,7 @@ class EVENTS_EXPORT ExtendedKeyEventData {
 //
 // For a keystroke event,
 // -- is_char_ is false.
-// -- Event::type() can be any one of ET_KEY_PRESSED, ET_KEY_RELEASED,
-//    ET_TRANSLATED_KEY_PRESS, or ET_TRANSLATED_KEY_RELEASE.
+// -- Event::type() can be any one of ET_KEY_PRESSED, ET_KEY_RELEASED.
 // -- code_ and Event::flags() represent the physical key event.
 //    - code_ is a platform-independent representation of the physical key,
 //      based on DOM KeyboardEvent |code| values. It does not vary depending
@@ -625,7 +693,9 @@ class EVENTS_EXPORT ExtendedKeyEventData {
 //    if the mapped key generates a character that has an associated VKEY_
 //    code, then key_code_ is that code; if not, then key_code_ is the unmapped
 //    VKEY_ code. For example, US, Greek, Cyrillic, Japanese, etc. all use
-//    VKEY_Q for the key beside Tab, while French uses VKEY_A.
+//    VKEY_Q for the key beside Tab, while French uses VKEY_A. The stored
+//    key_code_ is non-located (e.g. VKEY_SHIFT rather than VKEY_LSHIFT,
+//    VKEY_1 rather than VKEY_NUMPAD1).
 //
 // For a character event,
 // -- is_char_ is true.
@@ -743,12 +813,6 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // Normalizes flags_ so that it describes the state after the event.
   // (Native X11 event flags describe the state before the event.)
   void NormalizeFlags();
-
-  // Returns true if the key event has already been processed by an input method
-  // and there is no need to pass the key event to the input method again.
-  bool IsTranslated() const;
-  // Marks this key event as translated or not translated.
-  void SetTranslated(bool translated);
 
  protected:
   friend class KeyEventTestApi;

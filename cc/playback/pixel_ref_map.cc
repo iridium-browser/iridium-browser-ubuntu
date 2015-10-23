@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <limits>
 
-#include "cc/base/util.h"
+#include "cc/base/math_util.h"
 #include "cc/playback/display_item_list.h"
 #include "cc/playback/picture.h"
 #include "skia/ext/pixel_ref_utils.h"
@@ -21,7 +21,8 @@ PixelRefMap::PixelRefMap(const gfx::Size& cell_size) : cell_size_(cell_size) {
 PixelRefMap::~PixelRefMap() {
 }
 
-void PixelRefMap::GatherPixelRefsFromPicture(SkPicture* picture) {
+void PixelRefMap::GatherPixelRefsFromPicture(SkPicture* picture,
+                                             const gfx::Rect& layer_rect) {
   DCHECK(picture);
 
   int min_x = std::numeric_limits<int>::max();
@@ -34,19 +35,34 @@ void PixelRefMap::GatherPixelRefsFromPicture(SkPicture* picture) {
   for (skia::DiscardablePixelRefList::const_iterator it = pixel_refs.begin();
        it != pixel_refs.end(); ++it) {
     gfx::Point min(
-        RoundDown(static_cast<int>(it->pixel_ref_rect.x()), cell_size_.width()),
-        RoundDown(static_cast<int>(it->pixel_ref_rect.y()),
-                  cell_size_.height()));
-    gfx::Point max(
-        RoundDown(static_cast<int>(std::ceil(it->pixel_ref_rect.right())),
-                  cell_size_.width()),
-        RoundDown(static_cast<int>(std::ceil(it->pixel_ref_rect.bottom())),
-                  cell_size_.height()));
+        MathUtil::UncheckedRoundDown(static_cast<int>(it->pixel_ref_rect.x()),
+                                     cell_size_.width()),
+        MathUtil::UncheckedRoundDown(static_cast<int>(it->pixel_ref_rect.y()),
+                                     cell_size_.height()));
+    gfx::Point max(MathUtil::UncheckedRoundDown(
+                       static_cast<int>(std::ceil(it->pixel_ref_rect.right())),
+                       cell_size_.width()),
+                   MathUtil::UncheckedRoundDown(
+                       static_cast<int>(std::ceil(it->pixel_ref_rect.bottom())),
+                       cell_size_.height()));
+
+    // We recorded the picture as if it was at (0, 0) by translating by layer
+    // rect origin. Add the rect origin back here. It really doesn't make much
+    // of a difference, since the query for pixel refs doesn't use this
+    // information. However, since picture pile / display list also returns this
+    // information, it would be nice to express it relative to the layer, not
+    // relative to the particular implementation of the raster source.
+    skia::PositionPixelRef position_pixel_ref = *it;
+    position_pixel_ref.pixel_ref_rect.setXYWH(
+        position_pixel_ref.pixel_ref_rect.x() + layer_rect.x(),
+        position_pixel_ref.pixel_ref_rect.y() + layer_rect.y(),
+        position_pixel_ref.pixel_ref_rect.width(),
+        position_pixel_ref.pixel_ref_rect.height());
 
     for (int y = min.y(); y <= max.y(); y += cell_size_.height()) {
       for (int x = min.x(); x <= max.x(); x += cell_size_.width()) {
         PixelRefMapKey key(x, y);
-        data_hash_map_[key].push_back(it->pixel_ref);
+        data_hash_map_[key].push_back(position_pixel_ref);
       }
     }
 
@@ -147,11 +163,13 @@ void PixelRefMap::Iterator::PointToFirstPixelRef(const gfx::Rect& rect) {
   gfx::Size cell_size(target_pixel_ref_map_->cell_size_);
   // We have to find a cell_size aligned point that corresponds to
   // query_rect. Point is a multiple of cell_size.
-  min_point_ = gfx::Point(RoundDown(query_rect.x(), cell_size.width()),
-                          RoundDown(query_rect.y(), cell_size.height()));
-  max_point_ =
-      gfx::Point(RoundDown(query_rect.right() - 1, cell_size.width()),
-                 RoundDown(query_rect.bottom() - 1, cell_size.height()));
+  min_point_ = gfx::Point(
+      MathUtil::UncheckedRoundDown(query_rect.x(), cell_size.width()),
+      MathUtil::UncheckedRoundDown(query_rect.y(), cell_size.height()));
+  max_point_ = gfx::Point(
+      MathUtil::UncheckedRoundDown(query_rect.right() - 1, cell_size.width()),
+      MathUtil::UncheckedRoundDown(query_rect.bottom() - 1,
+                                   cell_size.height()));
 
   // Limit the points to known pixel ref boundaries.
   min_point_ = gfx::Point(

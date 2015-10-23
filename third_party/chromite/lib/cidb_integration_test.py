@@ -167,6 +167,14 @@ class CIDBMigrationsTest(CIDBIntegrationTest):
         for action in constants.CL_ACTIONS]
     db.InsertCLActions(build_id, all_actions_list)
 
+  def testWaterfallMigration(self):
+    """Test that migrating waterfall from enum to varchar preserves value."""
+    db = self._PrepareFreshDatabase(40)
+    build_id = db.InsertBuild('my builder', 'chromiumos', _random(),
+                              'my config', 'my bot hostname')
+    db.ApplySchemaMigrations(41)
+    self.assertEqual('chromiumos', db.GetBuildStatus(build_id)['waterfall'])
+
 
 class CIDBAPITest(CIDBIntegrationTest):
   """Tests of the CIDB API."""
@@ -186,6 +194,14 @@ class CIDBAPITest(CIDBIntegrationTest):
     db = self._PrepareFreshDatabase(1)
     current_db_time = db.GetTime()
     self.assertEqual(type(current_db_time), datetime.datetime)
+
+  def testGetKeyVals(self):
+    db = self._PrepareFreshDatabase(40)
+    # In production we would never insert into this table from a bot, but for
+    # testing purposes here this is convenient.
+    db._Execute('INSERT INTO keyvalTable(k, v) VALUES '
+                '("/foo/bar", "baz"), ("/qux/norf", NULL)')
+    self.assertEqual(db.GetKeyVals(), {'/foo/bar': 'baz', '/qux/norf': None})
 
 
 def GetTestDataSeries(test_data_path):

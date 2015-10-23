@@ -17,9 +17,7 @@ import android.view.animation.Interpolator;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
-import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animatable;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animation;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
@@ -31,6 +29,7 @@ import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneOverlayLayer;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
@@ -399,7 +398,7 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
 
         // 5. TODO(dtrainor): Notify the overlay objects.
         for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).onSizeChanged(width, height, visibleViewport.top);
+            mSceneOverlays.get(i).onSizeChanged(width, height, visibleViewport.top, orientation);
         }
     }
 
@@ -461,7 +460,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      *                           selection occurs.
      */
     public void startHiding(int nextTabId, boolean hintAtTabSelection) {
-        getLayoutTab(nextTabId);
         mUpdateHost.startHiding(nextTabId, hintAtTabSelection);
         mIsHiding = true;
         mNextTabId = nextTabId;
@@ -633,23 +631,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
             if (mLayoutTabs[i].showToolbar()) return true;
         }
         return false;
-    }
-
-    /**
-     * Returns whether or not the native Contextual Search layout is showing. Layouts supporting
-     * Contextual Search should override this method and return "true", indicating that
-     * the layout has already been swapped from an Android View to a native cc::Layer.
-     * @return Whether or not the Contextual Search bar is showing.
-     */
-    public boolean isContextualSearchLayoutShowing() {
-        return false;
-    }
-
-    /**
-     * @return The {@link ContextualSearchPanel} or "null" if there is none for this layout.
-     */
-    public ContextualSearchPanel getContextualSearchPanel() {
-        return null;
     }
 
     /**
@@ -1161,16 +1142,43 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
         updateSceneLayer(viewport, contentViewport, layerTitleCache, tabContentManager,
                 resourceManager, fullscreenManager);
 
+        float offsetPx = fullscreenManager != null ? fullscreenManager.getControlOffset() : 0.f;
+        float dpToPx = getContext().getResources().getDisplayMetrics().density;
+        float offsetDp = offsetPx / dpToPx;
+        float offsetOverride = getTopControlsOffset(offsetDp);
+        if (!Float.isNaN(offsetOverride)) offsetDp = offsetOverride;
+
         SceneLayer content = getSceneLayer();
         for (int i = 0; i < mSceneOverlays.size(); i++) {
             SceneOverlayLayer overlayLayer = mSceneOverlays.get(i).getUpdatedSceneOverlayTree(
-                    layerTitleCache, resourceManager, fullscreenManager);
+                    layerTitleCache, resourceManager, offsetDp);
 
             overlayLayer.setContentTree(content);
             content = overlayLayer;
         }
 
         return content;
+    }
+
+    /**
+     * @return Whether or not to force the top controls Android view to hide.
+     */
+    public boolean forceHideTopControlsAndroidView() {
+        return false;
+    }
+
+    /**
+     * @return The toolbar brightness.
+     */
+    public float getToolbarBrightness() {
+        return 1.0f;
+    }
+
+    /**
+     * @return Whether the tabstrip's event filter is enabled.
+     */
+    public boolean isTabStripEventFilterEnabled() {
+        return true;
     }
 
     /**

@@ -10,7 +10,6 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "chrome/browser/chromeos/file_system_provider/operations/test_util.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
 #include "chrome/common/extensions/api/file_system_provider.h"
@@ -44,7 +43,7 @@ class FileSystemProviderOperationsTruncateTest : public testing::Test {
     mount_options.writable = true;
     file_system_info_ = ProvidedFileSystemInfo(
         kExtensionId, mount_options, base::FilePath(), false /* configurable */,
-        extensions::SOURCE_FILE);
+        true /* watchable */, extensions::SOURCE_FILE);
   }
 
   ProvidedFileSystemInfo file_system_info_;
@@ -105,7 +104,7 @@ TEST_F(FileSystemProviderOperationsTruncateTest, Execute_ReadOnly) {
   const ProvidedFileSystemInfo read_only_file_system_info(
       kExtensionId, MountOptions(kFileSystemId, "" /* display_name */),
       base::FilePath() /* mount_path */, false /* configurable */,
-      extensions::SOURCE_FILE);
+      true /* watchable */, extensions::SOURCE_FILE);
 
   Truncate truncate(NULL, file_system_info_, base::FilePath(kFilePath),
                     kTruncateLength,

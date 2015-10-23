@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/autocomplete/shortcuts_database.h"
+#include "components/omnibox/browser/shortcuts_database.h"
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
@@ -10,10 +10,10 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/omnibox/autocomplete_match_type.h"
+#include "components/omnibox/browser/autocomplete_match_type.h"
+#include "components/omnibox/browser/shortcuts_constants.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "sql/statement.h"
 #include "sql/test/test_helpers.h"
@@ -96,7 +96,7 @@ class ShortcutsDatabaseTest : public testing::Test {
 void ShortcutsDatabaseTest::SetUp() {
   profile_.reset(new TestingProfile());
   db_ = new ShortcutsDatabase(
-      profile_->GetPath().Append(chrome::kShortcutsDatabaseName));
+      profile_->GetPath().Append(kShortcutsDatabaseName));
   ASSERT_TRUE(db_->Init());
   ClearDB();
 }

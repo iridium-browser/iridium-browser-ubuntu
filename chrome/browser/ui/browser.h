@@ -30,10 +30,10 @@
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-#include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/sessions/session_id.h"
+#include "components/toolbar/toolbar_model.h"
 #include "components/translate/content/browser/content_translate_driver.h"
 #include "components/ui/zoom/zoom_observer.h"
 #include "content/public/browser/notification_observer.h"
@@ -81,7 +81,7 @@ class SessionStorageNamespace;
 }
 
 namespace extensions {
-class BookmarkAppBrowserController;
+class HostedAppBrowserController;
 class Extension;
 class ExtensionRegistry;
 class WindowController;
@@ -98,7 +98,6 @@ class WebDialogDelegate;
 }
 
 namespace web_modal {
-class PopupManager;
 class WebContentsModalDialogHost;
 }
 
@@ -255,9 +254,6 @@ class Browser : public TabStripModelObserver,
     toolbar_model->swap(toolbar_model_);
   }
 #endif
-  web_modal::PopupManager* popup_manager() {
-    return popup_manager_.get();
-  }
   TabStripModel* tab_strip_model() const { return tab_strip_model_.get(); }
   chrome::BrowserCommandController* command_controller() {
     return command_controller_.get();
@@ -283,8 +279,8 @@ class Browser : public TabStripModelObserver,
   BrowserInstantController* instant_controller() {
     return instant_controller_.get();
   }
-  extensions::BookmarkAppBrowserController* bookmark_app_controller() {
-    return bookmark_app_controller_.get();
+  extensions::HostedAppBrowserController* hosted_app_controller() {
+    return hosted_app_controller_.get();
   }
 
   // Get the FindBarController for this browser, creating it if it does not
@@ -462,6 +458,9 @@ class Browser : public TabStripModelObserver,
   bool CanDragEnter(content::WebContents* source,
                     const content::DropData& data,
                     blink::WebDragOperationsMask operations_allowed) override;
+  content::SecurityStyle GetSecurityStyle(
+      content::WebContents* web_contents,
+      content::SecurityStyleExplanations* security_style_explanations) override;
 
   bool is_type_tabbed() const { return type_ == TYPE_TABBED; }
   bool is_type_popup() const { return type_ == TYPE_POPUP; }
@@ -477,9 +476,6 @@ class Browser : public TabStripModelObserver,
 
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
-
-  // Show a download on the download shelf.
-  void ShowDownload(content::DownloadItem* download);
 
   ExclusiveAccessManager* exclusive_access_manager() {
     return exclusive_access_manager_.get();
@@ -587,18 +583,17 @@ class Browser : public TabStripModelObserver,
       int route_id,
       int main_frame_route_id,
       WindowContainerType window_container_type,
-      const base::string16& frame_name,
+      const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace) override;
   void WebContentsCreated(content::WebContents* source_contents,
                           int opener_render_frame_id,
-                          const base::string16& frame_name,
+                          const std::string& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) override;
   void RendererUnresponsive(content::WebContents* source) override;
   void RendererResponsive(content::WebContents* source) override;
-  void WorkerCrashed(content::WebContents* source) override;
   void DidNavigateMainFramePostCommit(
       content::WebContents* web_contents) override;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
@@ -830,7 +825,7 @@ class Browser : public TabStripModelObserver,
       int route_id,
       int main_frame_route_id,
       content::WebContents* opener_web_contents,
-      const base::string16& frame_name,
+      const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace);
@@ -857,10 +852,6 @@ class Browser : public TabStripModelObserver,
 
   // This Browser's window.
   BrowserWindow* window_;
-
-  // Manages popup windows (bubbles, tab-modals) visible overlapping this
-  // window. JS alerts are not handled by this manager.
-  scoped_ptr<web_modal::PopupManager> popup_manager_;
 
   scoped_ptr<TabStripModelDelegate> tab_strip_model_delegate_;
   scoped_ptr<TabStripModel> tab_strip_model_;
@@ -963,7 +954,7 @@ class Browser : public TabStripModelObserver,
   scoped_ptr<BrowserInstantController> instant_controller_;
 
   // Helper which handles bookmark app specific browser configuration.
-  scoped_ptr<extensions::BookmarkAppBrowserController> bookmark_app_controller_;
+  scoped_ptr<extensions::HostedAppBrowserController> hosted_app_controller_;
 
   BookmarkBar::State bookmark_bar_state_;
 

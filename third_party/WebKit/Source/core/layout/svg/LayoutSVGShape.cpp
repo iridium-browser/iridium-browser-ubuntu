@@ -33,11 +33,10 @@
 #include "core/layout/PointerEventsHitRules.h"
 #include "core/layout/svg/LayoutSVGResourcePaintServer.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
-#include "core/layout/svg/SVGPathData.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/paint/SVGShapePainter.h"
-#include "core/svg/SVGGraphicsElement.h"
+#include "core/svg/SVGGeometryElement.h"
 #include "core/svg/SVGLengthContext.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/graphics/StrokeData.h"
@@ -45,11 +44,11 @@
 
 namespace blink {
 
-LayoutSVGShape::LayoutSVGShape(SVGGraphicsElement* node)
+LayoutSVGShape::LayoutSVGShape(SVGGeometryElement* node)
     : LayoutSVGModelObject(node)
     , m_needsBoundariesUpdate(false) // Default is false, the cached rects are empty from the beginning.
-    , m_needsShapeUpdate(true) // Default is true, so we grab a Path object once from SVGGraphicsElement.
-    , m_needsTransformUpdate(true) // Default is true, so we grab a AffineTransform object once from SVGGraphicsElement.
+    , m_needsShapeUpdate(true) // Default is true, so we grab a Path object once from SVGGeometryElement.
+    , m_needsTransformUpdate(true) // Default is true, so we grab a AffineTransform object once from SVGGeometryElement.
 {
 }
 
@@ -57,21 +56,35 @@ LayoutSVGShape::~LayoutSVGShape()
 {
 }
 
-void LayoutSVGShape::createPath()
-{
-    clearPath();
-    m_path = adoptPtr(new Path);
-    ASSERT(LayoutSVGShape::isShapeEmpty());
-
-    updatePathFromGraphicsElement(toSVGGraphicsElement(element()), path());
-}
-
 void LayoutSVGShape::updateShapeFromElement()
 {
-    createPath();
+    if (!m_path)
+        m_path = adoptPtr(new Path());
+    *m_path = toSVGGeometryElement(element())->asPath();
+    if (m_rareData.get())
+        m_rareData->m_cachedNonScalingStrokePath.clear();
+}
 
-    m_fillBoundingBox = calculateObjectBoundingBox();
-    m_strokeBoundingBox = calculateStrokeBoundingBox();
+void LayoutSVGShape::updateStrokeAndFillBoundingBoxes()
+{
+    m_fillBoundingBox = path().boundingRect();
+
+    m_strokeBoundingBox = m_fillBoundingBox;
+    if (style()->svgStyle().hasStroke()) {
+        StrokeData strokeData;
+        SVGLayoutSupport::applyStrokeStyleToStrokeData(strokeData, styleRef(), *this);
+        if (hasNonScalingStroke()) {
+            AffineTransform nonScalingTransform = nonScalingStrokeTransform();
+            if (nonScalingTransform.isInvertible()) {
+                Path* usePath = nonScalingStrokePath(m_path.get(), nonScalingTransform);
+                FloatRect strokeBoundingRect = usePath->strokeBoundingRect(strokeData);
+                strokeBoundingRect = nonScalingTransform.inverse().mapRect(strokeBoundingRect);
+                m_strokeBoundingBox.unite(strokeBoundingRect);
+            }
+        } else {
+            m_strokeBoundingBox.unite(path().strokeBoundingRect(strokeData));
+        }
+    }
 }
 
 FloatRect LayoutSVGShape::hitTestStrokeBoundingBox() const
@@ -155,11 +168,14 @@ void LayoutSVGShape::layout()
     bool updateCachedBoundariesInParents = false;
     LayoutAnalyzer::Scope analyzer(*this);
 
-    if (m_needsShapeUpdate || m_needsBoundariesUpdate) {
+    if (m_needsShapeUpdate)
         updateShapeFromElement();
-        m_needsShapeUpdate = false;
+
+    if (m_needsBoundariesUpdate || m_needsShapeUpdate) {
+        updateStrokeAndFillBoundingBoxes();
         updatePaintInvalidationBoundingBox();
         m_needsBoundariesUpdate = false;
+        m_needsShapeUpdate = false;
         updateCachedBoundariesInParents = true;
     }
 
@@ -182,17 +198,23 @@ void LayoutSVGShape::layout()
 
 Path* LayoutSVGShape::nonScalingStrokePath(const Path* path, const AffineTransform& strokeTransform) const
 {
-    DEFINE_STATIC_LOCAL(Path, tempPath, ());
+    LayoutSVGShapeRareData& rareData = ensureRareData();
+    if (!rareData.m_cachedNonScalingStrokePath.isEmpty() && strokeTransform == rareData.m_cachedNonScalingStrokeTransform)
+        return &rareData.m_cachedNonScalingStrokePath;
 
-    tempPath = *path;
-    tempPath.transform(strokeTransform);
-
-    return &tempPath;
+    rareData.m_cachedNonScalingStrokePath = *path;
+    rareData.m_cachedNonScalingStrokePath.transform(strokeTransform);
+    rareData.m_cachedNonScalingStrokeTransform = strokeTransform;
+    return &rareData.m_cachedNonScalingStrokePath;
 }
 
 AffineTransform LayoutSVGShape::nonScalingStrokeTransform() const
 {
-    return toSVGGraphicsElement(element())->getScreenCTM(SVGGraphicsElement::DisallowStyleUpdate);
+    AffineTransform t = toSVGGraphicsElement(element())->getScreenCTM(SVGGraphicsElement::DisallowStyleUpdate);
+    // Width of non-scaling stroke is independent of translation, so zero it out here.
+    t.setE(0);
+    t.setF(0);
+    return t;
 }
 
 void LayoutSVGShape::paint(const PaintInfo& paintInfo, const LayoutPoint&)
@@ -202,7 +224,7 @@ void LayoutSVGShape::paint(const PaintInfo& paintInfo, const LayoutPoint&)
 
 // This method is called from inside paintOutline() since we call paintOutline()
 // while transformed to our coord system, return local coords
-void LayoutSVGShape::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&) const
+void LayoutSVGShape::addOutlineRects(Vector<LayoutRect>& rects, const LayoutPoint&) const
 {
     LayoutRect rect = LayoutRect(paintInvalidationRectInLocalCoordinates());
     if (!rect.isEmpty())
@@ -221,8 +243,10 @@ bool LayoutSVGShape::nodeAtFloatPoint(HitTestResult& result, const FloatPoint& p
 
     PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_GEOMETRY_HITTESTING, result.hitTestRequest(), style()->pointerEvents());
     if (nodeAtFloatPointInternal(result.hitTestRequest(), localPoint, hitRules)) {
-        updateHitTestResult(result, roundedLayoutPoint(localPoint));
-        return true;
+        const LayoutPoint& localLayoutPoint = roundedLayoutPoint(localPoint);
+        updateHitTestResult(result, localLayoutPoint);
+        if (!result.addNodeToListBasedTestResult(element(), localLayoutPoint))
+            return true;
     }
 
     return false;
@@ -244,40 +268,9 @@ bool LayoutSVGShape::nodeAtFloatPointInternal(const HitTestRequest& request, con
     return false;
 }
 
-FloatRect LayoutSVGShape::calculateObjectBoundingBox() const
-{
-    return path().boundingRect();
-}
-
-FloatRect LayoutSVGShape::calculateStrokeBoundingBox() const
-{
-    ASSERT(m_path);
-    FloatRect strokeBoundingBox = m_fillBoundingBox;
-
-    if (style()->svgStyle().hasStroke()) {
-        StrokeData strokeData;
-        SVGLayoutSupport::applyStrokeStyleToStrokeData(strokeData, styleRef(), *this);
-        if (hasNonScalingStroke()) {
-            AffineTransform nonScalingTransform = nonScalingStrokeTransform();
-            if (nonScalingTransform.isInvertible()) {
-                Path* usePath = nonScalingStrokePath(m_path.get(), nonScalingTransform);
-                FloatRect strokeBoundingRect = usePath->strokeBoundingRect(strokeData);
-                strokeBoundingRect = nonScalingTransform.inverse().mapRect(strokeBoundingRect);
-                strokeBoundingBox.unite(strokeBoundingRect);
-            }
-        } else {
-            strokeBoundingBox.unite(path().strokeBoundingRect(strokeData));
-        }
-    }
-
-    return strokeBoundingBox;
-}
-
 void LayoutSVGShape::updatePaintInvalidationBoundingBox()
 {
     m_paintInvalidationBoundingBox = strokeBoundingBox();
-    if (strokeWidth() < 1.0f && !m_paintInvalidationBoundingBox.isEmpty())
-        m_paintInvalidationBoundingBox.inflate(1);
     SVGLayoutSupport::intersectPaintInvalidationRectWithResources(this, m_paintInvalidationBoundingBox);
 }
 
@@ -285,6 +278,22 @@ float LayoutSVGShape::strokeWidth() const
 {
     SVGLengthContext lengthContext(element());
     return lengthContext.valueForLength(style()->svgStyle().strokeWidth());
+}
+
+LayoutRect LayoutSVGShape::clippedOverflowRectForPaintInvalidation(
+    const LayoutBoxModelObject* paintInvalidationContainer,
+    const PaintInvalidationState* paintInvalidationState) const
+{
+    const float strokeWidthForHairlinePadding = style()->svgStyle().hasStroke() ? strokeWidth() : 0;
+    return SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(*this,
+        paintInvalidationContainer, paintInvalidationState, strokeWidthForHairlinePadding);
+}
+
+LayoutSVGShapeRareData& LayoutSVGShape::ensureRareData() const
+{
+    if (!m_rareData)
+        m_rareData = adoptPtr(new LayoutSVGShapeRareData());
+    return *m_rareData.get();
 }
 
 }

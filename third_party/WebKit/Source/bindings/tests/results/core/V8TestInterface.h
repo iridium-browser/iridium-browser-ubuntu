@@ -21,8 +21,10 @@
 namespace blink {
 
 class V8TestInterface {
+    STATIC_ONLY(V8TestInterface);
 public:
     class PrivateScript {
+        STATIC_ONLY(PrivateScript);
     public:
         static bool shortMethodWithShortArgumentImplementedInPrivateScriptMethod(LocalFrame* frame, TestInterface* holderImpl, int value, int* result);
         static bool stringAttributeAttributeGetter(LocalFrame* frame, TestInterfaceImplementation* holderImpl, String* result);
@@ -49,8 +51,8 @@ public:
     static void implementsCustomVoidMethodMethodCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static void legacyCallCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
-    static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*);
-    static void preparePrototypeObject(v8::Isolate*, v8::Local<v8::Object>);
+    static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*) { }
+    static void preparePrototypeObject(v8::Isolate*, v8::Local<v8::Object> prototypeObject, v8::Local<v8::FunctionTemplate> interfaceTemplate);
     CORE_EXPORT static void updateWrapperTypeInfo(InstallTemplateFunction, PreparePrototypeObjectFunction);
     CORE_EXPORT static void installV8TestInterfaceTemplate(v8::Local<v8::FunctionTemplate>, v8::Isolate*);
     CORE_EXPORT static void registerVoidMethodPartialOverloadMethodForPartialInterface(void (*)(const v8::FunctionCallbackInfo<v8::Value>&));

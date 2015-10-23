@@ -3,7 +3,8 @@
 # found in the LICENSE file.
 
 import logging
-from telemetry.perf_tests_helper import FlattenList
+
+from telemetry.util import perf_tests_helper
 from telemetry.util import statistics
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
@@ -68,7 +69,7 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
                                          stats.input_event_latency)
     values += self._ComputeLatencyMetric(page, stats, 'scroll_update_latency',
                                          stats.scroll_update_latency)
-    values += self._ComputeFirstGestureScrollUpdateLatency(page, stats)
+    values.append(self._ComputeFirstGestureScrollUpdateLatencies(page, stats))
     values += self._ComputeFrameTimeMetric(page, stats)
     if has_surface_flinger_stats:
       values += self._ComputeSurfaceFlingerMetric(page, stats)
@@ -164,7 +165,7 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
     latency_discrepancy = None
     none_value_reason = None
     if self._HasEnoughFrames(stats.frame_timestamps):
-      latency_list = FlattenList(list_of_latency_lists)
+      latency_list = perf_tests_helper.FlattenList(list_of_latency_lists)
       if len(latency_list) == 0:
         return ()
       mean_latency = round(statistics.ArithmeticMean(latency_list), 3)
@@ -183,27 +184,28 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
           none_value_reason=none_value_reason)
     )
 
-  def _ComputeFirstGestureScrollUpdateLatency(self, page, stats):
-    """Returns a Value for the first gesture scroll update latency."""
-    first_gesture_scroll_update_latency = None
+  def _ComputeFirstGestureScrollUpdateLatencies(self, page, stats):
+    """Returns a ListOfScalarValuesValues of gesture scroll update latencies.
+
+    Returns a Value for the first gesture scroll update latency for each
+    interaction record in |stats|.
+    """
     none_value_reason = None
-    if self._HasEnoughFrames(stats.frame_timestamps):
-      latency_list = FlattenList(stats.gesture_scroll_update_latency)
-      if len(latency_list) == 0:
-        return ()
-      first_gesture_scroll_update_latency = round(latency_list[0], 4)
-    else:
+    first_gesture_scroll_update_latencies = [round(latencies[0], 4)
+        for latencies in stats.gesture_scroll_update_latency
+        if len(latencies)]
+    if (not self._HasEnoughFrames(stats.frame_timestamps) or
+        not first_gesture_scroll_update_latencies):
+      first_gesture_scroll_update_latencies = None
       none_value_reason = NOT_ENOUGH_FRAMES_MESSAGE
-    return (
-      scalar.ScalarValue(
+    return list_of_scalar_values.ListOfScalarValues(
         page, 'first_gesture_scroll_update_latency', 'ms',
-        first_gesture_scroll_update_latency,
+        first_gesture_scroll_update_latencies,
         description='First gesture scroll update latency measures the time it '
                     'takes to process the very first gesture scroll update '
                     'input event. The first scroll gesture can often get '
                     'delayed by work related to page loading.',
-        none_value_reason=none_value_reason),
-    )
+        none_value_reason=none_value_reason)
 
   def _ComputeQueueingDuration(self, page, stats):
     """Returns a Value for the frame queueing durations."""
@@ -212,7 +214,8 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
     if 'frame_queueing_durations' in stats.errors:
       none_value_reason = stats.errors['frame_queueing_durations']
     elif self._HasEnoughFrames(stats.frame_timestamps):
-      queueing_durations = FlattenList(stats.frame_queueing_durations)
+      queueing_durations = perf_tests_helper.FlattenList(
+          stats.frame_queueing_durations)
       if len(queueing_durations) == 0:
         queueing_durations = None
         none_value_reason = 'No frame queueing durations recorded.'
@@ -239,7 +242,7 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
     percentage_smooth = None
     none_value_reason = None
     if self._HasEnoughFrames(stats.frame_timestamps):
-      frame_times = FlattenList(stats.frame_times)
+      frame_times = perf_tests_helper.FlattenList(stats.frame_times)
       mean_frame_time = round(statistics.ArithmeticMean(frame_times), 3)
       # We use 17ms as a somewhat looser threshold, instead of 1000.0/60.0.
       smooth_threshold = 17.0
@@ -294,7 +297,8 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
     none_value_reason = None
     if self._HasEnoughFrames(stats.frame_timestamps):
       mean_pixels_approximated = round(statistics.ArithmeticMean(
-          FlattenList(stats.approximated_pixel_percentages)), 3)
+          perf_tests_helper.FlattenList(
+              stats.approximated_pixel_percentages)), 3)
     else:
       none_value_reason = NOT_ENOUGH_FRAMES_MESSAGE
     return scalar.ScalarValue(
@@ -318,7 +322,8 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
             rendering_stats.CHECKERBOARDED_PIXEL_ERROR]
       else:
         mean_pixels_checkerboarded = round(statistics.ArithmeticMean(
-            FlattenList(stats.checkerboarded_pixel_percentages)), 3)
+            perf_tests_helper.FlattenList(
+                stats.checkerboarded_pixel_percentages)), 3)
     else:
       none_value_reason = NOT_ENOUGH_FRAMES_MESSAGE
     return scalar.ScalarValue(

@@ -155,7 +155,8 @@ Status WebViewImpl::HandleReceivedEvents() {
 Status WebViewImpl::Load(const std::string& url) {
   // Javascript URLs will cause a hang while waiting for the page to stop
   // loading, so just disallow.
-  if (StartsWithASCII(url, "javascript:", false))
+  if (base::StartsWith(url, "javascript:",
+                       base::CompareCase::INSENSITIVE_ASCII))
     return Status(kUnknownError, "unsupported protocol");
   base::DictionaryValue params;
   params.SetString("url", url);
@@ -237,7 +238,7 @@ Status WebViewImpl::CallFunction(const std::string& frame,
                                  const base::ListValue& args,
                                  scoped_ptr<base::Value>* result) {
   std::string json;
-  base::JSONWriter::Write(&args, &json);
+  base::JSONWriter::Write(args, &json);
   // TODO(zachconrad): Second null should be array of shadow host ids.
   std::string expression = base::StringPrintf(
       "(%s).apply(null, [null, %s, %s])",
@@ -292,12 +293,30 @@ Status WebViewImpl::GetFrameByFunction(const std::string& frame,
 
 Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
                                         const std::string& frame) {
+  double page_scale_factor = 1.0;
+  if (browser_info_->build_no >= 2358 && browser_info_->build_no <= 2430 &&
+      (browser_info_->is_android ||
+       mobile_emulation_override_manager_->IsEmulatingTouch())) {
+    // As of crrev.com/323900, on Android and under mobile emulation,
+    // Input.dispatchMouseEvent fails to apply the page scale factor to the
+    // mouse event coordinates. This leads to the MouseEvent being triggered on
+    // the wrong location on the page. This was fixed on the browser side in
+    // crrev.com/333979.
+    // TODO(samuong): remove once we stop supporting M45.
+    scoped_ptr<base::Value> value;
+    Status status = EvaluateScript(
+        std::string(), "window.screen.width / window.innerWidth;", &value);
+    if (status.IsError())
+      return status;
+    if (!value->GetAsDouble(&page_scale_factor))
+      return Status(kUnknownError, "unable to determine page scale factor");
+  }
   for (std::list<MouseEvent>::const_iterator it = events.begin();
        it != events.end(); ++it) {
     base::DictionaryValue params;
     params.SetString("type", GetAsString(it->type));
-    params.SetInteger("x", it->x);
-    params.SetInteger("y", it->y);
+    params.SetInteger("x", it->x * page_scale_factor);
+    params.SetInteger("y", it->y * page_scale_factor);
     params.SetInteger("modifiers", it->modifiers);
     params.SetString("button", GetAsString(it->button));
     params.SetInteger("clickCount", it->click_count);
@@ -388,11 +407,13 @@ Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id,
   if (status.code() == kTimeout && stop_load_on_timeout) {
     VLOG(0) << "Timed out. Stopping navigation...";
     scoped_ptr<base::Value> unused_value;
+    navigation_tracker_->set_timed_out(true);
     EvaluateScript(std::string(), "window.stop();", &unused_value);
     Status new_status = client_->HandleEventsUntil(
         base::Bind(&WebViewImpl::IsNotPendingNavigation, base::Unretained(this),
                    frame_id),
         base::TimeDelta::FromSeconds(10));
+    navigation_tracker_->set_timed_out(false);
     if (new_status.IsError())
       status = new_status;
   }
@@ -560,8 +581,11 @@ Status WebViewImpl::SynthesizeScrollGesture(int x,
   base::DictionaryValue params;
   params.SetInteger("x", x);
   params.SetInteger("y", y);
-  params.SetInteger("xdistance", xoffset);
-  params.SetInteger("ydistance", yoffset);
+  // Chrome's synthetic scroll gesture is actually a "swipe" gesture, so the
+  // direction of the swipe is opposite to the scroll (i.e. a swipe up scrolls
+  // down, and a swipe left scrolls right).
+  params.SetInteger("xDistance", -xoffset);
+  params.SetInteger("yDistance", -yoffset);
   return client_->SendCommand("Input.synthesizeScrollGesture", params);
 }
 
@@ -763,7 +787,7 @@ Status GetNodeIdFromFunction(DevToolsClient* client,
                              bool* found_node,
                              int* node_id) {
   std::string json;
-  base::JSONWriter::Write(&args, &json);
+  base::JSONWriter::Write(args, &json);
   // TODO(zachconrad): Second null should be array of shadow host ids.
   std::string expression = base::StringPrintf(
       "(%s).apply(null, [null, %s, %s, true])",

@@ -132,10 +132,36 @@ SuggestAppsDialog.prototype.createWidgetPlatformDelegate_ = function() {
     strings: {
       UI_LOCALE: util.getCurrentLocaleOrDefault(),
       LINK_TO_WEBSTORE: str('SUGGEST_DIALOG_LINK_TO_WEBSTORE'),
-      INSTALLATION_FAILED_MESSAGE: str('SUGGEST_DIALOG_INSTALLATION_FAILED')
+      INSTALLATION_FAILED_MESSAGE: str('SUGGEST_DIALOG_INSTALLATION_FAILED'),
+      LOADING_SPINNER_ALT: str('SUGGEST_DIALOG_LOADING_SPINNER_ALT'),
+      INSTALLING_SPINNER_ALT: str('SUGGEST_DIALOG_INSTALLING_SPINNER_ALT')
     },
 
-    metricsImpl: metrics,
+    metricsImpl: {
+      /**
+       * @param {string} enumName
+       * @param {number} value
+       * @param {number} enumSize
+       */
+      recordEnum: function(enumName, value, enumSize) {
+        metrics.recordEnum('SuggestApps.' + enumName, value, enumSize);
+      },
+
+      /** @param {string} actionName */
+      recordUserAction: function(actionName) {
+        metrics.recordUserAction('SuggestApps.' + actionName);
+      },
+
+      /** @param {string} intervalName */
+      startInterval: function(intervalName) {
+        metrics.startInterval('SuggestApps.' + intervalName);
+      },
+
+      /** @param {string} intervalName */
+      recordInterval: function(intervalName) {
+        metrics.recordInterval('SuggestApps.' + intervalName);
+      }
+    },
 
     /**
      * @param {string} itemId,
@@ -153,7 +179,7 @@ SuggestAppsDialog.prototype.createWidgetPlatformDelegate_ = function() {
     },
 
     /**
-     * @param {function(?Array.<!string>)} callback Callback
+     * @param {function(?Array<!string>)} callback Callback
      *     argument is a list of installed item ids (null on error).
      */
     getInstalledItems: function(callback) {
@@ -182,7 +208,7 @@ SuggestAppsDialog.prototype.createWidgetPlatformDelegate_ = function() {
           callback(null);
           return;
         }
-        callback(token);
+        callback(assert(token));
       });
     }
   };
@@ -192,7 +218,7 @@ SuggestAppsDialog.prototype.createWidgetPlatformDelegate_ = function() {
  * Internal method to show a dialog. This should be called only from 'Suggest.
  * appDialog.showXxxx()' functions.
  *
- * @param {!Object<string, *>} options Map of options for the dialog.
+ * @param {!Object<*>} options Map of options for the dialog.
  * @param {string} title Title of the dialog.
  * @param {?string} webStoreUrl Url for more results. Null if not supported.
  * @param {function(SuggestAppsDialog.Result, ?string)} onDialogClosed Called

@@ -9,7 +9,6 @@
 #include "base/values.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/granted_file_entry.h"
 #include "extensions/common/api/app_runtime.h"
@@ -21,7 +20,7 @@ using content::BrowserContext;
 
 namespace extensions {
 
-namespace app_runtime = core_api::app_runtime;
+namespace app_runtime = api::app_runtime;
 
 namespace {
 
@@ -31,12 +30,12 @@ void DispatchOnEmbedRequestedEventImpl(
     content::BrowserContext* context) {
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(app_embedding_request_data.release());
-  ExtensionSystem* system = ExtensionSystem::Get(context);
-  scoped_ptr<Event> event(
-      new Event(app_runtime::OnEmbedRequested::kEventName, args.Pass()));
+  scoped_ptr<Event> event(new Event(events::APP_RUNTIME_ON_EMBED_REQUESTED,
+                                    app_runtime::OnEmbedRequested::kEventName,
+                                    args.Pass()));
   event->restrict_to_browser_context = context;
-  system->event_router()->DispatchEventWithLazyListener(extension_id,
-                                                        event.Pass());
+  EventRouter::Get(context)
+      ->DispatchEventWithLazyListener(extension_id, event.Pass());
 
   ExtensionPrefs::Get(context)
       ->SetLastLaunchTime(extension_id, base::Time::Now());
@@ -55,8 +54,9 @@ void DispatchOnLaunchedEventImpl(const std::string& extension_id,
       ExtensionsBrowserClient::Get()->IsRunningInForcedAppMode());
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(launch_data.release());
-  scoped_ptr<Event> event(
-      new Event(app_runtime::OnLaunched::kEventName, args.Pass()));
+  scoped_ptr<Event> event(new Event(events::APP_RUNTIME_ON_LAUNCHED,
+                                    app_runtime::OnLaunched::kEventName,
+                                    args.Pass()));
   event->restrict_to_browser_context = context;
   EventRouter::Get(context)
       ->DispatchEventWithLazyListener(extension_id, event.Pass());
@@ -140,8 +140,9 @@ void AppRuntimeEventRouter::DispatchOnRestartedEvent(
     BrowserContext* context,
     const Extension* extension) {
   scoped_ptr<base::ListValue> arguments(new base::ListValue());
-  scoped_ptr<Event> event(
-      new Event(app_runtime::OnRestarted::kEventName, arguments.Pass()));
+  scoped_ptr<Event> event(new Event(events::APP_RUNTIME_ON_RESTARTED,
+                                    app_runtime::OnRestarted::kEventName,
+                                    arguments.Pass()));
   event->restrict_to_browser_context = context;
   EventRouter::Get(context)
       ->DispatchEventToExtension(extension->id(), event.Pass());

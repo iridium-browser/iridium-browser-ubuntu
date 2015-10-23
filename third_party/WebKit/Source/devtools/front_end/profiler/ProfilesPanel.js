@@ -183,8 +183,9 @@ WebInspector.ProfileType.prototype = {
     loadFromFile: function(file)
     {
         var name = file.name;
-        if (name.endsWith(this.fileExtension()))
-            name = name.substr(0, name.length - this.fileExtension().length);
+        var fileExtension = this.fileExtension();
+        if (fileExtension && name.endsWith(fileExtension))
+            name = name.substr(0, name.length - fileExtension.length);
         var profile = this.createProfileLoadedFromFile(name);
         profile.setFromFile();
         this.setProfileBeingRecorded(profile);
@@ -467,7 +468,7 @@ WebInspector.ProfilesPanel = function()
     this.recordButton.addEventListener("click", this.toggleRecordButton, this);
     toolbar.appendToolbarItem(this.recordButton);
 
-    this.clearResultsButton = new WebInspector.ToolbarButton(WebInspector.UIString("Clear all profiles."), "clear-toolbar-item");
+    this.clearResultsButton = new WebInspector.ToolbarButton(WebInspector.UIString("Clear all profiles"), "clear-toolbar-item");
     this.clearResultsButton.addEventListener("click", this._reset, this);
     toolbar.appendToolbarItem(this.clearResultsButton);
 

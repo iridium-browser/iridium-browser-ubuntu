@@ -19,7 +19,8 @@ const char kInstanceIDFieldTrialEnabledGroupName[] = "Enabled";
 // static
 bool InstanceIDDriver::IsInstanceIDEnabled() {
 #if defined(OS_ANDROID)
-  return true;
+  // Not implemented yet.
+  return false;
 #else
   std::string group_name =
       base::FieldTrialList::FindFullName(kInstanceIDFieldTrialName);
@@ -28,8 +29,7 @@ bool InstanceIDDriver::IsInstanceIDEnabled() {
 }
 
 InstanceIDDriver::InstanceIDDriver(gcm::GCMDriver* gcm_driver)
-    : gcm_driver_(gcm_driver),
-      instance_id_map_deleter_(&instance_id_map_) {
+    : gcm_driver_(gcm_driver) {
 }
 
 InstanceIDDriver::~InstanceIDDriver() {
@@ -40,9 +40,18 @@ InstanceID* InstanceIDDriver::GetInstanceID(const std::string& app_id) {
   if (iter != instance_id_map_.end())
     return iter->second;
 
-  InstanceID* instance_id = InstanceID::Create(app_id, gcm_driver_);
-  instance_id_map_[app_id] = instance_id;
-  return instance_id;
+  scoped_ptr<InstanceID> instance_id = InstanceID::Create(app_id, gcm_driver_);
+  InstanceID* instance_id_ptr = instance_id.get();
+  instance_id_map_.insert(app_id, instance_id.Pass());
+  return instance_id_ptr;
+}
+
+void InstanceIDDriver::RemoveInstanceID(const std::string& app_id) {
+  instance_id_map_.erase(app_id);
+}
+
+bool InstanceIDDriver::ExistsInstanceID(const std::string& app_id) const {
+  return instance_id_map_.find(app_id) != instance_id_map_.end();
 }
 
 }  // namespace instance_id

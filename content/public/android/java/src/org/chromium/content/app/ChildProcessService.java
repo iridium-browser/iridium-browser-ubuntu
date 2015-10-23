@@ -10,16 +10,16 @@ import android.content.Intent;
 import android.graphics.SurfaceTexture;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.os.ParcelFileDescriptor;
+import android.os.Parcelable;
 import android.os.Process;
 import android.os.RemoteException;
-import android.util.Log;
 import android.view.Surface;
 
 import org.chromium.base.BaseSwitches;
-import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
@@ -27,10 +27,10 @@ import org.chromium.base.library_loader.Linker;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.browser.ChildProcessConnection;
 import org.chromium.content.browser.ChildProcessLauncher;
+import org.chromium.content.browser.FileDescriptorInfo;
 import org.chromium.content.common.IChildProcessCallback;
 import org.chromium.content.common.IChildProcessService;
 
-import java.util.ArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -45,9 +45,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * for X in 0...N-1 (where N is {@link ChildProcessLauncher#MAX_REGISTERED_SERVICES})
  */
 @JNINamespace("content")
+@SuppressWarnings("SynchronizeOnNonFinalField")
 public class ChildProcessService extends Service {
     private static final String MAIN_THREAD_NAME = "ChildProcessMain";
-    private static final String TAG = "ChildProcessService";
+    private static final String TAG = "cr.ChildProcessService";
     private IChildProcessCallback mCallback;
 
     // This is the native "Main" thread for the renderer / utility process.
@@ -56,9 +57,8 @@ public class ChildProcessService extends Service {
     private String[] mCommandLineParams;
     private int mCpuCount;
     private long mCpuFeatures;
-    // Pairs IDs and file descriptors that should be registered natively.
-    private ArrayList<Integer> mFileIds;
-    private ArrayList<ParcelFileDescriptor> mFileFds;
+    // File descriptors that should be registered natively.
+    private FileDescriptorInfo[] mFdInfos;
     // Linker-specific parameters for this child process service.
     private ChromiumLinkerParams mLinkerParams;
 
@@ -75,6 +75,8 @@ public class ChildProcessService extends Service {
         @Override
         public int setupConnection(Bundle args, IChildProcessCallback callback) {
             mCallback = callback;
+            // Required to unparcel FileDescriptorInfo.
+            args.setClassLoader(getClassLoader());
             synchronized (mMainThread) {
                 // Allow the command line to be set via bind() intent or setupConnection, but
                 // the FD can only be transferred here.
@@ -87,24 +89,15 @@ public class ChildProcessService extends Service {
                 mCpuCount = args.getInt(ChildProcessConnection.EXTRA_CPU_COUNT);
                 mCpuFeatures = args.getLong(ChildProcessConnection.EXTRA_CPU_FEATURES);
                 assert mCpuCount > 0;
-                mFileIds = new ArrayList<Integer>();
-                mFileFds = new ArrayList<ParcelFileDescriptor>();
-                for (int i = 0;; i++) {
-                    String fdName = ChildProcessConnection.EXTRA_FILES_PREFIX + i
-                            + ChildProcessConnection.EXTRA_FILES_FD_SUFFIX;
-                    ParcelFileDescriptor parcel = args.getParcelable(fdName);
-                    if (parcel == null) {
-                        // End of the file list.
-                        break;
-                    }
-                    mFileFds.add(parcel);
-                    String idName = ChildProcessConnection.EXTRA_FILES_PREFIX + i
-                            + ChildProcessConnection.EXTRA_FILES_ID_SUFFIX;
-                    mFileIds.add(args.getInt(idName));
-                }
+                Parcelable[] fdInfosAsParcelable =
+                        args.getParcelableArray(ChildProcessConnection.EXTRA_FILES);
+                // For why this arraycopy is necessary:
+                // http://stackoverflow.com/questions/8745893/i-dont-get-why-this-classcastexception-occurs
+                mFdInfos = new FileDescriptorInfo[fdInfosAsParcelable.length];
+                System.arraycopy(fdInfosAsParcelable, 0, mFdInfos, 0, fdInfosAsParcelable.length);
                 Bundle sharedRelros = args.getBundle(Linker.EXTRA_LINKER_SHARED_RELROS);
                 if (sharedRelros != null) {
-                    Linker.useSharedRelros(sharedRelros);
+                    Linker.getInstance().useSharedRelros(sharedRelros);
                     sharedRelros = null;
                 }
                 mMainThread.notifyAll();
@@ -124,7 +117,7 @@ public class ChildProcessService extends Service {
 
     @Override
     public void onCreate() {
-        Log.i(TAG, "Creating new ChildProcessService pid=" + Process.myPid());
+        Log.i(TAG, "Creating new ChildProcessService pid=%d", Process.myPid());
         if (sContext.get() != null) {
             throw new RuntimeException("Illegal child process reuse.");
         }
@@ -144,7 +137,8 @@ public class ChildProcessService extends Service {
                         }
                     }
                     CommandLine.init(mCommandLineParams);
-                    boolean useLinker = Linker.isUsed();
+                    Linker linker = Linker.getInstance();
+                    boolean useLinker = linker.isUsed();
                     boolean requestedSharedRelro = false;
                     if (useLinker) {
                         synchronized (mMainThread) {
@@ -155,11 +149,11 @@ public class ChildProcessService extends Service {
                         assert mLinkerParams != null;
                         if (mLinkerParams.mWaitForSharedRelro) {
                             requestedSharedRelro = true;
-                            Linker.initServiceProcess(mLinkerParams.mBaseLoadAddress);
+                            linker.initServiceProcess(mLinkerParams.mBaseLoadAddress);
                         } else {
-                            Linker.disableSharedRelros();
+                            linker.disableSharedRelros();
                         }
-                        Linker.setTestRunnerClassName(mLinkerParams.mTestRunnerClassName);
+                        linker.setTestRunnerClassName(mLinkerParams.mTestRunnerClassName);
                     }
                     boolean isLoaded = false;
                     if (CommandLine.getInstance().hasSwitch(
@@ -170,7 +164,7 @@ public class ChildProcessService extends Service {
                     boolean loadAtFixedAddressFailed = false;
                     try {
                         LibraryLoader.get(LibraryProcessType.PROCESS_CHILD)
-                                .loadNow(getApplicationContext(), false);
+                                .loadNow(getApplicationContext());
                         isLoaded = true;
                     } catch (ProcessInitException e) {
                         if (requestedSharedRelro) {
@@ -182,10 +176,10 @@ public class ChildProcessService extends Service {
                         }
                     }
                     if (!isLoaded && requestedSharedRelro) {
-                        Linker.disableSharedRelros();
+                        linker.disableSharedRelros();
                         try {
                             LibraryLoader.get(LibraryProcessType.PROCESS_CHILD)
-                                    .loadNow(getApplicationContext(), false);
+                                    .loadNow(getApplicationContext());
                             isLoaded = true;
                         } catch (ProcessInitException e) {
                             Log.e(TAG, "Failed to load native library on retry", e);
@@ -201,29 +195,24 @@ public class ChildProcessService extends Service {
                     synchronized (mMainThread) {
                         mLibraryInitialized = true;
                         mMainThread.notifyAll();
-                        while (mFileIds == null) {
+                        while (mFdInfos == null) {
                             mMainThread.wait();
                         }
                     }
-                    assert mFileIds.size() == mFileFds.size();
-                    int[] fileIds = new int[mFileIds.size()];
-                    int[] fileFds = new int[mFileFds.size()];
-                    for (int i = 0; i < mFileIds.size(); ++i) {
-                        fileIds[i] = mFileIds.get(i);
-                        fileFds[i] = mFileFds.get(i).detachFd();
-                    }
                     ContentMain.initApplicationContext(sContext.get().getApplicationContext());
-                    nativeInitChildProcess(sContext.get().getApplicationContext(),
-                            ChildProcessService.this, fileIds, fileFds,
-                            mCpuCount, mCpuFeatures);
+                    for (FileDescriptorInfo fdInfo : mFdInfos) {
+                        nativeRegisterGlobalFileDescriptor(
+                                fdInfo.mId, fdInfo.mFd.detachFd(), fdInfo.mOffset, fdInfo.mSize);
+                    }
+                    nativeInitChildProcess(ChildProcessService.this, mCpuCount, mCpuFeatures);
                     if (mActivitySemaphore.tryAcquire()) {
                         ContentMain.start();
                         nativeExitChildProcess();
                     }
                 } catch (InterruptedException e) {
-                    Log.w(TAG, MAIN_THREAD_NAME + " startup failed: " + e);
+                    Log.w(TAG, "%s startup failed: %s", MAIN_THREAD_NAME, e);
                 } catch (ProcessInitException e) {
-                    Log.w(TAG, MAIN_THREAD_NAME + " startup failed: " + e);
+                    Log.w(TAG, "%s startup failed: %s", MAIN_THREAD_NAME, e);
                 }
             }
         }, MAIN_THREAD_NAME);
@@ -233,7 +222,7 @@ public class ChildProcessService extends Service {
     @Override
     @SuppressFBWarnings("DM_EXIT")
     public void onDestroy() {
-        Log.i(TAG, "Destroying ChildProcessService pid=" + Process.myPid());
+        Log.i(TAG, "Destroying ChildProcessService pid=%d", Process.myPid());
         super.onDestroy();
         if (mActivitySemaphore.tryAcquire()) {
             // TODO(crbug.com/457406): This is a bit hacky, but there is no known better solution
@@ -307,13 +296,13 @@ public class ChildProcessService extends Service {
             surface = new Surface((SurfaceTexture) surfaceObject);
             needRelease = true;
         } else {
-            Log.e(TAG, "Not a valid surfaceObject: " + surfaceObject);
+            Log.e(TAG, "Not a valid surfaceObject: %s", surfaceObject);
             return;
         }
         try {
             mCallback.establishSurfacePeer(pid, surface, primaryID, secondaryID);
         } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call establishSurfaceTexturePeer: " + e);
+            Log.e(TAG, "Unable to call establishSurfaceTexturePeer: %s", e);
             return;
         } finally {
             if (needRelease) {
@@ -333,7 +322,7 @@ public class ChildProcessService extends Service {
         try {
             return mCallback.getViewSurface(surfaceId).getSurface();
         } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call establishSurfaceTexturePeer: " + e);
+            Log.e(TAG, "Unable to call establishSurfaceTexturePeer: %s", e);
             return null;
         }
     }
@@ -351,7 +340,7 @@ public class ChildProcessService extends Service {
         try {
             mCallback.registerSurfaceTextureSurface(surfaceTextureId, clientId, surface);
         } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call registerSurfaceTextureSurface: " + e);
+            Log.e(TAG, "Unable to call registerSurfaceTextureSurface: %s", e);
         }
         surface.release();
     }
@@ -367,7 +356,7 @@ public class ChildProcessService extends Service {
         try {
             mCallback.unregisterSurfaceTextureSurface(surfaceTextureId, clientId);
         } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call unregisterSurfaceTextureSurface: " + e);
+            Log.e(TAG, "Unable to call unregisterSurfaceTextureSurface: %s", e);
         }
     }
 
@@ -382,24 +371,28 @@ public class ChildProcessService extends Service {
         try {
             return mCallback.getSurfaceTextureSurface(surfaceTextureId).getSurface();
         } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call getSurfaceTextureSurface: " + e);
+            Log.e(TAG, "Unable to call getSurfaceTextureSurface: %s", e);
             return null;
         }
     }
 
     /**
+     * Helper for registering FileDescriptorInfo objects with GlobalFileDescriptors.
+     * This includes the IPC channel, the crash dump signals and resource related
+     * files.
+     */
+    private static native void nativeRegisterGlobalFileDescriptor(
+            int id, int fd, long offset, long size);
+
+    /**
      * The main entry point for a child process. This should be called from a new thread since
      * it will not return until the child process exits. See child_process_service.{h,cc}
      *
-     * @param applicationContext The Application Context of the current process.
      * @param service The current ChildProcessService object.
-     * @param fileIds A list of file IDs that should be registered for access by the renderer.
-     * @param fileFds A list of file descriptors that should be registered for access by the
      * renderer.
      */
-    private static native void nativeInitChildProcess(Context applicationContext,
-            ChildProcessService service, int[] extraFileIds, int[] extraFileFds,
-            int cpuCount, long cpuFeatures);
+    private static native void nativeInitChildProcess(
+            ChildProcessService service, int cpuCount, long cpuFeatures);
 
     /**
      * Force the child process to exit.

@@ -92,7 +92,6 @@ static HarfBuzzFaceCache* harfBuzzFaceCache()
 HarfBuzzFace::HarfBuzzFace(FontPlatformData* platformData, uint64_t uniqueID)
     : m_platformData(platformData)
     , m_uniqueID(uniqueID)
-    , m_scriptForVerticalText(HB_SCRIPT_INVALID)
 {
     HarfBuzzFaceCache::AddResult result = harfBuzzFaceCache()->add(m_uniqueID, nullptr);
     if (result.isNewEntry)
@@ -112,43 +111,24 @@ HarfBuzzFace::~HarfBuzzFace()
         harfBuzzFaceCache()->remove(m_uniqueID);
 }
 
-static hb_script_t findScriptForVerticalGlyphSubstitution(hb_face_t* face)
-{
-    static const unsigned maxCount = 32;
-
-    unsigned scriptCount = maxCount;
-    hb_tag_t scriptTags[maxCount];
-    hb_ot_layout_table_get_script_tags(face, HB_OT_TAG_GSUB, 0, &scriptCount, scriptTags);
-    for (unsigned scriptIndex = 0; scriptIndex < scriptCount; ++scriptIndex) {
-        unsigned languageCount = maxCount;
-        hb_tag_t languageTags[maxCount];
-        hb_ot_layout_script_get_language_tags(face, HB_OT_TAG_GSUB, scriptIndex, 0, &languageCount, languageTags);
-        unsigned featureIndex;
-        for (unsigned languageIndex = 0; languageIndex < languageCount; ++languageIndex) {
-            if (hb_ot_layout_language_find_feature(face, HB_OT_TAG_GSUB, scriptIndex, languageIndex, HarfBuzzFace::vertTag, &featureIndex))
-                return hb_ot_tag_to_script(scriptTags[scriptIndex]);
-        }
-        // Try DefaultLangSys if all LangSys failed.
-        if (hb_ot_layout_language_find_feature(face, HB_OT_TAG_GSUB, scriptIndex, HB_OT_LAYOUT_DEFAULT_LANGUAGE_INDEX, HarfBuzzFace::vertTag, &featureIndex))
-            return hb_ot_tag_to_script(scriptTags[scriptIndex]);
-    }
-    return HB_SCRIPT_INVALID;
-}
-
-void HarfBuzzFace::setScriptForVerticalGlyphSubstitution(hb_buffer_t* buffer)
-{
-    if (m_scriptForVerticalText == HB_SCRIPT_INVALID)
-        m_scriptForVerticalText = findScriptForVerticalGlyphSubstitution(m_face);
-    hb_buffer_set_script(buffer, m_scriptForVerticalText);
-}
-
 struct HarfBuzzFontData {
-    HarfBuzzFontData(WTF::HashMap<uint32_t, uint16_t>* glyphCacheForFaceCacheEntry)
+    HarfBuzzFontData(WTF::HashMap<uint32_t, uint16_t>* glyphCacheForFaceCacheEntry, hb_face_t* face)
         : m_glyphCacheForFaceCacheEntry(glyphCacheForFaceCacheEntry)
+        , m_face(face)
+        , m_hbOpenTypeFont(nullptr)
     { }
+
+    ~HarfBuzzFontData()
+    {
+        if (m_hbOpenTypeFont)
+            hb_font_destroy(m_hbOpenTypeFont);
+    }
+
     SkPaint m_paint;
     RefPtr<SimpleFontData> m_simpleFontData;
     WTF::HashMap<uint32_t, uint16_t>* m_glyphCacheForFaceCacheEntry;
+    hb_face_t* m_face;
+    hb_font_t* m_hbOpenTypeFont;
 };
 
 static hb_position_t SkiaScalarToHarfBuzzPosition(SkScalar value)
@@ -177,13 +157,30 @@ static void SkiaGetGlyphWidthAndExtents(SkPaint* paint, hb_codepoint_t codepoint
     }
 }
 
+#if !defined(HB_VERSION_ATLEAST)
+#define HB_VERSION_ATLEAST(major, minor, micro) 0
+#endif
+
 static hb_bool_t harfBuzzGetGlyph(hb_font_t* hbFont, void* fontData, hb_codepoint_t unicode, hb_codepoint_t variationSelector, hb_codepoint_t* glyph, void* userData)
 {
-    // Variation selectors not supported.
-    if (variationSelector)
-        return false;
-
     HarfBuzzFontData* hbFontData = reinterpret_cast<HarfBuzzFontData*>(fontData);
+
+    if (variationSelector) {
+#if !HB_VERSION_ATLEAST(0, 9, 28)
+        return false;
+#else
+        // Skia does not support variation selectors, but hb does.
+        // We're not fully ready to switch to hb-ot-font yet,
+        // but are good enough to get glyph IDs for OpenType fonts.
+        if (!hbFontData->m_hbOpenTypeFont) {
+            hbFontData->m_hbOpenTypeFont = hb_font_create(hbFontData->m_face);
+            hb_ot_font_set_funcs(hbFontData->m_hbOpenTypeFont);
+        }
+        return hb_font_get_glyph(hbFontData->m_hbOpenTypeFont, unicode, variationSelector, glyph);
+        // When not found, glyph_func should return false rather than fallback to the base.
+        // http://lists.freedesktop.org/archives/harfbuzz/2015-May/004888.html
+#endif
+    }
 
     WTF::HashMap<uint32_t, uint16_t>::AddResult result = hbFontData->m_glyphCacheForFaceCacheEntry->add(unicode, 0);
     if (result.isNewEntry) {
@@ -331,9 +328,9 @@ hb_face_t* HarfBuzzFace::createFace()
     return face;
 }
 
-hb_font_t* HarfBuzzFace::createFont()
+hb_font_t* HarfBuzzFace::createFont() const
 {
-    HarfBuzzFontData* hbFontData = new HarfBuzzFontData(m_glyphCacheForFaceCacheEntry);
+    HarfBuzzFontData* hbFontData = new HarfBuzzFontData(m_glyphCacheForFaceCacheEntry, m_face);
     m_platformData->setupPaint(&hbFontData->m_paint);
     hbFontData->m_simpleFontData = FontCache::fontCache()->fontDataFromFontPlatformData(m_platformData);
     ASSERT(hbFontData->m_simpleFontData);

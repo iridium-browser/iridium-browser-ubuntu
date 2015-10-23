@@ -125,11 +125,11 @@ HTMLImportChild* HTMLImportsController::load(HTMLImport* parent, HTMLImportChild
         return child;
     }
 
-    bool sameOriginRequest = master()->securityOrigin()->canRequest(request.url());
+    bool sameOriginRequest = master()->securityOrigin()->canRequestNoSuborigin(request.url());
     request.setCrossOriginAccessControl(
         master()->securityOrigin(), sameOriginRequest ? AllowStoredCredentials : DoNotAllowStoredCredentials,
         ClientDidNotRequestCredentials);
-    ResourcePtr<RawResource> resource = parent->document()->fetcher()->fetchImport(request);
+    ResourcePtr<RawResource> resource = RawResource::fetchImport(request, parent->document()->fetcher());
     if (!resource)
         return nullptr;
 
@@ -144,7 +144,7 @@ HTMLImportChild* HTMLImportsController::load(HTMLImport* parent, HTMLImportChild
 
 Document* HTMLImportsController::master() const
 {
-    return root()->document();
+    return root() ? root()->document() : nullptr;
 }
 
 bool HTMLImportsController::shouldBlockScriptExecution(const Document& document) const

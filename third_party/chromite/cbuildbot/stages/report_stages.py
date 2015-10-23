@@ -138,8 +138,8 @@ class BuildStartStage(generic_stages.BuilderStage):
                    d['build_id'])
       return
 
-    counter_name = '.'.join([self._run.config['name'], 'build_started'])
-    graphite.StatsFactory.GetInstance().Counter(counter_name).increment()
+    graphite.StatsFactory.GetInstance().Counter('build_started').increment(
+        self._run.config['name'] or 'NO_CONFIG')
 
     # Note: In other build stages we use self._run.GetCIDBHandle to fetch
     # a cidb handle. However, since we don't yet have a build_id, we can't
@@ -163,6 +163,15 @@ class BuildStartStage(generic_stages.BuilderStage):
         logging.info('Inserted build_id %s into cidb database type %s.',
                      build_id, db_type)
 
+        master_build_id = d['master_build_id']
+        if master_build_id is not None:
+          master_build_status = db.GetBuildStatus(master_build_id)
+          master_url = tree_status.ConstructDashboardURL(
+              master_build_status['waterfall'],
+              master_build_status['builder_name'],
+              master_build_status['build_number'])
+          cros_build_lib.PrintBuildbotLink('Link to master build',
+                                           master_url)
 
   def HandleSkip(self):
     """Ensure that re-executions use the same db instance as initial db."""

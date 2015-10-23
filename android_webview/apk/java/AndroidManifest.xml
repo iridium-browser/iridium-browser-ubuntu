@@ -8,7 +8,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="{{package|default('com.android.webview')}}">
     <uses-sdk android:minSdkVersion="{{minsdk|default(21)}}"
-              android:targetSdkVersion="{{targetsdk|default(21)}}">
+              android:targetSdkVersion="{{targetsdk|default(23)}}">
     </uses-sdk>
 
     <uses-feature android:name="android.hardware.touchscreen"
@@ -29,7 +29,7 @@
         </activity>
         <provider android:name="com.android.webview.chromium.LicenseContentProvider"
                   android:exported="true"
-                  android:authorities="com.android.webview.chromium.LicenseContentProvider" />
+                  android:authorities="{{package|default('com.android.webview')}}.LicenseContentProvider" />
         <meta-data android:name="com.android.webview.WebViewLibrary"
                    android:value="libwebviewchromium.so" />
     </application>

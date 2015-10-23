@@ -17,8 +17,8 @@
 #include "net/log/net_log.h"
 #include "net/proxy/proxy_service.h"
 #include "net/ssl/channel_id_service.h"
-#include "net/url_request/fraudulent_certificate_reporter.h"
 #include "net/url_request/http_user_agent_settings.h"
+#include "net/url_request/url_request_backoff_manager.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "net/url_request/url_request_throttler_manager.h"
@@ -52,13 +52,6 @@ void URLRequestContextStorage::set_channel_id_service(
     scoped_ptr<ChannelIDService> channel_id_service) {
   context_->set_channel_id_service(channel_id_service.get());
   channel_id_service_ = channel_id_service.Pass();
-}
-
-void URLRequestContextStorage::set_fraudulent_certificate_reporter(
-    FraudulentCertificateReporter* fraudulent_certificate_reporter) {
-  context_->set_fraudulent_certificate_reporter(
-      fraudulent_certificate_reporter);
-  fraudulent_certificate_reporter_.reset(fraudulent_certificate_reporter);
 }
 
 void URLRequestContextStorage::set_http_auth_handler_factory(
@@ -117,6 +110,12 @@ void URLRequestContextStorage::set_throttler_manager(
     URLRequestThrottlerManager* throttler_manager) {
   context_->set_throttler_manager(throttler_manager);
   throttler_manager_.reset(throttler_manager);
+}
+
+void URLRequestContextStorage::set_backoff_manager(
+    URLRequestBackoffManager* backoff_manager) {
+  context_->set_backoff_manager(backoff_manager);
+  backoff_manager_.reset(backoff_manager);
 }
 
 void URLRequestContextStorage::set_http_user_agent_settings(

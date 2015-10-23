@@ -15,9 +15,9 @@ SpdyMajorVersion NextProtoToSpdyMajorVersion(NextProto next_proto) {
     case kProtoSPDY3:
     case kProtoSPDY31:
       return SPDY3;
-    case kProtoSPDY4_14:
-    case kProtoSPDY4:
-      return SPDY4;
+    case kProtoHTTP2_14:
+    case kProtoHTTP2:
+      return HTTP2;
     case kProtoUnknown:
     case kProtoHTTP11:
     case kProtoQUIC1SPDY3:
@@ -79,6 +79,8 @@ void BufferedSpdyFramer::OnSynStream(SpdyStreamId stream_id,
 void BufferedSpdyFramer::OnHeaders(SpdyStreamId stream_id,
                                    bool has_priority,
                                    SpdyPriority priority,
+                                   SpdyStreamId parent_stream_id,
+                                   bool exclusive,
                                    bool fin,
                                    bool end) {
   frames_received_++;
@@ -89,6 +91,8 @@ void BufferedSpdyFramer::OnHeaders(SpdyStreamId stream_id,
   control_frame_fields_->has_priority = has_priority;
   if (control_frame_fields_->has_priority) {
     control_frame_fields_->priority = priority;
+    control_frame_fields_->parent_stream_id = parent_stream_id;
+    control_frame_fields_->exclusive = exclusive;
   }
   control_frame_fields_->fin = fin;
 
@@ -145,8 +149,9 @@ bool BufferedSpdyFramer::OnControlFrameHeaderData(SpdyStreamId stream_id,
         visitor_->OnHeaders(control_frame_fields_->stream_id,
                             control_frame_fields_->has_priority,
                             control_frame_fields_->priority,
-                            control_frame_fields_->fin,
-                            headers);
+                            control_frame_fields_->parent_stream_id,
+                            control_frame_fields_->exclusive,
+                            control_frame_fields_->fin, headers);
         break;
       case PUSH_PROMISE:
         DCHECK_LT(SPDY3, protocol_version());
@@ -226,7 +231,7 @@ void BufferedSpdyFramer::OnGoAway(SpdyStreamId last_accepted_stream_id,
 }
 
 void BufferedSpdyFramer::OnWindowUpdate(SpdyStreamId stream_id,
-                                        uint32 delta_window_size) {
+                                        int delta_window_size) {
   visitor_->OnWindowUpdate(stream_id, delta_window_size);
 }
 
@@ -273,7 +278,7 @@ SpdyFramer::SpdyState BufferedSpdyFramer::state() const {
 }
 
 bool BufferedSpdyFramer::MessageFullyRead() {
-  return state() == SpdyFramer::SPDY_AUTO_RESET;
+  return state() == SpdyFramer::SPDY_FRAME_COMPLETE;
 }
 
 bool BufferedSpdyFramer::HasError() {
@@ -294,7 +299,7 @@ SpdyFrame* BufferedSpdyFramer::CreateSynStream(
   syn_stream.set_fin((flags & CONTROL_FLAG_FIN) != 0);
   syn_stream.set_unidirectional((flags & CONTROL_FLAG_UNIDIRECTIONAL) != 0);
   // TODO(hkhalil): Avoid copy here.
-  syn_stream.set_name_value_block(*headers);
+  syn_stream.set_header_block(*headers);
   return spdy_framer_.SerializeSynStream(syn_stream);
 }
 
@@ -307,7 +312,7 @@ SpdyFrame* BufferedSpdyFramer::CreateSynReply(
   SpdySynReplyIR syn_reply(stream_id);
   syn_reply.set_fin(flags & CONTROL_FLAG_FIN);
   // TODO(hkhalil): Avoid copy here.
-  syn_reply.set_name_value_block(*headers);
+  syn_reply.set_header_block(*headers);
   return spdy_framer_.SerializeSynReply(syn_reply);
 }
 
@@ -367,7 +372,7 @@ SpdyFrame* BufferedSpdyFramer::CreateHeaders(
     headers_ir.set_has_priority(true);
     headers_ir.set_priority(priority);
   }
-  headers_ir.set_name_value_block(*headers);
+  headers_ir.set_header_block(*headers);
   return spdy_framer_.SerializeHeaders(headers_ir);
 }
 
@@ -397,7 +402,7 @@ SpdyFrame* BufferedSpdyFramer::CreatePushPromise(
     SpdyStreamId promised_stream_id,
     const SpdyHeaderBlock* headers) {
   SpdyPushPromiseIR push_promise_ir(stream_id, promised_stream_id);
-  push_promise_ir.set_name_value_block(*headers);
+  push_promise_ir.set_header_block(*headers);
   return spdy_framer_.SerializePushPromise(push_promise_ir);
 }
 

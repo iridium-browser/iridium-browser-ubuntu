@@ -28,8 +28,7 @@ bool IsSmartVirtualKeyboardEnabled() {
           keyboard::switches::kEnableVirtualKeyboard)) {
     return false;
   }
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      keyboard::switches::kDisableSmartVirtualKeyboard);
+  return keyboard::IsSmartDeployEnabled();
 }
 
 }  // namespace
@@ -124,12 +123,15 @@ void VirtualKeyboardController::UpdateKeyboardEnabled() {
 }
 
 void VirtualKeyboardController::SetKeyboardEnabled(bool enabled) {
+  bool was_enabled = keyboard::IsKeyboardEnabled();
   keyboard::SetTouchKeyboardEnabled(enabled);
-  if (enabled) {
+  bool is_enabled = keyboard::IsKeyboardEnabled();
+  if (is_enabled == was_enabled)
+    return;
+  if (is_enabled) {
     Shell::GetInstance()->CreateKeyboard();
   } else {
-    if (!keyboard::IsKeyboardEnabled())
-      Shell::GetInstance()->DeactivateKeyboard();
+    Shell::GetInstance()->DeactivateKeyboard();
   }
 }
 

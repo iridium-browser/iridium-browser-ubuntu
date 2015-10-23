@@ -15,6 +15,7 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
+#include "ui/gfx/ipc/gfx_param_traits_macros.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
 #include "ui/ozone/ozone_export.h"
@@ -29,6 +30,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(ui::DisplayConnectionType,
 
 IPC_ENUM_TRAITS_MAX_VALUE(ui::HDCPState, ui::HDCP_STATE_LAST)
 
+IPC_ENUM_TRAITS_MAX_VALUE(gfx::OverlayTransform, gfx::OVERLAY_TRANSFORM_LAST)
+
+// clang-format off
 IPC_STRUCT_TRAITS_BEGIN(ui::DisplayMode_Params)
   IPC_STRUCT_TRAITS_MEMBER(size)
   IPC_STRUCT_TRAITS_MEMBER(is_interlaced)
@@ -58,6 +62,16 @@ IPC_STRUCT_TRAITS_BEGIN(ui::GammaRampRGBEntry)
   IPC_STRUCT_TRAITS_MEMBER(b)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(ui::OverlayCheck_Params)
+  IPC_STRUCT_TRAITS_MEMBER(buffer_size)
+  IPC_STRUCT_TRAITS_MEMBER(transform)
+  IPC_STRUCT_TRAITS_MEMBER(format)
+  IPC_STRUCT_TRAITS_MEMBER(display_rect)
+  IPC_STRUCT_TRAITS_MEMBER(plane_z_order)
+IPC_STRUCT_TRAITS_END()
+
+// clang-format on
+
 //------------------------------------------------------------------------------
 // GPU Messages
 // These are messages from the browser to the GPU process.
@@ -73,13 +87,13 @@ IPC_MESSAGE_CONTROL4(OzoneGpuMsg_CursorSet,
 IPC_MESSAGE_CONTROL2(OzoneGpuMsg_CursorMove,
                      gfx::AcceleratedWidget, gfx::Point)
 
-// Explicit creation of a WindowDelegate. We explicitly create the window
-// delegate such that any state change in the window is not lost while the
-// surface is created on the GPU side.
-IPC_MESSAGE_CONTROL1(OzoneGpuMsg_CreateWindowDelegate,
+// Explicit creation of a window. We explicitly create the window such
+// that any state change in the window is not lost while the surface is
+// created on the GPU side.
+IPC_MESSAGE_CONTROL1(OzoneGpuMsg_CreateWindow,
                      gfx::AcceleratedWidget /* widget */)
 
-IPC_MESSAGE_CONTROL1(OzoneGpuMsg_DestroyWindowDelegate,
+IPC_MESSAGE_CONTROL1(OzoneGpuMsg_DestroyWindow,
                      gfx::AcceleratedWidget /* widget */)
 
 // Updates the location and size of the widget on the screen.
@@ -124,6 +138,10 @@ IPC_MESSAGE_CONTROL2(OzoneGpuMsg_SetGammaRamp,
                      int64_t,                             // display ID,
                      std::vector<ui::GammaRampRGBEntry>)  // lut
 
+IPC_MESSAGE_CONTROL2(OzoneGpuMsg_CheckOverlayCapabilities,
+                     gfx::AcceleratedWidget /* widget */,
+                     std::vector<ui::OverlayCheck_Params> /* overlays */)
+
 //------------------------------------------------------------------------------
 // Browser Messages
 // These messages are from the GPU to the browser process.
@@ -146,3 +164,15 @@ IPC_MESSAGE_CONTROL3(OzoneHostMsg_HDCPStateReceived,
 IPC_MESSAGE_CONTROL2(OzoneHostMsg_HDCPStateUpdated,
                      int64_t /* display_id */,
                      bool /* success */)
+
+// Response to OzoneGpuMsg_TakeDisplayControl.
+IPC_MESSAGE_CONTROL1(OzoneHostMsg_DisplayControlTaken, bool /* success */)
+
+// Response to OzoneGpuMsg_RelinquishDisplayControl.
+IPC_MESSAGE_CONTROL1(OzoneHostMsg_DisplayControlRelinquished,
+                     bool /* success */)
+
+// Response for OzoneGpuMsg_CheckOverlayCapabilities
+IPC_MESSAGE_CONTROL2(OzoneHostMsg_OverlayCapabilitiesReceived,
+                     gfx::AcceleratedWidget /* widget */,
+                     bool /* result */)

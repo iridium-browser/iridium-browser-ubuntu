@@ -11,8 +11,10 @@ import os
 import mock
 import time
 
-from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import chromeos_config
 from chromite.cbuildbot import cbuildbot_run
+from chromite.cbuildbot import config_lib
+from chromite.cbuildbot import config_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import parallel
 
@@ -39,15 +41,15 @@ DEFAULT_OPTIONS = cros_test_lib.EasyAttr(
     debug=False,
     postsync_patch=True,
 )
-DEFAULT_CONFIG = cbuildbot_config.BuildConfig(
+DEFAULT_CONFIG = config_lib.BuildConfig(
     name=DEFAULT_BOT_NAME,
     master=True,
     boards=[DEFAULT_BOARD],
     postsync_patch=True,
     child_configs=[
-        cbuildbot_config.BuildConfig(
+        config_lib.BuildConfig(
             name='foo', postsync_patch=False, boards=[]),
-        cbuildbot_config.BuildConfig(
+        config_lib.BuildConfig(
             name='bar', postsync_patch=False, boards=[]),
     ],
 )
@@ -66,7 +68,7 @@ def _ExtendDefaultConfig(**kwargs):
   """Extend DEFAULT_CONFIG with keys/values in kwargs."""
   config_kwargs = DEFAULT_CONFIG.copy()
   config_kwargs.update(kwargs)
-  return cbuildbot_config.BuildConfig(**config_kwargs)
+  return config_lib.BuildConfig(**config_kwargs)
 
 
 class ExceptionsTest(cros_test_lib.TestCase):
@@ -128,8 +130,10 @@ class _BuilderRunTestCase(cros_test_lib.MockTestCase):
     """
     options = options or DEFAULT_OPTIONS
     config = config or DEFAULT_CONFIG
+    site_config = config_lib_unittest.MockSiteConfig()
+    site_config[config.name] = config
 
-    return cbuildbot_run.BuilderRun(options, config, self._manager)
+    return cbuildbot_run.BuilderRun(options, site_config, config, self._manager)
 
   def _NewChildBuilderRun(self, child_index, options=None, config=None):
     """Create a ChildBuilderRun objection from options and config values.
@@ -150,7 +154,7 @@ class BuilderRunPickleTest(_BuilderRunTestCase):
   """Make sure BuilderRun objects can be pickled."""
 
   def setUp(self):
-    self.real_config = cbuildbot_config.GetConfig()['x86-alex-release-group']
+    self.real_config = chromeos_config.GetConfig()['x86-alex-release-group']
     self.PatchObject(cbuildbot_run._BuilderRunBase, 'GetVersion',
                      return_value=DEFAULT_VERSION)
 

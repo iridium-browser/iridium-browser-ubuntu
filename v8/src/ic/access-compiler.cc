@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
-
 #include "src/ic/access-compiler.h"
 
 
@@ -51,5 +49,5 @@ Register* PropertyAccessCompiler::GetCallingConvention(Code::Kind kind) {
   DCHECK(kind == Code::STORE_IC || kind == Code::KEYED_STORE_IC);
   return store_calling_convention();
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

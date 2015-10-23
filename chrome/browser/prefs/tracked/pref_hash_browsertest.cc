@@ -309,10 +309,9 @@ class PrefHashBrowserTestBase
  private:
   // Returns true if this is the PRE_ phase of the test.
   bool IsPRETest() {
-    return StartsWithASCII(
-        testing::UnitTest::GetInstance()->current_test_info()->name(),
-        "PRE_",
-        true /* case_sensitive */);
+    return base::StartsWith(
+        testing::UnitTest::GetInstance()->current_test_info()->name(), "PRE_",
+        base::CompareCase::SENSITIVE);
   }
 
   SettingsProtectionLevel GetProtectionLevelFromTrialGroup(

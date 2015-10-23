@@ -365,26 +365,12 @@ void ExtensionStorageMonitor::OnExtensionUninstalled(
   RemoveNotificationForExtension(extension->id());
 }
 
-void ExtensionStorageMonitor::ExtensionUninstallAccepted() {
-  DCHECK(!uninstall_extension_id_.empty());
-
-  const Extension* extension = GetExtensionById(context_,
-                                                uninstall_extension_id_);
-  uninstall_extension_id_.clear();
-  if (!extension)
-    return;
-
-  ExtensionService* service =
-      ExtensionSystem::Get(context_)->extension_service();
-  DCHECK(service);
-  service->UninstallExtension(
-      extension->id(),
-      extensions::UNINSTALL_REASON_STORAGE_THRESHOLD_EXCEEDED,
-      base::Bind(&base::DoNothing),
-      NULL);
-}
-
-void ExtensionStorageMonitor::ExtensionUninstallCanceled() {
+void ExtensionStorageMonitor::OnExtensionUninstallDialogClosed(
+    bool did_start_uninstall,
+    const base::string16& error) {
+  // We may get a lagging OnExtensionUninstalledDialogClosed() call during
+  // testing, but did_start_uninstall should be false in this case.
+  DCHECK(!uninstall_extension_id_.empty() || !did_start_uninstall);
   uninstall_extension_id_.clear();
 }
 
@@ -394,7 +380,8 @@ std::string ExtensionStorageMonitor::GetNotificationId(
   placeholders.push_back(context_->GetPath().BaseName().MaybeAsASCII());
   placeholders.push_back(extension_id);
 
-  return ReplaceStringPlaceholders(kNotificationIdFormat, placeholders, NULL);
+  return base::ReplaceStringPlaceholders(
+      kNotificationIdFormat, placeholders, NULL);
 }
 
 void ExtensionStorageMonitor::OnStorageThresholdExceeded(
@@ -453,22 +440,18 @@ void ExtensionStorageMonitor::OnImageLoaded(
 
   scoped_ptr<message_center::Notification> notification;
   notification.reset(new message_center::Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      notification_id,
+      message_center::NOTIFICATION_TYPE_SIMPLE, notification_id,
       l10n_util::GetStringUTF16(IDS_EXTENSION_STORAGE_MONITOR_TITLE),
-      l10n_util::GetStringFUTF16(
-          IDS_EXTENSION_STORAGE_MONITOR_TEXT,
-          base::UTF8ToUTF16(extension->name()),
-          base::IntToString16(current_usage / kMBytes)),
-      notification_image,
-      base::string16() /* display source */,
-      message_center::NotifierId(
-          message_center::NotifierId::SYSTEM_COMPONENT, kSystemNotifierId),
+      l10n_util::GetStringFUTF16(IDS_EXTENSION_STORAGE_MONITOR_TEXT,
+                                 base::UTF8ToUTF16(extension->name()),
+                                 base::IntToString16(current_usage / kMBytes)),
+      notification_image, base::string16() /* display source */, GURL(),
+      message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
+                                 kSystemNotifierId),
       notification_data,
-      new message_center::HandleNotificationButtonClickDelegate(base::Bind(
-          &ExtensionStorageMonitor::OnNotificationButtonClick,
-          weak_ptr_factory_.GetWeakPtr(),
-          extension_id))));
+      new message_center::HandleNotificationButtonClickDelegate(
+          base::Bind(&ExtensionStorageMonitor::OnNotificationButtonClick,
+                     weak_ptr_factory_.GetWeakPtr(), extension_id))));
   notification->SetSystemPriority();
   message_center::MessageCenter::Get()->AddNotification(notification.Pass());
 
@@ -621,7 +604,9 @@ void ExtensionStorageMonitor::ShowUninstallPrompt(
   }
 
   uninstall_extension_id_ = extension->id();
-  uninstall_dialog_->ConfirmUninstall(extension);
+  uninstall_dialog_->ConfirmUninstall(
+      extension, extensions::UNINSTALL_REASON_STORAGE_THRESHOLD_EXCEEDED,
+      UNINSTALL_SOURCE_STORAGE_THRESHOLD_EXCEEDED);
 }
 
 int64 ExtensionStorageMonitor::GetNextStorageThreshold(

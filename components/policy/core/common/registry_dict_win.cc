@@ -115,7 +115,7 @@ scoped_ptr<base::Value> ConvertValue(const base::Value& value,
     case base::Value::TYPE_DICTIONARY: {
       // Dictionaries may be encoded as JSON strings.
       if (value.GetAsString(&string_value)) {
-        scoped_ptr<base::Value> result(base::JSONReader::Read(string_value));
+        scoped_ptr<base::Value> result = base::JSONReader::Read(string_value);
         if (result && result->IsType(schema.type()))
           return result.Pass();
       }
@@ -136,7 +136,7 @@ scoped_ptr<base::Value> ConvertValue(const base::Value& value,
 
 bool CaseInsensitiveStringCompare::operator()(const std::string& a,
                                               const std::string& b) const {
-  return base::strcasecmp(a.c_str(), b.c_str()) < 0;
+  return base::CompareCaseInsensitiveASCII(a, b) < 0;
 }
 
 RegistryDict::RegistryDict() {}

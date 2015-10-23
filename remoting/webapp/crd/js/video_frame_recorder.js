@@ -60,7 +60,8 @@ remoting.VideoFrameRecorder.prototype.sendMessageToHost_ = function(data) {
  */
 remoting.VideoFrameRecorder.prototype.onExtensionMessage =
     function(type, message) {
-  base.debug.assert(type == remoting.VideoFrameRecorder.EXTENSION_TYPE);
+  console.assert(type == remoting.VideoFrameRecorder.EXTENSION_TYPE,
+                'Unexpected extension message type: ' + type + '.');
 
   var messageType = base.getStringAttr(message, 'type');
   var messageData = base.getStringAttr(message, 'data');
@@ -141,9 +142,10 @@ remoting.VideoFrameRecorder.prototype.isRecording = function() {
 }
 
 /**
- * @param {Entry} entry The single file entry if multiple files are not allowed.
- * @param {Array<FileEntry>} fileEntries List of file entries if multiple files
- *     are allowed.
+ * @param {Entry=} entry The single file entry if multiple files are not
+ *     allowed.
+ * @param {Array<!FileEntry>=} fileEntries List of file entries if multiple
+ *     files are allowed.
  */
 remoting.VideoFrameRecorder.prototype.onFileChosen_ = function(
     entry, fileEntries) {

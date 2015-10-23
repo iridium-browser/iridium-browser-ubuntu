@@ -40,11 +40,11 @@ class FakeContentLayerClient : public ContentLayerClient {
   void PaintContents(SkCanvas* canvas,
                      const gfx::Rect& rect,
                      PaintingControlSetting painting_control) override;
-  void PaintContentsToDisplayList(
-      DisplayItemList* display_list,
+  scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       const gfx::Rect& clip,
       PaintingControlSetting painting_control) override;
   bool FillsBoundsCompletely() const override;
+  size_t GetApproximateUnsharedMemoryUsage() const override;
 
   void set_fill_with_nonsolid_color(bool nonsolid) {
     fill_with_nonsolid_color_ = nonsolid;
@@ -74,6 +74,10 @@ class FakeContentLayerClient : public ContentLayerClient {
     return last_painting_control_;
   }
 
+  void set_reported_memory_usage(size_t reported_memory_usage) {
+    reported_memory_usage_ = reported_memory_usage;
+  }
+
  private:
   typedef std::vector<std::pair<gfx::RectF, SkPaint>> RectPaintVector;
   typedef std::vector<BitmapData> BitmapVector;
@@ -83,6 +87,7 @@ class FakeContentLayerClient : public ContentLayerClient {
   BitmapVector draw_bitmaps_;
   SkCanvas* last_canvas_;
   PaintingControlSetting last_painting_control_;
+  size_t reported_memory_usage_;
 };
 
 }  // namespace cc

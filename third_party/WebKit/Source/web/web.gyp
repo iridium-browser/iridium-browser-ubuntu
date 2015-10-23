@@ -83,6 +83,7 @@
             'conditions': [
                 ['component=="shared_library"', {
                     'dependencies': [
+                        '../platform/blink_platform_tests.gyp:blink_platform_test_support',
                         '../wtf/wtf_tests.gyp:wtf_unittest_helpers',
                         '<(DEPTH)/base/base.gyp:test_support_base',
                         '<(DEPTH)/testing/gmock.gyp:gmock',
@@ -240,6 +241,24 @@
                     ],
                 }],
             ],
+        },
+        {
+           'target_name': 'image_decode_bench',
+           'type': 'executable',
+           'dependencies': [
+               '../config.gyp:config',
+               '../core/core.gyp:webcore',
+               '../platform/blink_platform.gyp:blink_common',
+               '../wtf/wtf.gyp:wtf',
+               'blink_web',
+               'blink_web_test_support',
+           ],
+           'defines': [
+               'BLINK_IMPLEMENTATION=1',
+           ],
+           'sources': [
+               'ImageDecodeBench.cpp',
+           ],
         },
     ], # targets
     'conditions': [

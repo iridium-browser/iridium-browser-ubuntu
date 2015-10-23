@@ -19,9 +19,11 @@ import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.ChromiumApplication;
+import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.FileProviderHelper;
+import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.DeviceUtils;
@@ -40,7 +42,7 @@ public class ChromeBrowserInitializer {
     private static ChromeBrowserInitializer sChromeBrowserInitiliazer;
 
     private final Handler mHandler;
-    private final ChromiumApplication mApplication;
+    private final ChromeApplication mApplication;
     private boolean mPreInflationStartupComplete;
     private boolean mPostInflationStartupComplete;
     private boolean mNativeInitializationComplete;
@@ -69,7 +71,7 @@ public class ChromeBrowserInitializer {
     }
 
     private ChromeBrowserInitializer(Context context) {
-        mApplication = (ChromiumApplication) context.getApplicationContext();
+        mApplication = (ChromeApplication) context.getApplicationContext();
         mHandler = new Handler(Looper.getMainLooper());
     }
 
@@ -82,10 +84,25 @@ public class ChromeBrowserInitializer {
     public void handlePreNativeStartup(final BrowserParts parts) {
         preInflationStartup();
         parts.preInflationStartup();
+        preInflationStartupDone();
         parts.setContentViewAndLoadLibrary();
         postInflationStartup();
         parts.postInflationStartup();
     }
+
+    /**
+     * This is needed for device class manager which depends on commandline args that are
+     * initialized in preInflationStartup()
+     */
+    private void preInflationStartupDone() {
+        // Domain reliability uses significant enough memory that we should disable it on low memory
+        // devices for now.
+        // TODO(zbowling): remove this after domain reliability is refactored. (crbug.com/495342)
+        if (DeviceClassManager.disableDomainReliability()) {
+            CommandLine.getInstance().appendSwitch(ChromeSwitches.DISABLE_DOMAIN_RELIABILITY);
+        }
+    }
+
 
     private void preInflationStartup() {
         ThreadUtils.assertOnUiThread();
@@ -151,7 +168,7 @@ public class ChromeBrowserInitializer {
         initQueue.add(new NativeInitTask() {
             @Override
             public void initFunction() {
-                initNetworkChangeNotifier();
+                initNetworkChangeNotifier(mApplication.getApplicationContext());
             }
         });
 
@@ -230,11 +247,11 @@ public class ChromeBrowserInitializer {
         }
     }
 
-    private void initNetworkChangeNotifier() {
+    public static void initNetworkChangeNotifier(Context context) {
         ThreadUtils.assertOnUiThread();
         TraceEvent.begin("NetworkChangeNotifier.init");
         // Enable auto-detection of network connectivity state changes.
-        NetworkChangeNotifier.init(mApplication);
+        NetworkChangeNotifier.init(context);
         NetworkChangeNotifier.setAutoDetectConnectivityState(true);
         TraceEvent.end("NetworkChangeNotifier.init");
     }
@@ -254,20 +271,32 @@ public class ChromeBrowserInitializer {
 
     private static void configureStrictMode() {
         CommandLine commandLine = CommandLine.getInstance();
-        if ("eng".equals(Build.TYPE) || commandLine.hasSwitch(ChromeSwitches.STRICT_MODE)) {
+        if ("eng".equals(Build.TYPE)
+                || ("userdebug".equals(Build.TYPE) && !ChromeVersionInfo.isStableBuild())
+                || commandLine.hasSwitch(ChromeSwitches.STRICT_MODE)) {
             StrictMode.enableDefaults();
-            StrictMode.ThreadPolicy.Builder policy =
+            StrictMode.ThreadPolicy.Builder threadPolicy =
                     new StrictMode.ThreadPolicy.Builder(StrictMode.getThreadPolicy());
-            policy = policy.detectAll()
+            threadPolicy = threadPolicy.detectAll()
                     .penaltyFlashScreen()
                     .penaltyDeathOnNetwork();
+            /*
+             * Explicitly enable detection of all violations except file URI leaks, as that results
+             * in false positives when file URI intents are passed between Chrome activities in
+             * separate processes. See http://crbug.com/508282#c11.
+             */
+            StrictMode.VmPolicy.Builder vmPolicy = new StrictMode.VmPolicy.Builder();
+            vmPolicy = vmPolicy.detectActivityLeaks()
+                    .detectLeakedClosableObjects()
+                    .detectLeakedRegistrationObjects()
+                    .detectLeakedSqlLiteObjects()
+                    .penaltyLog();
             if ("death".equals(commandLine.getSwitchValue(ChromeSwitches.STRICT_MODE))) {
-                policy = policy.penaltyDeath();
-                StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder(StrictMode.getVmPolicy())
-                        .penaltyDeath()
-                        .build());
+                threadPolicy = threadPolicy.penaltyDeath();
+                vmPolicy = vmPolicy.penaltyDeath();
             }
-            StrictMode.setThreadPolicy(policy.build());
+            StrictMode.setThreadPolicy(threadPolicy.build());
+            StrictMode.setVmPolicy(vmPolicy.build());
         }
     }
 

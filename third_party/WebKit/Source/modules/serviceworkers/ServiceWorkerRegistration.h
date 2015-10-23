@@ -8,9 +8,10 @@
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventTarget.h"
 #include "modules/serviceworkers/ServiceWorker.h"
+#include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/Supplementable.h"
-#include "public/platform/WebServiceWorkerRegistration.h"
-#include "public/platform/WebServiceWorkerRegistrationProxy.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerRegistration.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerRegistrationProxy.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
@@ -29,39 +30,40 @@ class ServiceWorkerRegistration final
     , public WebServiceWorkerRegistrationProxy
     , public HeapSupplementable<ServiceWorkerRegistration> {
     DEFINE_WRAPPERTYPEINFO();
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<ServiceWorkerRegistration>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(ServiceWorkerRegistration);
     USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
-    USING_PRE_FINALIZER(ServiceWorkerRegistration, dispose);
 public:
     // EventTarget overrides.
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override { return ActiveDOMObject::executionContext(); }
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override { return ActiveDOMObject::executionContext(); }
 
     // WebServiceWorkerRegistrationProxy overrides.
-    virtual void dispatchUpdateFoundEvent() override;
-    virtual void setInstalling(WebServiceWorker*) override;
-    virtual void setWaiting(WebServiceWorker*) override;
-    virtual void setActive(WebServiceWorker*) override;
+    void dispatchUpdateFoundEvent() override;
+    void setInstalling(WebServiceWorker*) override;
+    void setWaiting(WebServiceWorker*) override;
+    void setActive(WebServiceWorker*) override;
 
-    // For CallbackPromiseAdapter.
-    typedef WebServiceWorkerRegistration WebType;
-    static ServiceWorkerRegistration* from(ExecutionContext*, WebType* registration);
-    static ServiceWorkerRegistration* take(ScriptPromiseResolver*, WebType* registration);
-    static void dispose(WebType* registration);
+    static ServiceWorkerRegistration* from(ExecutionContext*, WebServiceWorkerRegistration*);
+    static ServiceWorkerRegistration* take(ScriptPromiseResolver*, WebServiceWorkerRegistration*);
+    static void dispose(WebServiceWorkerRegistration*);
 
-    PassRefPtrWillBeRawPtr<ServiceWorker> installing() { return m_installing.get(); }
-    PassRefPtrWillBeRawPtr<ServiceWorker> waiting() { return m_waiting.get(); }
-    PassRefPtrWillBeRawPtr<ServiceWorker> active() { return m_active.get(); }
+    ServiceWorker* installing() { return m_installing; }
+    ServiceWorker* waiting() { return m_waiting; }
+    ServiceWorker* active() { return m_active; }
 
     String scope() const;
 
     WebServiceWorkerRegistration* webRegistration() { return m_outerRegistration.get(); }
 
+    ScriptPromise update(ScriptState*);
     ScriptPromise unregister(ScriptState*);
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(updatefound);
 
-    virtual ~ServiceWorkerRegistration() override;
+    ~ServiceWorkerRegistration() override;
+
+    // Eager finalization needed to promptly release owned WebServiceWorkerRegistration.
+    EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
 private:
@@ -69,18 +71,34 @@ private:
     ServiceWorkerRegistration(ExecutionContext*, PassOwnPtr<WebServiceWorkerRegistration>);
 
     // ActiveDOMObject overrides.
-    virtual bool hasPendingActivity() const override;
-    virtual void stop() override;
-
-    void dispose();
+    bool hasPendingActivity() const override;
+    void stop() override;
 
     OwnPtr<WebServiceWorkerRegistration> m_outerRegistration;
     WebServiceWorkerProvider* m_provider;
-    RefPtrWillBeMember<ServiceWorker> m_installing;
-    RefPtrWillBeMember<ServiceWorker> m_waiting;
-    RefPtrWillBeMember<ServiceWorker> m_active;
+    Member<ServiceWorker> m_installing;
+    Member<ServiceWorker> m_waiting;
+    Member<ServiceWorker> m_active;
 
     bool m_stopped;
+};
+
+class ServiceWorkerRegistrationArray {
+    STATIC_ONLY(ServiceWorkerRegistrationArray);
+public:
+    static HeapVector<Member<ServiceWorkerRegistration>> take(ScriptPromiseResolver* resolver, PassOwnPtr<WebVector<WebServiceWorkerRegistration*>> webServiceWorkerRegistrations)
+    {
+        HeapVector<Member<ServiceWorkerRegistration>> registrations;
+        for (WebServiceWorkerRegistration* registration : *webServiceWorkerRegistrations)
+            registrations.append(ServiceWorkerRegistration::take(resolver, registration));
+        return registrations;
+    }
+
+    static void dispose(PassOwnPtr<WebVector<WebServiceWorkerRegistration*>> webServiceWorkerRegistrations)
+    {
+        for (WebServiceWorkerRegistration* registration : *webServiceWorkerRegistrations)
+            ServiceWorkerRegistration::dispose(registration);
+    }
 };
 
 } // namespace blink

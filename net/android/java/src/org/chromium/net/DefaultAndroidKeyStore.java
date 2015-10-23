@@ -10,8 +10,6 @@ import java.lang.reflect.Method;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.Signature;
-import java.security.interfaces.DSAKey;
-import java.security.interfaces.DSAParams;
 import java.security.interfaces.ECKey;
 import java.security.interfaces.RSAKey;
 import java.security.interfaces.RSAPrivateKey;
@@ -60,17 +58,6 @@ public class DefaultAndroidKeyStore implements AndroidKeyStore {
     }
 
     @Override
-    public byte[] getDSAKeyParamQ(AndroidPrivateKey key) {
-        PrivateKey javaKey = ((DefaultAndroidPrivateKey) key).getJavaKey();
-        if (javaKey instanceof DSAKey) {
-            DSAParams params = ((DSAKey) javaKey).getParams();
-            return params.getQ().toByteArray();
-        }
-        Log.w(TAG, "Not a DSAKey instance!");
-        return null;
-    }
-
-    @Override
     public byte[] getECKeyOrder(AndroidPrivateKey key) {
         PrivateKey javaKey = ((DefaultAndroidPrivateKey) key).getJavaKey();
         if (javaKey instanceof ECKey) {
@@ -79,12 +66,6 @@ public class DefaultAndroidKeyStore implements AndroidKeyStore {
         }
         Log.w(TAG, "Not an ECKey instance!");
         return null;
-    }
-
-    @Override
-    public byte[] getPrivateKeyEncodedBytes(AndroidPrivateKey key) {
-        PrivateKey javaKey = ((DefaultAndroidPrivateKey) key).getJavaKey();
-        return javaKey.getEncoded();
     }
 
     @Override

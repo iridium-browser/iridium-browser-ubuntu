@@ -18,8 +18,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -29,8 +27,10 @@
 #include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/native_app_modal_dialog.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/autocomplete_result.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_result.h"
+#include "components/omnibox/browser/omnibox_edit_model.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_registrar.h"
@@ -491,13 +491,13 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ClosableAfterNavigation) {
 
   // Navigate it elsewhere.
   content::TestNavigationObserver nav_observer(popup);
-  popup->GetMainFrame()->ExecuteJavaScript(
+  popup->GetMainFrame()->ExecuteJavaScriptForTests(
       base::UTF8ToUTF16("location.href = '/empty.html'"));
   nav_observer.Wait();
 
   // Have it close itself.
   CloseObserver close_observer(popup);
-  popup->GetMainFrame()->ExecuteJavaScript(
+  popup->GetMainFrame()->ExecuteJavaScriptForTests(
       base::UTF8ToUTF16("window.close()"));
   close_observer.Wait();
 }
@@ -574,7 +574,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnder) {
   ASSERT_NE(popup_browser, browser());
 
   // Showing an alert will raise the tab over the popup.
-  tab->GetMainFrame()->ExecuteJavaScript(base::UTF8ToUTF16("alert()"));
+  tab->GetMainFrame()->ExecuteJavaScriptForTests(base::UTF8ToUTF16("alert()"));
   app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
 
   // Verify that after the dialog was closed, the popup is in front again.

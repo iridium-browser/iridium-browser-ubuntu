@@ -17,36 +17,46 @@ const char kTabMediaUrnPrefix[] = "urn:x-org.chromium.media:source:tab";
 const char kDesktopMediaUrn[] = "urn:x-org.chromium.media:source:desktop";
 const char kCastUrnPrefix[] = "urn:x-com.google.cast:application:";
 
-MediaSource ForTabMediaSource(int tab_id) {
+MediaSource MediaSourceForTab(int tab_id) {
   return MediaSource(base::StringPrintf("%s:%d", kTabMediaUrnPrefix, tab_id));
 }
 
-MediaSource ForDesktopMediaSource() {
+MediaSource MediaSourceForDesktop() {
   return MediaSource(std::string(kDesktopMediaUrn));
 }
 
-// TODO(mfoltz): Remove when the TODO in
-// MediaSourceManager::GetDefaultMediaSource is resolved.
-MediaSource ForCastAppMediaSource(const std::string& app_id) {
+MediaSource MediaSourceForCastApp(const std::string& app_id) {
   return MediaSource(kCastUrnPrefix + app_id);
 }
 
-MediaSource ForPresentationUrl(const std::string& presentation_url) {
+MediaSource MediaSourceForPresentationUrl(const std::string& presentation_url) {
   return MediaSource(presentation_url);
 }
 
 bool IsMirroringMediaSource(const MediaSource& source) {
-  return StartsWithASCII(source.id(), kDesktopMediaUrn, true) ||
-    StartsWithASCII(source.id(), kTabMediaUrnPrefix, true);
+  return base::StartsWith(source.id(), kDesktopMediaUrn,
+                          base::CompareCase::SENSITIVE) ||
+         base::StartsWith(source.id(), kTabMediaUrnPrefix,
+                          base::CompareCase::SENSITIVE);
 }
 
 bool IsValidMediaSource(const MediaSource& source) {
   if (IsMirroringMediaSource(source) ||
-      StartsWithASCII(source.id(), kCastUrnPrefix, true)) {
+      base::StartsWith(source.id(), kCastUrnPrefix,
+                       base::CompareCase::SENSITIVE)) {
     return true;
   }
   GURL url(source.id());
   return url.is_valid() && url.SchemeIsHTTPOrHTTPS();
+}
+
+std::string PresentationUrlFromMediaSource(const MediaSource& source) {
+  return IsValidPresentationUrl(source.id()) ? source.id() : "";
+}
+
+bool IsValidPresentationUrl(const std::string& url) {
+  GURL gurl(url);
+  return gurl.is_valid() && gurl.SchemeIsHTTPOrHTTPS();
 }
 
 }  // namespace media_router

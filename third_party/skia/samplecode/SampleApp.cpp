@@ -15,7 +15,6 @@
 #include "SkCanvas.h"
 #include "SkCommandLineFlags.h"
 #include "SkData.h"
-#include "SkDeferredCanvas.h"
 #include "SkDevice.h"
 #include "SkDocument.h"
 #include "SkGPipe.h"
@@ -23,6 +22,7 @@
 #include "SkImageEncoder.h"
 #include "SkOSFile.h"
 #include "SkPaint.h"
+#include "SkPaintFilterCanvas.h"
 #include "SkPicture.h"
 #include "SkPictureRecorder.h"
 #include "SkStream.h"
@@ -42,6 +42,9 @@
 #else
 class GrContext;
 #endif
+
+// Should be 3x + 1
+#define kMaxFatBitsScale    28
 
 extern SampleView* CreateSamplePictFileView(const char filename[]);
 
@@ -175,7 +178,7 @@ public:
 #endif
     }
 
-    virtual void setUpBackend(SampleWindow* win, int msaaSampleCount) {
+    void setUpBackend(SampleWindow* win, int msaaSampleCount) override {
         SkASSERT(kNone_BackEndType == fBackend);
 
         fBackend = kNone_BackEndType;
@@ -184,7 +187,6 @@ public:
         switch (win->getDeviceType()) {
             case kRaster_DeviceType:    // fallthrough
             case kPicture_DeviceType:    // fallthrough
-            case kDeferred_DeviceType:    // fallthrough
             case kGPU_DeviceType:
                 // all these guys use the native backend
                 fBackend = kNativeGL_BackEndType;
@@ -212,7 +214,6 @@ public:
         switch (win->getDeviceType()) {
             case kRaster_DeviceType:    // fallthrough
             case kPicture_DeviceType:   // fallthrough
-            case kDeferred_DeviceType:  // fallthrough
             case kGPU_DeviceType:
                 // all these guys use the native interface
                 glInterface.reset(GrGLCreateNativeInterface());
@@ -249,7 +250,7 @@ public:
         this->windowSizeChanged(win);
     }
 
-    virtual void tearDownBackend(SampleWindow *win) {
+    void tearDownBackend(SampleWindow *win) override {
 #if SK_SUPPORT_GPU
         if (fCurContext) {
             // in case we have outstanding refs to this guy (lua?)
@@ -268,8 +269,7 @@ public:
         fBackend = kNone_BackEndType;
     }
 
-    virtual SkSurface* createSurface(SampleWindow::DeviceType dType,
-                                     SampleWindow* win) override {
+    SkSurface* createSurface(SampleWindow::DeviceType dType, SampleWindow* win) override {
 #if SK_SUPPORT_GPU
         if (IsGpuDeviceType(dType) && fCurContext) {
             SkSurfaceProps props(win->getSurfaceProps());
@@ -279,9 +279,8 @@ public:
         return NULL;
     }
 
-    virtual void publishCanvas(SampleWindow::DeviceType dType,
-                               SkCanvas* canvas,
-                               SampleWindow* win) {
+    void publishCanvas(SampleWindow::DeviceType dType,
+                       SkCanvas* canvas, SampleWindow* win) override {
 #if SK_SUPPORT_GPU
         if (fCurContext) {
             // in case we have queued drawing calls
@@ -304,7 +303,7 @@ public:
         win->present();
     }
 
-    virtual void windowSizeChanged(SampleWindow* win) {
+    void windowSizeChanged(SampleWindow* win) override {
 #if SK_SUPPORT_GPU
         if (fCurContext) {
             AttachmentInfo attachmentInfo;
@@ -315,7 +314,7 @@ public:
 #endif
     }
 
-    virtual GrContext* getGrContext() {
+    GrContext* getGrContext() override {
 #if SK_SUPPORT_GPU
         return fCurContext;
 #else
@@ -463,20 +462,23 @@ static FilterQualityState gFilterQualityStates[] = {
     { kHigh_SkFilterQuality,   "High",     "F3 "   },
 };
 
-class FlagsDrawFilter : public SkDrawFilter {
+class FlagsFilterCanvas : public SkPaintFilterCanvas {
 public:
-    FlagsDrawFilter(SkOSMenu::TriState lcd, SkOSMenu::TriState aa,
-                    SkOSMenu::TriState subpixel, int hinting, int filterQuality)
-        : fLCDState(lcd)
+    FlagsFilterCanvas(SkCanvas* canvas, SkOSMenu::TriState lcd, SkOSMenu::TriState aa,
+                      SkOSMenu::TriState subpixel, int hinting, int filterQuality)
+        : INHERITED(canvas->imageInfo().width(), canvas->imageInfo().height())
+        , fLCDState(lcd)
         , fAAState(aa)
         , fSubpixelState(subpixel)
         , fHintingState(hinting)
-        , fFilterQualityIndex(filterQuality)
-    {
+        , fFilterQualityIndex(filterQuality) {
         SkASSERT((unsigned)filterQuality < SK_ARRAY_COUNT(gFilterQualityStates));
+
+        this->addCanvas(canvas);
     }
 
-    virtual bool filter(SkPaint* paint, Type t) {
+protected:
+    void onFilterPaint(SkPaint* paint, Type t) const override {
         if (kText_Type == t && SkOSMenu::kMixedState != fLCDState) {
             paint->setLCDRenderText(SkOSMenu::kOnState == fLCDState);
         }
@@ -492,7 +494,6 @@ public:
         if (0 != fHintingState && fHintingState < (int)SK_ARRAY_COUNT(gHintingStates)) {
             paint->setHinting(gHintingStates[fHintingState].hinting);
         }
-        return true;
     }
 
 private:
@@ -501,6 +502,8 @@ private:
     SkOSMenu::TriState  fSubpixelState;
     int fHintingState;
     int fFilterQualityIndex;
+
+    typedef SkPaintFilterCanvas INHERITED;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -595,8 +598,8 @@ static const struct TilingInfo gTilingInfo[] = {
     { "1/1x1/16" , SK_Scalar1        , SK_Scalar1 / 16    }, // kRel_1x16_Tiling
     { "1/16x1/1" , SK_Scalar1 / 16   , SK_Scalar1         }, // kRel_16x1_Tiling
 };
-SK_COMPILE_ASSERT((SK_ARRAY_COUNT(gTilingInfo) == kLast_TilingMode_Enum),
-                  Incomplete_tiling_labels);
+static_assert((SK_ARRAY_COUNT(gTilingInfo) == kLast_TilingMode_Enum),
+              "Incomplete_tiling_labels");
 
 SkSize SampleWindow::tileSize() const {
     SkASSERT((TilingMode)fTilingMode < kLast_TilingMode_Enum);
@@ -631,31 +634,27 @@ bool SampleWindow::sendAnimatePulse() {
     return false;
 }
 
-void SampleWindow::setZoomCenter(float x, float y)
-{
+void SampleWindow::setZoomCenter(float x, float y) {
     fZoomCenterX = x;
     fZoomCenterY = y;
 }
 
-bool SampleWindow::zoomIn()
-{
+bool SampleWindow::zoomIn() {
     // Arbitrarily decided
-    if (fFatBitsScale == 25) return false;
+    if (fFatBitsScale == kMaxFatBitsScale) return false;
     fFatBitsScale++;
     this->inval(NULL);
     return true;
 }
 
-bool SampleWindow::zoomOut()
-{
+bool SampleWindow::zoomOut() {
     if (fFatBitsScale == 1) return false;
     fFatBitsScale--;
     this->inval(NULL);
     return true;
 }
 
-void SampleWindow::updatePointer(int x, int y)
-{
+void SampleWindow::updatePointer(int x, int y) {
     fMouseX = x;
     fMouseY = y;
     if (fShowZoomer) {
@@ -672,10 +671,9 @@ static inline SampleWindow::DeviceType cycle_devicetype(SampleWindow::DeviceType
         SampleWindow::kANGLE_DeviceType,
 #endif // SK_ANGLE
 #endif // SK_SUPPORT_GPU
-        SampleWindow::kDeferred_DeviceType,
         SampleWindow::kRaster_DeviceType,
     };
-    SK_COMPILE_ASSERT(SK_ARRAY_COUNT(gCT) == SampleWindow::kDeviceTypeCnt, array_size_mismatch);
+    static_assert(SK_ARRAY_COUNT(gCT) == SampleWindow::kDeviceTypeCnt, "array_size_mismatch");
     return gCT[ct];
 }
 
@@ -697,6 +695,7 @@ DEFINE_string(pictureDir, "", "Read pictures from here.");
 DEFINE_string(picture, "", "Path to single picture.");
 DEFINE_bool(sort, false, "Sort samples by title.");
 DEFINE_bool(list, false, "List samples?");
+DEFINE_string(key, "", "");  // dummy to enable gm tests that have platform-specific names
 #ifdef SAMPLE_PDF_FILE_VIEWER
 DEFINE_string(pdfPath, "", "Path to direcotry of pdf files.");
 #endif
@@ -819,9 +818,7 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
     fMagnify = false;
 
     fSaveToPdf = false;
-
-    fTransitionNext = 6;
-    fTransitionPrev = 2;
+    fSaveToSKP = false;
 
     int sinkID = this->getSinkID();
     fAppMenu = new SkOSMenu;
@@ -829,7 +826,7 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
     int itemID;
 
     itemID =fAppMenu->appendList("Device Type", "Device Type", sinkID, 0,
-                                "Raster", "Picture", "OpenGL", "Deferred",
+                                "Raster", "Picture", "OpenGL",
 #if SK_ANGLE
                                 "ANGLE",
 #endif
@@ -884,16 +881,7 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
     fAppMenu->assignKeyEquivalentToItem(itemID, 'z');
     itemID = fAppMenu->appendSwitch("Magnify", "Magnify" , sinkID, fMagnify);
     fAppMenu->assignKeyEquivalentToItem(itemID, 'm');
-    itemID =fAppMenu->appendList("Transition-Next", "Transition-Next", sinkID,
-                                fTransitionNext, "Up", "Up and Right", "Right",
-                                "Down and Right", "Down", "Down and Left",
-                                "Left", "Up and Left", NULL);
-    fAppMenu->assignKeyEquivalentToItem(itemID, 'j');
-    itemID =fAppMenu->appendList("Transition-Prev", "Transition-Prev", sinkID,
-                                fTransitionPrev, "Up", "Up and Right", "Right",
-                                "Down and Right", "Down", "Down and Left",
-                                "Left", "Up and Left", NULL);
-    fAppMenu->assignKeyEquivalentToItem(itemID, 'k');
+
     itemID = fAppMenu->appendAction("Save to PDF", sinkID);
     fAppMenu->assignKeyEquivalentToItem(itemID, 'e');
 
@@ -1086,89 +1074,163 @@ void SampleWindow::magnify(SkCanvas* canvas) {
     canvas->restoreToCount(count);
 }
 
-void SampleWindow::showZoomer(SkCanvas* canvas) {
-        int count = canvas->save();
-        canvas->resetMatrix();
-        // Ensure the mouse position is on screen.
-        int width = SkScalarRoundToInt(this->width());
-        int height = SkScalarRoundToInt(this->height());
-        if (fMouseX >= width) fMouseX = width - 1;
-        else if (fMouseX < 0) fMouseX = 0;
-        if (fMouseY >= height) fMouseY = height - 1;
-        else if (fMouseY < 0) fMouseY = 0;
+static SkPaint& set_color_ref(SkPaint& paint, SkColor c) {
+    paint.setColor(c);
+    return paint;
+}
 
-        SkBitmap bitmap = capture_bitmap(canvas);
-        bitmap.lockPixels();
+static void show_lcd_box(SkCanvas* canvas, SkScalar x, SkScalar y, SkColor c,
+                         SkScalar sx, SkScalar sy) {
+    const SkScalar w = (1 - 1/sx) / 3;
+    SkPaint paint;
+    SkRect r = SkRect::MakeXYWH(x, y, w, 1 - 1/sy);
+    canvas->drawRect(r, set_color_ref(paint, SkColorSetRGB(SkColorGetR(c), 0, 0)));
+    r.offset(w, 0);
+    canvas->drawRect(r, set_color_ref(paint, SkColorSetRGB(0, SkColorGetG(c), 0)));
+    r.offset(w, 0);
+    canvas->drawRect(r, set_color_ref(paint, SkColorSetRGB(0, 0, SkColorGetB(c))));
+}
 
-        // Find the size of the zoomed in view, forced to be odd, so the examined pixel is in the middle.
-        int zoomedWidth = (width >> 1) | 1;
-        int zoomedHeight = (height >> 1) | 1;
-        SkIRect src;
-        src.set(0, 0, zoomedWidth / fFatBitsScale, zoomedHeight / fFatBitsScale);
-        src.offset(fMouseX - (src.width()>>1), fMouseY - (src.height()>>1));
-        SkRect dest;
-        dest.set(0, 0, SkIntToScalar(zoomedWidth), SkIntToScalar(zoomedHeight));
-        dest.offset(SkIntToScalar(width - zoomedWidth), SkIntToScalar(height - zoomedHeight));
-        SkPaint paint;
-        // Clear the background behind our zoomed in view
-        paint.setColor(SK_ColorWHITE);
-        canvas->drawRect(dest, paint);
-        canvas->drawBitmapRect(bitmap, &src, dest);
-        paint.setColor(SK_ColorBLACK);
-        paint.setStyle(SkPaint::kStroke_Style);
-        // Draw a border around the pixel in the middle
-        SkRect originalPixel;
-        originalPixel.set(SkIntToScalar(fMouseX), SkIntToScalar(fMouseY), SkIntToScalar(fMouseX + 1), SkIntToScalar(fMouseY + 1));
-        SkMatrix matrix;
-        SkRect scalarSrc;
-        scalarSrc.set(src);
-        SkColor color = bitmap.getColor(fMouseX, fMouseY);
-        if (matrix.setRectToRect(scalarSrc, dest, SkMatrix::kFill_ScaleToFit)) {
-            SkRect pixel;
-            matrix.mapRect(&pixel, originalPixel);
-            // TODO Perhaps measure the values and make the outline white if it's "dark"
-            if (color == SK_ColorBLACK) {
-                paint.setColor(SK_ColorWHITE);
-            }
-            canvas->drawRect(pixel, paint);
+static void show_lcd_circle(SkCanvas* canvas, SkScalar x, SkScalar y, SkColor c,
+                            SkScalar, SkScalar) {
+    const SkRect r = SkRect::MakeXYWH(x, y, 1, 1);
+    const SkScalar cx = x + 0.5f;
+    const SkScalar cy = y + 0.5f;
+
+    SkPaint paint;
+    paint.setAntiAlias(true);
+
+    SkPath path;
+    path.addArc(r, 0, 120); path.lineTo(cx, cy);
+    canvas->drawPath(path, set_color_ref(paint, SkColorSetRGB(SkColorGetR(c), 0, 0)));
+
+    path.reset(); path.addArc(r, 120, 120); path.lineTo(cx, cy);
+    canvas->drawPath(path, set_color_ref(paint, SkColorSetRGB(0, SkColorGetG(c), 0)));
+
+    path.reset(); path.addArc(r, 240, 120); path.lineTo(cx, cy);
+    canvas->drawPath(path, set_color_ref(paint, SkColorSetRGB(0, 0, SkColorGetB(c))));
+}
+
+typedef void (*ShowLCDProc)(SkCanvas*, SkScalar, SkScalar, SkColor, SkScalar, SkScalar);
+
+/*
+ *  Like drawBitmapRect but we manually draw each pixels in RGB
+ */
+static void show_lcd_grid(SkCanvas* canvas, const SkBitmap& bitmap,
+                          const SkIRect& origSrc, const SkRect& dst, ShowLCDProc proc) {
+    SkIRect src;
+    if (!src.intersect(origSrc, bitmap.bounds())) {
+        return;
+    }
+    const SkScalar sx = dst.width() / src.width();
+    const SkScalar sy = dst.height() / src.height();
+
+    SkAutoCanvasRestore acr(canvas, true);
+    canvas->translate(dst.left(), dst.top());
+    canvas->scale(sx, sy);
+
+    for (int y = 0; y < src.height(); ++y) {
+        for (int x = 0; x < src.width(); ++x) {
+            proc(canvas, SkIntToScalar(x), SkIntToScalar(y),
+                 bitmap.getColor(src.left() + x, src.top() + y), sx, sy);
         }
-        paint.setColor(SK_ColorBLACK);
-        // Draw a border around the destination rectangle
-        canvas->drawRect(dest, paint);
-        paint.setStyle(SkPaint::kStrokeAndFill_Style);
-        // Identify the pixel and its color on screen
-        paint.setTypeface(fTypeface);
-        paint.setAntiAlias(true);
-        SkScalar lineHeight = paint.getFontMetrics(NULL);
-        SkString string;
-        string.appendf("(%i, %i)", fMouseX, fMouseY);
-        SkScalar left = dest.fLeft + SkIntToScalar(3);
-        SkScalar i = SK_Scalar1;
-        drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
-        // Alpha
-        i += SK_Scalar1;
-        string.reset();
-        string.appendf("A: %X", SkColorGetA(color));
-        drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
-        // Red
-        i += SK_Scalar1;
-        string.reset();
-        string.appendf("R: %X", SkColorGetR(color));
-        paint.setColor(SK_ColorRED);
-        drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
-        // Green
-        i += SK_Scalar1;
-        string.reset();
-        string.appendf("G: %X", SkColorGetG(color));
-        paint.setColor(SK_ColorGREEN);
-        drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
-        // Blue
-        i += SK_Scalar1;
-        string.reset();
-        string.appendf("B: %X", SkColorGetB(color));
-        paint.setColor(SK_ColorBLUE);
-        drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
-        canvas->restoreToCount(count);
+    }
+}
+
+void SampleWindow::showZoomer(SkCanvas* canvas) {
+    int count = canvas->save();
+    canvas->resetMatrix();
+    // Ensure the mouse position is on screen.
+    int width = SkScalarRoundToInt(this->width());
+    int height = SkScalarRoundToInt(this->height());
+    if (fMouseX >= width) fMouseX = width - 1;
+    else if (fMouseX < 0) fMouseX = 0;
+    if (fMouseY >= height) fMouseY = height - 1;
+    else if (fMouseY < 0) fMouseY = 0;
+
+    SkBitmap bitmap = capture_bitmap(canvas);
+    bitmap.lockPixels();
+
+    // Find the size of the zoomed in view, forced to be odd, so the examined pixel is in the middle.
+    int zoomedWidth = (width >> 1) | 1;
+    int zoomedHeight = (height >> 1) | 1;
+    SkIRect src;
+    src.set(0, 0, zoomedWidth / fFatBitsScale, zoomedHeight / fFatBitsScale);
+    src.offset(fMouseX - (src.width()>>1), fMouseY - (src.height()>>1));
+    SkRect dest;
+    dest.set(0, 0, SkIntToScalar(zoomedWidth), SkIntToScalar(zoomedHeight));
+    dest.offset(SkIntToScalar(width - zoomedWidth), SkIntToScalar(height - zoomedHeight));
+    SkPaint paint;
+    // Clear the background behind our zoomed in view
+    paint.setColor(SK_ColorWHITE);
+    canvas->drawRect(dest, paint);
+    switch (fFatBitsScale) {
+        case kMaxFatBitsScale:
+            show_lcd_grid(canvas, bitmap, src, dest, show_lcd_box);
+            break;
+        case kMaxFatBitsScale - 1:
+            show_lcd_grid(canvas, bitmap, src, dest, show_lcd_circle);
+            break;
+        default:
+            canvas->drawBitmapRect(bitmap, src, dest, NULL);
+            break;
+    }
+
+    paint.setColor(SK_ColorBLACK);
+    paint.setStyle(SkPaint::kStroke_Style);
+    // Draw a border around the pixel in the middle
+    SkRect originalPixel;
+    originalPixel.set(SkIntToScalar(fMouseX), SkIntToScalar(fMouseY), SkIntToScalar(fMouseX + 1), SkIntToScalar(fMouseY + 1));
+    SkMatrix matrix;
+    SkRect scalarSrc;
+    scalarSrc.set(src);
+    SkColor color = bitmap.getColor(fMouseX, fMouseY);
+    if (matrix.setRectToRect(scalarSrc, dest, SkMatrix::kFill_ScaleToFit)) {
+        SkRect pixel;
+        matrix.mapRect(&pixel, originalPixel);
+        // TODO Perhaps measure the values and make the outline white if it's "dark"
+        if (color == SK_ColorBLACK) {
+            paint.setColor(SK_ColorWHITE);
+        }
+        canvas->drawRect(pixel, paint);
+    }
+    paint.setColor(SK_ColorBLACK);
+    // Draw a border around the destination rectangle
+    canvas->drawRect(dest, paint);
+    paint.setStyle(SkPaint::kStrokeAndFill_Style);
+    // Identify the pixel and its color on screen
+    paint.setTypeface(fTypeface);
+    paint.setAntiAlias(true);
+    SkScalar lineHeight = paint.getFontMetrics(NULL);
+    SkString string;
+    string.appendf("(%i, %i)", fMouseX, fMouseY);
+    SkScalar left = dest.fLeft + SkIntToScalar(3);
+    SkScalar i = SK_Scalar1;
+    drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
+    // Alpha
+    i += SK_Scalar1;
+    string.reset();
+    string.appendf("A: %X", SkColorGetA(color));
+    drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
+    // Red
+    i += SK_Scalar1;
+    string.reset();
+    string.appendf("R: %X", SkColorGetR(color));
+    paint.setColor(SK_ColorRED);
+    drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
+    // Green
+    i += SK_Scalar1;
+    string.reset();
+    string.appendf("G: %X", SkColorGetG(color));
+    paint.setColor(SK_ColorGREEN);
+    drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
+    // Blue
+    i += SK_Scalar1;
+    string.reset();
+    string.appendf("B: %X", SkColorGetB(color));
+    paint.setColor(SK_ColorBLUE);
+    drawText(canvas, string, left, SkScalarMulAdd(lineHeight, i, dest.fTop), paint);
+    canvas->restoreToCount(count);
 }
 
 void SampleWindow::onDraw(SkCanvas* canvas) {
@@ -1178,8 +1240,10 @@ void SampleWindow::onDraw(SkCanvas* canvas) {
 
 void SampleWindow::saveToPdf()
 {
+#if SK_SUPPORT_PDF
     fSaveToPdf = true;
     this->inval(NULL);
+#endif  // SK_SUPPORT_PDF
 }
 
 SkCanvas* SampleWindow::beforeChildren(SkCanvas* canvas) {
@@ -1196,12 +1260,6 @@ SkCanvas* SampleWindow::beforeChildren(SkCanvas* canvas) {
         canvas = fPDFDocument->beginPage(this->width(), this->height());
     } else if (kPicture_DeviceType == fDeviceType) {
         canvas = fRecorder.beginRecording(9999, 9999, NULL, 0);
-    } else if (kDeferred_DeviceType == fDeviceType) {
-        fDeferredSurface.reset(canvas->newSurface(canvas->imageInfo()));
-        if (fDeferredSurface.get()) {
-            fDeferredCanvas.reset(SkDeferredCanvas::Create(fDeferredSurface));
-            canvas = fDeferredCanvas;
-        }
     } else {
         canvas = this->INHERITED::beforeChildren(canvas);
     }
@@ -1211,10 +1269,24 @@ SkCanvas* SampleWindow::beforeChildren(SkCanvas* canvas) {
         canvas->clipPath(fClipPath, SkRegion::kIntersect_Op, true);
     }
 
+    // Install a flags filter proxy canvas if needed
+    if (fLCDState != SkOSMenu::kMixedState ||
+        fAAState != SkOSMenu::kMixedState ||
+        fSubpixelState != SkOSMenu::kMixedState ||
+        fHintingState > 0 ||
+        fFilterQualityIndex > 0) {
+
+        canvas = SkNEW_ARGS(FlagsFilterCanvas, (canvas, fLCDState, fAAState, fSubpixelState,
+                                                fHintingState, fFilterQualityIndex));
+        fFlagsFilterCanvas.reset(canvas);
+    }
+
     return canvas;
 }
 #include "SkMultiPictureDraw.h"
 void SampleWindow::afterChildren(SkCanvas* orig) {
+    fFlagsFilterCanvas.reset(NULL);
+
     if (fSaveToPdf) {
         fSaveToPdf = false;
         fPDFDocument->endPage();
@@ -1241,9 +1313,13 @@ void SampleWindow::afterChildren(SkCanvas* orig) {
     if (kPicture_DeviceType == fDeviceType) {
         SkAutoTUnref<const SkPicture> picture(fRecorder.endRecording());
 
+        if (fSaveToSKP) {
+            SkFILEWStream stream("sample_app.skp");
+            picture->serialize(&stream);
+            fSaveToSKP = false;
+        }
+
         if (true) {
-            this->installDrawFilter(orig);
-            
             if (true) {
                 SkImageInfo info;
                 size_t rowBytes;
@@ -1290,18 +1366,12 @@ void SampleWindow::afterChildren(SkCanvas* orig) {
         } else {
             picture->playback(orig);
         }
-    } else if (kDeferred_DeviceType == fDeviceType) {
-        SkAutoTUnref<SkImage> image(fDeferredCanvas->newImageSnapshot());
-        if (image) {
-            orig->drawImage(image, 0, 0, NULL);
-        }
-        fDeferredCanvas.reset(NULL);
-        fDeferredSurface.reset(NULL);
     }
 
     // Do this after presentGL and other finishing, rather than in afterChild
-    if (fMeasureFPS && fMeasureFPS_StartTime) {
-        fMeasureFPS_Time += SkTime::GetMSecs() - fMeasureFPS_StartTime;
+    if (fMeasureFPS) {
+        fTimer.end();
+        fMeasureFPS_Time += fTimer.fWall;
     }
 }
 
@@ -1337,22 +1407,15 @@ void SampleWindow::beforeChild(SkView* child, SkCanvas* canvas) {
         canvas->concat(m);
     }
 
-    this->installDrawFilter(canvas);
-
     if (fMeasureFPS) {
-        if (SampleView::SetRepeatDraw(child, FPS_REPEAT_COUNT)) {
-            fMeasureFPS_StartTime = SkTime::GetMSecs();
-        }
+        (void)SampleView::SetRepeatDraw(child, FPS_REPEAT_COUNT);
+        fTimer.start();
     } else {
         (void)SampleView::SetRepeatDraw(child, 1);
     }
     if (fPerspAnim || fRotate) {
         this->inval(NULL);
     }
-}
-
-void SampleWindow::afterChild(SkView* child, SkCanvas* canvas) {
-    canvas->setDrawFilter(NULL);
 }
 
 void SampleWindow::changeZoomLevel(float delta) {
@@ -1410,9 +1473,18 @@ bool SampleWindow::previousSample() {
     return true;
 }
 
+#include "SkResourceCache.h"
+#include "SkGlyphCache.h"
 bool SampleWindow::nextSample() {
     fCurrIndex = (fCurrIndex + 1) % fSamples.count();
     this->loadView((*fSamples[fCurrIndex])());
+
+    if (false) {
+        SkResourceCache::TestDumpMemoryStatistics();
+        SkGlyphCache::Dump();
+        SkDebugf("\n");
+    }
+
     return true;
 }
 
@@ -1432,11 +1504,6 @@ int SampleWindow::sampleCount() {
 
 void SampleWindow::showOverview() {
     this->loadView(create_overview(fSamples.count(), fSamples.begin()));
-}
-
-void SampleWindow::installDrawFilter(SkCanvas* canvas) {
-    canvas->setDrawFilter(new FlagsDrawFilter(fLCDState, fAAState, fSubpixelState,
-                                              fHintingState, fFilterQualityIndex))->unref();
 }
 
 void SampleWindow::postAnimatingEvent() {
@@ -1491,9 +1558,8 @@ bool SampleWindow::onEvent(const SkEvent& evt) {
         SkOSMenu::FindListIndex(evt, "Hinting", &fHintingState) ||
         SkOSMenu::FindSwitchState(evt, "Clip", &fUseClip) ||
         SkOSMenu::FindSwitchState(evt, "Zoomer", &fShowZoomer) ||
-        SkOSMenu::FindSwitchState(evt, "Magnify", &fMagnify) ||
-        SkOSMenu::FindListIndex(evt, "Transition-Next", &fTransitionNext) ||
-        SkOSMenu::FindListIndex(evt, "Transition-Prev", &fTransitionPrev)) {
+        SkOSMenu::FindSwitchState(evt, "Magnify", &fMagnify))
+    {
         this->inval(NULL);
         this->updateTitle();
         return true;
@@ -1647,6 +1713,10 @@ bool SampleWindow::onHandleChar(SkUnichar uni) {
             fPerspAnim = !fPerspAnim;
             this->inval(NULL);
             this->updateTitle();
+            return true;
+        case 'K':
+            fSaveToSKP = true;
+            this->inval(NULL);
             return true;
 #if SK_SUPPORT_GPU
         case 'p':
@@ -1871,10 +1941,9 @@ static const char* gDeviceTypePrefix[] = {
     "angle: ",
 #endif // SK_ANGLE
 #endif // SK_SUPPORT_GPU
-    "deferred: ",
 };
-SK_COMPILE_ASSERT(SK_ARRAY_COUNT(gDeviceTypePrefix) == SampleWindow::kDeviceTypeCnt,
-                  array_size_mismatch);
+static_assert(SK_ARRAY_COUNT(gDeviceTypePrefix) == SampleWindow::kDeviceTypeCnt,
+              "array_size_mismatch");
 
 static const char* trystate_str(SkOSMenu::TriState state,
                                 const char trueStr[], const char falseStr[]) {
@@ -1930,7 +1999,7 @@ void SampleWindow::updateTitle() {
     }
 
     if (fMeasureFPS) {
-        title.appendf(" %8.3f ms", fMeasureFPS_Time / (float)FPS_REPEAT_COUNT);
+        title.appendf(" %8.4f ms", fMeasureFPS_Time / (float)FPS_REPEAT_COUNT);
     }
 
     SkView* view = curr_view(this);
@@ -1953,9 +2022,9 @@ void SampleWindow::updateTitle() {
     if (IsGpuDeviceType(fDeviceType) &&
         fDevManager &&
         fDevManager->getGrRenderTarget() &&
-        fDevManager->getGrRenderTarget()->numSamples() > 0) {
+        fDevManager->getGrRenderTarget()->numColorSamples() > 0) {
         title.appendf(" [MSAA: %d]",
-                       fDevManager->getGrRenderTarget()->numSamples());
+                       fDevManager->getGrRenderTarget()->numColorSamples());
     }
 #endif
 

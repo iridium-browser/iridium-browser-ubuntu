@@ -170,9 +170,12 @@ void BrowserViewRenderer::UpdateMemoryPolicy() {
   if (g_memory_override_in_bytes) {
     bytes_limit = static_cast<size_t>(g_memory_override_in_bytes);
   } else {
-    gfx::Rect interest_rect = offscreen_pre_raster_
-                                  ? gfx::Rect(size_)
-                                  : last_on_draw_global_visible_rect_;
+    ParentCompositorDrawConstraints parent_draw_constraints =
+        shared_renderer_state_.GetParentDrawConstraintsOnUI();
+    gfx::Rect interest_rect =
+        offscreen_pre_raster_ || parent_draw_constraints.is_layer
+            ? gfx::Rect(size_)
+            : last_on_draw_global_visible_rect_;
     size_t width = interest_rect.width();
     size_t height = interest_rect.height();
     bytes_limit = kMemoryMultiplier * kBytesPerPixel * width * height;
@@ -240,12 +243,8 @@ bool BrowserViewRenderer::CompositeHw() {
   gfx::Rect viewport_rect_for_tile_priority;
 
   // Leave viewport_rect_for_tile_priority empty if offscreen_pre_raster_ is on.
-  if (!offscreen_pre_raster_) {
-    if (parent_draw_constraints.is_layer) {
-      viewport_rect_for_tile_priority = parent_draw_constraints.surface_rect;
-    } else {
-      viewport_rect_for_tile_priority = last_on_draw_global_visible_rect_;
-    }
+  if (!offscreen_pre_raster_ && !parent_draw_constraints.is_layer) {
+    viewport_rect_for_tile_priority = last_on_draw_global_visible_rect_;
   }
 
   scoped_ptr<cc::CompositorFrame> frame =
@@ -262,7 +261,7 @@ bool BrowserViewRenderer::CompositeHw() {
   }
 
   scoped_ptr<ChildFrame> child_frame = make_scoped_ptr(
-      new ChildFrame(frame.Pass(), viewport_rect_for_tile_priority,
+      new ChildFrame(frame.Pass(), viewport_rect_for_tile_priority.IsEmpty(),
                      transform_for_tile_priority, offscreen_pre_raster_,
                      parent_draw_constraints.is_layer));
 
@@ -319,15 +318,19 @@ skia::RefPtr<SkPicture> BrowserViewRenderer::CapturePicture(int width,
     return skia::AdoptRef(emptyRecorder.endRecording());
   }
 
-  // Reset scroll back to the origin, will go back to the old
-  // value when scroll_reset is out of scope.
-  base::AutoReset<gfx::Vector2dF> scroll_reset(&scroll_offset_dip_,
-                                               gfx::Vector2dF());
-
   SkPictureRecorder recorder;
   SkCanvas* rec_canvas = recorder.beginRecording(width, height, NULL, 0);
-  if (compositor_)
-    CompositeSW(rec_canvas);
+  if (compositor_) {
+    {
+      // Reset scroll back to the origin, will go back to the old
+      // value when scroll_reset is out of scope.
+      base::AutoReset<gfx::Vector2dF> scroll_reset(&scroll_offset_dip_,
+                                                   gfx::Vector2dF());
+      compositor_->DidChangeRootLayerScrollOffset();
+      CompositeSW(rec_canvas);
+    }
+    compositor_->DidChangeRootLayerScrollOffset();
+  }
   return skia::AdoptRef(recorder.endRecording());
 }
 
@@ -414,6 +417,16 @@ void BrowserViewRenderer::OnDetachedFromWindow() {
   UpdateCompositorIsActive();
 }
 
+void BrowserViewRenderer::OnComputeScroll(base::TimeTicks animation_time) {
+  if (pending_fling_animation_.is_null())
+    return;
+  TRACE_EVENT0("android_webview", "BrowserViewRenderer::OnComputeScroll");
+  DCHECK(!pending_fling_animation_.is_null());
+  AnimationCallback animation = pending_fling_animation_;
+  pending_fling_animation_.Reset();
+  animation.Run(animation_time);
+}
+
 void BrowserViewRenderer::ReleaseHardware() {
   DCHECK(hardware_enabled_);
   ReturnUnusedResource(shared_renderer_state_.PassUncommittedFrameOnUI());
@@ -450,6 +463,7 @@ void BrowserViewRenderer::DidDestroyCompositor(
     content::SynchronousCompositor* compositor) {
   TRACE_EVENT0("android_webview", "BrowserViewRenderer::DidDestroyCompositor");
   DCHECK(compositor_);
+  compositor_->SetIsActive(false);
   compositor_ = NULL;
 }
 
@@ -550,8 +564,8 @@ gfx::Vector2dF BrowserViewRenderer::GetTotalRootLayerScrollOffset() {
   return scroll_offset_dip_;
 }
 
-bool BrowserViewRenderer::IsExternalFlingActive() const {
-  return client_->IsFlingActive();
+bool BrowserViewRenderer::IsExternalScrollActive() const {
+  return client_->IsSmoothScrollingActive();
 }
 
 void BrowserViewRenderer::UpdateRootLayerState(
@@ -605,6 +619,15 @@ BrowserViewRenderer::RootLayerStateAsValue(
   return state;
 }
 
+void BrowserViewRenderer::SetNeedsAnimateScroll(
+    const AnimationCallback& scroll_animation) {
+  pending_fling_animation_ = scroll_animation;
+  // No need to reschedule the fallback tick here because the compositor is
+  // fine with the animation not being ticked. The invalidate could happen some
+  // time later, or not at all.
+  client_->PostInvalidate();
+}
+
 void BrowserViewRenderer::DidOverscroll(gfx::Vector2dF accumulated_overscroll,
                                         gfx::Vector2dF latest_overscroll_delta,
                                         gfx::Vector2dF current_fling_velocity) {
@@ -617,7 +640,10 @@ void BrowserViewRenderer::DidOverscroll(gfx::Vector2dF accumulated_overscroll,
       scaled_overscroll_delta + overscroll_rounding_error_);
   overscroll_rounding_error_ =
       scaled_overscroll_delta - rounded_overscroll_delta;
-  client_->DidOverscroll(rounded_overscroll_delta);
+  gfx::Vector2dF fling_velocity_pixels =
+      gfx::ScaleVector2d(current_fling_velocity, physical_pixel_scale);
+
+  client_->DidOverscroll(rounded_overscroll_delta, fling_velocity_pixels);
 }
 
 void BrowserViewRenderer::PostInvalidate() {

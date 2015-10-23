@@ -32,7 +32,7 @@
 #include "wtf/Noncopyable.h"
 #include "wtf/OwnPtr.h"
 
-class SkBitmap;
+class SkImage;
 
 namespace blink {
 
@@ -42,23 +42,10 @@ class IntPoint;
 class IntSize;
 class SharedBuffer;
 
-// This is a helper class used by BitmapImage only. If you need an image
-// decoder then you should look into
-// Source/platform/image-decoders/ImageDecoder.h.
 class PLATFORM_EXPORT ImageSource {
     WTF_MAKE_NONCOPYABLE(ImageSource);
 public:
-    enum AlphaOption {
-        AlphaPremultiplied,
-        AlphaNotPremultiplied
-    };
-
-    enum GammaAndColorProfileOption {
-        GammaAndColorProfileApplied,
-        GammaAndColorProfileIgnored
-    };
-
-    ImageSource(AlphaOption alphaOption = AlphaPremultiplied, GammaAndColorProfileOption gammaAndColorProfileOption = GammaAndColorProfileApplied);
+    ImageSource();
     ~ImageSource();
 
     // Tells the ImageSource that the Image no longer cares about decoded frame
@@ -94,14 +81,13 @@ public:
 
     size_t frameCount() const;
 
-    // Attempts to create the requested frame if necessary, and sets the
-    // SkBitmap outparam to the associated bitmap.  Returns whether a valid
-    // bitmap was set.
-    bool createFrameAtIndex(size_t, SkBitmap*);
+    // Attempts to create the requested frame.
+    PassRefPtr<SkImage> createFrameAtIndex(size_t);
 
     float frameDurationAtIndex(size_t) const;
     bool frameHasAlphaAtIndex(size_t) const; // Whether or not the frame actually used any alpha.
     bool frameIsCompleteAtIndex(size_t) const; // Whether or not the frame is fully received.
+    bool frameIsLazyDecodedAtIndex(size_t) const; // Whether or not the frame is lazy-decoded.
     ImageOrientation orientationAtIndex(size_t) const; // EXIF image orientation
 
     // Returns the number of bytes in the decoded frame. May return 0 if the
@@ -110,9 +96,6 @@ public:
 
 private:
     OwnPtr<DeferredImageDecoder> m_decoder;
-
-    AlphaOption m_alphaOption;
-    GammaAndColorProfileOption m_gammaAndColorProfileOption;
 };
 
 } // namespace blink

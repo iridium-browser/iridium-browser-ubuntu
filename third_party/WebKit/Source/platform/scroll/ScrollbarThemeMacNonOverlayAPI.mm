@@ -56,20 +56,11 @@ static int cThumbMinLength[] = { 26, 20 };
 static int cOuterButtonLength[] = { 16, 14 }; // The outer button in a double button pair is a bit bigger.
 static int cOuterButtonOverlap = 2;
 
-static ScrollbarButtonsPlacement gButtonPlacement = ScrollbarButtonsDoubleEnd;
+static ScrollbarButtonsPlacement gButtonPlacement = ScrollbarButtonsPlacementDoubleEnd;
 
-void ScrollbarThemeMacNonOverlayAPI::updateButtonPlacement()
+void ScrollbarThemeMacNonOverlayAPI::updateButtonPlacement(ScrollbarButtonsPlacement buttonPlacement)
 {
-    NSString *buttonPlacement = [[NSUserDefaults standardUserDefaults] objectForKey:@"AppleScrollBarVariant"];
-    if ([buttonPlacement isEqualToString:@"Single"])
-        gButtonPlacement = ScrollbarButtonsSingle;
-    else if ([buttonPlacement isEqualToString:@"DoubleMin"])
-        gButtonPlacement = ScrollbarButtonsDoubleStart;
-    else if ([buttonPlacement isEqualToString:@"DoubleBoth"])
-        gButtonPlacement = ScrollbarButtonsDoubleBoth;
-    else {
-        gButtonPlacement = ScrollbarButtonsDoubleEnd;
-    }
+    gButtonPlacement = buttonPlacement;
 }
 
 // Override ScrollbarThemeMacCommon::paint() to add support for the following:
@@ -79,9 +70,10 @@ void ScrollbarThemeMacNonOverlayAPI::updateButtonPlacement()
 bool ScrollbarThemeMacNonOverlayAPI::paint(ScrollbarThemeClient* scrollbar, GraphicsContext* context, const IntRect& damageRect)
 {
     DisplayItem::Type displayItemType = scrollbar->orientation() == HorizontalScrollbar ? DisplayItem::ScrollbarHorizontal : DisplayItem::ScrollbarVertical;
-    DrawingRecorder recorder(*context, *scrollbar, displayItemType, scrollbar->frameRect());
-    if (recorder.canUseCachedDrawing())
+    if (DrawingRecorder::useCachedDrawingIfPossible(*context, *scrollbar, displayItemType))
         return true;
+
+    DrawingRecorder recorder(*context, *scrollbar, displayItemType, scrollbar->frameRect());
 
     // Get the tickmarks for the frameview.
     Vector<IntRect> tickmarks;
@@ -114,8 +106,8 @@ bool ScrollbarThemeMacNonOverlayAPI::paint(ScrollbarThemeClient* scrollbar, Grap
 
     // The Aqua scrollbar is buggy when rotated and scaled.  We will just draw into a bitmap if we detect a scale or rotation.
     bool canDrawDirectly = currentCTM.a == 1.0f && currentCTM.b == 0.0f && currentCTM.c == 0.0f && (currentCTM.d == 1.0f || currentCTM.d == -1.0f);
-    GraphicsContext* drawingContext = context;
     OwnPtr<ImageBuffer> imageBuffer;
+    SkCanvas* drawingCanvas;
     if (!canDrawDirectly) {
         trackInfo.bounds = IntRect(IntPoint(), scrollbar->frameRect().size());
 
@@ -127,14 +119,16 @@ bool ScrollbarThemeMacNonOverlayAPI::paint(ScrollbarThemeClient* scrollbar, Grap
         if (!imageBuffer)
             return true;
 
-        drawingContext = imageBuffer->context();
+        drawingCanvas = imageBuffer->canvas();
+    } else {
+        drawingCanvas = canvas;
     }
 
     // Draw the track and its thumb.
     gfx::SkiaBitLocker bitLocker(
-        drawingContext->canvas(),
+        drawingCanvas,
         ThemeMac::inflateRectForAA(scrollbar->frameRect()),
-        drawingContext->deviceScaleFactor());
+        canDrawDirectly ? context->deviceScaleFactor() : 1.0f);
     CGContextRef cgContext = bitLocker.cgContext();
     HIThemeDrawTrack(&trackInfo, 0, cgContext, kHIThemeOrientationNormal);
 
@@ -148,12 +142,14 @@ bool ScrollbarThemeMacNonOverlayAPI::paint(ScrollbarThemeClient* scrollbar, Grap
     // Inset a bit.
     tickmarkTrackRect.setX(tickmarkTrackRect.x() + 2);
     tickmarkTrackRect.setWidth(tickmarkTrackRect.width() - 5);
-    paintGivenTickmarks(drawingContext, scrollbar, tickmarkTrackRect, tickmarks);
+    paintGivenTickmarks(drawingCanvas, scrollbar, tickmarkTrackRect, tickmarks);
 
     if (!canDrawDirectly) {
         ASSERT(imageBuffer);
-        context->drawImageBuffer(imageBuffer.get(),
-            FloatRect(scrollbar->frameRect().location(), imageBuffer->size()));
+        if (!context->contextDisabled()) {
+            imageBuffer->draw(context, FloatRect(scrollbar->frameRect().location(), imageBuffer->size()),
+                nullptr, SkXfermode::kSrcOver_Mode);
+        }
     }
 
     return true;
@@ -171,7 +167,7 @@ ScrollbarButtonsPlacement ScrollbarThemeMacNonOverlayAPI::buttonsPlacement() con
 
 bool ScrollbarThemeMacNonOverlayAPI::hasButtons(ScrollbarThemeClient* scrollbar)
 {
-    return scrollbar->enabled() && buttonsPlacement() != ScrollbarButtonsNone
+    return scrollbar->enabled() && buttonsPlacement() != ScrollbarButtonsPlacementNone
              && (scrollbar->orientation() == HorizontalScrollbar
              ? scrollbar->width()
              : scrollbar->height()) >= 2 * (cRealButtonLength[scrollbar->controlSize()] - cButtonHitInset[scrollbar->controlSize()]);
@@ -187,7 +183,7 @@ bool ScrollbarThemeMacNonOverlayAPI::hasThumb(ScrollbarThemeClient* scrollbar)
 
 static IntRect buttonRepaintRect(const IntRect& buttonRect, ScrollbarOrientation orientation, ScrollbarControlSize controlSize, bool start)
 {
-    ASSERT(gButtonPlacement != ScrollbarButtonsNone);
+    ASSERT(gButtonPlacement != ScrollbarButtonsPlacementNone);
 
     IntRect paintRect(buttonRect);
     if (orientation == HorizontalScrollbar) {
@@ -207,14 +203,14 @@ IntRect ScrollbarThemeMacNonOverlayAPI::backButtonRect(ScrollbarThemeClient* scr
 {
     IntRect result;
 
-    if (part == BackButtonStartPart && (buttonsPlacement() == ScrollbarButtonsNone || buttonsPlacement() == ScrollbarButtonsDoubleEnd))
+    if (part == BackButtonStartPart && (buttonsPlacement() == ScrollbarButtonsPlacementNone || buttonsPlacement() == ScrollbarButtonsPlacementDoubleEnd))
         return result;
 
-    if (part == BackButtonEndPart && (buttonsPlacement() == ScrollbarButtonsNone || buttonsPlacement() == ScrollbarButtonsDoubleStart || buttonsPlacement() == ScrollbarButtonsSingle))
+    if (part == BackButtonEndPart && (buttonsPlacement() == ScrollbarButtonsPlacementNone || buttonsPlacement() == ScrollbarButtonsPlacementDoubleStart || buttonsPlacement() == ScrollbarButtonsPlacementSingle))
         return result;
 
     int thickness = scrollbarThickness(scrollbar->controlSize());
-    bool outerButton = part == BackButtonStartPart && (buttonsPlacement() == ScrollbarButtonsDoubleStart || buttonsPlacement() == ScrollbarButtonsDoubleBoth);
+    bool outerButton = part == BackButtonStartPart && (buttonsPlacement() == ScrollbarButtonsPlacementDoubleStart || buttonsPlacement() == ScrollbarButtonsPlacementDoubleBoth);
     if (outerButton) {
         if (scrollbar->orientation() == HorizontalScrollbar)
             result = IntRect(scrollbar->x(), scrollbar->y(), cOuterButtonLength[scrollbar->controlSize()] + (painting ? cOuterButtonOverlap : 0), thickness);
@@ -241,17 +237,17 @@ IntRect ScrollbarThemeMacNonOverlayAPI::forwardButtonRect(ScrollbarThemeClient* 
 {
     IntRect result;
 
-    if (part == ForwardButtonEndPart && (buttonsPlacement() == ScrollbarButtonsNone || buttonsPlacement() == ScrollbarButtonsDoubleStart))
+    if (part == ForwardButtonEndPart && (buttonsPlacement() == ScrollbarButtonsPlacementNone || buttonsPlacement() == ScrollbarButtonsPlacementDoubleStart))
         return result;
 
-    if (part == ForwardButtonStartPart && (buttonsPlacement() == ScrollbarButtonsNone || buttonsPlacement() == ScrollbarButtonsDoubleEnd || buttonsPlacement() == ScrollbarButtonsSingle))
+    if (part == ForwardButtonStartPart && (buttonsPlacement() == ScrollbarButtonsPlacementNone || buttonsPlacement() == ScrollbarButtonsPlacementDoubleEnd || buttonsPlacement() == ScrollbarButtonsPlacementSingle))
         return result;
 
     int thickness = scrollbarThickness(scrollbar->controlSize());
     int outerButtonLength = cOuterButtonLength[scrollbar->controlSize()];
     int buttonLength = cButtonLength[scrollbar->controlSize()];
 
-    bool outerButton = part == ForwardButtonEndPart && (buttonsPlacement() == ScrollbarButtonsDoubleEnd || buttonsPlacement() == ScrollbarButtonsDoubleBoth);
+    bool outerButton = part == ForwardButtonEndPart && (buttonsPlacement() == ScrollbarButtonsPlacementDoubleEnd || buttonsPlacement() == ScrollbarButtonsPlacementDoubleBoth);
     if (outerButton) {
         if (scrollbar->orientation() == HorizontalScrollbar) {
             result = IntRect(scrollbar->x() + scrollbar->width() - outerButtonLength, scrollbar->y(), outerButtonLength, thickness);
@@ -290,17 +286,17 @@ IntRect ScrollbarThemeMacNonOverlayAPI::trackRect(ScrollbarThemeClient* scrollba
     int buttonLength = cButtonLength[scrollbar->controlSize()];
     int doubleButtonLength = outerButtonLength + buttonLength;
     switch (buttonsPlacement()) {
-        case ScrollbarButtonsSingle:
+        case ScrollbarButtonsPlacementSingle:
             startWidth = buttonLength;
             endWidth = buttonLength;
             break;
-        case ScrollbarButtonsDoubleStart:
+        case ScrollbarButtonsPlacementDoubleStart:
             startWidth = doubleButtonLength;
             break;
-        case ScrollbarButtonsDoubleEnd:
+        case ScrollbarButtonsPlacementDoubleEnd:
             endWidth = doubleButtonLength;
             break;
-        case ScrollbarButtonsDoubleBoth:
+        case ScrollbarButtonsPlacementDoubleBoth:
             startWidth = doubleButtonLength;
             endWidth = doubleButtonLength;
             break;

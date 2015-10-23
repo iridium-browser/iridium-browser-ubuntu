@@ -35,8 +35,7 @@
 #include "core/inspector/InjectedScript.h"
 #include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InjectedScriptNative.h"
-#include "core/inspector/JSONParser.h"
-#include "platform/JSONValues.h"
+#include "core/inspector/RemoteObjectId.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebData.h"
 #include "wtf/PassOwnPtr.h"
@@ -68,9 +67,6 @@ InjectedScriptManager::~InjectedScriptManager()
 DEFINE_TRACE(InjectedScriptManager)
 {
     visitor->trace(m_injectedScriptHost);
-#if ENABLE(OILPAN)
-    visitor->trace(m_callbackDataSet);
-#endif
 }
 
 void InjectedScriptManager::disconnect()
@@ -106,16 +102,11 @@ int InjectedScriptManager::injectedScriptIdFor(ScriptState* scriptState)
     return id;
 }
 
-InjectedScript InjectedScriptManager::injectedScriptForObjectId(const String& objectId)
+InjectedScript InjectedScriptManager::findInjectedScript(RemoteObjectIdBase* objectId) const
 {
-    RefPtr<JSONValue> parsedObjectId = parseJSON(objectId);
-    if (parsedObjectId && parsedObjectId->type() == JSONValue::TypeObject) {
-        long injectedScriptId = 0;
-        bool success = parsedObjectId->asObject()->getNumber("injectedScriptId", &injectedScriptId);
-        if (success)
-            return m_idToInjectedScript.get(injectedScriptId);
-    }
-    return InjectedScript();
+    if (!objectId)
+        return InjectedScript();
+    return m_idToInjectedScript.get(objectId->contextId());
 }
 
 void InjectedScriptManager::discardInjectedScripts()
@@ -186,28 +177,6 @@ InjectedScript InjectedScriptManager::injectedScriptFor(ScriptState* inspectedSc
         result.setCustomObjectFormatterEnabled(m_customObjectFormatterEnabled);
     m_idToInjectedScript.set(id, result);
     return result;
-}
-
-PassOwnPtrWillBeRawPtr<InjectedScriptManager::CallbackData> InjectedScriptManager::CallbackData::create(InjectedScriptManager* manager)
-{
-    return adoptPtrWillBeNoop(new CallbackData(manager));
-}
-
-InjectedScriptManager::CallbackData::CallbackData(InjectedScriptManager* manager)
-    : injectedScriptManager(manager)
-{
-}
-
-void InjectedScriptManager::CallbackData::dispose()
-{
-    // Promptly release the ScopedPersistent<>.
-    handle.clear();
-}
-
-DEFINE_TRACE(InjectedScriptManager::CallbackData)
-{
-    visitor->trace(host);
-    visitor->trace(injectedScriptManager);
 }
 
 } // namespace blink

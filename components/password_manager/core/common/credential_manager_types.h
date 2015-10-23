@@ -24,7 +24,7 @@ const size_t kMaxFederations = 50u;
 
 enum class CredentialType {
   CREDENTIAL_TYPE_EMPTY = 0,
-  CREDENTIAL_TYPE_LOCAL,
+  CREDENTIAL_TYPE_PASSWORD,
   CREDENTIAL_TYPE_FEDERATED,
   CREDENTIAL_TYPE_LAST = CREDENTIAL_TYPE_FEDERATED
 };
@@ -44,11 +44,11 @@ struct CredentialInfo {
   // property.
   base::string16 name;
 
-  // The address of a user's avatar. Corresponds to WebCredential's avatar
-  // property.
-  GURL avatar;
+  // The address of this credential's icon (e.g. the user's avatar).
+  // Corresponds to WebCredential's icon property.
+  GURL icon;
 
-  // Corresponds to WebLocalCredential's password property.
+  // Corresponds to WebPasswordCredential's password property.
   base::string16 password;
 
   // Corresponds to WebFederatedCredential's federation property, which is an

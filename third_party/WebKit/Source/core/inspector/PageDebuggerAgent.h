@@ -31,7 +31,7 @@
 #ifndef PageDebuggerAgent_h
 #define PageDebuggerAgent_h
 
-#include "bindings/core/v8/MainThreadDebugger.h"
+#include "core/CoreExport.h"
 #include "core/inspector/InspectorDebuggerAgent.h"
 #include "core/inspector/InspectorOverlay.h"
 
@@ -45,33 +45,29 @@ class DocumentLoader;
 class InspectorPageAgent;
 class MainThreadDebugger;
 
-class PageDebuggerAgent final
+class CORE_EXPORT PageDebuggerAgent final
     : public InspectorDebuggerAgent
     , public InspectorOverlay::Listener {
     WTF_MAKE_NONCOPYABLE(PageDebuggerAgent);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(PageDebuggerAgent);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PageDebuggerAgent);
 public:
-    static PassOwnPtrWillBeRawPtr<PageDebuggerAgent> create(MainThreadDebugger*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*, int debuggerId);
+    static PassOwnPtrWillBeRawPtr<PageDebuggerAgent> create(MainThreadDebugger*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*);
     ~PageDebuggerAgent() override;
     DECLARE_VIRTUAL_TRACE();
 
     void enable(ErrorString*) final;
+    void restore() final;
     void compileScript(ErrorString*, const String& expression, const String& sourceURL, bool persistScript, const int* executionContextId, TypeBuilder::OptOutput<TypeBuilder::Debugger::ScriptId>*, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override;
     void runScript(ErrorString*, const TypeBuilder::Debugger::ScriptId&, const int* executionContextId, const String* objectGroup, const bool* doNotPauseOnExceptionsAndMuteConsole, RefPtr<TypeBuilder::Runtime::RemoteObject>& result, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override;
 
     void didStartProvisionalLoad(LocalFrame*);
     void didClearDocumentOfWindowObject(LocalFrame*);
-    void didCommitLoadForLocalFrame(LocalFrame*) override;
-
-protected:
-    void enable() override;
-    void disable() override;
 
 private:
-    void startListeningScriptDebugServer() override;
-    void stopListeningScriptDebugServer() override;
-    ScriptDebugServer& scriptDebugServer() override;
+    // V8DebuggerAgent::Client implemntation.
+    void debuggerAgentEnabled() override;
+    void debuggerAgentDisabled() override;
     void muteConsole() override;
     void unmuteConsole() override;
 
@@ -79,14 +75,12 @@ private:
     void overlayResumed() override;
     void overlaySteppedOver() override;
 
-    InjectedScript injectedScriptForEval(ErrorString*, const int* executionContextId) override;
+    InjectedScript defaultInjectedScript() override;
     bool canExecuteScripts() const;
 
-    PageDebuggerAgent(MainThreadDebugger*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*, int debuggerId);
-    RawPtrWillBeMember<MainThreadDebugger> m_mainThreadDebugger;
+    PageDebuggerAgent(MainThreadDebugger*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*);
     RawPtrWillBeMember<InspectorPageAgent> m_pageAgent;
     RawPtrWillBeMember<InspectorOverlay> m_overlay;
-    int m_debuggerId;
     HashMap<String, String> m_compiledScriptURLs;
 };
 

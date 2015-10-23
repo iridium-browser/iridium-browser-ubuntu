@@ -9,7 +9,7 @@
 #define SkDiscardablePixelRef_DEFINED
 
 #include "SkDiscardableMemory.h"
-#include "SkImageGenerator.h"
+#include "SkImageGeneratorPriv.h"
 #include "SkImageInfo.h"
 #include "SkPixelRef.h"
 
@@ -20,7 +20,10 @@
  */
 class SkDiscardablePixelRef : public SkPixelRef {
 public:
-    SK_DECLARE_INST_COUNT(SkDiscardablePixelRef)
+    
+    SkDiscardableMemory* diagnostic_only_getDiscardable() const override {
+        return fDiscardableMemory;
+    }
 
 protected:
     ~SkDiscardablePixelRef();
@@ -32,6 +35,8 @@ protected:
     SkData* onRefEncodedData() override {
         return fGenerator->refEncodedData();
     }
+
+    bool onIsLazyGenerated() const override { return true; }
 
 private:
     SkImageGenerator* const fGenerator;
@@ -61,7 +66,7 @@ private:
         return fGenerator->getYUV8Planes(sizes, planes, rowBytes, colorSpace);
     }
 
-    friend bool SkInstallDiscardablePixelRef(SkImageGenerator*, SkBitmap*,
+    friend bool SkInstallDiscardablePixelRef(SkImageGenerator*, const SkIRect*, SkBitmap*,
                                              SkDiscardableMemory::Factory*);
 
     typedef SkPixelRef INHERITED;

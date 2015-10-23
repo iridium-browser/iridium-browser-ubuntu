@@ -34,7 +34,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/interstitials/security_interstitial_metrics_helper.h"
+#include "chrome/browser/interstitials/chrome_metrics_helper.h"
 #include "chrome/browser/interstitials/security_interstitial_page.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "content/public/browser/interstitial_page_delegate.h"
@@ -122,7 +122,7 @@ class SafeBrowsingBlockingPage : public SecurityInterstitialPage {
   // pending malware details object, we look at the user's
   // preferences, and if the option to send malware details is
   // enabled, the report is scheduled to be sent on the |ui_manager_|.
-  void FinishMalwareDetails(int64 delay_ms);
+  void FinishMalwareDetails(int64 delay_ms, bool did_proceed, int num_visits);
 
   // A list of SafeBrowsingUIManager::UnsafeResource for a tab that the user
   // should be warned about.  They are queued when displaying more than one
@@ -186,6 +186,7 @@ class SafeBrowsingBlockingPage : public SecurityInterstitialPage {
   void PopulatePhishingLoadTimeData(base::DictionaryValue* load_time_data);
 
   std::string GetMetricPrefix() const;
+  std::string GetExtraMetricsSuffix() const;
   std::string GetRapporPrefix() const;
   std::string GetSamplingEventName() const;
 

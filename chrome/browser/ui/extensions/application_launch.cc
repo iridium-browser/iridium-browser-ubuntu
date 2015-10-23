@@ -160,13 +160,13 @@ ui::WindowShowState DetermineWindowShowState(
 
 #if defined(USE_ASH)
   // In ash, LAUNCH_TYPE_FULLSCREEN launches in a maximized app window and
-  // LAUNCH_TYPE_WINDOW launches in a normal app window.
+  // LAUNCH_TYPE_WINDOW launches in a default app window.
   extensions::LaunchType launch_type =
       extensions::GetLaunchType(ExtensionPrefs::Get(profile), extension);
   if (launch_type == extensions::LAUNCH_TYPE_FULLSCREEN)
     return ui::SHOW_STATE_MAXIMIZED;
   else if (launch_type == extensions::LAUNCH_TYPE_WINDOW)
-    return ui::SHOW_STATE_NORMAL;
+    return ui::SHOW_STATE_DEFAULT;
 #endif
 
   return ui::SHOW_STATE_DEFAULT;
@@ -333,6 +333,12 @@ WebContents* OpenEnabledApplication(const AppLaunchParams& params) {
   UMA_HISTOGRAM_ENUMERATION("Extensions.HostedAppLaunchContainer",
                             params.container,
                             extensions::NUM_LAUNCH_CONTAINERS);
+
+  if (extension->from_bookmark()) {
+    UMA_HISTOGRAM_ENUMERATION("Extensions.BookmarkAppLaunchContainer",
+                              params.container,
+                              extensions::NUM_LAUNCH_CONTAINERS);
+  }
 
   // Record v1 app launch. Platform app launch is recorded when dispatching
   // the onLaunched event.

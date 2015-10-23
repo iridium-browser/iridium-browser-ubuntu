@@ -43,17 +43,6 @@ remoting.BufferedSignalStrategy.prototype.sendMessage = function(message) {
 };
 
 /**
- * Send any messages accumulated during connection set-up.
- *
- * @param {remoting.LogToServer} logToServer The LogToServer instance for the
- *     connection.
- */
-remoting.BufferedSignalStrategy.prototype.sendConnectionSetupResults =
-    function(logToServer) {
-  this.underlying_.sendConnectionSetupResults(logToServer);
-};
-
-/**
  * If the underlying implementation is connected, flush all pending messages.
  * @private
  */
@@ -72,36 +61,31 @@ remoting.BufferedSignalStrategy.prototype.flush_ = function() {
 
 remoting.BufferedSignalStrategy.prototype.setStateChangedCallback =
     function(onStateChangedCallback) {
-  base.debug.assert(false);
+  console.error('Unexpected setStateChangedCallback().');
 };
 
 remoting.BufferedSignalStrategy.prototype.setIncomingStanzaCallback =
     function(onIncomingStanzaCallback) {
-  base.debug.assert(false);
+  console.error('Unexpected setIncomingStanzaCallback().');
 };
 
 remoting.BufferedSignalStrategy.prototype.connect =
     function(server, username, authToken) {
-  base.debug.assert(false);
-};
-
-remoting.BufferedSignalStrategy.prototype.sendConnectionSetupResults =
-    function(logToServer) {
-  base.debug.assert(false);
+  console.error('Unexpected connect().');
 };
 
 remoting.BufferedSignalStrategy.prototype.getState = function() {
-  base.debug.assert(false);
+  console.error('Unexpected getState().');
 };
 
 remoting.BufferedSignalStrategy.prototype.getError = function() {
-  base.debug.assert(false);
+  console.error('Unexpected getError().');
 };
 
 remoting.BufferedSignalStrategy.prototype.getJid = function() {
-  base.debug.assert(false);
+  console.error('Unexpected getJid().');
 };
 
 remoting.BufferedSignalStrategy.prototype.getType = function() {
-  base.debug.assert(false);
+  console.error('Unexpected getType().');
 };

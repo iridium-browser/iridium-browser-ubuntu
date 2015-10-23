@@ -8,6 +8,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 
+import org.chromium.base.annotations.CalledByNative;
+
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
@@ -29,6 +31,7 @@ public class ThreadUtils {
         }
     }
 
+    @VisibleForTesting
     public static void setUiThread(Looper looper) {
         synchronized (sLock) {
             if (sUiThreadHandler != null && sUiThreadHandler.getLooper() != looper) {
@@ -80,6 +83,7 @@ public class ThreadUtils {
      * @param c The Callable to run
      * @return The result of the callable
      */
+    @VisibleForTesting
     public static <T> T runOnUiThreadBlockingNoException(Callable<T> c) {
         try {
             return runOnUiThreadBlocking(c);

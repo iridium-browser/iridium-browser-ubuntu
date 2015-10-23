@@ -22,7 +22,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "base/time/time.h"
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -38,7 +37,6 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
@@ -47,6 +45,8 @@
 #include "components/app_modal/app_modal_dialog_queue.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/history/core/browser/history_service_observer.h"
+#include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/download_item.h"
@@ -144,17 +144,6 @@ bool GetCurrentTabTitle(const Browser* browser, base::string16* title) {
     return false;
   title->assign(last_entry->GetTitleForDisplay(std::string()));
   return true;
-}
-
-Browser* OpenURLOffTheRecord(Profile* profile, const GURL& url) {
-  chrome::HostDesktopType active_desktop = chrome::GetActiveDesktop();
-  chrome::OpenURLOffTheRecord(profile, url, active_desktop);
-  Browser* browser = chrome::FindTabbedBrowser(
-      profile->GetOffTheRecordProfile(), false, active_desktop);
-  content::TestNavigationObserver observer(
-      browser->tab_strip_model()->GetActiveWebContents());
-  observer.Wait();
-  return browser;
 }
 
 void NavigateToURL(chrome::NavigateParams* params) {

@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
@@ -37,7 +39,7 @@ void SignalEvent(base::WaitableEvent* e) {
 
 bool WaitForExistingTasksOnLoop(base::MessageLoop* loop) {
   base::WaitableEvent e(true, false);
-  loop->PostTask(FROM_HERE, base::Bind(&SignalEvent, &e));
+  loop->task_runner()->PostTask(FROM_HERE, base::Bind(&SignalEvent, &e));
   // Timeout stolen from StatusChangeChecker::GetTimeoutDuration().
   return e.TimedWait(base::TimeDelta::FromSeconds(45));
 }
@@ -63,12 +65,12 @@ IN_PROC_BROWSER_TEST_F(SingleClientDirectorySyncTest,
   ProfileSyncService* sync_service = GetSyncService(0);
   base::FilePath directory_path = sync_service->GetDirectoryPathForTest();
   ASSERT_TRUE(base::DirectoryExists(directory_path));
-  sync_service->StopAndSuppress();
-  sync_service->DisableForUser();
+  sync_service->RequestStop(ProfileSyncService::CLEAR_DATA);
 
   // Wait for StartupController::StartUp()'s tasks to finish.
   base::RunLoop run_loop;
-  base::MessageLoop::current()->PostTask(FROM_HERE, run_loop.QuitClosure());
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                run_loop.QuitClosure());
   run_loop.Run();
   // Wait for the directory deletion to finish.
   base::MessageLoop* sync_loop = sync_service->GetSyncLoopForTest();
@@ -106,7 +108,15 @@ IN_PROC_BROWSER_TEST_F(SingleClientDirectorySyncTest,
   // Write a bunch of bookmarks and flush the directory to ensure sync notices
   // the corruption. The key here is to force sync to actually write a lot of
   // data to its DB so it will see the corruption we introduced above.
-  const GURL url("https://www.google.com");
+  const GURL url(
+      "https://"
+      "www."
+      "gooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooogle.com");
   const bookmarks::BookmarkNode* top = bookmarks_helper::AddFolder(
       0, bookmarks_helper::GetOtherNode(0), 0, "top");
   for (int i = 0; i < kNumEntriesRequiredForCorruption; ++i) {

@@ -4,7 +4,7 @@
 
 #include "ash/wm/default_state.h"
 
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
@@ -31,6 +31,11 @@ namespace {
 // must be visible when the window is added to the workspace.
 const float kMinimumPercentOnScreenArea = 0.3f;
 
+// When a window that has restore bounds at least as large as a work area is
+// unmaximized, inset the bounds slightly so that they are not exactly the same.
+// This makes it easier to resize the window.
+const int kMaximizedWindowInset = 10;  // DIPs.
+
 bool IsMinimizedWindowState(const WindowStateType state_type) {
   return state_type == WINDOW_STATE_TYPE_MINIMIZED ||
          state_type == WINDOW_STATE_TYPE_DOCKED_MINIMIZED;
@@ -53,10 +58,10 @@ void MoveToDisplayForRestore(WindowState* window_state) {
   if (!display_area.Intersects(restore_bounds)) {
     const gfx::Display& display =
         Shell::GetScreen()->GetDisplayMatching(restore_bounds);
-    DisplayController* display_controller =
-        Shell::GetInstance()->display_controller();
+    WindowTreeHostManager* window_tree_host_manager =
+        Shell::GetInstance()->window_tree_host_manager();
     aura::Window* new_root =
-        display_controller->GetRootWindowForDisplayId(display.id());
+        window_tree_host_manager->GetRootWindowForDisplayId(display.id());
     if (new_root != window_state->window()->GetRootWindow()) {
       aura::Window* new_container =
           Shell::GetContainer(new_root, window_state->window()->parent()->id());
@@ -167,7 +172,7 @@ void CycleSnapDock(WindowState* window_state, WMEventType event) {
 }  // namespace;
 
 DefaultState::DefaultState(WindowStateType initial_state_type)
-    : state_type_(initial_state_type) {}
+    : state_type_(initial_state_type), stored_window_state_(nullptr) {}
 DefaultState::~DefaultState() {}
 
 void DefaultState::OnWMEvent(WindowState* window_state,
@@ -422,10 +427,8 @@ bool DefaultState::ProcessWorkspaceEvents(WindowState* window_state,
       // adjusted to have minimum visibility, because they are positioned by the
       // user and user should always be able to interact with them. Other
       // windows are positioned programmatically.
-      if (window_state->window()->type() != ui::wm::WINDOW_TYPE_NORMAL &&
-          window_state->window()->type() != ui::wm::WINDOW_TYPE_PANEL) {
+      if (!window_state->IsUserPositionable())
         return true;
-      }
 
       // Use entire display instead of workarea because the workarea can
       // be further shrunk by the docked area. The logic ensures 30%
@@ -645,10 +648,9 @@ void DefaultState::UpdateBoundsFromState(WindowState* window_state,
         if (previous_state_type == WINDOW_STATE_TYPE_MAXIMIZED &&
             bounds_in_parent.width() >= work_area_in_parent.width() &&
             bounds_in_parent.height() >= work_area_in_parent.height()) {
-          // Inset the bounds slightly so that they are not exactly same as
-          // the work area bounds and it is easier to resize the window.
           bounds_in_parent = work_area_in_parent;
-          bounds_in_parent.Inset(10, 10, 10, 10);
+          bounds_in_parent.Inset(kMaximizedWindowInset, kMaximizedWindowInset,
+                                 kMaximizedWindowInset, kMaximizedWindowInset);
         }
       } else {
         bounds_in_parent = window->bounds();

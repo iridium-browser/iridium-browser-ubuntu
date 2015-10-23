@@ -31,6 +31,7 @@
 #ifndef InspectorHeapProfilerAgent_h
 #define InspectorHeapProfilerAgent_h
 
+#include "core/CoreExport.h"
 #include "core/InspectorFrontend.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "wtf/Forward.h"
@@ -40,6 +41,10 @@
 #include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
 
+namespace v8 {
+class Isolate;
+}
+
 namespace blink {
 
 class InjectedScriptManager;
@@ -47,41 +52,40 @@ class HeapStatsUpdateTask;
 
 typedef String ErrorString;
 
-class InspectorHeapProfilerAgent final : public InspectorBaseAgent<InspectorHeapProfilerAgent, InspectorFrontend::HeapProfiler>, public InspectorBackendDispatcher::HeapProfilerCommandHandler {
+class CORE_EXPORT InspectorHeapProfilerAgent final : public InspectorBaseAgent<InspectorHeapProfilerAgent, InspectorFrontend::HeapProfiler>, public InspectorBackendDispatcher::HeapProfilerCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorHeapProfilerAgent);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(InspectorHeapProfilerAgent);
 public:
-    static PassOwnPtrWillBeRawPtr<InspectorHeapProfilerAgent> create(InjectedScriptManager*);
-    virtual ~InspectorHeapProfilerAgent();
+    static PassOwnPtrWillBeRawPtr<InspectorHeapProfilerAgent> create(v8::Isolate*, InjectedScriptManager*);
+    ~InspectorHeapProfilerAgent() override;
     DECLARE_VIRTUAL_TRACE();
 
-    virtual void collectGarbage(ErrorString*) override;
+    void collectGarbage(ErrorString*) override;
 
-    virtual void enable(ErrorString*) override;
-    virtual void startTrackingHeapObjects(ErrorString*, const bool* trackAllocations) override;
-    virtual void stopTrackingHeapObjects(ErrorString*, const bool* reportProgress) override;
+    void enable(ErrorString*) override;
+    void startTrackingHeapObjects(ErrorString*, const bool* trackAllocations) override;
+    void stopTrackingHeapObjects(ErrorString*, const bool* reportProgress) override;
 
     void disable(ErrorString*) override;
     void restore() override;
 
-    virtual void takeHeapSnapshot(ErrorString*, const bool* reportProgress) override;
+    void takeHeapSnapshot(ErrorString*, const bool* reportProgress) override;
 
-    virtual void getObjectByHeapObjectId(ErrorString*, const String& heapSnapshotObjectId, const String* objectGroup, RefPtr<TypeBuilder::Runtime::RemoteObject>& result) override;
-    virtual void addInspectedHeapObject(ErrorString*, const String& inspectedHeapObjectId) override;
-    virtual void getHeapObjectId(ErrorString*, const String& objectId, String* heapSnapshotObjectId) override;
+    void getObjectByHeapObjectId(ErrorString*, const String& heapSnapshotObjectId, const String* objectGroup, RefPtr<TypeBuilder::Runtime::RemoteObject>& result) override;
+    void addInspectedHeapObject(ErrorString*, const String& inspectedHeapObjectId) override;
+    void getHeapObjectId(ErrorString*, const String& objectId, String* heapSnapshotObjectId) override;
 
 private:
-    class HeapStatsStream;
     class HeapStatsUpdateTask;
 
-    explicit InspectorHeapProfilerAgent(InjectedScriptManager*);
+    InspectorHeapProfilerAgent(v8::Isolate*, InjectedScriptManager*);
 
     void requestHeapStatsUpdate();
-    void pushHeapStatsUpdate(const uint32_t* const data, const int size);
 
     void startTrackingHeapObjectsInternal(bool trackAllocations);
     void stopTrackingHeapObjectsInternal();
 
+    v8::Isolate* m_isolate;
     RawPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     OwnPtrWillBeMember<HeapStatsUpdateTask> m_heapStatsUpdateTask;
 };

@@ -37,12 +37,27 @@ gluShaderUtil.GLSLVersion = {
 };
 
 /**
+ * gluShaderUtil.isGLSLVersionSupported
+ * @param {WebGL2RenderingContext|WebGLRenderingContextBase} ctx
+ * @param {gluShaderUtil.GLSLVersion} version
+ * @return {boolean}
+ */
+gluShaderUtil.isGLSLVersionSupported = function(ctx, version) {
+    return version <= gluShaderUtil.getGLSLVersion(ctx);
+};
+
+/**
  * gluShaderUtil.getGLSLVersion - Returns a gluShaderUtil.GLSLVersion based on a given webgl context.
- * @param {WebGL2RenderingContext} gl
+ * @param {WebGL2RenderingContext|WebGLRenderingContextBase} gl
  * @return {gluShaderUtil.GLSLVersion}
  */
 gluShaderUtil.getGLSLVersion = function(gl) {
     var glslversion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+
+    // TODO: Versions are not yet well implemented... Firefox returns GLSL ES 1.0 in some cases,
+    // and Chromium returns GLSL ES 2.0 in some cases. Returning the right version for
+    // testing.
+    // return gluShaderUtil.GLSLVersion.V300_ES;
 
     if (glslversion.indexOf('WebGL GLSL ES 1.0') != -1) return gluShaderUtil.GLSLVersion.V100_ES;
     if (glslversion.indexOf('WebGL GLSL ES 3.0') != -1) return gluShaderUtil.GLSLVersion.V300_ES;
@@ -60,6 +75,25 @@ gluShaderUtil.getGLSLVersionDeclaration = function(version) {
     [
         '#version 100',
         '#version 300 es'
+    ];
+
+    if (version > s_decl.length - 1)
+        throw new Error('Unsupported GLSL version.');
+
+    return s_decl[version];
+};
+
+/**
+ * gluShaderUtil.getGLSLVersionString - Returns the same thing as
+ * getGLSLVersionDeclaration() but without the substring '#version'
+ * @param {gluShaderUtil.GLSLVersion} version
+ * @return {string}
+ */
+gluShaderUtil.getGLSLVersionString = function(version) {
+    /** @type {Array<string>} */ var s_decl =
+    [
+        '100',
+        '300 es'
     ];
 
     if (version > s_decl.length - 1)

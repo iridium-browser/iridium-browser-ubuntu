@@ -33,6 +33,7 @@
 
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/InspectorRuntimeAgent.h"
+#include "core/inspector/InspectorTaskRunner.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/Forward.h"
 #include "wtf/Noncopyable.h"
@@ -69,12 +70,13 @@ public:
     void dispose();
     void interruptAndDispatchInspectorCommands();
 
-    void pauseOnStart();
+    void workerContextInitialized(bool pauseOnStart);
 
 private:
     friend InstrumentingAgents* instrumentationForWorkerGlobalScope(WorkerGlobalScope*);
 
     // InspectorRuntimeAgent::Client implementation.
+    void pauseOnStart();
     void resumeStartup() override;
     bool isRunRequired() override;
 
@@ -83,7 +85,7 @@ private:
     OwnPtrWillBeMember<InspectorCompositeState> m_state;
     RefPtrWillBeMember<InstrumentingAgents> m_instrumentingAgents;
     OwnPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
-    OwnPtrWillBeMember<WorkerThreadDebugger> m_workerThreadDebugger;
+    OwnPtr<WorkerThreadDebugger> m_workerThreadDebugger;
     InspectorAgentRegistry m_agents;
     OwnPtr<InspectorFrontendChannel> m_frontendChannel;
     OwnPtr<InspectorFrontend> m_frontend;
@@ -91,6 +93,8 @@ private:
     RawPtrWillBeMember<WorkerDebuggerAgent> m_workerDebuggerAgent;
     OwnPtrWillBeMember<AsyncCallTracker> m_asyncCallTracker;
     RawPtrWillBeMember<WorkerRuntimeAgent> m_workerRuntimeAgent;
+    OwnPtr<InspectorTaskRunner> m_inspectorTaskRunner;
+    OwnPtr<InspectorTaskRunner::IgnoreInterruptsScope> m_beforeInitlizedScope;
     bool m_paused;
 };
 

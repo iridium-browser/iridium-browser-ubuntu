@@ -153,7 +153,7 @@ class PrintWebViewHelperTestBase : public content::RenderViewTest {
   }
 
   void PrintWithJavaScript() {
-    ExecuteJavaScript("window.print();");
+    ExecuteJavaScriptForTests("window.print();");
     ProcessPendingMessages();
   }
   // The renderer should be done calculating the number of rendered pages
@@ -172,7 +172,7 @@ class PrintWebViewHelperTestBase : public content::RenderViewTest {
     PrintHostMsg_DidGetPrintedPagesCount::Param post_page_count_param;
     PrintHostMsg_DidGetPrintedPagesCount::Read(page_cnt_msg,
                                                &post_page_count_param);
-    EXPECT_EQ(count, get<1>(post_page_count_param));
+    EXPECT_EQ(count, base::get<1>(post_page_count_param));
 #endif  // defined(OS_CHROMEOS)
   }
 
@@ -187,17 +187,11 @@ class PrintWebViewHelperTestBase : public content::RenderViewTest {
     PrintHostMsg_DidGetPreviewPageCount::Param post_page_count_param;
     PrintHostMsg_DidGetPreviewPageCount::Read(page_cnt_msg,
                                               &post_page_count_param);
-    EXPECT_EQ(count, get<0>(post_page_count_param).page_count);
+    EXPECT_EQ(count, base::get<0>(post_page_count_param).page_count);
   }
 
   // Verifies whether the pages printed or not.
   void VerifyPagesPrinted(bool printed) {
-#if defined(OS_CHROMEOS)
-    bool did_print_msg =
-        (render_thread_->sink().GetUniqueMessageMatching(
-             PrintHostMsg_TempFileForPrintingWritten::ID) != NULL);
-    ASSERT_EQ(printed, did_print_msg);
-#else
     const IPC::Message* print_msg =
         render_thread_->sink().GetUniqueMessageMatching(
             PrintHostMsg_DidPrintPage::ID);
@@ -206,9 +200,8 @@ class PrintWebViewHelperTestBase : public content::RenderViewTest {
     if (printed) {
       PrintHostMsg_DidPrintPage::Param post_did_print_page_param;
       PrintHostMsg_DidPrintPage::Read(print_msg, &post_did_print_page_param);
-      EXPECT_EQ(0, get<0>(post_did_print_page_param).page_number);
+      EXPECT_EQ(0, base::get<0>(post_did_print_page_param).page_number);
     }
-#endif  // defined(OS_CHROMEOS)
   }
 
 #if defined(ENABLE_BASIC_PRINTING)
@@ -411,7 +404,7 @@ struct TestPageData {
   const wchar_t* file;
 };
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_MACOSX) && defined(ENABLE_BASIC_PRINTING)
 const TestPageData kTestPages[] = {
     {
      "<html>"
@@ -424,23 +417,17 @@ const TestPageData kTestPages[] = {
      "<body style=\"background-color: white;\">"
      "<p style=\"font-family: arial;\">Hello World!</p>"
      "</body>",
-#if defined(OS_MACOSX)
-     // Mac printing code compensates for the WebKit scale factor while
-     // generating
-     // the metafile, so we expect smaller pages.
      1,
+     // Mac printing code compensates for the WebKit scale factor while
+     // generating the metafile, so we expect smaller pages. (On non-Mac
+     // platforms, this would be 675x900).
      600,
      780,
-#else
-     1,
-     675,
-     900,
-#endif
      NULL,
      NULL,
     },
 };
-#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+#endif  // defined(OS_MACOSX) && defined(ENABLE_BASIC_PRINTING)
 }  // namespace
 
 // TODO(estade): need to port MockPrinter to get this on Linux. This involves
@@ -543,9 +530,9 @@ class MAYBE_PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
     if (did_get_preview_msg) {
       PrintHostMsg_MetafileReadyForPrinting::Param preview_param;
       PrintHostMsg_MetafileReadyForPrinting::Read(preview_msg, &preview_param);
-      EXPECT_NE(0, get<0>(preview_param).document_cookie);
-      EXPECT_NE(0, get<0>(preview_param).expected_pages_count);
-      EXPECT_NE(0U, get<0>(preview_param).data_size);
+      EXPECT_NE(0, base::get<0>(preview_param).document_cookie);
+      EXPECT_NE(0, base::get<0>(preview_param).expected_pages_count);
+      EXPECT_NE(0U, base::get<0>(preview_param).data_size);
     }
   }
 
@@ -571,12 +558,12 @@ class MAYBE_PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
       if (msg->type() == PrintHostMsg_DidPreviewPage::ID) {
         PrintHostMsg_DidPreviewPage::Param page_param;
         PrintHostMsg_DidPreviewPage::Read(msg, &page_param);
-        if (get<0>(page_param).page_number == page_number) {
+        if (base::get<0>(page_param).page_number == page_number) {
           msg_found = true;
           if (generate_draft_pages)
-            EXPECT_NE(0U, get<0>(page_param).data_size);
+            EXPECT_NE(0U, base::get<0>(page_param).data_size);
           else
-            EXPECT_EQ(0U, get<0>(page_param).data_size);
+            EXPECT_EQ(0U, base::get<0>(page_param).data_size);
           break;
         }
       }
@@ -599,13 +586,13 @@ class MAYBE_PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
       PrintHostMsg_DidGetDefaultPageLayout::Param param;
       PrintHostMsg_DidGetDefaultPageLayout::Read(default_page_layout_msg,
                                                  &param);
-      EXPECT_EQ(content_width, get<0>(param).content_width);
-      EXPECT_EQ(content_height, get<0>(param).content_height);
-      EXPECT_EQ(margin_top, get<0>(param).margin_top);
-      EXPECT_EQ(margin_right, get<0>(param).margin_right);
-      EXPECT_EQ(margin_left, get<0>(param).margin_left);
-      EXPECT_EQ(margin_bottom, get<0>(param).margin_bottom);
-      EXPECT_EQ(page_has_print_css, get<2>(param));
+      EXPECT_EQ(content_width, base::get<0>(param).content_width);
+      EXPECT_EQ(content_height, base::get<0>(param).content_height);
+      EXPECT_EQ(margin_top, base::get<0>(param).margin_top);
+      EXPECT_EQ(margin_right, base::get<0>(param).margin_right);
+      EXPECT_EQ(margin_left, base::get<0>(param).margin_left);
+      EXPECT_EQ(margin_bottom, base::get<0>(param).margin_bottom);
+      EXPECT_EQ(page_has_print_css, base::get<2>(param));
     }
   }
 

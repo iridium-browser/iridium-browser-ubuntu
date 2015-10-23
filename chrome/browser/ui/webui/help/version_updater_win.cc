@@ -28,7 +28,8 @@ class VersionUpdaterWin : public VersionUpdater, public UpdateCheckDelegate {
  public:
   // |owner_widget| is the parent widget hosting the update check UI. Any UI
   // needed to install an update (e.g., a UAC prompt for a system-level install)
-  // will be parented to this widget.
+  // will be parented to this widget. |owner_widget| may be given a value of
+  // nullptr in which case the UAC prompt will be parented to the desktop.
   explicit VersionUpdaterWin(gfx::AcceleratedWidget owner_widget);
   ~VersionUpdaterWin() override;
 
@@ -42,13 +43,11 @@ class VersionUpdaterWin : public VersionUpdater, public UpdateCheckDelegate {
                          const base::string16& new_version) override;
   void OnUpgradeComplete(const base::string16& new_version) override;
   void OnError(GoogleUpdateErrorCode error_code,
-               const base::string16& error_message,
+               const base::string16& html_error_message,
                const base::string16& new_version) override;
 
  private:
-#if defined(GOOGLE_CHROME_BUILD)
   void BeginUpdateCheckOnFileThread(bool install_update_if_possible);
-#endif  // GOOGLE_CHROME_BUILD
 
   // A task run on the UI thread with the result of checking for a pending
   // restart.
@@ -75,7 +74,6 @@ VersionUpdaterWin::~VersionUpdaterWin() {
 
 void VersionUpdaterWin::CheckForUpdate(const StatusCallback& callback) {
   // There is no supported integration with Google Update for Chromium.
-#if defined(GOOGLE_CHROME_BUILD)
   callback_ = callback;
 
   // On-demand updates for Chrome don't work in Vista RTM when UAC is turned
@@ -89,7 +87,6 @@ void VersionUpdaterWin::CheckForUpdate(const StatusCallback& callback) {
     callback_.Run(CHECKING, 0, base::string16());
     BeginUpdateCheckOnFileThread(false /* !install_update_if_possible */);
   }
-#endif
 }
 
 void VersionUpdaterWin::RelaunchBrowser() const {
@@ -98,7 +95,6 @@ void VersionUpdaterWin::RelaunchBrowser() const {
 
 void VersionUpdaterWin::OnUpdateCheckComplete(
     const base::string16& new_version) {
-#if defined(GOOGLE_CHROME_BUILD)
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   Status status = CHECKING;
   if (new_version.empty()) {
@@ -123,46 +119,47 @@ void VersionUpdaterWin::OnUpdateCheckComplete(
     BeginUpdateCheckOnFileThread(true /* install_update_if_possible */);
   }
   callback_.Run(status, 0, base::string16());
-#endif  // GOOGLE_CHROME_BUILD
 }
 
 void VersionUpdaterWin::OnUpgradeProgress(int progress,
                                           const base::string16& new_version) {
-#if defined(GOOGLE_CHROME_BUILD)
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   callback_.Run(UPDATING, progress, base::string16());
-#endif  // GOOGLE_CHROME_BUILD
 }
 
 void VersionUpdaterWin::OnUpgradeComplete(const base::string16& new_version) {
-#if defined(GOOGLE_CHROME_BUILD)
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   callback_.Run(NEARLY_UPDATED, 0, base::string16());
-#endif  // GOOGLE_CHROME_BUILD
 }
 
 void VersionUpdaterWin::OnError(GoogleUpdateErrorCode error_code,
-                                const base::string16& error_message,
+                                const base::string16& html_error_message,
                                 const base::string16& new_version) {
-#if defined(GOOGLE_CHROME_BUILD)
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   base::string16 message;
 
-  // Current versions of Google Update provide a nice message for the policy
-  // case. Use this generic error for the policy case only if no message from
-  // Google Update is present.
-  if (error_code != GOOGLE_UPDATE_DISABLED_BY_POLICY || error_message.empty())
-    message = l10n_util::GetStringFUTF16Int(IDS_UPGRADE_ERROR, error_code);
-
-  if (!error_message.empty()) {
-    message += l10n_util::GetStringFUTF16(
-        IDS_ABOUT_BOX_ERROR_DURING_UPDATE_CHECK, error_message);
+  switch (error_code) {
+    case GOOGLE_UPDATE_DISABLED_BY_POLICY:
+      message =
+          l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY);
+      break;
+    case GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY:
+      message =
+          l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY_MANUAL);
+      break;
+    default:
+      // html_error_message mentions error_code so don't combine messages.
+      if (html_error_message.empty()) {
+        message = l10n_util::GetStringFUTF16Int(IDS_UPGRADE_ERROR, error_code);
+      } else {
+        message = l10n_util::GetStringFUTF16(
+            IDS_ABOUT_BOX_ERROR_DURING_UPDATE_CHECK, html_error_message);
+      }
+      break;
   }
   callback_.Run(FAILED, 0, message);
-#endif  // GOOGLE_CHROME_BUILD
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
 void VersionUpdaterWin::BeginUpdateCheckOnFileThread(
     bool install_update_if_possible) {
   BeginUpdateCheck(content::BrowserThread::GetMessageLoopProxyForThread(
@@ -171,7 +168,6 @@ void VersionUpdaterWin::BeginUpdateCheckOnFileThread(
                    install_update_if_possible, owner_widget_,
                    weak_factory_.GetWeakPtr());
 }
-#endif  // GOOGLE_CHROME_BUILD
 
 void VersionUpdaterWin::OnPendingRestartCheck(bool is_update_pending_restart) {
   callback_.Run(is_update_pending_restart ? NEARLY_UPDATED : UPDATED, 0,
@@ -186,10 +182,15 @@ VersionUpdater* VersionUpdater::Create(content::WebContents* web_contents) {
   // this this window will no longer have focus by the time UAC is needed. In
   // that case, the UAC prompt will appear in the taskbar and will require a
   // user click. This is the least surprising thing we can do for the user, and
-  // is the intended behavior for Windows applications. It's also possible that
-  // the browser window hosting the update check will have been closed by the
-  // time the UAC prompt is needed. This will behave similarly.
-  return new VersionUpdaterWin(web_contents->GetTopLevelNativeWindow()
-                                   ->GetHost()
-                                   ->GetAcceleratedWidget());
+  // is the intended behavior for Windows applications.
+  // It's also possible that the browser window hosting the update check will
+  // have been closed by the time the UAC prompt is needed. In this case, the
+  // web contents may no longer be hosted in a window, leading either
+  // GetTopLevelNativeWindow or GetHost to return null. Passing nullptr to
+  // VersionUpdaterWin will then also cause the UAC prompt to appear in the task
+  // bar.
+  gfx::NativeWindow window = web_contents->GetTopLevelNativeWindow();
+  aura::WindowTreeHost* window_tree_host = window ? window->GetHost() : nullptr;
+  return new VersionUpdaterWin(
+      window_tree_host ? window_tree_host->GetAcceleratedWidget() : nullptr);
 }

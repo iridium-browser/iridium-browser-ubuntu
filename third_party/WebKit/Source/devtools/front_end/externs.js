@@ -182,6 +182,11 @@ function DOMFileSystem() {}
  */
 DOMFileSystem.prototype.root = null;
 
+/**
+ * @type {*}
+ */
+window.domAutomationController;
+
 var DevToolsHost = {};
 
 /** @typedef {{type:string, id:(number|undefined),
@@ -271,8 +276,6 @@ function Panel() {}
 /** @constructor */
 function PanelWithSidebar() {}
 /** @constructor */
-function Request() {}
-/** @constructor */
 function Resource() {}
 /** @constructor */
 function Timeline() {}
@@ -308,6 +311,28 @@ difflib.stringAsLines = function(text) { return []; }
 /** @constructor */
 difflib.SequenceMatcher = function(baseText, newText) { }
 difflib.SequenceMatcher.prototype.get_opcodes = function() { return []; }
+
+/** @constructor */
+function Path2D() {}
+Path2D.prototype = {
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     */
+    rect: function(x, y, w, h) { },
+    /**
+     * @param {number} x
+     * @param {number} y
+     */
+    moveTo: function(x, y) { },
+    /**
+     * @param {number} x
+     * @param {number} y
+     */
+    lineTo: function(x, y) { }
+}
 
 /** @constructor */
 var Doc = function() { }
@@ -531,13 +556,6 @@ CodeMirror.doc;
 
 /** @type {boolean} */
 window.dispatchStandaloneTestRunnerMessages;
-
-// FIXME: This should be removed once transpilation is not required for closure compiler ES6
-/**
- * @param {number} count
- * @return {string}
- */
-String.prototype.repeat = function(count) {}
 
 /**
  * @param {*} obj

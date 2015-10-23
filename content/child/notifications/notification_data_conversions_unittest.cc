@@ -23,6 +23,10 @@ const char kNotificationTag[] = "my_tag";
 const char kNotificationIconUrl[] = "https://example.com/icon.png";
 const int kNotificationVibrationPattern[] = { 100, 200, 300 };
 const unsigned char kNotificationData[] = { 0xdf, 0xff, 0x0, 0x0, 0xff, 0xdf };
+const char kAction1Name[] = "btn1";
+const char kAction1Title[] = "Button 1";
+const char kAction2Name[] = "btn2";
+const char kAction2Title[] = "Button 2";
 
 TEST(NotificationDataConversionsTest, ToPlatformNotificationData) {
   std::vector<int> vibration_pattern(
@@ -31,6 +35,13 @@ TEST(NotificationDataConversionsTest, ToPlatformNotificationData) {
 
   std::vector<char> developer_data(
       kNotificationData, kNotificationData + arraysize(kNotificationData));
+
+  blink::WebVector<blink::WebNotificationAction> web_actions(
+      static_cast<size_t>(2));
+  web_actions[0].action = blink::WebString::fromUTF8(kAction1Name);
+  web_actions[0].title = blink::WebString::fromUTF8(kAction1Title);
+  web_actions[1].action = blink::WebString::fromUTF8(kAction2Name);
+  web_actions[1].title = blink::WebString::fromUTF8(kAction2Title);
 
   blink::WebNotificationData web_data(
       blink::WebString::fromUTF8(kNotificationTitle),
@@ -41,11 +52,12 @@ TEST(NotificationDataConversionsTest, ToPlatformNotificationData) {
       blink::WebURL(GURL(kNotificationIconUrl)),
       blink::WebVector<int>(vibration_pattern),
       true /* silent */,
-      blink::WebVector<char>(developer_data));
+      blink::WebVector<char>(developer_data),
+      web_actions);
 
   PlatformNotificationData platform_data = ToPlatformNotificationData(web_data);
   EXPECT_EQ(base::ASCIIToUTF16(kNotificationTitle), platform_data.title);
-  EXPECT_EQ(PlatformNotificationData::NotificationDirectionLeftToRight,
+  EXPECT_EQ(PlatformNotificationData::DIRECTION_LEFT_TO_RIGHT,
             platform_data.direction);
   EXPECT_EQ(kNotificationLang, platform_data.lang);
   EXPECT_EQ(base::ASCIIToUTF16(kNotificationBody), platform_data.body);
@@ -59,22 +71,11 @@ TEST(NotificationDataConversionsTest, ToPlatformNotificationData) {
   ASSERT_EQ(developer_data.size(), platform_data.data.size());
   for (size_t i = 0; i < developer_data.size(); ++i)
     EXPECT_EQ(developer_data[i], platform_data.data[i]);
-}
-
-TEST(NotificationDataConversionsTest,
-     ToPlatformNotificationDataDirectionality) {
-  blink::WebNotificationData web_data;
-  web_data.direction = blink::WebNotificationData::DirectionLeftToRight;
-
-  PlatformNotificationData platform_data = ToPlatformNotificationData(web_data);
-  EXPECT_EQ(PlatformNotificationData::NotificationDirectionLeftToRight,
-            platform_data.direction);
-
-  web_data.direction = blink::WebNotificationData::DirectionRightToLeft;
-
-  platform_data = ToPlatformNotificationData(web_data);
-  EXPECT_EQ(PlatformNotificationData::NotificationDirectionRightToLeft,
-            platform_data.direction);
+  ASSERT_EQ(web_actions.size(), platform_data.actions.size());
+  EXPECT_EQ(kAction1Name, platform_data.actions[0].action);
+  EXPECT_EQ(base::ASCIIToUTF16(kAction1Title), platform_data.actions[0].title);
+  EXPECT_EQ(kAction2Name, platform_data.actions[1].action);
+  EXPECT_EQ(base::ASCIIToUTF16(kAction2Title), platform_data.actions[1].title);
 }
 
 TEST(NotificationDataConversionsTest, ToWebNotificationData) {
@@ -88,7 +89,7 @@ TEST(NotificationDataConversionsTest, ToWebNotificationData) {
   PlatformNotificationData platform_data;
   platform_data.title = base::ASCIIToUTF16(kNotificationTitle);
   platform_data.direction =
-      PlatformNotificationData::NotificationDirectionLeftToRight;
+      PlatformNotificationData::DIRECTION_LEFT_TO_RIGHT;
   platform_data.lang = kNotificationLang;
   platform_data.body = base::ASCIIToUTF16(kNotificationBody);
   platform_data.tag = kNotificationTag;
@@ -96,6 +97,11 @@ TEST(NotificationDataConversionsTest, ToWebNotificationData) {
   platform_data.vibration_pattern = vibration_pattern;
   platform_data.silent = true;
   platform_data.data = developer_data;
+  platform_data.actions.resize(2);
+  platform_data.actions[0].action = kAction1Name;
+  platform_data.actions[0].title = base::ASCIIToUTF16(kAction1Title);
+  platform_data.actions[1].action = kAction2Name;
+  platform_data.actions[1].title = base::ASCIIToUTF16(kAction2Title);
 
   blink::WebNotificationData web_data = ToWebNotificationData(platform_data);
   EXPECT_EQ(kNotificationTitle, web_data.title);
@@ -115,23 +121,43 @@ TEST(NotificationDataConversionsTest, ToWebNotificationData) {
   ASSERT_EQ(developer_data.size(), web_data.data.size());
   for (size_t i = 0; i < developer_data.size(); ++i)
     EXPECT_EQ(developer_data[i], web_data.data[i]);
+
+  ASSERT_EQ(platform_data.actions.size(), web_data.actions.size());
+  EXPECT_EQ(kAction1Name, web_data.actions[0].action);
+  EXPECT_EQ(kAction1Title, web_data.actions[0].title);
+  EXPECT_EQ(kAction2Name, web_data.actions[1].action);
+  EXPECT_EQ(kAction2Title, web_data.actions[1].title);
 }
 
-TEST(NotificationDataConversionsTest, ToWebNotificationDataDirectionality) {
-  PlatformNotificationData platform_data;
-  platform_data.direction =
-      PlatformNotificationData::NotificationDirectionLeftToRight;
+TEST(NotificationDataConversionsTest, NotificationDataDirectionality) {
+  std::map<blink::WebNotificationData::Direction,
+           PlatformNotificationData::Direction> mappings;
 
-  blink::WebNotificationData web_data = ToWebNotificationData(platform_data);
-  EXPECT_EQ(blink::WebNotificationData::DirectionLeftToRight,
-            web_data.direction);
+  mappings[blink::WebNotificationData::DirectionLeftToRight] =
+      PlatformNotificationData::DIRECTION_LEFT_TO_RIGHT;
+  mappings[blink::WebNotificationData::DirectionRightToLeft] =
+      PlatformNotificationData::DIRECTION_RIGHT_TO_LEFT;
+  mappings[blink::WebNotificationData::DirectionAuto] =
+      PlatformNotificationData::DIRECTION_AUTO;
 
-  platform_data.direction =
-      PlatformNotificationData::NotificationDirectionRightToLeft;
+  for (const auto& pair : mappings) {
+    {
+      blink::WebNotificationData web_data;
+      web_data.direction = pair.first;
 
-  web_data = ToWebNotificationData(platform_data);
-  EXPECT_EQ(blink::WebNotificationData::DirectionRightToLeft,
-            web_data.direction);
+      PlatformNotificationData platform_data =
+          ToPlatformNotificationData(web_data);
+      EXPECT_EQ(pair.second, platform_data.direction);
+    }
+    {
+      PlatformNotificationData platform_data;
+      platform_data.direction = pair.second;
+
+      blink::WebNotificationData web_data =
+          ToWebNotificationData(platform_data);
+      EXPECT_EQ(pair.first, web_data.direction);
+    }
+  }
 }
 
 }  // namespace content

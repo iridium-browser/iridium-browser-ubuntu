@@ -11,16 +11,23 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/non_thread_safe.h"
+#include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -41,6 +48,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/os_crypt/os_crypt.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/test/browser_test_utils.h"
@@ -51,6 +59,7 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
+#include "chrome/test/base/scoped_bundle_swizzler_mac.h"
 #endif
 
 #if defined(OS_WIN)
@@ -183,6 +192,10 @@ InProcessBrowserTest::InProcessBrowserTest()
   // ContentMain. However that is after tests' constructors or SetUp methods,
   // which sometimes need it. So just override it.
   CHECK(PathService::Override(chrome::DIR_TEST_DATA, test_data_dir));
+
+#if defined(OS_MACOSX)
+  bundle_swizzler_.reset(new ScopedBundleSwizzlerMac);
+#endif
 }
 
 InProcessBrowserTest::~InProcessBrowserTest() {
@@ -374,6 +387,32 @@ void InProcessBrowserTest::TearDown() {
   BrowserTestBase::TearDown();
 }
 
+void InProcessBrowserTest::CloseBrowserSynchronously(Browser* browser) {
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(browser));
+  CloseBrowserAsynchronously(browser);
+  observer.Wait();
+}
+
+void InProcessBrowserTest::CloseBrowserAsynchronously(Browser* browser) {
+  browser->window()->Close();
+#if defined(OS_MACOSX)
+  // BrowserWindowController depends on the auto release pool being recycled
+  // in the message loop to delete itself.
+  AutoreleasePool()->Recycle();
+#endif
+}
+
+void InProcessBrowserTest::CloseAllBrowsers() {
+  chrome::CloseAllBrowsers();
+#if defined(OS_MACOSX)
+  // BrowserWindowController depends on the auto release pool being recycled
+  // in the message loop to delete itself.
+  AutoreleasePool()->Recycle();
+#endif
+}
+
 // TODO(alexmos): This function should expose success of the underlying
 // navigation to tests, which should make sure navigations succeed when
 // appropriate. See https://crbug.com/425335
@@ -403,6 +442,26 @@ void InProcessBrowserTest::AddTabAtIndex(
 
 bool InProcessBrowserTest::SetUpUserDataDirectory() {
   return true;
+}
+
+#if !defined(OS_MACOSX)
+void InProcessBrowserTest::OpenDevToolsWindow(
+    content::WebContents* web_contents) {
+  ASSERT_FALSE(content::DevToolsAgentHost::HasFor(web_contents));
+  DevToolsWindow::OpenDevToolsWindow(web_contents);
+  ASSERT_TRUE(content::DevToolsAgentHost::HasFor(web_contents));
+}
+
+Browser* InProcessBrowserTest::OpenURLOffTheRecord(Profile* profile,
+                                                   const GURL& url) {
+  chrome::HostDesktopType active_desktop = chrome::GetActiveDesktop();
+  chrome::OpenURLOffTheRecord(profile, url, active_desktop);
+  Browser* browser = chrome::FindTabbedBrowser(
+      profile->GetOffTheRecordProfile(), false, active_desktop);
+  content::TestNavigationObserver observer(
+      browser->tab_strip_model()->GetActiveWebContents());
+  observer.Wait();
+  return browser;
 }
 
 // Creates a browser with a single tab (about:blank), waits for the tab to
@@ -441,6 +500,7 @@ Browser* InProcessBrowserTest::CreateBrowserForApp(
   AddBlankTabAndShow(browser);
   return browser;
 }
+#endif  // !defined(OS_MACOSX)
 
 void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
   content::WindowedNotificationObserver observer(
@@ -478,6 +538,8 @@ base::CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
 #endif
 
 void InProcessBrowserTest::RunTestOnMainThreadLoop() {
+  AfterStartupTaskUtils::SetBrowserStartupIsComplete();
+
   // Pump startup related events.
   content::RunAllPendingInMessageLoop();
 
@@ -576,8 +638,8 @@ void InProcessBrowserTest::QuitBrowsers() {
   // Invoke AttemptExit on a running message loop.
   // AttemptExit exits the message loop after everything has been
   // shut down properly.
-  base::MessageLoopForUI::current()->PostTask(FROM_HERE,
-                                              base::Bind(&chrome::AttemptExit));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&chrome::AttemptExit));
   content::RunMessageLoop();
 
 #if defined(OS_MACOSX)

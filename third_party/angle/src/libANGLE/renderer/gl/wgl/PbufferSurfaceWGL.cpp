@@ -25,8 +25,8 @@ PbufferSurfaceWGL::PbufferSurfaceWGL(EGLint width, EGLint height, EGLenum textur
       mTextureFormat(textureFormat),
       mTextureTarget(textureTarget),
       mPixelFormat(pixelFormat),
-      mParentDeviceContext(deviceContext),
       mShareWGLContext(wglContext),
+      mParentDeviceContext(deviceContext),
       mPbuffer(nullptr),
       mPbufferDeviceContext(nullptr),
       mFunctionsWGL(functions)
@@ -177,6 +177,11 @@ EGLint PbufferSurfaceWGL::getHeight() const
 EGLint PbufferSurfaceWGL::isPostSubBufferSupported() const
 {
     return EGL_FALSE;
+}
+
+EGLint PbufferSurfaceWGL::getSwapBehavior() const
+{
+    return EGL_BUFFER_PRESERVED;
 }
 
 }

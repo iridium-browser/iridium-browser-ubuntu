@@ -36,10 +36,6 @@ class TestPasswordStore : public PasswordStore {
  protected:
   ~TestPasswordStore() override;
 
-  // Helper function to determine if forms are considered equivalent.
-  bool FormsAreEquivalent(const autofill::PasswordForm& lhs,
-                          const autofill::PasswordForm& rhs);
-
   // PasswordStore interface
   PasswordStoreChangeList AddLoginImpl(
       const autofill::PasswordForm& form) override;
@@ -50,7 +46,6 @@ class TestPasswordStore : public PasswordStore {
   ScopedVector<autofill::PasswordForm> FillMatchingLogins(
       const autofill::PasswordForm& form,
       PasswordStore::AuthorizationPromptPolicy prompt_policy) override;
-  void GetAutofillableLoginsImpl(scoped_ptr<GetLoginsRequest> request) override;
 
   // Unused portions of PasswordStore interface
   void ReportMetricsImpl(const std::string& sync_username,
@@ -61,7 +56,6 @@ class TestPasswordStore : public PasswordStore {
   PasswordStoreChangeList RemoveLoginsSyncedBetweenImpl(
       base::Time delete_begin,
       base::Time delete_end) override;
-  void GetBlacklistLoginsImpl(scoped_ptr<GetLoginsRequest> request) override;
   bool FillAutofillableLogins(
       ScopedVector<autofill::PasswordForm>* forms) override;
   bool FillBlacklistLogins(

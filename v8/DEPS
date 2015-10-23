@@ -8,23 +8,23 @@ vars = {
 
 deps = {
   "v8/build/gyp":
-    Var("git_url") + "/external/gyp.git" + "@" + "0bb67471bca068996e15b56738fa4824dfa19de0",
+    Var("git_url") + "/external/gyp.git" + "@" + "6ee91ad8659871916f9aa840d42e1513befdf638",
   "v8/third_party/icu":
-    Var("git_url") + "/chromium/deps/icu.git" + "@" + "f8c0e585b0a046d83d72b5d37356cb50d5b2031a",
+    Var("git_url") + "/chromium/deps/icu.git" + "@" + "89dcdec16381883782b9cc9cff38e00f047a0f46",
   "v8/buildtools":
-    Var("git_url") + "/chromium/buildtools.git" + "@" + "b0ede9c89f9d5fbe5387d961ad4c0ec665b6c821",
+    Var("git_url") + "/chromium/buildtools.git" + "@" + "565d04e8741429fb1b4f26d102f2c6c3b849edeb",
   "v8/testing/gtest":
-    Var("git_url") + "/external/googletest.git" + "@" + "be1868139ffe0ccd0e8e3b37292b84c821d9c8ad",
+    Var("git_url") + "/external/googletest.git" + "@" + "9855a87157778d39b95eccfb201a9dc90f6d61c6",
   "v8/testing/gmock":
-    Var("git_url") + "/external/googlemock.git" + "@" + "29763965ab52f24565299976b936d1265cb6a271",  # from svn revision 501
+    Var("git_url") + "/external/googlemock.git" + "@" + "0421b6f358139f02e102c9c332ce19a33faf75be",
   "v8/tools/clang":
-    Var("git_url") + "/chromium/src/tools/clang.git" + "@" + "5bab78c6ced45a71a8e095a09697ca80492e57e1",
+    Var("git_url") + "/chromium/src/tools/clang.git" + "@" + "5b12e334ec0e571a8e1f68d028dc5427b58c17ec",
 }
 
 deps_os = {
   "android": {
     "v8/third_party/android_tools":
-      Var("git_url") + "/android_tools.git" + "@" + "4f723e2a5fa5b7b8a198072ac19b92344be2b271",
+      Var("git_url") + "/android_tools.git" + "@" + "9e9b6169a098bc19986e44fbbf65e4c29031e4bd",
   },
   "win": {
     "v8/third_party/cygwin":

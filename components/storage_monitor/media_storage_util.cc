@@ -9,7 +9,7 @@
 #include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/storage_monitor/removable_device_constants.h"
@@ -99,7 +99,7 @@ bool MediaStorageUtil::HasDcim(const base::FilePath& mount_point) {
   if (!base::DirectoryExists(mount_point.Append(dcim_dir))) {
     // Check for lowercase 'dcim' as well.
     base::FilePath dcim_path_lower(
-        mount_point.Append(base::StringToLowerASCII(dcim_dir)));
+        mount_point.Append(base::ToLowerASCII(dcim_dir)));
     if (!base::DirectoryExists(dcim_path_lower))
       return false;
   }

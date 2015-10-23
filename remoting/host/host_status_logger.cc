@@ -5,7 +5,6 @@
 #include "remoting/host/host_status_logger.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/host_status_monitor.h"
 #include "remoting/host/server_log_entry_host.h"
@@ -61,7 +60,7 @@ void HostStatusLogger::OnClientRouteChange(
     const protocol::TransportRoute& route) {
   // Store connection type for the video channel. It is logged later
   // when client authentication is finished.
-  if (channel_name == kVideoChannelName) {
+  if (channel_name == kVideoChannelName || channel_name == kQuicChannelName) {
     connection_route_type_[jid] = route.type;
   }
 }

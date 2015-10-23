@@ -10,9 +10,11 @@ import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewStub;
 import android.widget.FrameLayout;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.prerender.ExternalPrerenderHandler;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -39,6 +41,7 @@ public final class WarmupManager {
     private final Set<String> mDnsRequestsInFlight;
     private final Map<String, Profile> mPendingPreconnectWithProfile;
 
+    private boolean mPrerenderIsAllowed;
     private WebContents mPrerenderedWebContents;
     private boolean mPrerendered;
     private ViewGroup mMainView;
@@ -54,8 +57,19 @@ public final class WarmupManager {
     }
 
     private WarmupManager() {
+        mPrerenderIsAllowed = true;
         mDnsRequestsInFlight = new HashSet<String>();
         mPendingPreconnectWithProfile = new HashMap<String, Profile>();
+    }
+
+    /**
+     * Disallow prerendering from now until the browser process death.
+     */
+    public void disallowPrerendering() {
+        ThreadUtils.assertOnUiThread();
+        mPrerenderIsAllowed = false;
+        cancelCurrentPrerender();
+        mExternalPrerenderHandler = null;
     }
 
     /**
@@ -69,6 +83,7 @@ public final class WarmupManager {
      */
     public boolean hasPrerenderedUrl(String url) {
         ThreadUtils.assertOnUiThread();
+        if (!mPrerenderIsAllowed) return false;
         return hasAnyPrerenderedUrl() && ExternalPrerenderHandler.hasPrerenderedUrl(
                 Profile.getLastUsedProfile(), url, mPrerenderedWebContents);
     }
@@ -78,6 +93,7 @@ public final class WarmupManager {
      */
     public boolean hasAnyPrerenderedUrl() {
         ThreadUtils.assertOnUiThread();
+        if (!mPrerenderIsAllowed) return false;
         return mPrerendered;
     }
 
@@ -86,6 +102,7 @@ public final class WarmupManager {
      */
     public WebContents takePrerenderedWebContents() {
         ThreadUtils.assertOnUiThread();
+        if (!mPrerenderIsAllowed) return null;
         WebContents prerenderedWebContents = mPrerenderedWebContents;
         assert (mPrerenderedWebContents != null);
         mPrerenderedWebContents = null;
@@ -105,6 +122,7 @@ public final class WarmupManager {
     public void prerenderUrl(final String url, final String referrer,
             final int widthPix, final int heightPix) {
         ThreadUtils.assertOnUiThread();
+        if (!mPrerenderIsAllowed) return;
         clearWebContentsIfNecessary();
         if (mExternalPrerenderHandler == null) {
             mExternalPrerenderHandler = new ExternalPrerenderHandler();
@@ -120,12 +138,26 @@ public final class WarmupManager {
      * @param baseContext The base context to use for creating the ContextWrapper.
      * @param themeId Id of the main theme to use in the inflated views.
      * @param layoutId Id of the layout to inflate.
+     * @param toolbarContainerStubId Id of the ViewStub to be replaced with the
+     *        toolbar container. May be 0 if there is no toolbar.
+     * @param toolbarContainerId Id of the toolbar container. May be 0 if there is no toolbar.
      */
-    public void initializeViewHierarchy(Context baseContext, int themeId, int layoutId) {
-        ThreadUtils.assertOnUiThread();
-        ContextThemeWrapper context = new ContextThemeWrapper(baseContext, themeId);
-        FrameLayout contentHolder = new FrameLayout(context);
-        mMainView = (ViewGroup) LayoutInflater.from(context).inflate(layoutId, contentHolder);
+    public void initializeViewHierarchy(Context baseContext, int themeId, int layoutId,
+            int toolbarContainerStubId, int toolbarContainerId) {
+        TraceEvent.begin("WarmupManager.initializeViewHierarchy");
+        try {
+            ThreadUtils.assertOnUiThread();
+            ContextThemeWrapper context = new ContextThemeWrapper(baseContext, themeId);
+            FrameLayout contentHolder = new FrameLayout(context);
+            mMainView = (ViewGroup) LayoutInflater.from(context).inflate(layoutId, contentHolder);
+            if (toolbarContainerId != 0) {
+                ViewStub stub = (ViewStub) mMainView.findViewById(toolbarContainerStubId);
+                stub.setLayoutResource(toolbarContainerId);
+                stub.inflate();
+            }
+        } finally {
+            TraceEvent.end("WarmupManager.initializeViewHierarchy");
+        }
     }
 
     /**

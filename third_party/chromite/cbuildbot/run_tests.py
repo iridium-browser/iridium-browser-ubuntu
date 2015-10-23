@@ -25,6 +25,7 @@ from chromite.lib import cgroups
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import gs
 from chromite.lib import namespaces
 from chromite.lib import osutils
 from chromite.lib import proctitle
@@ -65,6 +66,7 @@ SPECIAL_TESTS = {
     'lib/chroot_util_unittest': INSIDE,
     'lib/filetype_unittest': INSIDE,
     'lib/upgrade_table_unittest': INSIDE,
+    'mobmonitor/checkfile/manager_unittest': INSIDE,
     'scripts/cros_install_debug_syms_unittest': INSIDE,
     'scripts/cros_list_modified_packages_unittest': INSIDE,
     'scripts/cros_mark_as_stable_unittest': INSIDE,
@@ -417,6 +419,10 @@ def main(argv):
       ChrootAvailable() and
       not cros_build_lib.IsInsideChroot()):
     cros_build_lib.RunCommand(['cros_sdk', '--create'])
+
+  # This is a cheesy hack to make sure gsutil is populated in the cache before
+  # we run tests. This is a partial workaround for crbug.com/468838.
+  gs.GSContext.GetDefaultGSUtilBin()
 
   # Now let's run some tests.
   _ReExecuteIfNeeded([sys.argv[0]] + argv, opts.network)

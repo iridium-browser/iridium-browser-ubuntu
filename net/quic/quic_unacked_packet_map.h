@@ -11,13 +11,18 @@
 
 namespace net {
 
+class AckNotifierManager;
+
 // Class which tracks unacked packets for three purposes:
 // 1) Track retransmittable data, including multiple transmissions of frames.
 // 2) Track packets and bytes in flight for congestion control.
 // 3) Track sent time of packets to provide RTT measurements from acks.
 class NET_EXPORT_PRIVATE QuicUnackedPacketMap {
  public:
-  QuicUnackedPacketMap();
+  // Initialize an instance of UnackedPacketMap.  The AckNotifierManager
+  // provided to the constructor will be notified whenever a packet is removed
+  // from the map.
+  explicit QuicUnackedPacketMap(AckNotifierManager* ack_notifier_manager);
   ~QuicUnackedPacketMap();
 
   // Adds |serialized_packet| to the map and marks it as sent at |sent_time|.
@@ -153,10 +158,8 @@ class NET_EXPORT_PRIVATE QuicUnackedPacketMap {
   bool IsPacketUseless(QuicPacketSequenceNumber sequence_number,
                        const TransmissionInfo& info) const;
 
-  // Returns true if the packet is useless or it's only purpose is RTT
-  // measurement, and it's old enough that is unlikely to ever happen.
-  bool IsPacketRemovable(QuicPacketSequenceNumber sequence_number,
-                         const TransmissionInfo& info) const;
+  // Removes the packet with lowest sequence number from the map.
+  void PopLeastUnacked();
 
   QuicPacketSequenceNumber largest_sent_packet_;
   QuicPacketSequenceNumber largest_observed_;
@@ -176,6 +179,10 @@ class NET_EXPORT_PRIVATE QuicUnackedPacketMap {
   QuicByteCount bytes_in_flight_;
   // Number of retransmittable crypto handshake packets.
   size_t pending_crypto_packet_count_;
+
+  // Notifier manager for ACK packets.  We notify it every time we abandon a
+  // packet.
+  AckNotifierManager* ack_notifier_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicUnackedPacketMap);
 };

@@ -26,6 +26,7 @@
 #ifndef CSSImageGeneratorValue_h
 #define CSSImageGeneratorValue_h
 
+#include "core/CoreExport.h"
 #include "core/css/CSSValue.h"
 #include "platform/geometry/IntSizeHash.h"
 #include "wtf/HashCountedSet.h"
@@ -38,6 +39,7 @@ class Image;
 class LayoutObject;
 
 struct SizeAndCount {
+    DISALLOW_ALLOCATION();
     SizeAndCount(IntSize newSize = IntSize(), int newCount = 0)
         : size(newSize)
         , count(newCount)
@@ -50,7 +52,7 @@ struct SizeAndCount {
 
 typedef HashMap<const LayoutObject*, SizeAndCount> LayoutObjectSizeCountMap;
 
-class CSSImageGeneratorValue : public CSSValue {
+class CORE_EXPORT CSSImageGeneratorValue : public CSSValue {
 public:
     ~CSSImageGeneratorValue();
 
@@ -83,8 +85,7 @@ protected:
     // FIXME: Oilpan: when/if we can make the layoutObject point directly to the CSSImageGenerator value using
     // a member we don't need to have this hack where we keep a persistent to the instance as long as
     // there are clients in the LayoutObjectSizeCountMap.
-    GC_PLUGIN_IGNORE("366546")
-    OwnPtr<Persistent<CSSImageGeneratorValue>> m_keepAlive;
+    SelfKeepAlive<CSSImageGeneratorValue> m_keepAlive;
 #endif
 };
 

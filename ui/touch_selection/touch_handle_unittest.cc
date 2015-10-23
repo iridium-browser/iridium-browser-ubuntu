@@ -14,8 +14,8 @@ using ui::test::MockMotionEvent;
 namespace ui {
 namespace {
 
-const int kDefaultTapTimeoutMs = 200;
-const float kDefaultTapSlop = 10.f;
+const int kDefaultTapDurationMs = 200;
+const double kDefaultTapSlop = 10.;
 const float kDefaultDrawableSize = 10.f;
 
 struct MockDrawableData {
@@ -74,18 +74,23 @@ class TouchHandleTest : public testing::Test, public TouchHandleClient {
   ~TouchHandleTest() override {}
 
   // TouchHandleClient implementation.
-  void OnHandleDragBegin(const TouchHandle& handle) override {
+  void OnDragBegin(const TouchSelectionDraggable& handler,
+                   const gfx::PointF& drag_position) override {
     dragging_ = true;
   }
 
-  void OnHandleDragUpdate(const TouchHandle& handle,
-                          const gfx::PointF& new_position) override {
+  void OnDragUpdate(const TouchSelectionDraggable& handler,
+                    const gfx::PointF& drag_position) override {
     dragged_ = true;
-    drag_position_ = new_position;
+    drag_position_ = drag_position;
   }
 
-  void OnHandleDragEnd(const TouchHandle& handle) override {
+  void OnDragEnd(const TouchSelectionDraggable& handler) override {
     dragging_ = false;
+  }
+
+  bool IsWithinTapSlop(const gfx::Vector2dF& delta) const override {
+    return delta.LengthSquared() < (kDefaultTapSlop * kDefaultTapSlop);
   }
 
   void OnHandleTapped(const TouchHandle& handle) override { tapped_ = true; }
@@ -96,11 +101,9 @@ class TouchHandleTest : public testing::Test, public TouchHandleClient {
     return make_scoped_ptr(new MockTouchHandleDrawable(&drawable_data_));
   }
 
-  base::TimeDelta GetTapTimeout() const override {
-    return base::TimeDelta::FromMilliseconds(kDefaultTapTimeoutMs);
+  base::TimeDelta GetMaxTapDuration() const override {
+    return base::TimeDelta::FromMilliseconds(kDefaultTapDurationMs);
   }
-
-  float GetTapSlop() const override { return kDefaultTapSlop; }
 
   void Animate(TouchHandle& handle) {
     needs_animate_ = false;
@@ -455,6 +458,14 @@ TEST_F(TouchHandleTest, DragTargettingUsesTouchSize) {
   event.SetTouchMajor(0);
   EXPECT_TRUE(handle.WillHandleTouchEvent(event));
   EXPECT_TRUE(IsDragging());
+
+  // Touches centered above the handle region should never register a hit, even
+  // if the touch region intersects the handle region.
+  event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time,
+                          kDefaultDrawableSize / 2.f, -kTouchSize / 3.f);
+  event.SetTouchMajor(kTouchSize);
+  EXPECT_FALSE(handle.WillHandleTouchEvent(event));
+  EXPECT_FALSE(IsDragging());
 }
 
 TEST_F(TouchHandleTest, Tap) {
@@ -474,7 +485,7 @@ TEST_F(TouchHandleTest, Tap) {
   // Long press shouldn't trigger a tap.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
   EXPECT_TRUE(handle.WillHandleTouchEvent(event));
-  event_time += 2 * GetTapTimeout();
+  event_time += 2 * GetMaxTapDuration();
   event = MockMotionEvent(MockMotionEvent::ACTION_UP, event_time, 0, 0);
   EXPECT_TRUE(handle.WillHandleTouchEvent(event));
   EXPECT_FALSE(GetAndResetHandleTapped());
@@ -482,7 +493,7 @@ TEST_F(TouchHandleTest, Tap) {
   // Only a brief tap within the slop region should trigger a tap.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
   EXPECT_TRUE(handle.WillHandleTouchEvent(event));
-  event_time += GetTapTimeout() / 2;
+  event_time += GetMaxTapDuration() / 2;
   event = MockMotionEvent(
       MockMotionEvent::ACTION_MOVE, event_time, kDefaultTapSlop / 2.f, 0);
   EXPECT_TRUE(handle.WillHandleTouchEvent(event));
@@ -494,7 +505,7 @@ TEST_F(TouchHandleTest, Tap) {
   // Moving beyond the slop region shouldn't trigger a tap.
   event = MockMotionEvent(MockMotionEvent::ACTION_DOWN, event_time, 0, 0);
   EXPECT_TRUE(handle.WillHandleTouchEvent(event));
-  event_time += GetTapTimeout() / 2;
+  event_time += GetMaxTapDuration() / 2;
   event = MockMotionEvent(
       MockMotionEvent::ACTION_MOVE, event_time, kDefaultTapSlop * 2.f, 0);
   EXPECT_TRUE(handle.WillHandleTouchEvent(event));

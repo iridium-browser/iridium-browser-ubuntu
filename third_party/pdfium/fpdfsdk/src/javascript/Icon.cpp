@@ -1,7 +1,7 @@
 // Copyright 2014 PDFium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
- 
+
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "../../include/javascript/JavaScript.h"
@@ -17,51 +17,42 @@ BEGIN_JS_STATIC_CONST(CJS_Icon)
 END_JS_STATIC_CONST()
 
 BEGIN_JS_STATIC_PROP(CJS_Icon)
-	JS_STATIC_PROP_ENTRY(name)
+JS_STATIC_PROP_ENTRY(name)
 END_JS_STATIC_PROP()
 
-BEGIN_JS_STATIC_METHOD(CJS_Icon) 
+BEGIN_JS_STATIC_METHOD(CJS_Icon)
 END_JS_STATIC_METHOD()
 
-IMPLEMENT_JS_CLASS(CJS_Icon,Icon)
+IMPLEMENT_JS_CLASS(CJS_Icon, Icon)
 
-Icon::Icon(CJS_Object* pJSObject) : CJS_EmbedObj(pJSObject),
-	m_pIconStream(NULL),
-	m_swIconName(L"")
-{
+Icon::Icon(CJS_Object* pJSObject)
+    : CJS_EmbedObj(pJSObject), m_pIconStream(NULL), m_swIconName(L"") {}
+
+Icon::~Icon() {}
+
+void Icon::SetStream(CPDF_Stream* pIconStream) {
+  if (pIconStream)
+    m_pIconStream = pIconStream;
 }
 
-Icon::~Icon()
-{
-
+CPDF_Stream* Icon::GetStream() {
+  return m_pIconStream;
 }
 
-void Icon::SetStream(CPDF_Stream* pIconStream)
-{
-	if(pIconStream)
-		m_pIconStream = pIconStream;
+void Icon::SetIconName(CFX_WideString name) {
+  m_swIconName = name;
 }
 
-CPDF_Stream* Icon::GetStream()
-{
-	return m_pIconStream;
+CFX_WideString Icon::GetIconName() {
+  return m_swIconName;
 }
 
-void Icon::SetIconName(CFX_WideString name)
-{
-	m_swIconName = name;
+FX_BOOL Icon::name(IFXJS_Context* cc,
+                   CJS_PropValue& vp,
+                   CFX_WideString& sError) {
+  if (!vp.IsGetting())
+    return FALSE;
+
+  vp << m_swIconName;
+  return TRUE;
 }
-
-CFX_WideString Icon::GetIconName()
-{
-	return m_swIconName;
-}
-
-FX_BOOL Icon::name(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError)
-{
-	if(!vp.IsGetting())return FALSE;
-
-	vp << m_swIconName;
-	return TRUE;
-}
-

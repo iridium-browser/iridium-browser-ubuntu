@@ -43,10 +43,10 @@
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/html/shadow/SpinButtonElement.h"
 #include "core/html/shadow/TextControlInnerElements.h"
-#include "core/style/AuthorStyleInfo.h"
-#include "core/style/ComputedStyle.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
+#include "core/style/AuthorStyleInfo.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/FileMetadata.h"
 #include "platform/FloatConversion.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -103,7 +103,7 @@ void LayoutTheme::adjustStyle(ComputedStyle& style, Element* e, const AuthorStyl
         return;
 
     if (shouldUseFallbackTheme(style)) {
-        adjustStyleUsingFallbackTheme(style, e);
+        adjustStyleUsingFallbackTheme(style);
         return;
     }
 
@@ -190,15 +190,15 @@ void LayoutTheme::adjustStyle(ComputedStyle& style, Element* e, const AuthorStyl
     switch (style.appearance()) {
 #if !USE(NEW_THEME)
     case CheckboxPart:
-        return adjustCheckboxStyle(style, e);
+        return adjustCheckboxStyle(style);
     case RadioPart:
-        return adjustRadioStyle(style, e);
+        return adjustRadioStyle(style);
     case PushButtonPart:
     case SquareButtonPart:
     case ButtonPart:
-        return adjustButtonStyle(style, e);
+        return adjustButtonStyle(style);
     case InnerSpinButtonPart:
-        return adjustInnerSpinButtonStyle(style, e);
+        return adjustInnerSpinButtonStyle(style);
 #endif
     case MenulistPart:
         return adjustMenuListStyle(style, e);
@@ -206,15 +206,15 @@ void LayoutTheme::adjustStyle(ComputedStyle& style, Element* e, const AuthorStyl
         return adjustMenuListButtonStyle(style, e);
     case SliderThumbHorizontalPart:
     case SliderThumbVerticalPart:
-        return adjustSliderThumbStyle(style, e);
+        return adjustSliderThumbStyle(style);
     case SearchFieldPart:
-        return adjustSearchFieldStyle(style, e);
+        return adjustSearchFieldStyle(style);
     case SearchFieldCancelButtonPart:
-        return adjustSearchFieldCancelButtonStyle(style, e);
+        return adjustSearchFieldCancelButtonStyle(style);
     case SearchFieldDecorationPart:
-        return adjustSearchFieldDecorationStyle(style, e);
+        return adjustSearchFieldDecorationStyle(style);
     case SearchFieldResultsDecorationPart:
-        return adjustSearchFieldResultsDecorationStyle(style, e);
+        return adjustSearchFieldResultsDecorationStyle(style);
     default:
         break;
     }
@@ -228,38 +228,56 @@ String LayoutTheme::extraDefaultStyleSheet()
     return runtimeCSS.toString();
 }
 
-static String formatChromiumMediaControlsTime(float time, float duration)
+static String formatChromiumMediaControlsTime(float time, float duration, bool includeSeparator)
 {
     if (!std::isfinite(time))
         time = 0;
     if (!std::isfinite(duration))
         duration = 0;
     int seconds = static_cast<int>(fabsf(time));
+    int minutes = seconds / 60;
     int hours = seconds / (60 * 60);
-    int minutes = (seconds / 60) % 60;
+
     seconds %= 60;
 
     // duration defines the format of how the time is rendered
     int durationSecs = static_cast<int>(fabsf(duration));
-    int durationHours = durationSecs / (60 * 60);
-    int durationMins = (durationSecs / 60) % 60;
+    int durationMins = durationSecs / 60;
 
-    if (durationHours || hours)
-        return String::format("%s%01d:%02d:%02d", (time < 0 ? "-" : ""), hours, minutes, seconds);
-    if (durationMins > 9)
-        return String::format("%s%02d:%02d", (time < 0 ? "-" : ""), minutes, seconds);
+    if (!RuntimeEnabledFeatures::newMediaPlaybackUiEnabled()) {
+        int durationHours = durationSecs / (60 * 60);
+        durationMins %= 60;
+        minutes %= 60;
+        if (durationHours || hours)
+            return String::format("%s%01d:%02d:%02d", (time < 0 ? "-" : ""), hours, minutes, seconds);
+        if (durationMins > 9)
+            return String::format("%s%02d:%02d", (time < 0 ? "-" : ""), minutes, seconds);
 
-    return String::format("%s%01d:%02d", (time < 0 ? "-" : ""), minutes, seconds);
+        return String::format("%s%01d:%02d", (time < 0 ? "-" : ""), minutes, seconds);
+    }
+
+    // New UI includes a leading "/ " before duration.
+    const char* separator = includeSeparator ? "/ " : "";
+
+    // 0-9 minutes duration is 0:00
+    // 10-99 minutes duration is 00:00
+    // >99 minutes duration is 000:00
+    if (durationMins > 99 || minutes > 99)
+        return String::format("%s%s%03d:%02d", separator, (time < 0 ? "-" : ""), minutes, seconds);
+    if (durationMins > 10)
+        return String::format("%s%s%02d:%02d", separator, (time < 0 ? "-" : ""), minutes, seconds);
+
+    return String::format("%s%s%01d:%02d", separator, (time < 0 ? "-" : ""), minutes, seconds);
 }
 
 String LayoutTheme::formatMediaControlsTime(float time) const
 {
-    return formatChromiumMediaControlsTime(time, time);
+    return formatChromiumMediaControlsTime(time, time, true);
 }
 
 String LayoutTheme::formatMediaControlsCurrentTime(float currentTime, float duration) const
 {
-    return formatChromiumMediaControlsTime(currentTime, duration);
+    return formatChromiumMediaControlsTime(currentTime, duration, false);
 }
 
 Color LayoutTheme::activeSelectionBackgroundColor() const
@@ -397,10 +415,10 @@ bool LayoutTheme::isControlStyled(const ComputedStyle& style, const AuthorStyleI
     }
 }
 
-void LayoutTheme::adjustPaintInvalidationRect(const LayoutObject* o, IntRect& r)
+void LayoutTheme::addVisualOverflow(const LayoutObject& object, IntRect& borderBox)
 {
 #if USE(NEW_THEME)
-    m_platformTheme->inflateControlPaintRect(o->style()->appearance(), controlStatesForLayoutObject(o), r, o->style()->effectiveZoom());
+    m_platformTheme->addVisualOverflow(object.style()->appearance(), controlStatesForLayoutObject(&object), object.style()->effectiveZoom(), borderBox);
 #endif
 }
 
@@ -418,11 +436,6 @@ bool LayoutTheme::shouldDrawDefaultFocusRing(LayoutObject* layoutObject) const
     if (node->focused() && !node->shouldHaveFocusAppearance())
         return false;
     return true;
-}
-
-bool LayoutTheme::supportsFocusRing(const ComputedStyle& style) const
-{
-    return (style.hasAppearance() && style.appearance() != TextFieldPart && style.appearance() != TextAreaPart && style.appearance() != MenulistButtonPart && style.appearance() != ListboxPart);
 }
 
 bool LayoutTheme::controlStateChanged(LayoutObject& o, ControlState state) const
@@ -567,7 +580,7 @@ bool LayoutTheme::isSpinUpButtonPartHovered(const LayoutObject* o)
 
 #if !USE(NEW_THEME)
 
-void LayoutTheme::adjustCheckboxStyle(ComputedStyle& style, Element*) const
+void LayoutTheme::adjustCheckboxStyle(ComputedStyle& style) const
 {
     // A summary of the rules for checkbox designed to match WinIE:
     // width/height - honored (WinIE actually scales its control for small widths, but lets it overflow for small heights.)
@@ -582,7 +595,7 @@ void LayoutTheme::adjustCheckboxStyle(ComputedStyle& style, Element*) const
     style.resetBorder();
 }
 
-void LayoutTheme::adjustRadioStyle(ComputedStyle& style, Element*) const
+void LayoutTheme::adjustRadioStyle(ComputedStyle& style) const
 {
     // A summary of the rules for checkbox designed to match WinIE:
     // width/height - honored (WinIE actually scales its control for small widths, but lets it overflow for small heights.)
@@ -597,11 +610,11 @@ void LayoutTheme::adjustRadioStyle(ComputedStyle& style, Element*) const
     style.resetBorder();
 }
 
-void LayoutTheme::adjustButtonStyle(ComputedStyle& style, Element*) const
+void LayoutTheme::adjustButtonStyle(ComputedStyle& style) const
 {
 }
 
-void LayoutTheme::adjustInnerSpinButtonStyle(ComputedStyle&, Element*) const
+void LayoutTheme::adjustInnerSpinButtonStyle(ComputedStyle&) const
 {
 }
 #endif
@@ -639,28 +652,28 @@ void LayoutTheme::adjustMenuListButtonStyle(ComputedStyle&, Element*) const
 {
 }
 
-void LayoutTheme::adjustSliderThumbStyle(ComputedStyle& style, Element* element) const
+void LayoutTheme::adjustSliderThumbStyle(ComputedStyle& style) const
 {
-    adjustSliderThumbSize(style, element);
+    adjustSliderThumbSize(style);
 }
 
-void LayoutTheme::adjustSliderThumbSize(ComputedStyle&, Element*) const
-{
-}
-
-void LayoutTheme::adjustSearchFieldStyle(ComputedStyle&, Element*) const
+void LayoutTheme::adjustSliderThumbSize(ComputedStyle&) const
 {
 }
 
-void LayoutTheme::adjustSearchFieldCancelButtonStyle(ComputedStyle&, Element*) const
+void LayoutTheme::adjustSearchFieldStyle(ComputedStyle&) const
 {
 }
 
-void LayoutTheme::adjustSearchFieldDecorationStyle(ComputedStyle&, Element*) const
+void LayoutTheme::adjustSearchFieldCancelButtonStyle(ComputedStyle&) const
 {
 }
 
-void LayoutTheme::adjustSearchFieldResultsDecorationStyle(ComputedStyle&, Element*) const
+void LayoutTheme::adjustSearchFieldDecorationStyle(ComputedStyle&) const
+{
+}
+
+void LayoutTheme::adjustSearchFieldResultsDecorationStyle(ComputedStyle&) const
 {
 }
 
@@ -872,14 +885,14 @@ bool LayoutTheme::shouldUseFallbackTheme(const ComputedStyle&) const
     return false;
 }
 
-void LayoutTheme::adjustStyleUsingFallbackTheme(ComputedStyle& style, Element* e)
+void LayoutTheme::adjustStyleUsingFallbackTheme(ComputedStyle& style)
 {
     ControlPart part = style.appearance();
     switch (part) {
     case CheckboxPart:
-        return adjustCheckboxStyleUsingFallbackTheme(style, e);
+        return adjustCheckboxStyleUsingFallbackTheme(style);
     case RadioPart:
-        return adjustRadioStyleUsingFallbackTheme(style, e);
+        return adjustRadioStyleUsingFallbackTheme(style);
     default:
         break;
     }
@@ -894,7 +907,7 @@ void LayoutTheme::setSizeIfAuto(ComputedStyle& style, const IntSize& size)
         style.setHeight(Length(size.height(), Fixed));
 }
 
-void LayoutTheme::adjustCheckboxStyleUsingFallbackTheme(ComputedStyle& style, Element*) const
+void LayoutTheme::adjustCheckboxStyleUsingFallbackTheme(ComputedStyle& style) const
 {
     // If the width and height are both specified, then we have nothing to do.
     if (!style.width().isIntrinsicOrAuto() && !style.height().isAuto())
@@ -914,7 +927,7 @@ void LayoutTheme::adjustCheckboxStyleUsingFallbackTheme(ComputedStyle& style, El
     style.resetBorder();
 }
 
-void LayoutTheme::adjustRadioStyleUsingFallbackTheme(ComputedStyle& style, Element*) const
+void LayoutTheme::adjustRadioStyleUsingFallbackTheme(ComputedStyle& style) const
 {
     // If the width and height are both specified, then we have nothing to do.
     if (!style.width().isIntrinsicOrAuto() && !style.height().isAuto())

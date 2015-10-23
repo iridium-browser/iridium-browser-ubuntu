@@ -10,6 +10,7 @@ the CLI commands.
 
 from __future__ import print_function
 
+from chromite.cli import deploy
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import remote_access
@@ -115,27 +116,6 @@ class CommandVMTest(object):
     except vm.VMStopError as e:
       logging.warning('Failed to stop the VM: %s', e)
 
-  @TestCommandDecorator('devices')
-  def TestDevices(self):
-    """Tests the devices command."""
-    logging.info('Test to use devices command to set a user-friendly alias '
-                 'name for the VM device.')
-    alias = 'vm_device'
-    cmd = self.BuildCommand('devices', device=self.vm.device_addr,
-                            pos_args=['alias', alias])
-    result = cros_build_lib.RunCommand(cmd, capture_output=True,
-                                       error_code_ok=True)
-    if result.returncode:
-      logging.error('Failed to set an alias for the VM device.')
-      raise CommandError(result.error)
-
-    # Verify that the alias is set correctly.
-    with remote_access.ChromiumOSDeviceHandler(
-        remote_access.LOCALHOST, port=self.vm.port) as device:
-      if device.alias != alias:
-        logging.error('VM alias is "%s", which is not expected.', device.alias)
-        raise CommandError()
-
   @TestCommandDecorator('shell')
   def TestShell(self):
     """Tests the shell command."""
@@ -224,22 +204,41 @@ class CommandVMTest(object):
     # Set the installation root to /usr/local so that the command does not
     # attempt to remount rootfs (which leads to VM reboot).
     cmd = self.BuildCommand('deploy', device=self.vm.device_addr,
-                            pos_args=packages, opt_args=['--root=/usr/local'])
+                            pos_args=packages, opt_args=['--log-level=info',
+                                                         '--root=/usr/local'])
 
     logging.info('Test to uninstall packages on the VM device.')
-    result = cros_build_lib.RunCommand(cmd + ['--unmerge'],
-                                       capture_output=True,
-                                       error_code_ok=True)
+    with cros_build_lib.OutputCapturer() as output:
+      result = cros_build_lib.RunCommand(cmd + ['--unmerge'],
+                                         error_code_ok=True)
+
     if result.returncode:
       logging.error('Failed to uninstall packages on the VM device.')
       raise CommandError(result.error)
 
+    captured_output = output.GetStdout() + output.GetStderr()
+    for event in deploy.BrilloDeployOperation.UNMERGE_EVENTS:
+      if event not in captured_output:
+        logging.error('Strings used by deploy.BrilloDeployOperation to update '
+                      'the progress bar have been changed. Please update the '
+                      'strings in UNMERGE_EVENTS')
+        raise CommandError()
+
     logging.info('Test to install packages on the VM device.')
-    result = cros_build_lib.RunCommand(cmd, capture_output=True,
-                                       error_code_ok=True)
+    with cros_build_lib.OutputCapturer() as output:
+      result = cros_build_lib.RunCommand(cmd, error_code_ok=True)
+
     if result.returncode:
       logging.error('Failed to install packages on the VM device.')
       raise CommandError(result.error)
+
+    captured_output = output.GetStdout() + output.GetStderr()
+    for event in deploy.BrilloDeployOperation.MERGE_EVENTS:
+      if event not in captured_output:
+        logging.error('Strings used by deploy.BrilloDeployOperation to update '
+                      'the progress bar have been changed. Please update the '
+                      'strings in MERGE_EVENTS')
+        raise CommandError()
 
     # Verify that the packages are installed.
     with remote_access.ChromiumOSDeviceHandler(
@@ -253,7 +252,6 @@ class CommandVMTest(object):
 
   def RunTests(self):
     """Calls the test functions."""
-    self.TestDevices()
     self.TestShell()
     self.TestDebug()
     self.TestFlash()

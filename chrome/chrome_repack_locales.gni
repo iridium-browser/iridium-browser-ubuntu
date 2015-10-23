@@ -54,11 +54,13 @@ template("_repack_one_locale") {
     if (!is_ios) {
       sources += [
         "${root_gen_dir}/content/app/strings/content_strings_${locale}.pak",
+        "${root_gen_dir}/device/bluetooth/strings/bluetooth_strings_${locale}.pak",
         "${root_gen_dir}/ui/strings/app_locale_settings_${locale}.pak",
         "${root_gen_dir}/ui/strings/ui_strings_${locale}.pak",
       ]
       deps += [
         "//content/app/strings",
+        "//device/bluetooth/strings",
         "//ui/strings:ui_strings",
         "//ui/strings:app_locale_settings",
       ]
@@ -69,16 +71,11 @@ template("_repack_one_locale") {
     }
     if (enable_extensions) {
       sources += [
-        "${root_gen_dir}/device/bluetooth/device_bluetooth_strings_${locale}.pak",
-
         # TODO(jamescook): When Android stops building extensions code move
         # this to the OS != 'ios' and OS != 'android' section.
         "${root_gen_dir}/extensions/strings/extensions_strings_${locale}.pak",
       ]
-      deps += [
-        "//device/bluetooth:strings",
-        "//extensions/strings",
-      ]
+      deps += [ "//extensions/strings" ]
     }
 
     if (is_chrome_branded) {
@@ -155,9 +152,7 @@ template("chrome_repack_locales") {
 
   # The group that external targets depend on which collects all deps.
   group(group_target_name) {
-    if (defined(invoker.visibility)) {
-      visibility = invoker.visibility
-    }
+    forward_variables_from(invoker, [ "visibility" ])
     deps = locale_targets
   }
 }

@@ -69,7 +69,8 @@ bool NotificationUIManagerAndroid::OnNotificationClicked(
   PlatformNotificationServiceImpl::GetInstance()->OnPersistentNotificationClick(
       ProfileManager::GetLastUsedProfile(),
       persistent_notification_id,
-      origin);
+      origin,
+      -1 /* action_index */);
 
   return true;
 }
@@ -199,14 +200,14 @@ bool NotificationUIManagerAndroid::CancelById(const std::string& delegate_id,
 
 std::set<std::string>
 NotificationUIManagerAndroid::GetAllIdsByProfileAndSourceOrigin(
-    Profile* profile,
+    ProfileID profile_id,
     const GURL& source) {
   NOTREACHED();
   return std::set<std::string>();
 }
 
 std::set<std::string> NotificationUIManagerAndroid::GetAllIdsByProfile(
-    Profile* profile) {
+    ProfileID profile_id) {
   NOTREACHED();
   return std::set<std::string>();
 }

@@ -10,7 +10,6 @@
 
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/metrics/field_trial.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
@@ -76,6 +75,44 @@ void BindFields(const EntryKernel& entry,
   }
 }
 
+// Helper function that loads a number of shareable fields of the
+// same type. The sharing criteria is based on comparison of
+// the serialized data. Only consecutive DB columns need to compared
+// to cover all possible sharing combinations.
+template <typename TValue, typename TField>
+void UnpackProtoFields(sql::Statement* statement,
+                       EntryKernel* kernel,
+                       int* index,
+                       int end_index) {
+  const void* prev_blob = nullptr;
+  int prev_length = -1;
+  int prev_index = -1;
+
+  for (; *index < end_index; ++(*index)) {
+    int length = statement->ColumnByteLength(*index);
+    if (length == 0) {
+      // Skip this column and keep the default value in the kernel field.
+      continue;
+    }
+
+    const void* blob = statement->ColumnBlob(*index);
+    // According to sqlite3 documentation, the prev_blob pointer should remain
+    // valid until moving to the next row.
+    if (length == prev_length && memcmp(blob, prev_blob, length) == 0) {
+      // Serialized values are the same - share the value from |prev_index|
+      // field with the current field.
+      kernel->copy(static_cast<TField>(prev_index),
+                   static_cast<TField>(*index));
+    } else {
+      // Regular case - deserialize and copy the value to the field.
+      kernel->load(static_cast<TField>(*index), blob, length);
+      prev_blob = blob;
+      prev_length = length;
+      prev_index = *index;
+    }
+  }
+}
+
 // The caller owns the returned EntryKernel*.  Assumes the statement currently
 // points to a valid row in the metas table. Returns NULL to indicate that
 // it detected a corruption in the data on unpacking.
@@ -101,10 +138,8 @@ scoped_ptr<EntryKernel> UnpackEntry(sql::Statement* statement) {
     kernel->put(static_cast<StringField>(i),
                 statement->ColumnString(i));
   }
-  for ( ; i < PROTO_FIELDS_END; ++i) {
-    kernel->mutable_ref(static_cast<ProtoField>(i)).ParseFromArray(
-        statement->ColumnBlob(i), statement->ColumnByteLength(i));
-  }
+  UnpackProtoFields<sync_pb::EntitySpecifics, ProtoField>(
+      statement, kernel.get(), &i, PROTO_FIELDS_END);
   for ( ; i < UNIQUE_POSITION_FIELDS_END; ++i) {
     std::string temp;
     statement->ColumnBlobAsString(i, &temp);
@@ -118,10 +153,8 @@ scoped_ptr<EntryKernel> UnpackEntry(sql::Statement* statement) {
     kernel->mutable_ref(static_cast<UniquePositionField>(i)) =
         UniquePosition::FromProto(proto);
   }
-  for (; i < ATTACHMENT_METADATA_FIELDS_END; ++i) {
-    kernel->mutable_ref(static_cast<AttachmentMetadataField>(i)).ParseFromArray(
-        statement->ColumnBlob(i), statement->ColumnByteLength(i));
-  }
+  UnpackProtoFields<sync_pb::AttachmentMetadata, AttachmentMetadataField>(
+      statement, kernel.get(), &i, ATTACHMENT_METADATA_FIELDS_END);
 
   // Sanity check on positions.  We risk strange and rare crashes if our
   // assumptions about unique position values are broken.
@@ -140,12 +173,6 @@ namespace {
 // This just has to be big enough to hold an UPDATE or INSERT statement that
 // modifies all the columns in the entry table.
 static const string::size_type kUpdateStatementBufferSize = 2048;
-
-bool IsSyncBackingDatabase32KEnabled() {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("SyncBackingDatabase32K");
-  return group_name == "Enabled";
-}
 
 void OnSqliteError(const base::Closure& catastrophic_error_handler,
                    int err,
@@ -200,7 +227,7 @@ bool SaveEntryToDB(sql::Statement* save_statement, const EntryKernel& entry) {
 
 DirectoryBackingStore::DirectoryBackingStore(const string& dir_name)
     : dir_name_(dir_name),
-      database_page_size_(IsSyncBackingDatabase32KEnabled() ? 32768 : 4096),
+      database_page_size_(32768),
       needs_column_refresh_(false) {
   DCHECK(base::ThreadTaskRunnerHandle::IsSet());
   ResetAndCreateConnection();
@@ -209,7 +236,7 @@ DirectoryBackingStore::DirectoryBackingStore(const string& dir_name)
 DirectoryBackingStore::DirectoryBackingStore(const string& dir_name,
                                              sql::Connection* db)
     : dir_name_(dir_name),
-      database_page_size_(IsSyncBackingDatabase32KEnabled() ? 32768 : 4096),
+      database_page_size_(32768),
       db_(db),
       needs_column_refresh_(false) {
   DCHECK(base::ThreadTaskRunnerHandle::IsSet());
@@ -352,8 +379,7 @@ bool DirectoryBackingStore::OpenInMemory() {
 
 bool DirectoryBackingStore::InitializeTables() {
   int page_size = 0;
-  if (IsSyncBackingDatabase32KEnabled() && GetDatabasePageSize(&page_size) &&
-      page_size == 4096) {
+  if (GetDatabasePageSize(&page_size) && page_size == 4096) {
     IncreasePageSizeTo32K();
   }
   sql::Transaction transaction(db_.get());

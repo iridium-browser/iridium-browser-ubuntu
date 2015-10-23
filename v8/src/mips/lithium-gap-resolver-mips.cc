@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
-
 #include "src/mips/lithium-codegen-mips.h"
 #include "src/mips/lithium-gap-resolver-mips.h"
 
@@ -296,4 +294,5 @@ void LGapResolver::EmitMove(int index) {
 
 #undef __
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

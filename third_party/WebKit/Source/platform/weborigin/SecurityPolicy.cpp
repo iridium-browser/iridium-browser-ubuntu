@@ -176,7 +176,7 @@ void SecurityPolicy::addOriginAccessWhitelistEntry(const SecurityOrigin& sourceO
         result.storedValue->value = adoptPtr(new OriginAccessWhiteList);
 
     OriginAccessWhiteList* list = result.storedValue->value.get();
-    list->append(OriginAccessEntry(destinationProtocol, destinationDomain, allowDestinationSubdomains ? OriginAccessEntry::AllowSubdomains : OriginAccessEntry::DisallowSubdomains, OriginAccessEntry::TreatIPAddressAsIPAddress));
+    list->append(OriginAccessEntry(destinationProtocol, destinationDomain, allowDestinationSubdomains ? OriginAccessEntry::AllowSubdomains : OriginAccessEntry::DisallowSubdomains));
 }
 
 void SecurityPolicy::removeOriginAccessWhitelistEntry(const SecurityOrigin& sourceOrigin, const String& destinationProtocol, const String& destinationDomain, bool allowDestinationSubdomains)
@@ -193,7 +193,8 @@ void SecurityPolicy::removeOriginAccessWhitelistEntry(const SecurityOrigin& sour
         return;
 
     OriginAccessWhiteList* list = it->value.get();
-    size_t index = list->find(OriginAccessEntry(destinationProtocol, destinationDomain, allowDestinationSubdomains ? OriginAccessEntry::AllowSubdomains : OriginAccessEntry::DisallowSubdomains, OriginAccessEntry::TreatIPAddressAsIPAddress));
+    size_t index = list->find(OriginAccessEntry(destinationProtocol, destinationDomain, allowDestinationSubdomains ? OriginAccessEntry::AllowSubdomains : OriginAccessEntry::DisallowSubdomains));
+
     if (index == kNotFound)
         return;
 
@@ -207,6 +208,33 @@ void SecurityPolicy::resetOriginAccessWhitelists()
 {
     ASSERT(isMainThread());
     originAccessMap().clear();
+}
+
+bool SecurityPolicy::referrerPolicyFromString(const String& policy, ReferrerPolicy* result)
+{
+    ASSERT(!policy.isNull());
+
+    if (equalIgnoringCase(policy, "no-referrer") || equalIgnoringCase(policy, "never")) {
+        *result = ReferrerPolicyNever;
+        return true;
+    }
+    if (equalIgnoringCase(policy, "unsafe-url") || equalIgnoringCase(policy, "always")) {
+        *result = ReferrerPolicyAlways;
+        return true;
+    }
+    if (equalIgnoringCase(policy, "origin")) {
+        *result = ReferrerPolicyOrigin;
+        return true;
+    }
+    if (equalIgnoringCase(policy, "origin-when-cross-origin") || equalIgnoringCase(policy, "origin-when-crossorigin")) {
+        *result = ReferrerPolicyOriginWhenCrossOrigin;
+        return true;
+    }
+    if (equalIgnoringCase(policy, "no-referrer-when-downgrade") || equalIgnoringCase(policy, "default")) {
+        *result = ReferrerPolicyNoReferrerWhenDowngrade;
+        return true;
+    }
+    return false;
 }
 
 } // namespace blink

@@ -12,7 +12,9 @@
 #include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
 #include "gpu/GLES2/gl2extchromium.h"
+#include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "third_party/skia/include/gpu/GrContext.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -105,10 +107,6 @@ OutputSurface::~OutputSurface() {
     context_provider_->SetMemoryPolicyChangedCallback(
         ContextProvider::MemoryPolicyChangedCallback());
   }
-  if (worker_context_provider_.get()) {
-    worker_context_provider_->SetLostContextCallback(
-        ContextProvider::LostContextCallback());
-  }
 }
 
 bool OutputSurface::HasExternalStencilTest() const {
@@ -132,14 +130,8 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
 
   if (success && worker_context_provider_.get()) {
     success = worker_context_provider_->BindToCurrentThread();
-    if (success) {
+    if (success)
       worker_context_provider_->SetupLock();
-      // The destructor resets the context lost callback, so base::Unretained
-      // is safe, as long as the worker threads stop using the context before
-      // the output surface is destroyed.
-      worker_context_provider_->SetLostContextCallback(base::Bind(
-          &OutputSurface::DidLoseOutputSurface, base::Unretained(this)));
-    }
   }
 
   if (!success)
@@ -174,10 +166,6 @@ void OutputSurface::Reshape(const gfx::Size& size, float scale_factor) {
     software_device_->Resize(size, scale_factor);
 }
 
-gfx::Size OutputSurface::SurfaceSize() const {
-  return surface_size_;
-}
-
 void OutputSurface::BindFramebuffer() {
   DCHECK(context_provider_.get());
   context_provider_->ContextGL()->BindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -207,6 +195,33 @@ void OutputSurface::SetMemoryPolicy(const ManagedMemoryPolicy& policy) {
 
 OverlayCandidateValidator* OutputSurface::GetOverlayCandidateValidator() const {
   return nullptr;
+}
+
+unsigned OutputSurface::GetOverlayTextureId() const {
+  return 0;
+}
+
+void OutputSurface::SetWorkerContextShouldAggressivelyFreeResources(
+    bool aggressively_free_resources) {
+  TRACE_EVENT1("cc",
+               "OutputSurface::SetWorkerContextShouldAggressivelyFreeResources",
+               "aggressively_free_resources", aggressively_free_resources);
+  if (auto* context_provider = worker_context_provider()) {
+    ContextProvider::ScopedContextLock scoped_context(context_provider);
+
+    if (aggressively_free_resources) {
+      context_provider->DeleteCachedResources();
+    }
+
+    if (auto* context_support = context_provider->ContextSupport()) {
+      context_support->SetAggressivelyFreeResources(
+          aggressively_free_resources);
+    }
+  }
+}
+
+bool OutputSurface::SurfaceIsSuspendForRecycle() const {
+  return false;
 }
 
 }  // namespace cc

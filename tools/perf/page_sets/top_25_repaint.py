@@ -2,10 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
-from page_sets import top_pages
 from page_sets import repaint_helpers
+from page_sets import top_pages
 
 
 class TopRepaintPage(page_module.Page):
@@ -14,8 +15,8 @@ class TopRepaintPage(page_module.Page):
                credentials=None):
     super(TopRepaintPage, self).__init__(
         url=url, page_set=page_set, name=name,
-        credentials_path='data/credentials.json')
-    self.user_agent_type = 'desktop'
+        credentials_path='data/credentials.json',
+        shared_page_state_class=shared_page_state.SharedDesktopPageState)
     self.archive_data_file = 'data/top_25_repaint.json'
     self.credentials = credentials
     self._mode = mode
@@ -37,15 +38,14 @@ def _CreatePageClassWithRepaintInteractions(page_cls, mode, width, height):
   return DerivedRepaintPage
 
 
-class Top25RepaintPageSet(page_set_module.PageSet):
+class Top25RepaintPageSet(story.StorySet):
 
   """ Pages hand-picked for 2012 CrOS scrolling tuning efforts. """
 
   def __init__(self, mode='viewport', width=None, height=None):
     super(Top25RepaintPageSet, self).__init__(
-        user_agent_type='desktop',
         archive_data_file='data/top_25_repaint.json',
-        bucket=page_set_module.PARTNER_BUCKET)
+        cloud_storage_bucket=story.PARTNER_BUCKET)
 
     top_page_classes = [
         top_pages.GoogleWebSearchPage,
@@ -68,8 +68,9 @@ class Top25RepaintPageSet(page_set_module.PageSet):
     ]
 
     for cl in top_page_classes:
-      self.AddUserStory(_CreatePageClassWithRepaintInteractions(
-          cl, mode=mode, width=width, height=height)(self))
+      self.AddStory(_CreatePageClassWithRepaintInteractions(
+          cl, mode=mode, width=width, height=height)
+                        (self, shared_page_state.SharedDesktopPageState))
 
     other_urls = [
         # Why: #1 news worldwide (Alexa global)
@@ -92,5 +93,5 @@ class Top25RepaintPageSet(page_set_module.PageSet):
     ]
 
     for url in other_urls:
-      self.AddUserStory(
+      self.AddStory(
           TopRepaintPage(url, self, mode=mode, height=height, width=width))

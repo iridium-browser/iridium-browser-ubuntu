@@ -43,13 +43,13 @@
 #include "media/base/video_frame.h"
 #include "media/blink/webcontentdecryptionmodule_impl.h"
 #include "media/blink/webmediaplayer_delegate.h"
-#include "media/blink/webmediaplayer_util.h"
 #include "net/base/mime_util.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
 #include "third_party/WebKit/public/platform/WebEncryptedMediaTypes.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3DProvider.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayerClient.h"
+#include "third_party/WebKit/public/platform/WebMediaPlayerEncryptedMediaClient.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -87,6 +87,8 @@ void OnReleaseTexture(
   GLES2Interface* gl = factories->ContextGL();
   gl->WaitSyncPointCHROMIUM(release_sync_point);
   gl->DeleteTextures(1, &texture_id);
+  // Flush to ensure that the stream texture gets deleted in a timely fashion.
+  gl->ShallowFlushCHROMIUM();
 }
 
 bool IsSkBitmapProperlySizedTexture(const SkBitmap* bitmap,
@@ -148,27 +150,27 @@ namespace content {
 WebMediaPlayerAndroid::WebMediaPlayerAndroid(
     blink::WebFrame* frame,
     blink::WebMediaPlayerClient* client,
+    blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
     base::WeakPtr<media::WebMediaPlayerDelegate> delegate,
     RendererMediaPlayerManager* player_manager,
     media::CdmFactory* cdm_factory,
-    media::MediaPermission* media_permission,
-    blink::WebContentDecryptionModule* initial_cdm,
     scoped_refptr<StreamTextureFactory> factory,
-    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    media::MediaLog* media_log)
+    const media::WebMediaPlayerParams& params)
     : RenderFrameObserver(RenderFrame::FromWebFrame(frame)),
       frame_(frame),
       client_(client),
+      encrypted_client_(encrypted_client),
       delegate_(delegate),
+      defer_load_cb_(params.defer_load_cb()),
       buffered_(static_cast<size_t>(1)),
-      media_task_runner_(task_runner),
+      media_task_runner_(params.media_task_runner()),
       ignore_metadata_duration_change_(false),
       pending_seek_(false),
       seeking_(false),
       did_loading_progress_(false),
       player_manager_(player_manager),
       cdm_factory_(cdm_factory),
-      media_permission_(media_permission),
+      media_permission_(params.media_permission()),
       network_state_(WebMediaPlayer::NetworkStateEmpty),
       ready_state_(WebMediaPlayer::ReadyStateHaveNothing),
       texture_id_(0),
@@ -177,18 +179,18 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       is_playing_(false),
       needs_establish_peer_(true),
       has_size_info_(false),
-      // Compositor thread does not exist in layout tests.
-      compositor_loop_(
-          RenderThreadImpl::current()->compositor_message_loop_proxy().get()
-              ? RenderThreadImpl::current()->compositor_message_loop_proxy()
-              : base::MessageLoopProxy::current()),
+      // Threaded compositing isn't enabled universally yet.
+      compositor_task_runner_(
+          params.compositor_task_runner()
+              ? params.compositor_task_runner()
+              : base::ThreadTaskRunnerHandle::Get()),
       stream_texture_factory_(factory),
       needs_external_surface_(false),
       is_fullscreen_(false),
       video_frame_provider_client_(NULL),
       player_type_(MEDIA_PLAYER_TYPE_URL),
       is_remote_(false),
-      media_log_(media_log),
+      media_log_(params.media_log()),
       init_data_type_(media::EmeInitDataType::UNKNOWN),
       cdm_context_(NULL),
       allow_stored_credentials_(false),
@@ -219,9 +221,9 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
   TryCreateStreamTextureProxyIfNeeded();
   interpolator_.SetUpperBound(base::TimeDelta());
 
-  if (initial_cdm) {
-    cdm_context_ =
-        media::ToWebContentDecryptionModuleImpl(initial_cdm)->GetCdmContext();
+  if (params.initial_cdm()) {
+    cdm_context_ = media::ToWebContentDecryptionModuleImpl(params.initial_cdm())
+                       ->GetCdmContext();
   }
 }
 
@@ -238,6 +240,8 @@ WebMediaPlayerAndroid::~WebMediaPlayerAndroid() {
   if (stream_id_) {
     GLES2Interface* gl = stream_texture_factory_->ContextGL();
     gl->DeleteTextures(1, &texture_id_);
+    // Flush to ensure that the stream texture gets deleted in a timely fashion.
+    gl->ShallowFlushCHROMIUM();
     texture_id_ = 0;
     texture_mailbox_ = gpu::Mailbox();
     stream_id_ = 0;
@@ -267,6 +271,18 @@ WebMediaPlayerAndroid::~WebMediaPlayerAndroid() {
 void WebMediaPlayerAndroid::load(LoadType load_type,
                                  const blink::WebURL& url,
                                  CORSMode cors_mode) {
+  if (!defer_load_cb_.is_null()) {
+    defer_load_cb_.Run(base::Bind(&WebMediaPlayerAndroid::DoLoad,
+                                  weak_factory_.GetWeakPtr(), load_type, url,
+                                  cors_mode));
+    return;
+  }
+  DoLoad(load_type, url, cors_mode);
+}
+
+void WebMediaPlayerAndroid::DoLoad(LoadType load_type,
+                                   const blink::WebURL& url,
+                                   CORSMode cors_mode) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
   media::ReportMetrics(load_type, GURL(url),
@@ -405,7 +421,7 @@ void WebMediaPlayerAndroid::seek(double seconds) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   DVLOG(1) << __FUNCTION__ << "(" << seconds << ")";
 
-  base::TimeDelta new_seek_time = media::ConvertSecondsToTimestamp(seconds);
+  base::TimeDelta new_seek_time = base::TimeDelta::FromSecondsD(seconds);
 
   if (seeking_) {
     if (new_seek_time == seek_time_) {
@@ -458,6 +474,15 @@ void WebMediaPlayerAndroid::setVolume(double volume) {
   player_manager_->SetVolume(player_id_, volume);
 }
 
+void WebMediaPlayerAndroid::setSinkId(
+    const blink::WebString& device_id,
+    media::WebSetSinkIdCB* raw_web_callbacks) {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
+  scoped_ptr<media::WebSetSinkIdCB> web_callbacks(raw_web_callbacks);
+  web_callbacks->onError(new blink::WebSetSinkIdError(
+      blink::WebSetSinkIdError::ErrorTypeNotSupported, "Not Supported"));
+}
+
 bool WebMediaPlayerAndroid::hasVideo() const {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   // If we have obtained video size information before, use it.
@@ -490,7 +515,8 @@ bool WebMediaPlayerAndroid::hasAudio() const {
 
   if (mime.find("audio/") != std::string::npos ||
       mime.find("video/") != std::string::npos ||
-      mime.find("application/ogg") != std::string::npos) {
+      mime.find("application/ogg") != std::string::npos ||
+      mime.find("application/x-mpegurl") != std::string::npos) {
     return true;
   }
   return false;
@@ -610,7 +636,7 @@ void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
 
   unsigned textureId = static_cast<unsigned>(
     (bitmap_.getTexture())->getTextureHandle());
-  if (!copyVideoTextureToPlatformTexture(context3D, textureId, 0,
+  if (!copyVideoTextureToPlatformTexture(context3D, textureId,
       GL_RGBA, GL_UNSIGNED_BYTE, true, false)) {
     return;
   }
@@ -626,20 +652,7 @@ void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
   paint.setXfermodeMode(mode);
   // It is not necessary to pass the dest into the drawBitmap call since all
   // the context have been set up before calling paintCurrentFrameInContext.
-  canvas->drawBitmapRect(bitmap_, 0, dest, &paint);
-}
-
-bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
-    blink::WebGraphicsContext3D* web_graphics_context,
-    unsigned int texture,
-    unsigned int level,
-    unsigned int internal_format,
-    unsigned int type,
-    bool premultiply_alpha,
-    bool flip_y) {
-  return copyVideoTextureToPlatformTexture(web_graphics_context, texture,
-                                           internal_format, type,
-                                           premultiply_alpha, flip_y);
+  canvas->drawBitmapRect(bitmap_, dest, &paint);
 }
 
 bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
@@ -660,10 +673,9 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
     video_frame = current_frame_;
   }
 
-  if (!video_frame.get() ||
-      video_frame->format() != media::VideoFrame::NATIVE_TEXTURE)
+  if (!video_frame.get() || !video_frame->HasTextures())
     return false;
-  DCHECK_EQ(1u, media::VideoFrame::NumTextures(video_frame->texture_format()));
+  DCHECK_EQ(1u, media::VideoFrame::NumPlanes(video_frame->format()));
   const gpu::MailboxHolder& mailbox_holder = video_frame->mailbox_holder(0);
   DCHECK((!is_remote_ &&
           mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES) ||
@@ -673,24 +685,17 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
 
   // Ensure the target of texture is set before copyTextureCHROMIUM, otherwise
   // an invalid texture target may be used for copy texture.
-  uint32 src_texture = web_graphics_context->createAndConsumeTextureCHROMIUM(
-      mailbox_holder.texture_target, mailbox_holder.mailbox.name);
-
-  // The video is stored in an unmultiplied format, so premultiply if
-  // necessary.
-  web_graphics_context->pixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM,
-                                    premultiply_alpha);
+  uint32 src_texture =
+      web_graphics_context->createAndConsumeTextureCHROMIUM(
+          mailbox_holder.texture_target, mailbox_holder.mailbox.name);
 
   // Application itself needs to take care of setting the right flip_y
   // value down to get the expected result.
   // flip_y==true means to reverse the video orientation while
   // flip_y==false means to keep the intrinsic orientation.
-  web_graphics_context->pixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, flip_y);
-  web_graphics_context->copyTextureCHROMIUM(GL_TEXTURE_2D, src_texture, texture,
-                                            internal_format, type);
-  web_graphics_context->pixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, false);
-  web_graphics_context->pixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM,
-                                    false);
+  web_graphics_context->copyTextureCHROMIUM(
+      GL_TEXTURE_2D, src_texture, texture, internal_format, type,
+      flip_y, premultiply_alpha, false);
 
   web_graphics_context->deleteTexture(src_texture);
   web_graphics_context->flush();
@@ -729,7 +734,7 @@ bool WebMediaPlayerAndroid::didPassCORSAccessCheck() const {
 }
 
 double WebMediaPlayerAndroid::mediaTimeForTimeValue(double timeValue) const {
-  return media::ConvertSecondsToTimestamp(timeValue).InSecondsF();
+  return base::TimeDelta::FromSecondsD(timeValue).InSecondsF();
 }
 
 unsigned WebMediaPlayerAndroid::decodedFrameCount() const {
@@ -761,12 +766,17 @@ unsigned WebMediaPlayerAndroid::videoDecodedByteCount() const {
 }
 
 void WebMediaPlayerAndroid::OnMediaMetadataChanged(
-    const base::TimeDelta& duration, int width, int height, bool success) {
+    base::TimeDelta duration, int width, int height, bool success) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   bool need_to_signal_duration_changed = false;
 
   if (is_local_resource_)
     UpdateNetworkState(WebMediaPlayer::NetworkStateLoaded);
+
+  // For HLS streams, the reported duration may be zero for infinite streams.
+  // See http://crbug.com/501213.
+  if (duration.is_zero() && IsHLSStream())
+    duration = media::kInfiniteDuration();
 
   // Update duration, if necessary, prior to ready state updates that may
   // cause duration() query.
@@ -859,6 +869,12 @@ void WebMediaPlayerAndroid::OnMediaError(int error_type) {
 
 void WebMediaPlayerAndroid::OnVideoSizeChanged(int width, int height) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
+
+  // For HLS streams, a bogus empty size may be reported at first, followed by
+  // the actual size only once playback begins. See http://crbug.com/509972.
+  if (!has_size_info_ && width == 0 && height == 0 && IsHLSStream())
+    return;
+
   has_size_info_ = true;
   if (natural_size_.width == width && natural_size_.height == height)
     return;
@@ -902,14 +918,10 @@ void WebMediaPlayerAndroid::OnVideoSizeChanged(int width, int height) {
   // Lazily allocate compositing layer.
   if (!video_weblayer_) {
     video_weblayer_.reset(new cc_blink::WebLayerImpl(
-        cc::VideoLayer::Create(this, media::VIDEO_ROTATION_0)));
+        cc::VideoLayer::Create(cc_blink::WebLayerImpl::LayerSettings(), this,
+                               media::VIDEO_ROTATION_0)));
     client_->setWebLayer(video_weblayer_.get());
   }
-
-  // TODO(qinmin): This is a hack. We need the media element to stop showing the
-  // poster image by forcing it to call setDisplayMode(video). Should move the
-  // logic into HTMLMediaElement.cpp.
-  client_->timeChanged();
 }
 
 void WebMediaPlayerAndroid::OnTimeUpdate(base::TimeDelta current_timestamp,
@@ -959,8 +971,10 @@ void WebMediaPlayerAndroid::OnDidExitFullscreen() {
     SetNeedsEstablishPeer(true);
   // We had the fullscreen surface connected to Android MediaPlayer,
   // so reconnect our surface texture for embedded playback.
-  if (!paused() && needs_establish_peer_)
+  if (!paused() && needs_establish_peer_) {
+    TryCreateStreamTextureProxyIfNeeded();
     EstablishSurfaceTexturePeer();
+  }
 
 #if defined(VIDEO_HOLE)
   if (!paused() && needs_external_surface_)
@@ -971,6 +985,13 @@ void WebMediaPlayerAndroid::OnDidExitFullscreen() {
 }
 
 void WebMediaPlayerAndroid::OnMediaPlayerPlay() {
+  // The MediaPlayer might request the video to be played after it lost its
+  // stream texture proxy or the peer connection, for example, if the video was
+  // paused while fullscreen then fullscreen state was left.
+  TryCreateStreamTextureProxyIfNeeded();
+  if (needs_establish_peer_)
+    EstablishSurfaceTexturePeer();
+
   UpdatePlayingState(true);
   client_->playbackStateChanged();
 }
@@ -978,10 +999,6 @@ void WebMediaPlayerAndroid::OnMediaPlayerPlay() {
 void WebMediaPlayerAndroid::OnMediaPlayerPause() {
   UpdatePlayingState(false);
   client_->playbackStateChanged();
-}
-
-void WebMediaPlayerAndroid::OnRequestFullscreen() {
-  client_->requestFullscreen();
 }
 
 void WebMediaPlayerAndroid::OnRemoteRouteAvailabilityChanged(
@@ -1073,10 +1090,8 @@ void WebMediaPlayerAndroid::InitializePlayer(
     const GURL& first_party_for_cookies,
     bool allow_stored_credentials,
     int demuxer_client_id) {
-  if (player_type_ == MEDIA_PLAYER_TYPE_URL) {
-    UMA_HISTOGRAM_BOOLEAN("Media.Android.IsHttpLiveStreamingMedia",
-                          IsHLSStream());
-  }
+  ReportHLSMetrics();
+
   allow_stored_credentials_ = allow_stored_credentials;
   player_manager_->Initialize(
       player_type_, player_id_, url, first_party_for_cookies, demuxer_client_id,
@@ -1204,14 +1219,14 @@ void WebMediaPlayerAndroid::DrawRemotePlaybackText(
   GLuint texture_mailbox_sync_point = gl->InsertSyncPointCHROMIUM();
 
   scoped_refptr<VideoFrame> new_frame = VideoFrame::WrapNativeTexture(
+      media::PIXEL_FORMAT_ARGB,
       gpu::MailboxHolder(texture_mailbox, texture_target,
                          texture_mailbox_sync_point),
       media::BindToCurrentLoop(base::Bind(&OnReleaseTexture,
                                           stream_texture_factory_,
                                           remote_playback_texture_id)),
       canvas_size /* coded_size */, gfx::Rect(canvas_size) /* visible_rect */,
-      canvas_size /* natural_size */, base::TimeDelta() /* timestamp */,
-      false /* allow overlay */, true /* has_alpha */);
+      canvas_size /* natural_size */, base::TimeDelta() /* timestamp */);
   SetCurrentFrameInternal(new_frame);
 }
 
@@ -1223,7 +1238,7 @@ void WebMediaPlayerAndroid::ReallocateVideoFrame() {
     if (!natural_size_.isEmpty()) {
       // Now we finally know that "stream texture" and "video frame" won't
       // be needed. EME uses "external surface" and "video hole" instead.
-      ResetStreamTextureProxy();
+      RemoveSurfaceTextureAndProxy();
       scoped_refptr<VideoFrame> new_frame =
           VideoFrame::CreateHoleFrame(natural_size_);
       SetCurrentFrameInternal(new_frame);
@@ -1242,12 +1257,13 @@ void WebMediaPlayerAndroid::ReallocateVideoFrame() {
     GLuint texture_mailbox_sync_point = gl->InsertSyncPointCHROMIUM();
 
     scoped_refptr<VideoFrame> new_frame = VideoFrame::WrapNativeTexture(
+        media::PIXEL_FORMAT_ARGB,
         gpu::MailboxHolder(texture_mailbox_, texture_target,
                            texture_mailbox_sync_point),
         media::BindToCurrentLoop(base::Bind(
             &OnReleaseTexture, stream_texture_factory_, texture_id_ref)),
         natural_size_, gfx::Rect(natural_size_), natural_size_,
-        base::TimeDelta(), false /* allow_overlay */, true /* has_alpha */);
+        base::TimeDelta());
     SetCurrentFrameInternal(new_frame);
   }
 }
@@ -1259,8 +1275,10 @@ void WebMediaPlayerAndroid::SetVideoFrameProviderClient(
 
   // Set the callback target when a frame is produced. Need to do this before
   // StopUsingProvider to ensure we really stop using the client.
-  if (stream_texture_proxy_)
-    stream_texture_proxy_->BindToLoop(stream_id_, client, compositor_loop_);
+  if (stream_texture_proxy_) {
+    stream_texture_proxy_->BindToLoop(stream_id_, client,
+                                      compositor_task_runner_);
+  }
 
   if (video_frame_provider_client_ && video_frame_provider_client_ != client)
     video_frame_provider_client_->StopUsingProvider();
@@ -1301,9 +1319,21 @@ void WebMediaPlayerAndroid::PutCurrentFrame() {
 void WebMediaPlayerAndroid::ResetStreamTextureProxy() {
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
+  RemoveSurfaceTextureAndProxy();
+
+  TryCreateStreamTextureProxyIfNeeded();
+  if (needs_establish_peer_ && is_playing_)
+    EstablishSurfaceTexturePeer();
+}
+
+void WebMediaPlayerAndroid::RemoveSurfaceTextureAndProxy() {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
+
   if (stream_id_) {
     GLES2Interface* gl = stream_texture_factory_->ContextGL();
     gl->DeleteTextures(1, &texture_id_);
+    // Flush to ensure that the stream texture gets deleted in a timely fashion.
+    gl->ShallowFlushCHROMIUM();
     texture_id_ = 0;
     texture_mailbox_ = gpu::Mailbox();
     stream_id_ = 0;
@@ -1312,10 +1342,6 @@ void WebMediaPlayerAndroid::ResetStreamTextureProxy() {
   needs_establish_peer_ = !needs_external_surface_ && !is_remote_ &&
                           !is_fullscreen_ &&
                           (hasVideo() || IsHLSStream());
-
-  TryCreateStreamTextureProxyIfNeeded();
-  if (needs_establish_peer_ && is_playing_)
-    EstablishSurfaceTexturePeer();
 }
 
 void WebMediaPlayerAndroid::TryCreateStreamTextureProxyIfNeeded() {
@@ -1338,7 +1364,7 @@ void WebMediaPlayerAndroid::TryCreateStreamTextureProxyIfNeeded() {
     ReallocateVideoFrame();
     if (video_frame_provider_client_) {
       stream_texture_proxy_->BindToLoop(
-          stream_id_, video_frame_provider_client_, compositor_loop_);
+          stream_id_, video_frame_provider_client_, compositor_task_runner_);
     }
   }
 }
@@ -1430,8 +1456,9 @@ const gfx::RectF WebMediaPlayerAndroid::GetBoundaryRectangle() {
 // Convert a WebString to ASCII, falling back on an empty string in the case
 // of a non-ASCII string.
 static std::string ToASCIIOrEmpty(const blink::WebString& string) {
-  return base::IsStringASCII(string) ? base::UTF16ToASCII(string)
-                                     : std::string();
+  return base::IsStringASCII(string)
+      ? base::UTF16ToASCII(base::StringPiece16(string))
+      : std::string();
 }
 
 // Helper functions to report media EME related stats to UMA. They follow the
@@ -1657,12 +1684,13 @@ void WebMediaPlayerAndroid::setContentDecryptionModule(
     blink::WebContentDecryptionModuleResult result) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
-  // TODO(xhwang): Support setMediaKeys(0) if necessary: http://crbug.com/330324
+  // Once the CDM is set it can't be cleared as there may be frames being
+  // decrypted on other threads. So fail this request.
+  // http://crbug.com/462365#c7.
   if (!cdm) {
     result.completeWithError(
-        blink::WebContentDecryptionModuleExceptionNotSupportedError,
-        0,
-        "Null MediaKeys object is not supported.");
+        blink::WebContentDecryptionModuleExceptionInvalidStateError, 0,
+        "The existing MediaKeys object cannot be removed at this time.");
     return;
   }
 
@@ -1696,7 +1724,7 @@ void WebMediaPlayerAndroid::ContentDecryptionModuleAttached(
 void WebMediaPlayerAndroid::OnKeyAdded(const std::string& session_id) {
   EmeUMAHistogramCounts(current_key_system_, "KeyAdded", 1);
 
-  client_->keyAdded(
+  encrypted_client_->keyAdded(
       WebString::fromUTF8(media::GetPrefixedKeySystemName(current_key_system_)),
       WebString::fromUTF8(session_id));
 }
@@ -1715,10 +1743,11 @@ void WebMediaPlayerAndroid::OnKeyError(const std::string& session_id,
     short_system_code = static_cast<unsigned short>(system_code);
   }
 
-  client_->keyError(
+  encrypted_client_->keyError(
       WebString::fromUTF8(media::GetPrefixedKeySystemName(current_key_system_)),
       WebString::fromUTF8(session_id),
-      static_cast<blink::WebMediaPlayerClient::MediaKeyErrorCode>(error_code),
+      static_cast<blink::WebMediaPlayerEncryptedMediaClient::MediaKeyErrorCode>(
+          error_code),
       short_system_code);
 }
 
@@ -1727,12 +1756,10 @@ void WebMediaPlayerAndroid::OnKeyMessage(const std::string& session_id,
                                          const GURL& destination_url) {
   DCHECK(destination_url.is_empty() || destination_url.is_valid());
 
-  client_->keyMessage(
+  encrypted_client_->keyMessage(
       WebString::fromUTF8(media::GetPrefixedKeySystemName(current_key_system_)),
-      WebString::fromUTF8(session_id),
-      message.empty() ? NULL : &message[0],
-      message.size(),
-      destination_url);
+      WebString::fromUTF8(session_id), message.empty() ? NULL : &message[0],
+      message.size(), destination_url);
 }
 
 void WebMediaPlayerAndroid::OnMediaSourceOpened(
@@ -1760,17 +1787,17 @@ void WebMediaPlayerAndroid::OnEncryptedMediaInitData(
   if (init_data_type_ == media::EmeInitDataType::UNKNOWN)
     init_data_type_ = init_data_type;
 
-  client_->encrypted(ConvertToWebInitDataType(init_data_type),
-                     vector_as_array(&init_data), init_data.size());
+  encrypted_client_->encrypted(ConvertToWebInitDataType(init_data_type),
+                               vector_as_array(&init_data), init_data.size());
 }
 
 void WebMediaPlayerAndroid::OnWaitingForDecryptionKey() {
-  client_->didBlockPlaybackWaitingForKey();
+  encrypted_client_->didBlockPlaybackWaitingForKey();
 
   // TODO(jrummell): didResumePlaybackBlockedForKey() should only be called
   // when a key has been successfully added (e.g. OnSessionKeysChange() with
   // |has_additional_usable_key| = true). http://crbug.com/461903
-  client_->didResumePlaybackBlockedForKey();
+  encrypted_client_->didResumePlaybackBlockedForKey();
 }
 
 void WebMediaPlayerAndroid::OnCdmContextReady(media::CdmContext* cdm_context) {
@@ -1855,6 +1882,10 @@ void WebMediaPlayerAndroid::SetDecryptorReadyCB(
   decryptor_ready_cb_ = decryptor_ready_cb;
 }
 
+bool WebMediaPlayerAndroid::supportsOverlayFullscreenVideo() {
+  return true;
+}
+
 void WebMediaPlayerAndroid::enterFullscreen() {
   if (is_player_initialized_)
     player_manager_->EnterFullscreen(player_id_);
@@ -1868,6 +1899,18 @@ bool WebMediaPlayerAndroid::IsHLSStream() const {
   if (!net::GetMimeTypeFromFile(base::FilePath(url.path()), &mime))
     return false;
   return !mime.compare("application/x-mpegurl");
+}
+
+void WebMediaPlayerAndroid::ReportHLSMetrics() const {
+  if (player_type_ != MEDIA_PLAYER_TYPE_URL)
+    return;
+
+  bool is_hls = IsHLSStream();
+  UMA_HISTOGRAM_BOOLEAN("Media.Android.IsHttpLiveStreamingMedia", is_hls);
+  if (is_hls) {
+    media::RecordOriginOfHLSPlayback(
+        GURL(frame_->document().securityOrigin().toString()));
+  }
 }
 
 }  // namespace content

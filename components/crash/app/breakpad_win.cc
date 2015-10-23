@@ -94,9 +94,11 @@ const wchar_t kSystemPrincipalSid[] =L"S-1-5-18";
 google_breakpad::ExceptionHandler* g_breakpad = NULL;
 google_breakpad::ExceptionHandler* g_dumphandler_no_crash = NULL;
 
+#if !defined(_WIN64)
 EXCEPTION_POINTERS g_surrogate_exception_pointers = {0};
 EXCEPTION_RECORD g_surrogate_exception_record = {0};
 CONTEXT g_surrogate_context = {0};
+#endif  // !defined(_WIN64)
 
 typedef NTSTATUS (WINAPI* NtTerminateProcessPtr)(HANDLE ProcessHandle,
                                                  NTSTATUS ExitStatus);
@@ -285,6 +287,7 @@ long WINAPI ServiceExceptionFilter(EXCEPTION_POINTERS* info) {
   return EXCEPTION_EXECUTE_HANDLER;
 }
 
+#if !defined(COMPONENT_BUILD)
 // Installed via base::debug::SetCrashKeyReportingFunctions.
 void SetCrashKeyValueForBaseDebug(const base::StringPiece& key,
                                   const base::StringPiece& value) {
@@ -298,6 +301,7 @@ void ClearCrashKeyForBaseDebug(const base::StringPiece& key) {
   DCHECK(CrashKeysWin::keeper());
   CrashKeysWin::keeper()->ClearCrashKeyValue(base::UTF8ToUTF16(key));
 }
+#endif  // !defined(COMPONENT_BUILD)
 
 }  // namespace
 
@@ -368,6 +372,20 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
   return WrapMessageBoxWithSEH(message.c_str(), title.c_str(), flags, exit_now);
 }
 
+extern "C" void __declspec(dllexport) TerminateProcessWithoutDump() {
+  // Patched stub exists based on conditions (See InitCrashReporter).
+  // As a side note this function also gets called from
+  // WindowProcExceptionFilter.
+  if (g_real_terminate_process_stub == NULL) {
+    ::TerminateProcess(::GetCurrentProcess(), content::RESULT_CODE_KILLED);
+  } else {
+    NtTerminateProcessPtr real_terminate_proc =
+        reinterpret_cast<NtTerminateProcessPtr>(
+            static_cast<char*>(g_real_terminate_process_stub));
+    real_terminate_proc(::GetCurrentProcess(), content::RESULT_CODE_KILLED);
+  }
+}
+
 // Crashes the process after generating a dump for the provided exception. Note
 // that the crash reporter should be initialized before calling this function
 // for it to do anything.
@@ -378,17 +396,7 @@ extern "C" int __declspec(dllexport) CrashForException(
     EXCEPTION_POINTERS* info) {
   if (g_breakpad) {
     g_breakpad->WriteMinidumpForException(info);
-    // Patched stub exists based on conditions (See InitCrashReporter).
-    // As a side note this function also gets called from
-    // WindowProcExceptionFilter.
-    if (g_real_terminate_process_stub == NULL) {
-      ::TerminateProcess(::GetCurrentProcess(), content::RESULT_CODE_KILLED);
-    } else {
-      NtTerminateProcessPtr real_terminate_proc =
-          reinterpret_cast<NtTerminateProcessPtr>(
-              static_cast<char*>(g_real_terminate_process_stub));
-      real_terminate_proc(::GetCurrentProcess(), content::RESULT_CODE_KILLED);
-    }
+    TerminateProcessWithoutDump();
   }
   return EXCEPTION_CONTINUE_SEARCH;
 }

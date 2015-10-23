@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/suggestion_answer.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
@@ -46,10 +46,6 @@ class OmniboxResultView : public views::View,
     DIVIDER,
     NUM_KINDS
   };
-
-  // The minimum distance between the top and bottom of the text and the
-  // top or bottom of the row.
-  static const int kMinimumTextVerticalPadding = 3;
 
   OmniboxResultView(OmniboxPopupContentsView* model,
                     int model_index,
@@ -119,9 +115,6 @@ class OmniboxResultView : public views::View,
 
   const gfx::Rect& text_bounds() const { return text_bounds_; }
 
-  void set_edge_item_padding(int value) { edge_item_padding_ = value; }
-  void set_item_padding(int value) { item_padding_ = value; }
-
  private:
   // views::View:
   const char* GetClassName() const override;
@@ -159,25 +152,33 @@ class OmniboxResultView : public views::View,
   int GetAnswerLineHeight() const;
   int GetContentLineHeight() const;
 
-  // Adds |text| to |description_rendertext_|.  |text_type| is an index into the
+  // Creates a RenderText with text and styling from the image line.
+  scoped_ptr<gfx::RenderText> CreateAnswerLine(
+      const SuggestionAnswer::ImageLine& line,
+      gfx::FontList font_list);
+
+  // Adds |text| to |destination|.  |text_type| is an index into the
   // kTextStyles constant defined in the .cc file and is used to style the text,
   // including setting the font size, color, and baseline style.  See the
   // TextStyle struct in the .cc file for more.
-  void AppendAnswerText(const base::string16& text, int text_type);
+  void AppendAnswerText(gfx::RenderText* destination,
+                        const base::string16& text,
+                        int text_type);
+
+  // AppendAnswerText will break up the |text| into bold and non-bold pieces
+  // and pass each to this helper with the correct |is_bold| value.
+  void AppendAnswerTextHelper(gfx::RenderText* destination,
+                              const base::string16& text,
+                              int text_type,
+                              bool is_bold);
 
   static int default_icon_size_;
-
-  // Default values cached here, may be overridden using the setters above.
-  int edge_item_padding_;
-  int item_padding_;
 
   // This row's model and model index.
   OmniboxPopupContentsView* model_;
   size_t model_index_;
 
   LocationBarView* location_bar_view_;
-  // Note: image_service_ may be null in some unit tests.
-  BitmapFetcherService* image_service_;
 
   const gfx::FontList font_list_;
   int font_height_;
@@ -196,9 +197,7 @@ class OmniboxResultView : public views::View,
 
   scoped_ptr<gfx::SlideAnimation> animation_;
 
-  // If the answer has an icon, these control the fetching and updating
-  // of the icon.
-  BitmapFetcherService::RequestId request_id_;
+  // If the answer has an icon, cache the image.
   gfx::ImageSkia answer_image_;
 
   // We preserve these RenderTexts so that we won't recreate them on every call
@@ -210,8 +209,6 @@ class OmniboxResultView : public views::View,
   mutable scoped_ptr<gfx::RenderText> keyword_description_rendertext_;
 
   mutable int separator_width_;
-
-  base::WeakPtrFactory<OmniboxResultView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxResultView);
 };

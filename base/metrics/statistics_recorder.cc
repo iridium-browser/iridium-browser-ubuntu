@@ -10,12 +10,10 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
-
-using std::list;
-using std::string;
 
 namespace {
 // Initialize histogram statistics gathering system.
@@ -59,11 +57,20 @@ HistogramBase* StatisticsRecorder::RegisterOrDeleteDuplicate(
     if (histograms_ == NULL) {
       histogram_to_return = histogram;
     } else {
-      const string& name = histogram->histogram_name();
-      HistogramMap::iterator it = histograms_->find(name);
+      const std::string& name = histogram->histogram_name();
+      HistogramMap::iterator it = histograms_->find(HistogramNameRef(name));
       if (histograms_->end() == it) {
-        (*histograms_)[name] = histogram;
+        (*histograms_)[HistogramNameRef(name)] = histogram;
         ANNOTATE_LEAKING_OBJECT_PTR(histogram);  // see crbug.com/79322
+        // If there are callbacks for this histogram, we set the kCallbackExists
+        // flag.
+        auto callback_iterator = callbacks_->find(name);
+        if (callback_iterator != callbacks_->end()) {
+          if (!callback_iterator->second.is_null())
+            histogram->SetFlags(HistogramBase::kCallbackExists);
+          else
+            histogram->ClearFlags(HistogramBase::kCallbackExists);
+        }
         histogram_to_return = histogram;
       } else if (histogram == it->second) {
         // The histogram was registered before.
@@ -96,22 +103,18 @@ const BucketRanges* StatisticsRecorder::RegisterOrDeleteDuplicateRanges(
     return ranges;
   }
 
-  list<const BucketRanges*>* checksum_matching_list;
+  std::list<const BucketRanges*>* checksum_matching_list;
   RangesMap::iterator ranges_it = ranges_->find(ranges->checksum());
   if (ranges_->end() == ranges_it) {
     // Add a new matching list to map.
-    checksum_matching_list = new list<const BucketRanges*>();
+    checksum_matching_list = new std::list<const BucketRanges*>();
     ANNOTATE_LEAKING_OBJECT_PTR(checksum_matching_list);
     (*ranges_)[ranges->checksum()] = checksum_matching_list;
   } else {
     checksum_matching_list = ranges_it->second;
   }
 
-  list<const BucketRanges*>::iterator checksum_matching_list_it;
-  for (checksum_matching_list_it = checksum_matching_list->begin();
-       checksum_matching_list_it != checksum_matching_list->end();
-       ++checksum_matching_list_it) {
-    const BucketRanges* existing_ranges = *checksum_matching_list_it;
+  for (const BucketRanges* existing_ranges : *checksum_matching_list) {
     if (existing_ranges->Equals(ranges)) {
       if (existing_ranges == ranges) {
         return ranges;
@@ -135,10 +138,8 @@ void StatisticsRecorder::WriteHTMLGraph(const std::string& query,
 
   Histograms snapshot;
   GetSnapshot(query, &snapshot);
-  for (Histograms::iterator it = snapshot.begin();
-       it != snapshot.end();
-       ++it) {
-    (*it)->WriteHTMLGraph(output);
+  for (const HistogramBase* histogram : snapshot) {
+    histogram->WriteHTMLGraph(output);
     output->append("<br><hr><br>");
   }
 }
@@ -155,10 +156,8 @@ void StatisticsRecorder::WriteGraph(const std::string& query,
 
   Histograms snapshot;
   GetSnapshot(query, &snapshot);
-  for (Histograms::iterator it = snapshot.begin();
-       it != snapshot.end();
-       ++it) {
-    (*it)->WriteAscii(output);
+  for (const HistogramBase* histogram : snapshot) {
+    histogram->WriteAscii(output);
     output->append("\n");
   }
 }
@@ -179,14 +178,13 @@ std::string StatisticsRecorder::ToJSON(const std::string& query) {
   GetSnapshot(query, &snapshot);
   output += "\"histograms\":[";
   bool first_histogram = true;
-  for (Histograms::const_iterator it = snapshot.begin(); it != snapshot.end();
-       ++it) {
+  for (const HistogramBase* histogram : snapshot) {
     if (first_histogram)
       first_histogram = false;
     else
       output += ",";
     std::string json;
-    (*it)->WriteJSON(&json);
+    histogram->WriteJSON(&json);
     output += json;
   }
   output += "]}";
@@ -201,11 +199,9 @@ void StatisticsRecorder::GetHistograms(Histograms* output) {
   if (histograms_ == NULL)
     return;
 
-  for (HistogramMap::iterator it = histograms_->begin();
-       histograms_->end() != it;
-       ++it) {
-    DCHECK_EQ(it->first, it->second->histogram_name());
-    output->push_back(it->second);
+  for (const auto& entry : *histograms_) {
+    DCHECK_EQ(entry.first.name_, entry.second->histogram_name());
+    output->push_back(entry.second);
   }
 }
 
@@ -218,15 +214,9 @@ void StatisticsRecorder::GetBucketRanges(
   if (ranges_ == NULL)
     return;
 
-  for (RangesMap::iterator it = ranges_->begin();
-       ranges_->end() != it;
-       ++it) {
-    list<const BucketRanges*>* ranges_list = it->second;
-    list<const BucketRanges*>::iterator ranges_list_it;
-    for (ranges_list_it = ranges_list->begin();
-         ranges_list_it != ranges_list->end();
-         ++ranges_list_it) {
-      output->push_back(*ranges_list_it);
+  for (const auto& entry : *ranges_) {
+    for (const auto& range_entry : *entry.second) {
+      output->push_back(range_entry);
     }
   }
 }
@@ -239,10 +229,62 @@ HistogramBase* StatisticsRecorder::FindHistogram(const std::string& name) {
   if (histograms_ == NULL)
     return NULL;
 
-  HistogramMap::iterator it = histograms_->find(name);
+  HistogramMap::iterator it = histograms_->find(HistogramNameRef(name));
   if (histograms_->end() == it)
     return NULL;
   return it->second;
+}
+
+// static
+bool StatisticsRecorder::SetCallback(
+    const std::string& name,
+    const StatisticsRecorder::OnSampleCallback& cb) {
+  DCHECK(!cb.is_null());
+  if (lock_ == NULL)
+    return false;
+  base::AutoLock auto_lock(*lock_);
+  if (histograms_ == NULL)
+    return false;
+
+  if (ContainsKey(*callbacks_, name))
+    return false;
+  callbacks_->insert(std::make_pair(name, cb));
+
+  auto histogram_iterator = histograms_->find(HistogramNameRef(name));
+  if (histogram_iterator != histograms_->end())
+    histogram_iterator->second->SetFlags(HistogramBase::kCallbackExists);
+
+  return true;
+}
+
+// static
+void StatisticsRecorder::ClearCallback(const std::string& name) {
+  if (lock_ == NULL)
+    return;
+  base::AutoLock auto_lock(*lock_);
+  if (histograms_ == NULL)
+    return;
+
+  callbacks_->erase(name);
+
+  // We also clear the flag from the histogram (if it exists).
+  auto histogram_iterator = histograms_->find(HistogramNameRef(name));
+  if (histogram_iterator != histograms_->end())
+    histogram_iterator->second->ClearFlags(HistogramBase::kCallbackExists);
+}
+
+// static
+StatisticsRecorder::OnSampleCallback StatisticsRecorder::FindCallback(
+    const std::string& name) {
+  if (lock_ == NULL)
+    return OnSampleCallback();
+  base::AutoLock auto_lock(*lock_);
+  if (histograms_ == NULL)
+    return OnSampleCallback();
+
+  auto callback_iterator = callbacks_->find(name);
+  return callback_iterator != callbacks_->end() ? callback_iterator->second
+                                                : OnSampleCallback();
 }
 
 // private static
@@ -254,11 +296,9 @@ void StatisticsRecorder::GetSnapshot(const std::string& query,
   if (histograms_ == NULL)
     return;
 
-  for (HistogramMap::iterator it = histograms_->begin();
-       histograms_->end() != it;
-       ++it) {
-    if (it->first.find(query) != std::string::npos)
-      snapshot->push_back(it->second);
+  for (const auto& entry : *histograms_) {
+    if (entry.first.name_.find(query) != std::string::npos)
+      snapshot->push_back(entry.second);
   }
 }
 
@@ -278,6 +318,7 @@ StatisticsRecorder::StatisticsRecorder() {
   }
   base::AutoLock auto_lock(*lock_);
   histograms_ = new HistogramMap;
+  callbacks_ = new CallbackMap;
   ranges_ = new RangesMap;
 
   if (VLOG_IS_ON(1))
@@ -286,7 +327,7 @@ StatisticsRecorder::StatisticsRecorder() {
 
 // static
 void StatisticsRecorder::DumpHistogramsToVlog(void* instance) {
-  string output;
+  std::string output;
   StatisticsRecorder::WriteGraph(std::string(), &output);
   VLOG(1) << output;
 }
@@ -296,14 +337,17 @@ StatisticsRecorder::~StatisticsRecorder() {
 
   // Clean up.
   scoped_ptr<HistogramMap> histograms_deleter;
+  scoped_ptr<CallbackMap> callbacks_deleter;
   scoped_ptr<RangesMap> ranges_deleter;
   // We don't delete lock_ on purpose to avoid having to properly protect
   // against it going away after we checked for NULL in the static methods.
   {
     base::AutoLock auto_lock(*lock_);
     histograms_deleter.reset(histograms_);
+    callbacks_deleter.reset(callbacks_);
     ranges_deleter.reset(ranges_);
     histograms_ = NULL;
+    callbacks_ = NULL;
     ranges_ = NULL;
   }
   // We are going to leak the histograms and the ranges.
@@ -312,6 +356,8 @@ StatisticsRecorder::~StatisticsRecorder() {
 
 // static
 StatisticsRecorder::HistogramMap* StatisticsRecorder::histograms_ = NULL;
+// static
+StatisticsRecorder::CallbackMap* StatisticsRecorder::callbacks_ = NULL;
 // static
 StatisticsRecorder::RangesMap* StatisticsRecorder::ranges_ = NULL;
 // static

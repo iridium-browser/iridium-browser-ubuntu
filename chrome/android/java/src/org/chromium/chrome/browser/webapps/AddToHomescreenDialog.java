@@ -5,9 +5,9 @@
 package org.chromium.chrome.browser.webapps;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.graphics.Bitmap;
+import android.support.v7.app.AlertDialog;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -17,8 +17,7 @@ import android.widget.ImageView;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ShortcutHelper;
-import org.chromium.chrome.browser.Tab;
+import org.chromium.chrome.browser.tab.Tab;
 
 /**
  * Helper class showing the UI regarding Add to Homescreen and delegate the
@@ -40,7 +39,7 @@ public class AddToHomescreenDialog {
     public static void show(final Activity activity, final Tab currentTab) {
         View view = activity.getLayoutInflater().inflate(
                 R.layout.add_to_homescreen_dialog, null);
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity, R.style.AlertDialogTheme)
                 .setTitle(R.string.menu_add_to_homescreen)
                 .setNegativeButton(R.string.cancel,
                         new DialogInterface.OnClickListener() {
@@ -51,6 +50,7 @@ public class AddToHomescreenDialog {
                         });
 
         final AlertDialog dialog = builder.create();
+        dialog.getDelegate().setHandleNativeActionModesEnabled(false);
         // On click of the menu item for "add to homescreen", an alert dialog pops asking the user
         // if the title needs to be edited. On click of "Add", shortcut is created. Default
         // title is the title of the page. OK button is disabled if the title text is empty.
@@ -75,17 +75,17 @@ public class AddToHomescreenDialog {
             }
         });
 
-        final ShortcutHelper shortcutHelper =
-                new ShortcutHelper(activity.getApplicationContext(), currentTab);
+        final AddToHomescreenDialogHelper shortcutHelper =
+                new AddToHomescreenDialogHelper(activity.getApplicationContext(), currentTab);
 
         // Initializing the shortcut helper is asynchronous. Until it is
         // initialized, the UI will show a disabled text field and OK buttons.
         // They will be enabled and pre-filled as soon as the onInitialized
         // callback will be run. The user will still be able to cancel the
         // operation.
-        shortcutHelper.initialize(new ShortcutHelper.ShortcutHelperObserver() {
+        shortcutHelper.initialize(new AddToHomescreenDialogHelper.Observer() {
             @Override
-            public void onTitleAvailable(String title) {
+            public void onUserTitleAvailable(String title) {
                 input.setEnabled(true);
                 input.setText(title);
             }

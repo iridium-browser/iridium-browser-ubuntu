@@ -17,7 +17,6 @@
 #include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/dev/ppb_video_capture_dev.h"
 #include "ppapi/c/dev/ppb_video_decoder_dev.h"
-#include "ppapi/c/dev/ppp_selection_dev.h"
 #include "ppapi/c/ppb_compositor.h"
 #include "ppapi/c/ppb_compositor_layer.h"
 #include "ppapi/c/ppb_console.h"
@@ -146,6 +145,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VarDictionary_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_1_0;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_1_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoEncoder_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoEncoder_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_WebSocket_1_0;
@@ -164,7 +164,6 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_6;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_7;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_Dev_0_16;
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Selection_Dev_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_CameraDevice_Private_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_ContentDecryptor_Private_0_14;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DisplayColorProfile_Private_0_1;
@@ -2218,6 +2217,50 @@ static int32_t Pnacl_M40_PPB_VideoDecoder_Reset(PP_Resource video_decoder, struc
 
 /* End wrapper methods for PPB_VideoDecoder_1_0 */
 
+/* Begin wrapper methods for PPB_VideoDecoder_1_1 */
+
+static PP_Resource Pnacl_M46_PPB_VideoDecoder_Create(PP_Instance instance) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  return iface->Create(instance);
+}
+
+static PP_Bool Pnacl_M46_PPB_VideoDecoder_IsVideoDecoder(PP_Resource resource) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  return iface->IsVideoDecoder(resource);
+}
+
+static int32_t Pnacl_M46_PPB_VideoDecoder_Initialize(PP_Resource video_decoder, PP_Resource graphics3d_context, PP_VideoProfile profile, PP_HardwareAcceleration acceleration, uint32_t min_picture_count, struct PP_CompletionCallback* callback) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  return iface->Initialize(video_decoder, graphics3d_context, profile, acceleration, min_picture_count, *callback);
+}
+
+static int32_t Pnacl_M46_PPB_VideoDecoder_Decode(PP_Resource video_decoder, uint32_t decode_id, uint32_t size, const void* buffer, struct PP_CompletionCallback* callback) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  return iface->Decode(video_decoder, decode_id, size, buffer, *callback);
+}
+
+static int32_t Pnacl_M46_PPB_VideoDecoder_GetPicture(PP_Resource video_decoder, struct PP_VideoPicture* picture, struct PP_CompletionCallback* callback) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  return iface->GetPicture(video_decoder, picture, *callback);
+}
+
+static void Pnacl_M46_PPB_VideoDecoder_RecyclePicture(PP_Resource video_decoder, const struct PP_VideoPicture* picture) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  iface->RecyclePicture(video_decoder, picture);
+}
+
+static int32_t Pnacl_M46_PPB_VideoDecoder_Flush(PP_Resource video_decoder, struct PP_CompletionCallback* callback) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  return iface->Flush(video_decoder, *callback);
+}
+
+static int32_t Pnacl_M46_PPB_VideoDecoder_Reset(PP_Resource video_decoder, struct PP_CompletionCallback* callback) {
+  const struct PPB_VideoDecoder_1_1 *iface = Pnacl_WrapperInfo_PPB_VideoDecoder_1_1.real_iface;
+  return iface->Reset(video_decoder, *callback);
+}
+
+/* End wrapper methods for PPB_VideoDecoder_1_1 */
+
 /* Begin wrapper methods for PPB_VideoEncoder_0_1 */
 
 static PP_Resource Pnacl_M42_PPB_VideoEncoder_Create(PP_Instance instance) {
@@ -2766,8 +2809,6 @@ static int32_t Pnacl_M23_PPB_Printing_Dev_GetDefaultPrintSettings(PP_Resource re
 
 /* End wrapper methods for PPB_Printing_Dev_0_7 */
 
-/* Not generating wrapper methods for PPB_Scrollbar_Dev_0_5 */
-
 /* Not generating wrapper methods for PPB_TextInput_Dev_0_1 */
 
 /* Not generating wrapper methods for PPB_TextInput_Dev_0_2 */
@@ -3003,42 +3044,15 @@ static void Pnacl_M14_PPB_VideoDecoder_Dev_Destroy(PP_Resource video_decoder) {
 
 /* Not generating wrapper methods for PPB_View_Dev_0_1 */
 
-/* Not generating wrapper methods for PPB_Widget_Dev_0_3 */
-
-/* Not generating wrapper methods for PPB_Widget_Dev_0_4 */
-
-/* Not generating wrapper methods for PPB_Zoom_Dev_0_2 */
-
 /* Not generating wrapper methods for PPP_NetworkState_Dev_0_1 */
 
 /* Not generating wrapper methods for PPP_Printing_Dev_0_6 */
-
-/* Not generating wrapper methods for PPP_Scrollbar_Dev_0_2 */
-
-/* Not generating wrapper methods for PPP_Scrollbar_Dev_0_3 */
-
-/* Begin wrapper methods for PPP_Selection_Dev_0_3 */
-
-static struct PP_Var Pnacl_M13_PPP_Selection_Dev_GetSelectedText(PP_Instance instance, PP_Bool html) {
-  const struct PPP_Selection_Dev_0_3 *iface = Pnacl_WrapperInfo_PPP_Selection_Dev_0_3.real_iface;
-  void (*temp_fp)(struct PP_Var* _struct_result, PP_Instance instance, PP_Bool html) =
-    ((void (*)(struct PP_Var* _struct_result, PP_Instance instance, PP_Bool html))iface->GetSelectedText);
-  struct PP_Var _struct_result;
-  temp_fp(&_struct_result, instance, html);
-  return _struct_result;
-}
-
-/* End wrapper methods for PPP_Selection_Dev_0_3 */
 
 /* Not generating wrapper methods for PPP_TextInput_Dev_0_1 */
 
 /* Not generating wrapper methods for PPP_VideoCapture_Dev_0_1 */
 
 /* Not generating wrapper methods for PPP_VideoDecoder_Dev_0_11 */
-
-/* Not generating wrapper methods for PPP_Widget_Dev_0_2 */
-
-/* Not generating wrapper methods for PPP_Zoom_Dev_0_3 */
 
 /* Not generating wrapper methods for PPB_CameraCapabilities_Private_0_1 */
 
@@ -5138,6 +5152,17 @@ static const struct PPB_VideoDecoder_1_0 Pnacl_Wrappers_PPB_VideoDecoder_1_0 = {
     .Reset = (int32_t (*)(PP_Resource video_decoder, struct PP_CompletionCallback callback))&Pnacl_M40_PPB_VideoDecoder_Reset
 };
 
+static const struct PPB_VideoDecoder_1_1 Pnacl_Wrappers_PPB_VideoDecoder_1_1 = {
+    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M46_PPB_VideoDecoder_Create,
+    .IsVideoDecoder = (PP_Bool (*)(PP_Resource resource))&Pnacl_M46_PPB_VideoDecoder_IsVideoDecoder,
+    .Initialize = (int32_t (*)(PP_Resource video_decoder, PP_Resource graphics3d_context, PP_VideoProfile profile, PP_HardwareAcceleration acceleration, uint32_t min_picture_count, struct PP_CompletionCallback callback))&Pnacl_M46_PPB_VideoDecoder_Initialize,
+    .Decode = (int32_t (*)(PP_Resource video_decoder, uint32_t decode_id, uint32_t size, const void* buffer, struct PP_CompletionCallback callback))&Pnacl_M46_PPB_VideoDecoder_Decode,
+    .GetPicture = (int32_t (*)(PP_Resource video_decoder, struct PP_VideoPicture* picture, struct PP_CompletionCallback callback))&Pnacl_M46_PPB_VideoDecoder_GetPicture,
+    .RecyclePicture = (void (*)(PP_Resource video_decoder, const struct PP_VideoPicture* picture))&Pnacl_M46_PPB_VideoDecoder_RecyclePicture,
+    .Flush = (int32_t (*)(PP_Resource video_decoder, struct PP_CompletionCallback callback))&Pnacl_M46_PPB_VideoDecoder_Flush,
+    .Reset = (int32_t (*)(PP_Resource video_decoder, struct PP_CompletionCallback callback))&Pnacl_M46_PPB_VideoDecoder_Reset
+};
+
 static const struct PPB_VideoEncoder_0_1 Pnacl_Wrappers_PPB_VideoEncoder_0_1 = {
     .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M42_PPB_VideoEncoder_Create,
     .IsVideoEncoder = (PP_Bool (*)(PP_Resource resource))&Pnacl_M42_PPB_VideoEncoder_IsVideoEncoder,
@@ -5311,8 +5336,6 @@ static const struct PPB_Printing_Dev_0_7 Pnacl_Wrappers_PPB_Printing_Dev_0_7 = {
     .GetDefaultPrintSettings = (int32_t (*)(PP_Resource resource, struct PP_PrintSettings_Dev* print_settings, struct PP_CompletionCallback callback))&Pnacl_M23_PPB_Printing_Dev_GetDefaultPrintSettings
 };
 
-/* Not generating wrapper interface for PPB_Scrollbar_Dev_0_5 */
-
 /* Not generating wrapper interface for PPB_TextInput_Dev_0_1 */
 
 /* Not generating wrapper interface for PPB_TextInput_Dev_0_2 */
@@ -5379,33 +5402,15 @@ static const struct PPB_VideoDecoder_Dev_0_16 Pnacl_Wrappers_PPB_VideoDecoder_De
 
 /* Not generating wrapper interface for PPB_View_Dev_0_1 */
 
-/* Not generating wrapper interface for PPB_Widget_Dev_0_3 */
-
-/* Not generating wrapper interface for PPB_Widget_Dev_0_4 */
-
-/* Not generating wrapper interface for PPB_Zoom_Dev_0_2 */
-
 /* Not generating wrapper interface for PPP_NetworkState_Dev_0_1 */
 
 /* Not generating wrapper interface for PPP_Printing_Dev_0_6 */
-
-/* Not generating wrapper interface for PPP_Scrollbar_Dev_0_2 */
-
-/* Not generating wrapper interface for PPP_Scrollbar_Dev_0_3 */
-
-static const struct PPP_Selection_Dev_0_3 Pnacl_Wrappers_PPP_Selection_Dev_0_3 = {
-    .GetSelectedText = &Pnacl_M13_PPP_Selection_Dev_GetSelectedText
-};
 
 /* Not generating wrapper interface for PPP_TextInput_Dev_0_1 */
 
 /* Not generating wrapper interface for PPP_VideoCapture_Dev_0_1 */
 
 /* Not generating wrapper interface for PPP_VideoDecoder_Dev_0_11 */
-
-/* Not generating wrapper interface for PPP_Widget_Dev_0_2 */
-
-/* Not generating wrapper interface for PPP_Zoom_Dev_0_3 */
 
 /* Not generating wrapper interface for PPB_CameraCapabilities_Private_0_1 */
 
@@ -6132,6 +6137,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_1_0 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_1_1 = {
+  .iface_macro = PPB_VIDEODECODER_INTERFACE_1_1,
+  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_VideoDecoder_1_1,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoEncoder_0_1 = {
   .iface_macro = PPB_VIDEOENCODER_INTERFACE_0_1,
   .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_VideoEncoder_0_1,
@@ -6237,12 +6248,6 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_3 = {
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_Dev_0_16 = {
   .iface_macro = PPB_VIDEODECODER_DEV_INTERFACE_0_16,
   .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_VideoDecoder_Dev_0_16,
-  .real_iface = NULL
-};
-
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Selection_Dev_0_3 = {
-  .iface_macro = PPP_SELECTION_DEV_INTERFACE_0_3,
-  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPP_Selection_Dev_0_3,
   .real_iface = NULL
 };
 
@@ -6539,6 +6544,7 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_VideoDecoder_0_1,
   &Pnacl_WrapperInfo_PPB_VideoDecoder_0_2,
   &Pnacl_WrapperInfo_PPB_VideoDecoder_1_0,
+  &Pnacl_WrapperInfo_PPB_VideoDecoder_1_1,
   &Pnacl_WrapperInfo_PPB_VideoEncoder_0_1,
   &Pnacl_WrapperInfo_PPB_VideoEncoder_0_2,
   &Pnacl_WrapperInfo_PPB_WebSocket_1_0,
@@ -6599,7 +6605,6 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
 
 static struct __PnaclWrapperInfo *s_ppp_wrappers[] = {
   &Pnacl_WrapperInfo_PPP_Messaging_1_0,
-  &Pnacl_WrapperInfo_PPP_Selection_Dev_0_3,
   &Pnacl_WrapperInfo_PPP_ContentDecryptor_Private_0_15,
   &Pnacl_WrapperInfo_PPP_Instance_Private_0_1,
   NULL

@@ -7,6 +7,7 @@
 #ifndef InspectorTracingAgent_h
 #define InspectorTracingAgent_h
 
+#include "core/CoreExport.h"
 #include "core/InspectorFrontend.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "wtf/PassOwnPtr.h"
@@ -17,7 +18,7 @@ namespace blink {
 class InspectorPageAgent;
 class InspectorWorkerAgent;
 
-class InspectorTracingAgent final
+class CORE_EXPORT InspectorTracingAgent final
     : public InspectorBaseAgent<InspectorTracingAgent, InspectorFrontend::Tracing>
     , public InspectorBackendDispatcher::TracingCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorTracingAgent);
@@ -42,7 +43,7 @@ public:
     void disable(ErrorString*) override;
 
     // Protocol method implementations.
-    virtual void start(ErrorString*, const String* categoryFilter, const String*, const double*, PassRefPtrWillBeRawPtr<StartCallback>) override;
+    void start(ErrorString*, const String* categoryFilter, const String*, const double*, PassRefPtrWillBeRawPtr<StartCallback>) override;
     virtual void end(ErrorString*, PassRefPtrWillBeRawPtr<EndCallback>);
 
     // Methods for other agents to use.

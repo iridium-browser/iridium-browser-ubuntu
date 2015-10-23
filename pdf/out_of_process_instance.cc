@@ -54,7 +54,7 @@ const char kAccessibleCopyable[] = "copyable";
 
 // PDF background colors.
 const uint32 kBackgroundColor = 0xFFCCCCCC;
-const uint32 kBackgroundColorMaterial = 0xFF424242;
+const uint32 kBackgroundColorMaterial = 0xFF525659;
 
 // Constants used in handling postMessage() messages.
 const char kType[] = "type";
@@ -206,8 +206,9 @@ const PPP_Pdf ppp_private = {
 
 int ExtractPrintPreviewPageIndex(const std::string& src_url) {
   // Sample |src_url| format: chrome://print/id/page_index/print.pdf
-  std::vector<std::string> url_substr;
-  base::SplitString(src_url.substr(strlen(kChromePrint)), '/', &url_substr);
+  std::vector<std::string> url_substr = base::SplitString(
+      src_url.substr(strlen(kChromePrint)), "/",
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (url_substr.size() != 3)
     return -1;
 
@@ -262,7 +263,6 @@ OutOfProcessInstance::OutOfProcessInstance(PP_Instance instance)
     : pp::Instance(instance),
       pp::Find_Private(this),
       pp::Printing_Dev(this),
-      pp::Selection_Dev(this),
       cursor_(PP_CURSORTYPE_POINTER),
       zoom_(1.0),
       device_scale_(1.0),
@@ -279,7 +279,8 @@ OutOfProcessInstance::OutOfProcessInstance(PP_Instance instance)
       received_viewport_message_(false),
       did_call_start_loading_(false),
       stop_scrolling_(false),
-      background_color_(kBackgroundColor) {
+      background_color_(kBackgroundColor),
+      top_toolbar_height_(0) {
   loader_factory_.Initialize(this);
   timer_factory_.Initialize(this);
   form_factory_.Initialize(this);
@@ -304,23 +305,24 @@ bool OutOfProcessInstance::Init(uint32_t argc,
                                 const char* argn[],
                                 const char* argv[]) {
   // Check if the PDF is being loaded in the PDF chrome extension. We only allow
-  // the plugin to be put into "full frame" mode when it is being loaded in the
-  // extension because this enables some features that we don't want pages
-  // abusing outside of the extension.
+  // the plugin to be loaded in the extension and print preview to avoid
+  // exposing sensitive APIs directly to external websites.
   pp::Var document_url_var = pp::URLUtil_Dev::Get()->GetDocumentURL(this);
-  std::string document_url = document_url_var.is_string() ?
-      document_url_var.AsString() : std::string();
+  if (!document_url_var.is_string())
+    return false;
+  std::string document_url = document_url_var.AsString();
   std::string extension_url = std::string(kChromeExtension);
-  bool in_extension =
-      !document_url.compare(0, extension_url.size(), extension_url);
+  std::string print_preview_url = std::string(kChromePrint);
+  if (!base::StringPiece(document_url).starts_with(kChromeExtension) &&
+      !base::StringPiece(document_url).starts_with(kChromePrint)) {
+    return false;
+  }
 
-  if (in_extension) {
-    // Check if the plugin is full frame. This is passed in from JS.
-    for (uint32_t i = 0; i < argc; ++i) {
-      if (strcmp(argn[i], "full-frame") == 0) {
-        full_ = true;
-        break;
-      }
+  // Check if the plugin is full frame. This is passed in from JS.
+  for (uint32_t i = 0; i < argc; ++i) {
+    if (strcmp(argn[i], "full-frame") == 0) {
+      full_ = true;
+      break;
     }
   }
 
@@ -343,9 +345,9 @@ bool OutOfProcessInstance::Init(uint32_t argc,
 
   text_input_.reset(new pp::TextInput_Dev(this));
 
-  const char* stream_url = NULL;
-  const char* original_url = NULL;
-  const char* headers = NULL;
+  const char* stream_url = nullptr;
+  const char* original_url = nullptr;
+  const char* headers = nullptr;
   bool is_material = false;
   for (uint32_t i = 0; i < argc; ++i) {
     if (strcmp(argn[i], "src") == 0)
@@ -356,18 +358,14 @@ bool OutOfProcessInstance::Init(uint32_t argc,
       headers = argv[i];
     else if (strcmp(argn[i], "is-material") == 0)
       is_material = true;
+    else if (strcmp(argn[i], "top-toolbar-height") == 0)
+      base::StringToInt(argv[i], &top_toolbar_height_);
   }
 
   if (is_material)
     background_color_ = kBackgroundColorMaterial;
   else
     background_color_ = kBackgroundColor;
-
-  // TODO(raymes): This is a hack to ensure that if no headers are passed in
-  // then we get the right MIME type. When the in process plugin is removed we
-  // can fix the document loader properly and remove this hack.
-  if (!headers || strcmp(headers, "") == 0)
-    headers = "content-type: application/pdf";
 
   if (!original_url)
     return false;
@@ -444,7 +442,7 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
     preview_engine_.reset();
     engine_.reset(PDFEngine::Create(this));
     engine_->SetGrayscale(dict.Get(pp::Var(kJSPrintPreviewGrayscale)).AsBool());
-    engine_->New(url_.c_str());
+    engine_->New(url_.c_str(), nullptr /* empty header */);
 
     print_preview_page_count_ =
         std::max(dict.Get(pp::Var(kJSPrintPreviewPageCount)).AsInt(), 0);
@@ -472,7 +470,7 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
           engine_->HasPermission(PDFEngine::PERMISSION_COPY_ACCESSIBLE);
       node.SetBoolean(kAccessibleCopyable, has_permissions);
       std::string json;
-      base::JSONWriter::Write(&node, &json);
+      base::JSONWriter::Write(node, &json);
       reply.Set(pp::Var(kJSAccessibilityJSON), pp::Var(json));
     }
     PostMessage(reply);
@@ -599,8 +597,12 @@ void OutOfProcessInstance::DidChangeView(const pp::View& view) {
 
   if (!stop_scrolling_) {
     pp::Point scroll_offset(view.GetScrollOffset());
+    // Because view messages come from the DOM, the coordinates of the viewport
+    // are 0-based (i.e. they do not correspond to the viewport's coordinates in
+    // JS), so we need to subtract the toolbar height to convert them into
+    // viewport coordinates.
     pp::FloatPoint scroll_offset_float(scroll_offset.x(),
-                                       scroll_offset.y());
+                                       scroll_offset.y() - top_toolbar_height_);
     scroll_offset_float = BoundScrollOffsetToDocument(scroll_offset_float);
     engine_->ScrolledToXPosition(scroll_offset_float.x() * device_scale_);
     engine_->ScrolledToYPosition(scroll_offset_float.y() * device_scale_);
@@ -625,12 +627,6 @@ pp::Var OutOfProcessInstance::GetLinkAtPosition(
   ScalePoint(device_scale_, &offset_point);
   offset_point.set_x(offset_point.x() - available_area_.x());
   return engine_->GetLinkAtPosition(offset_point);
-}
-
-pp::Var OutOfProcessInstance::GetSelectedText(bool html) {
-  if (html)
-    return pp::Var();
-  return engine_->GetSelectedText();
 }
 
 uint32_t OutOfProcessInstance::QuerySupportedPrintOutputFormats() {
@@ -737,6 +733,16 @@ void OutOfProcessInstance::OnPaint(
         pdf_pending[j].Offset(available_area_.point());
         pending->push_back(pdf_pending[j]);
       }
+    }
+
+    // Ensure the region above the first page (if any) is filled;
+    int32_t first_page_ypos = engine_->GetNumberOfPages() == 0 ?
+        0 : engine_->GetPageScreenRect(0).y();
+    if (rect.y() < first_page_ypos) {
+      pp::Rect region = rect.Intersect(pp::Rect(
+          pp::Point(), pp::Size(plugin_size_.width(), first_page_ypos)));
+      ready->push_back(PaintManager::ReadyRect(region, image_data_, false));
+      FillRect(region, background_color_);
     }
 
     for (size_t j = 0; j < background_parts_.size(); ++j) {
@@ -915,7 +921,7 @@ void OutOfProcessInstance::UpdateCursor(PP_CursorType_Dev cursor) {
   }
 
   cursor_interface->SetCursor(
-      pp_instance(), cursor_, pp::ImageData().pp_resource(), NULL);
+      pp_instance(), cursor_, pp::ImageData().pp_resource(), nullptr);
 }
 
 void OutOfProcessInstance::UpdateTickMarks(
@@ -1143,10 +1149,14 @@ void OutOfProcessInstance::DocumentLoadComplete(int page_count) {
   if (!engine_->HasPermission(PDFEngine::PERMISSION_COPY))
     content_restrictions |= CONTENT_RESTRICTION_COPY;
 
+  if (!engine_->HasPermission(PDFEngine::PERMISSION_PRINT_LOW_QUALITY) &&
+      !engine_->HasPermission(PDFEngine::PERMISSION_PRINT_HIGH_QUALITY)) {
+    content_restrictions |= CONTENT_RESTRICTION_PRINT;
+  }
+
   pp::PDF::SetContentRestriction(this, content_restrictions);
 
-  uma_.HistogramCustomCounts("PDF.PageCount", page_count,
-                             1, 1000000, 50);
+  uma_.HistogramCustomCounts("PDF.PageCount", page_count, 1, 1000000, 50);
 }
 
 void OutOfProcessInstance::RotateClockwise() {
@@ -1177,7 +1187,7 @@ void OutOfProcessInstance::PreviewDocumentLoadComplete() {
   if (print_preview_page_count_ == 0)
     return;
 
-  if (preview_pages_info_.size())
+  if (!preview_pages_info_.empty())
     LoadAvailablePreviewPage();
 }
 
@@ -1210,7 +1220,7 @@ void OutOfProcessInstance::PreviewDocumentLoadFailed() {
   preview_document_load_state_ = LOAD_STATE_FAILED;
   preview_pages_info_.pop();
 
-  if (preview_pages_info_.size())
+  if (!preview_pages_info_.empty())
     LoadAvailablePreviewPage();
 }
 
@@ -1292,10 +1302,10 @@ void OutOfProcessInstance::OnGeometryChanged(double old_zoom,
     available_area_.Offset((available_area_.width() - doc_width) / 2, 0);
     available_area_.set_width(doc_width);
   }
-  int doc_height = GetDocumentPixelHeight();
-  if (doc_height < available_area_.height()) {
-    available_area_.set_height(doc_height);
-  }
+  int bottom_of_document =
+      GetDocumentPixelHeight() + (top_toolbar_height_ * device_scale_);
+  if (bottom_of_document < available_area_.height())
+    available_area_.set_height(bottom_of_document);
 
   CalculateBackgroundParts();
   engine_->PageOffsetUpdated(available_area_.point());
@@ -1360,7 +1370,7 @@ void OutOfProcessInstance::AppendBlankPrintPreviewPages() {
   if (print_preview_page_count_ == 0)
     return;
   engine_->AppendBlankPages(print_preview_page_count_);
-  if (preview_pages_info_.size() > 0)
+  if (!preview_pages_info_.empty())
     LoadAvailablePreviewPage();
 }
 
@@ -1393,7 +1403,7 @@ void OutOfProcessInstance::ProcessPreviewPageInfo(const std::string& url,
 }
 
 void OutOfProcessInstance::LoadAvailablePreviewPage() {
-  if (preview_pages_info_.size() <= 0 ||
+  if (preview_pages_info_.empty() ||
       document_load_state_ != LOAD_STATE_COMPLETE) {
     return;
   }
@@ -1421,8 +1431,9 @@ pp::FloatPoint OutOfProcessInstance::BoundScrollOffsetToDocument(
     const pp::FloatPoint& scroll_offset) {
   float max_x = document_size_.width() * zoom_ - plugin_dip_size_.width();
   float x = std::max(std::min(scroll_offset.x(), max_x), 0.0f);
+  float min_y = -top_toolbar_height_;
   float max_y = document_size_.height() * zoom_ - plugin_dip_size_.height();
-  float y = std::max(std::min(scroll_offset.y(), max_y), 0.0f);
+  float y = std::max(std::min(scroll_offset.y(), max_y), min_y);
   return pp::FloatPoint(x, y);
 }
 

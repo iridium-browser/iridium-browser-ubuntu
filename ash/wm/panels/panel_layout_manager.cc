@@ -268,7 +268,7 @@ PanelLayoutManager::PanelLayoutManager(aura::Window* panel_container)
   DCHECK(panel_container);
   aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
       AddObserver(this);
-  Shell::GetInstance()->display_controller()->AddObserver(this);
+  Shell::GetInstance()->window_tree_host_manager()->AddObserver(this);
   Shell::GetInstance()->AddShellObserver(this);
 }
 
@@ -290,7 +290,7 @@ void PanelLayoutManager::Shutdown() {
   shelf_ = NULL;
   aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
       RemoveObserver(this);
-  Shell::GetInstance()->display_controller()->RemoveObserver(this);
+  Shell::GetInstance()->window_tree_host_manager()->RemoveObserver(this);
   Shell::GetInstance()->RemoveShellObserver(this);
 }
 
@@ -513,8 +513,10 @@ void PanelLayoutManager::OnPostWindowStateTypeChange(
 ////////////////////////////////////////////////////////////////////////////////
 // PanelLayoutManager, aura::client::ActivationChangeObserver implementation:
 
-void PanelLayoutManager::OnWindowActivated(aura::Window* gained_active,
-                                           aura::Window* lost_active) {
+void PanelLayoutManager::OnWindowActivated(
+    aura::client::ActivationChangeObserver::ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
   // Ignore if the panel that is not managed by this was activated.
   if (gained_active && gained_active->type() == ui::wm::WINDOW_TYPE_PANEL &&
       gained_active->parent() == panel_container_) {
@@ -524,7 +526,7 @@ void PanelLayoutManager::OnWindowActivated(aura::Window* gained_active,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// PanelLayoutManager, DisplayController::Observer implementation:
+// PanelLayoutManager, WindowTreeHostManager::Observer implementation:
 
 void PanelLayoutManager::OnDisplayConfigurationChanged() {
   Relayout();

@@ -17,6 +17,13 @@ namespace content{
 class WebContents;
 }
 
+namespace net {
+class SSLInfo;
+}
+
+class CertReportHelper;
+class SSLCertReporter;
+
 // This class is responsible for showing/hiding the interstitial page that is
 // shown when a captive portal triggers an SSL error.
 // It deletes itself when the interstitial page is closed.
@@ -42,13 +49,16 @@ class CaptivePortalBlockingPage : public SecurityInterstitialPage {
   CaptivePortalBlockingPage(content::WebContents* web_contents,
                             const GURL& request_url,
                             const GURL& login_url,
+                            scoped_ptr<SSLCertReporter> ssl_cert_reporter,
+                            const net::SSLInfo& ssl_info,
                             const base::Callback<void(bool)>& callback);
   ~CaptivePortalBlockingPage() override;
 
   // SecurityInterstitialPage method:
   const void* GetTypeForTesting() const override;
 
-  void SetDelegateForTesting(Delegate* delegate) { delegate_.reset(delegate); }
+  // Should only be used for testing and chrome://interstitials page.
+  void SetDelegate(Delegate* delegate) { delegate_.reset(delegate); }
 
  protected:
   // SecurityInterstitialPage methods:
@@ -58,11 +68,14 @@ class CaptivePortalBlockingPage : public SecurityInterstitialPage {
 
   // InterstitialPageDelegate method:
   void CommandReceived(const std::string& command) override;
+  void OnProceed() override;
+  void OnDontProceed() override;
 
  private:
   // URL of the login page, opened when the user clicks the "Connect" button.
   GURL login_url_;
   scoped_ptr<Delegate> delegate_;
+  scoped_ptr<CertReportHelper> cert_report_helper_;
   base::Callback<void(bool)> callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CaptivePortalBlockingPage);

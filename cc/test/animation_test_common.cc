@@ -5,6 +5,7 @@
 #include "cc/test/animation_test_common.h"
 
 #include "cc/animation/animation_id_provider.h"
+#include "cc/animation/animation_player.h"
 #include "cc/animation/keyframed_animation_curve.h"
 #include "cc/animation/layer_animation_controller.h"
 #include "cc/animation/transform_operations.h"
@@ -86,7 +87,7 @@ int AddAnimatedTransform(Target* target,
                          int delta_y) {
   TransformOperations start_operations;
   if (duration > 0.0) {
-    start_operations.AppendTranslate(delta_x, delta_y, 0.0);
+    start_operations.AppendTranslate(0, 0, 0.0);
   }
 
   TransformOperations operations;
@@ -208,8 +209,9 @@ float FakeFloatTransition::GetValue(base::TimeDelta time) const {
 }
 
 FakeLayerAnimationValueObserver::FakeLayerAnimationValueObserver()
-    : opacity_(0.0f), animation_waiting_for_deletion_(false) {
-}
+    : opacity_(0.0f),
+      animation_waiting_for_deletion_(false),
+      transform_is_animating_(false) {}
 
 FakeLayerAnimationValueObserver::~FakeLayerAnimationValueObserver() {}
 
@@ -234,6 +236,11 @@ void FakeLayerAnimationValueObserver::OnScrollOffsetAnimated(
 
 void FakeLayerAnimationValueObserver::OnAnimationWaitingForDeletion() {
   animation_waiting_for_deletion_ = true;
+}
+
+void FakeLayerAnimationValueObserver::OnTransformIsPotentiallyAnimatingChanged(
+    bool is_animating) {
+  transform_is_animating_ = is_animating;
 }
 
 bool FakeLayerAnimationValueObserver::IsActive() const {
@@ -356,6 +363,56 @@ int AddAnimatedFilterToLayer(LayerImpl* layer,
                            duration,
                            start_brightness,
                            end_brightness);
+}
+
+int AddAnimatedTransformToPlayer(AnimationPlayer* player,
+                                 double duration,
+                                 int delta_x,
+                                 int delta_y) {
+  return AddAnimatedTransform(player, duration, delta_x, delta_y);
+}
+
+int AddOpacityTransitionToPlayer(AnimationPlayer* player,
+                                 double duration,
+                                 float start_opacity,
+                                 float end_opacity,
+                                 bool use_timing_function) {
+  return AddOpacityTransition(player, duration, start_opacity, end_opacity,
+                              use_timing_function);
+}
+
+int AddAnimatedFilterToPlayer(AnimationPlayer* player,
+                              double duration,
+                              float start_brightness,
+                              float end_brightness) {
+  return AddAnimatedFilter(player, duration, start_brightness, end_brightness);
+}
+
+int AddOpacityStepsToController(LayerAnimationController* target,
+                                double duration,
+                                float start_opacity,
+                                float end_opacity,
+                                int num_steps) {
+  scoped_ptr<KeyframedFloatAnimationCurve> curve(
+      KeyframedFloatAnimationCurve::Create());
+
+  scoped_ptr<TimingFunction> func =
+      StepsTimingFunction::Create(num_steps, 0.5f);
+  if (duration > 0.0)
+    curve->AddKeyframe(
+        FloatKeyframe::Create(base::TimeDelta(), start_opacity, func.Pass()));
+  curve->AddKeyframe(FloatKeyframe::Create(
+      base::TimeDelta::FromSecondsD(duration), end_opacity, nullptr));
+
+  int id = AnimationIdProvider::NextAnimationId();
+
+  scoped_ptr<Animation> animation(
+      Animation::Create(curve.Pass(), id, AnimationIdProvider::NextGroupId(),
+                        Animation::OPACITY));
+  animation->set_needs_synchronized_start_time(true);
+
+  target->AddAnimation(animation.Pass());
+  return id;
 }
 
 }  // namespace cc

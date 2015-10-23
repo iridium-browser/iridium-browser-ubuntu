@@ -28,14 +28,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -149,7 +141,7 @@
     "env": {
       "CC": "/usr/bin/clang", 
       "CXX": "/usr/bin/clang++", 
-      "GYP_DEFINES": "skia_arch_type=arm skia_arch_width=32 skia_clang_build=1 skia_warnings_as_errors=0"
+      "GYP_DEFINES": "skia_arch_type=arm skia_clang_build=1 skia_warnings_as_errors=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -201,14 +193,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -320,7 +304,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=arm skia_arch_width=32 skia_use_android_framework_defines=1 skia_warnings_as_errors=1"
+      "GYP_DEFINES": "skia_arch_type=arm skia_use_android_framework_defines=1 skia_warnings_as_errors=1"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -372,14 +356,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -491,7 +467,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=arm skia_arch_width=32 skia_warnings_as_errors=1"
+      "GYP_DEFINES": "skia_arch_type=arm skia_warnings_as_errors=1"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -550,14 +526,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -666,7 +634,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=arm skia_arch_width=32 skia_warnings_as_errors=1"
+      "GYP_DEFINES": "skia_arch_type=arm skia_warnings_as_errors=1"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -722,14 +690,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -838,7 +798,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_warnings_as_errors=1"
+      "GYP_DEFINES": "skia_arch_type=x86_64 skia_warnings_as_errors=1"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -893,14 +853,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -1009,7 +961,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_mesa=1 skia_warnings_as_errors=1"
+      "GYP_DEFINES": "skia_arch_type=x86_64 skia_mesa=1 skia_warnings_as_errors=1"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -1063,14 +1015,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -1187,7 +1131,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "qt_sdk=C:/Qt/4.8.5/ skia_arch_type=x86 skia_arch_width=32 skia_warnings_as_errors=1 skia_win_debuggers_path=c:/DbgHelp skia_win_ltcg=0"
+      "GYP_DEFINES": "qt_sdk=C:/Qt/4.8.5/ skia_arch_type=x86 skia_warnings_as_errors=1 skia_win_debuggers_path=c:/DbgHelp skia_win_ltcg=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -1242,14 +1186,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -1366,7 +1302,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "qt_sdk=C:/Qt/4.8.5/ skia_arch_type=x86 skia_arch_width=32 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp skia_win_exceptions=1 skia_win_ltcg=0"
+      "GYP_DEFINES": "qt_sdk=C:/Qt/4.8.5/ skia_arch_type=x86 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp skia_win_exceptions=1 skia_win_ltcg=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -1421,14 +1357,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -1545,7 +1473,7 @@
     "do_perf_steps": false, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "qt_sdk=C:/Qt/4.8.5/ skia_arch_type=x86 skia_arch_width=32 skia_gdi=1 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp skia_win_ltcg=0"
+      "GYP_DEFINES": "qt_sdk=C:/Qt/4.8.5/ skia_arch_type=x86 skia_gdi=1 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp skia_win_ltcg=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -1596,14 +1524,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -1768,14 +1688,6 @@
       "tests", 
       "gm", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -1892,7 +1804,7 @@
     "do_perf_steps": true, 
     "do_test_steps": false, 
     "env": {
-      "GYP_DEFINES": "qt_sdk=C:/Qt/Qt5.1.0/5.1.0/msvc2012_64/ skia_arch_type=x86_64 skia_arch_width=64 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp"
+      "GYP_DEFINES": "qt_sdk=C:/Qt/Qt5.1.0/5.1.0/msvc2012_64/ skia_arch_type=x86_64 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -1942,14 +1854,6 @@
       "tests", 
       "gm", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -2061,7 +1965,7 @@
     "do_perf_steps": true, 
     "do_test_steps": true, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=arm skia_arch_width=32 skia_warnings_as_errors=0"
+      "GYP_DEFINES": "skia_arch_type=arm skia_warnings_as_errors=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -2124,14 +2028,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -2240,7 +2136,7 @@
     "do_perf_steps": true, 
     "do_test_steps": true, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_gpu=0 skia_warnings_as_errors=0"
+      "GYP_DEFINES": "skia_arch_type=x86_64 skia_gpu=0 skia_warnings_as_errors=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -2296,14 +2192,6 @@
       "tests", 
       "gm", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -2414,7 +2302,7 @@
     "env": {
       "CC": "/usr/bin/clang", 
       "CXX": "/usr/bin/clang++", 
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_clang_build=1 skia_run_pdfviewer_in_gm=1 skia_warnings_as_errors=0"
+      "GYP_DEFINES": "skia_arch_type=x86_64 skia_clang_build=1 skia_run_pdfviewer_in_gm=1 skia_warnings_as_errors=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -2431,182 +2319,6 @@
       "nvprmsaa16"
     ], 
     "upload_dm_results": true, 
-    "upload_perf_results": false
-  }, 
-  "Test-Ubuntu-Clang-GCE-CPU-AVX2-x86_64-Coverage": {
-    "build_targets": [
-      "dm"
-    ], 
-    "builder_cfg": {
-      "arch": "x86_64", 
-      "compiler": "Clang", 
-      "configuration": "Coverage", 
-      "cpu_or_gpu": "CPU", 
-      "cpu_or_gpu_value": "AVX2", 
-      "is_trybot": false, 
-      "model": "GCE", 
-      "os": "Ubuntu", 
-      "role": "Test"
-    }, 
-    "configuration": "Coverage", 
-    "dm_flags": [
-      "--matrix", 
-      "0", 
-      "1", 
-      "1", 
-      "0", 
-      "--config", 
-      "565", 
-      "8888", 
-      "gpu", 
-      "upright-matrix-8888", 
-      "upright-matrix-gpu", 
-      "sp-8888", 
-      "msaa16", 
-      "pdf", 
-      "serialize-8888", 
-      "tiles_rt-8888", 
-      "pipe-8888", 
-      "--src", 
-      "tests", 
-      "gm", 
-      "image", 
-      "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "_", 
-      "image", 
-      "decode", 
-      "pal8os2v2.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "pal8v4.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "pal8v5.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "rgb16-565.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "rgb16-565pal.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "rgb32-111110.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "rgb32bf.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "rgba32.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "rgba32abf.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "rgb24largepal.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "pal8os2v2-16.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "pal8oversizepal.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "pal4rletrns.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "pal8rletrns.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "4bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "8bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "24bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "32bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "subset", 
-      "rgb24largepal.bmp", 
-      "_", 
-      "image", 
-      "subset", 
-      "pal8os2v2-16.bmp", 
-      "_", 
-      "image", 
-      "subset", 
-      "pal8oversizepal.bmp", 
-      "_", 
-      "image", 
-      "subset", 
-      "4bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "subset", 
-      "8bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "subset", 
-      "24bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "subset", 
-      "32bpp-pixeldata-cropped.bmp", 
-      "_", 
-      "image", 
-      "decode", 
-      "Hopstarter-Mac-Folders-Apple.ico"
-    ], 
-    "do_perf_steps": false, 
-    "do_test_steps": true, 
-    "env": {
-      "CC": "/usr/bin/clang-3.6", 
-      "CXX": "/usr/bin/clang++-3.6", 
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_clang_build=1 skia_gpu=0 skia_warnings_as_errors=0"
-    }, 
-    "nanobench_flags": [
-      "--scales", 
-      "1.0", 
-      "1.1", 
-      "--config", 
-      "565", 
-      "8888", 
-      "gpu", 
-      "nonrendering", 
-      "angle", 
-      "hwui", 
-      "msaa16", 
-      "nvprmsaa16"
-    ], 
-    "upload_dm_results": false, 
     "upload_perf_results": false
   }, 
   "Test-Ubuntu-GCC-GCE-CPU-AVX2-x86_64-Release-SKNX_NO_SIMD": {
@@ -2649,14 +2361,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -2765,7 +2469,7 @@
     "do_perf_steps": false, 
     "do_test_steps": true, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_gpu=0 skia_warnings_as_errors=0 sknx_no_simd=1"
+      "GYP_DEFINES": "skia_arch_type=x86_64 skia_gpu=0 skia_warnings_as_errors=0 sknx_no_simd=1"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -2824,14 +2528,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -2940,7 +2636,7 @@
     "do_perf_steps": false, 
     "do_test_steps": true, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_gpu=0 skia_shared_lib=1 skia_warnings_as_errors=0"
+      "GYP_DEFINES": "skia_arch_type=x86_64 skia_gpu=0 skia_shared_lib=1 skia_warnings_as_errors=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -2998,14 +2694,6 @@
       "tests", 
       "gm", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -3140,7 +2828,7 @@
     "do_perf_steps": true, 
     "do_test_steps": true, 
     "env": {
-      "GYP_DEFINES": "skia_arch_type=x86_64 skia_arch_width=64 skia_release_optimization_level=1 skia_warnings_as_errors=0"
+      "GYP_DEFINES": "skia_arch_type=x86_64 skia_release_optimization_level=1 skia_warnings_as_errors=0"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -3202,14 +2890,6 @@
       "gm", 
       "image", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -3326,7 +3006,7 @@
     "do_perf_steps": false, 
     "do_test_steps": true, 
     "env": {
-      "GYP_DEFINES": "qt_sdk=C:/Qt/Qt5.1.0/5.1.0/msvc2012_64/ skia_arch_type=x86_64 skia_arch_width=64 skia_gpu=0 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp"
+      "GYP_DEFINES": "qt_sdk=C:/Qt/Qt5.1.0/5.1.0/msvc2012_64/ skia_arch_type=x86_64 skia_gpu=0 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -3384,14 +3064,6 @@
       "tests", 
       "gm", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -3508,7 +3180,7 @@
     "do_perf_steps": false, 
     "do_test_steps": true, 
     "env": {
-      "GYP_DEFINES": "qt_sdk=C:/Qt/Qt5.1.0/5.1.0/msvc2012_64/ skia_angle=1 skia_arch_type=x86 skia_arch_width=32 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp"
+      "GYP_DEFINES": "qt_sdk=C:/Qt/Qt5.1.0/5.1.0/msvc2012_64/ skia_angle=1 skia_arch_type=x86 skia_warnings_as_errors=0 skia_win_debuggers_path=c:/DbgHelp"
     }, 
     "nanobench_flags": [
       "--scales", 
@@ -3563,14 +3235,6 @@
       "tests", 
       "gm", 
       "--blacklist", 
-      "gpu", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
-      "msaa", 
-      "_", 
-      "_", 
-      "PANO_20121023_214540.jpg", 
       "_", 
       "image", 
       "decode", 
@@ -3711,7 +3375,7 @@
     "env": {
       "CC": "/usr/bin/clang", 
       "CXX": "/usr/bin/clang++", 
-      "GYP_DEFINES": "skia_arch_type=arm skia_arch_width=32 skia_clang_build=1 skia_os=ios skia_warnings_as_errors=0"
+      "GYP_DEFINES": "skia_arch_type=arm skia_clang_build=1 skia_os=ios skia_warnings_as_errors=0"
     }, 
     "nanobench_flags": [
       "--scales", 

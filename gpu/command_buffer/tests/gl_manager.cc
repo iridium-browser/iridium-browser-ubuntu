@@ -13,6 +13,7 @@
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
+#include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
@@ -29,6 +30,7 @@
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image_ref_counted_memory.h"
@@ -38,39 +40,21 @@
 namespace gpu {
 namespace {
 
-size_t NumberOfPlanesForGpuMemoryBufferFormat(
-    gfx::GpuMemoryBuffer::Format format) {
+size_t SubsamplingFactor(gfx::BufferFormat format, int plane) {
   switch (format) {
-    case gfx::GpuMemoryBuffer::ATC:
-    case gfx::GpuMemoryBuffer::ATCIA:
-    case gfx::GpuMemoryBuffer::DXT1:
-    case gfx::GpuMemoryBuffer::DXT5:
-    case gfx::GpuMemoryBuffer::ETC1:
-    case gfx::GpuMemoryBuffer::R_8:
-    case gfx::GpuMemoryBuffer::RGBA_8888:
-    case gfx::GpuMemoryBuffer::RGBX_8888:
-    case gfx::GpuMemoryBuffer::BGRA_8888:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
+    case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::UYVY_422:
       return 1;
-    case gfx::GpuMemoryBuffer::YUV_420:
-      return 3;
-  }
-  NOTREACHED();
-  return 0;
-}
-
-size_t SubsamplingFactor(gfx::GpuMemoryBuffer::Format format, int plane) {
-  switch (format) {
-    case gfx::GpuMemoryBuffer::ATC:
-    case gfx::GpuMemoryBuffer::ATCIA:
-    case gfx::GpuMemoryBuffer::DXT1:
-    case gfx::GpuMemoryBuffer::DXT5:
-    case gfx::GpuMemoryBuffer::ETC1:
-    case gfx::GpuMemoryBuffer::R_8:
-    case gfx::GpuMemoryBuffer::RGBA_8888:
-    case gfx::GpuMemoryBuffer::RGBX_8888:
-    case gfx::GpuMemoryBuffer::BGRA_8888:
-      return 1;
-    case gfx::GpuMemoryBuffer::YUV_420: {
+    case gfx::BufferFormat::YUV_420: {
       static size_t factor[] = {1, 2, 2};
       DCHECK_LT(static_cast<size_t>(plane), arraysize(factor));
       return factor[plane];
@@ -80,30 +64,32 @@ size_t SubsamplingFactor(gfx::GpuMemoryBuffer::Format format, int plane) {
   return 0;
 }
 
-size_t StrideInBytes(size_t width,
-                     gfx::GpuMemoryBuffer::Format format,
-                     int plane) {
+size_t StrideInBytes(size_t width, gfx::BufferFormat format, int plane) {
   switch (format) {
-    case gfx::GpuMemoryBuffer::ATCIA:
-    case gfx::GpuMemoryBuffer::DXT5:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT5:
       DCHECK_EQ(plane, 0);
       return width;
-    case gfx::GpuMemoryBuffer::ATC:
-    case gfx::GpuMemoryBuffer::DXT1:
-    case gfx::GpuMemoryBuffer::ETC1:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::ETC1:
       DCHECK_EQ(plane, 0);
       DCHECK_EQ(width % 2, 0U);
       return width / 2;
-    case gfx::GpuMemoryBuffer::R_8:
+    case gfx::BufferFormat::R_8:
       return (width + 3) & ~0x3;
-    case gfx::GpuMemoryBuffer::RGBA_8888:
-    case gfx::GpuMemoryBuffer::BGRA_8888:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::UYVY_422:
+      DCHECK_EQ(plane, 0);
+      return width * 2;
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRA_8888:
       DCHECK_EQ(plane, 0);
       return width * 4;
-    case gfx::GpuMemoryBuffer::RGBX_8888:
+    case gfx::BufferFormat::BGRX_8888:
       NOTREACHED();
       return 0;
-    case gfx::GpuMemoryBuffer::YUV_420:
+    case gfx::BufferFormat::YUV_420:
       return width / SubsamplingFactor(format, plane);
   }
 
@@ -111,10 +97,9 @@ size_t StrideInBytes(size_t width,
   return 0;
 }
 
-size_t BufferSizeInBytes(const gfx::Size& size,
-                         gfx::GpuMemoryBuffer::Format format) {
+size_t BufferSizeInBytes(const gfx::Size& size, gfx::BufferFormat format) {
   size_t size_in_bytes = 0;
-  size_t num_planes = NumberOfPlanesForGpuMemoryBufferFormat(format);
+  size_t num_planes = gfx::NumberOfPlanesForBufferFormat(format);
   for (size_t i = 0; i < num_planes; ++i) {
     size_in_bytes += StrideInBytes(size.width(), format, i) *
                      (size.height() / SubsamplingFactor(format, i));
@@ -126,7 +111,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  public:
   GpuMemoryBufferImpl(base::RefCountedBytes* bytes,
                       const gfx::Size& size,
-                      gfx::GpuMemoryBuffer::Format format)
+                      gfx::BufferFormat format)
       : bytes_(bytes), size_(size), format_(format), mapped_(false) {}
 
   static GpuMemoryBufferImpl* FromClientBuffer(ClientBuffer buffer) {
@@ -136,7 +121,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   // Overridden from gfx::GpuMemoryBuffer:
   bool Map(void** data) override {
     size_t offset = 0;
-    size_t num_planes = NumberOfPlanesForGpuMemoryBufferFormat(format_);
+    size_t num_planes = gfx::NumberOfPlanesForBufferFormat(format_);
     for (size_t i = 0; i < num_planes; ++i) {
       data[i] = reinterpret_cast<uint8*>(&bytes_->data().front()) + offset;
       offset += StrideInBytes(size_.width(), format_, i) *
@@ -147,11 +132,15 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   }
   void Unmap() override { mapped_ = false; }
   bool IsMapped() const override { return mapped_; }
-  Format GetFormat() const override { return format_; }
+  gfx::BufferFormat GetFormat() const override { return format_; }
   void GetStride(int* stride) const override {
-    size_t num_planes = NumberOfPlanesForGpuMemoryBufferFormat(format_);
+    size_t num_planes = gfx::NumberOfPlanesForBufferFormat(format_);
     for (size_t i = 0; i < num_planes; ++i)
       stride[i] = StrideInBytes(size_.width(), format_, i);
+  }
+  gfx::GpuMemoryBufferId GetId() const override {
+    NOTREACHED();
+    return gfx::GpuMemoryBufferId(0);
   }
   gfx::GpuMemoryBufferHandle GetHandle() const override {
     NOTREACHED();
@@ -166,7 +155,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  private:
   scoped_refptr<base::RefCountedBytes> bytes_;
   const gfx::Size size_;
-  gfx::GpuMemoryBuffer::Format format_;
+  gfx::BufferFormat format_;
   bool mapped_;
 };
 
@@ -184,7 +173,8 @@ GLManager::Options::Options()
       virtual_manager(NULL),
       bind_generates_resource(false),
       lose_context_when_out_of_memory(false),
-      context_lost_allowed(false) {
+      context_lost_allowed(false),
+      webgl_version(0) {
 }
 
 GLManager::GLManager() : context_lost_allowed_(false) {
@@ -212,7 +202,7 @@ GLManager::~GLManager() {
 // static
 scoped_ptr<gfx::GpuMemoryBuffer> GLManager::CreateGpuMemoryBuffer(
     const gfx::Size& size,
-    gfx::GpuMemoryBuffer::Format format) {
+    gfx::BufferFormat format) {
   std::vector<unsigned char> data(BufferSizeInBytes(size, format), 0);
   scoped_refptr<base::RefCountedBytes> bytes(new base::RefCountedBytes(data));
   return make_scoped_ptr<gfx::GpuMemoryBuffer>(
@@ -272,6 +262,7 @@ void GLManager::InitializeWithCommandLine(const GLManager::Options& options,
   attrib_helper.alpha_size = 8;
   attrib_helper.depth_size = 16;
   attrib_helper.stencil_size = 8;
+  attrib_helper.webgl_version = options.webgl_version;
   attrib_helper.Serialize(&attribs);
 
   DCHECK(!command_line || !context_group);
@@ -279,14 +270,10 @@ void GLManager::InitializeWithCommandLine(const GLManager::Options& options,
     scoped_refptr<gles2::FeatureInfo> feature_info;
     if (command_line)
       feature_info = new gles2::FeatureInfo(*command_line);
-    context_group =
-        new gles2::ContextGroup(mailbox_manager_.get(),
-                                NULL,
-                                new gpu::gles2::ShaderTranslatorCache,
-                                feature_info,
-                                NULL,
-                                NULL,
-                                options.bind_generates_resource);
+    context_group = new gles2::ContextGroup(
+        mailbox_manager_.get(), NULL, new gpu::gles2::ShaderTranslatorCache,
+        new gpu::gles2::FramebufferCompletenessCache, feature_info, NULL, NULL,
+        options.bind_generates_resource);
   }
 
   decoder_.reset(::gpu::gles2::GLES2Decoder::Create(context_group));
@@ -465,7 +452,7 @@ int32 GLManager::CreateGpuMemoryBufferImage(size_t width,
                                             unsigned usage) {
   DCHECK_EQ(usage, static_cast<unsigned>(GL_MAP_CHROMIUM));
   scoped_ptr<gfx::GpuMemoryBuffer> buffer = GLManager::CreateGpuMemoryBuffer(
-      gfx::Size(width, height), gfx::GpuMemoryBuffer::RGBA_8888);
+      gfx::Size(width, height), gfx::BufferFormat::RGBA_8888);
   return CreateImage(buffer->AsClientBuffer(), width, height, internalformat);
 }
 
@@ -509,6 +496,11 @@ uint32 GLManager::CreateStreamTexture(uint32 texture_id) {
 
 void GLManager::SetLock(base::Lock*) {
   NOTIMPLEMENTED();
+}
+
+bool GLManager::IsGpuChannelLost() {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 }  // namespace gpu

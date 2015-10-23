@@ -8,6 +8,7 @@
 #include <X11/extensions/XTest.h>
 #include <X11/Xlib.h>
 #include <X11/XKBlib.h>
+#undef Status  // Xlib.h #defines this, which breaks protobuf headers.
 
 #include <set>
 
@@ -24,6 +25,7 @@
 #include "remoting/host/clipboard.h"
 #include "remoting/host/linux/unicode_to_keysym.h"
 #include "remoting/proto/internal.pb.h"
+#include "remoting/protocol/usb_key_codes.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 
@@ -88,14 +90,14 @@ bool FindKeycodeForUnicode(Display* display,
 }
 
 bool IsModifierKey(int usb_keycode) {
-  return usb_keycode == 0x0700e0 ||  // Left Ctrl
-         usb_keycode == 0x0700e1 ||  // Left Shift
-         usb_keycode == 0x0700e2 ||  // Left Alt
-         usb_keycode == 0x0700e3 ||  // Left OS
-         usb_keycode == 0x0700e4 ||  // Right Ctrl
-         usb_keycode == 0x0700e5 ||  // Right Shift
-         usb_keycode == 0x0700e6 ||  // Right Alt
-         usb_keycode == 0x0700e7;    // Right OS
+  return usb_keycode == kUsbLeftControl ||
+         usb_keycode == kUsbLeftShift ||
+         usb_keycode == kUsbLeftAlt ||
+         usb_keycode == kUsbLeftOs ||
+         usb_keycode == kUsbRightControl ||
+         usb_keycode == kUsbRightShift ||
+         usb_keycode == kUsbRightAlt ||
+         usb_keycode == kUsbRightOs;
 }
 
 // Pixel-to-wheel-ticks conversion ratio used by GTK.
@@ -643,6 +645,7 @@ void InputInjectorX11::Core::Stop() {
 
 }  // namespace
 
+// static
 scoped_ptr<InputInjector> InputInjector::Create(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
@@ -651,6 +654,11 @@ scoped_ptr<InputInjector> InputInjector::Create(
   if (!injector->Init())
     return nullptr;
   return injector.Pass();
+}
+
+// static
+bool InputInjector::SupportsTouchEvents() {
+  return false;
 }
 
 }  // namespace remoting

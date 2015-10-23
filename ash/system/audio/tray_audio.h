@@ -31,6 +31,12 @@ class TrayAudio : public TrayImageItem,
   static bool ShowAudioDeviceMenu();
 
  protected:
+  // Overridden from gfx::DisplayObserver.
+  void OnDisplayAdded(const gfx::Display& new_display) override;
+  void OnDisplayRemoved(const gfx::Display& old_display) override;
+  void OnDisplayMetricsChanged(const gfx::Display& display,
+                               uint32_t changed_metrics) override;
+
   virtual void Update();
 
   scoped_ptr<system::TrayAudioDelegate> audio_delegate_;
@@ -54,16 +60,10 @@ class TrayAudio : public TrayImageItem,
 
   // Overridden from AudioObserver.
   void OnOutputNodeVolumeChanged(uint64_t node_id, double volume) override;
-  void OnOutputMuteChanged(bool mute_on) override;
+  void OnOutputMuteChanged(bool mute_on, bool system_adjust) override;
   void OnAudioNodesChanged() override;
   void OnActiveOutputNodeChanged() override;
   void OnActiveInputNodeChanged() override;
-
-  // Overridden from gfx::DisplayObserver.
-  void OnDisplayAdded(const gfx::Display& new_display) override;
-  void OnDisplayRemoved(const gfx::Display& old_display) override;
-  void OnDisplayMetricsChanged(const gfx::Display& display,
-                               uint32_t changed_metrics) override;
 
   void ChangeInternalSpeakerChannelMode();
 

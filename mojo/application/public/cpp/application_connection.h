@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/memory/weak_ptr.h"
 #include "mojo/application/public/cpp/lib/interface_factory_connector.h"
 #include "mojo/application/public/interfaces/service_provider.mojom.h"
 
@@ -40,18 +41,36 @@ class ServiceConnector;
 //
 // Just as with InterfaceFactory, ServiceConnector must outlive
 // ApplicationConnection.
+//
+// An ApplicationConnection's lifetime is managed by an ApplicationImpl. To
+// close a connection, call CloseConnection which will destroy this object.
 class ApplicationConnection {
  public:
-  virtual ~ApplicationConnection();
+  virtual ~ApplicationConnection() {}
+
+  class TestApi {
+   public:
+    explicit TestApi(ApplicationConnection* connection)
+        : connection_(connection) {
+    }
+    base::WeakPtr<ApplicationConnection> GetWeakPtr() {
+      return connection_->GetWeakPtr();
+    }
+
+   private:
+    ApplicationConnection* connection_;
+  };
 
   // See class description for details.
   virtual void SetServiceConnector(ServiceConnector* connector) = 0;
 
   // Makes Interface available as a service to the remote application.
   // |factory| will create implementations of Interface on demand.
+  // Returns true if the service was exposed, false if capability filtering
+  // from the shell prevented the service from being exposed.
   template <typename Interface>
-  void AddService(InterfaceFactory<Interface>* factory) {
-    SetServiceConnectorForName(
+  bool AddService(InterfaceFactory<Interface>* factory) {
+    return SetServiceConnectorForName(
         new internal::InterfaceFactoryConnector<Interface>(factory),
         Interface::Name_);
   }
@@ -88,9 +107,22 @@ class ApplicationConnection {
   // Caller does not take ownership.
   virtual ServiceProvider* GetServiceProvider() = 0;
 
- private:
-  virtual void SetServiceConnectorForName(ServiceConnector* service_connector,
+  // Returns the local application's ServiceProvider interface. The return
+  // value is owned by this connection.
+  virtual ServiceProvider* GetLocalServiceProvider() = 0;
+
+  // Register a handler to receive an error notification on the pipe to the
+  // remote application's service provider.
+  virtual void SetRemoteServiceProviderConnectionErrorHandler(
+      const Closure& handler) = 0;
+
+ protected:
+  // Returns true if the connector was set, false if it was not set (e.g. by
+  // some filtering policy preventing this interface from being exposed).
+  virtual bool SetServiceConnectorForName(ServiceConnector* service_connector,
                                           const std::string& name) = 0;
+
+  virtual base::WeakPtr<ApplicationConnection> GetWeakPtr() = 0;
 };
 
 }  // namespace mojo

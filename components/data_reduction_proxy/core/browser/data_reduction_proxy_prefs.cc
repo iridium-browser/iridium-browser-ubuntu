@@ -31,7 +31,6 @@ namespace data_reduction_proxy {
 // are reflected in RegisterSimpleProfilePrefs.
 void RegisterSyncableProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kDataReductionProxyEnabled, false);
-  registry->RegisterBooleanPref(prefs::kDataReductionProxyAltEnabled, false);
   registry->RegisterBooleanPref(prefs::kDataReductionProxyWasEnabledBefore,
                                 false);
 
@@ -42,11 +41,38 @@ void RegisterSyncableProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kUpdateDailyReceivedContentLengths,
                                 false);
   registry->RegisterListPref(prefs::kDailyHttpOriginalContentLength);
+  registry->RegisterInt64Pref(prefs::kDailyHttpOriginalContentLengthApplication,
+                              0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpOriginalContentLengthVideo, 0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpOriginalContentLengthUnknown,
+                              0L);
+
   registry->RegisterListPref(prefs::kDailyHttpReceivedContentLength);
+  registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthApplication,
+                              0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthVideo, 0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthUnknown,
+                              0L);
+
   registry->RegisterListPref(
       prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabled);
+  registry->RegisterInt64Pref(
+      prefs::
+          kDailyOriginalContentLengthWithDataReductionProxyEnabledApplication,
+      0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabledVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabledUnknown,
+      0L);
   registry->RegisterListPref(
       prefs::kDailyContentLengthWithDataReductionProxyEnabled);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthWithDataReductionProxyEnabledApplication, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthWithDataReductionProxyEnabledVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthWithDataReductionProxyEnabledUnknown, 0L);
   registry->RegisterListPref(
       prefs::kDailyContentLengthHttpsWithDataReductionProxyEnabled);
   registry->RegisterListPref(
@@ -57,16 +83,33 @@ void RegisterSyncableProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kDailyContentLengthUnknownWithDataReductionProxyEnabled);
   registry->RegisterListPref(
       prefs::kDailyOriginalContentLengthViaDataReductionProxy);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthViaDataReductionProxyApplication, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthViaDataReductionProxyVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthViaDataReductionProxyUnknown, 0L);
   registry->RegisterListPref(prefs::kDailyContentLengthViaDataReductionProxy);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthViaDataReductionProxyApplication, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthViaDataReductionProxyVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthViaDataReductionProxyUnknown, 0L);
+
   registry->RegisterInt64Pref(prefs::kDailyHttpContentLengthLastUpdateDate, 0L);
+  registry->RegisterIntegerPref(prefs::kLoFiImplicitOptOutEpoch, 0);
+  registry->RegisterIntegerPref(prefs::kLoFiSnackbarsShownPerSession, 0);
+  registry->RegisterIntegerPref(prefs::kLoFiLoadImagesPerSession, 0);
+  registry->RegisterIntegerPref(prefs::kLoFiConsecutiveSessionDisables, 0);
+  registry->RegisterBooleanPref(prefs::kLoFiWasUsedThisSession, false);
   registry->RegisterInt64Pref(prefs::kSimulatedConfigRetrieveTime, 0L);
+  registry->RegisterStringPref(prefs::kDataReductionProxyConfig, std::string());
 }
 
 void RegisterSimpleProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(
       prefs::kDataReductionProxyEnabled, false);
-  registry->RegisterBooleanPref(
-      prefs::kDataReductionProxyAltEnabled, false);
   registry->RegisterBooleanPref(
       prefs::kDataReductionProxyWasEnabledBefore, false);
 
@@ -84,14 +127,38 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
       prefs::kHttpOriginalContentLength, 0);
   registry->RegisterListPref(
       prefs::kDailyHttpOriginalContentLength);
-  registry->RegisterListPref(
-      prefs::kDailyHttpReceivedContentLength);
+  registry->RegisterInt64Pref(prefs::kDailyHttpOriginalContentLengthApplication,
+                              0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpOriginalContentLengthVideo, 0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpOriginalContentLengthUnknown,
+                              0L);
+  registry->RegisterListPref(prefs::kDailyHttpReceivedContentLength);
+  registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthApplication,
+                              0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthVideo, 0L);
+  registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthUnknown,
+                              0L);
   registry->RegisterBooleanPref(prefs::kUpdateDailyReceivedContentLengths,
                                 false);
   registry->RegisterListPref(
       prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabled);
+  registry->RegisterInt64Pref(
+      prefs::
+          kDailyOriginalContentLengthWithDataReductionProxyEnabledApplication,
+      0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabledVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabledUnknown,
+      0L);
   registry->RegisterListPref(
       prefs::kDailyContentLengthWithDataReductionProxyEnabled);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthWithDataReductionProxyEnabledApplication, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthWithDataReductionProxyEnabledVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthWithDataReductionProxyEnabledUnknown, 0L);
   registry->RegisterListPref(
       prefs::kDailyContentLengthHttpsWithDataReductionProxyEnabled);
   registry->RegisterListPref(
@@ -102,11 +169,28 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
       prefs::kDailyContentLengthUnknownWithDataReductionProxyEnabled);
   registry->RegisterListPref(
       prefs::kDailyOriginalContentLengthViaDataReductionProxy);
-  registry->RegisterListPref(
-      prefs::kDailyContentLengthViaDataReductionProxy);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthViaDataReductionProxyApplication, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthViaDataReductionProxyVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyOriginalContentLengthViaDataReductionProxyUnknown, 0L);
+  registry->RegisterListPref(prefs::kDailyContentLengthViaDataReductionProxy);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthViaDataReductionProxyApplication, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthViaDataReductionProxyVideo, 0L);
+  registry->RegisterInt64Pref(
+      prefs::kDailyContentLengthViaDataReductionProxyUnknown, 0L);
   registry->RegisterInt64Pref(
       prefs::kDailyHttpContentLengthLastUpdateDate, 0L);
+  registry->RegisterIntegerPref(prefs::kLoFiImplicitOptOutEpoch, 0);
+  registry->RegisterIntegerPref(prefs::kLoFiSnackbarsShownPerSession, 0);
+  registry->RegisterIntegerPref(prefs::kLoFiLoadImagesPerSession, 0);
+  registry->RegisterIntegerPref(prefs::kLoFiConsecutiveSessionDisables, 0);
+  registry->RegisterBooleanPref(prefs::kLoFiWasUsedThisSession, false);
   registry->RegisterInt64Pref(prefs::kSimulatedConfigRetrieveTime, 0L);
+  registry->RegisterStringPref(prefs::kDataReductionProxyConfig, std::string());
 }
 
 void MigrateStatisticsPrefs(PrefService* local_state_prefs,

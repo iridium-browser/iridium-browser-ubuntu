@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/strings/string16.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
@@ -29,10 +30,12 @@ class TestWebState : public WebState {
   const std::string& GetContentsMimeType() const override;
   const std::string& GetContentLanguageHeader() const override;
   bool ContentIsHTML() const override;
+  const base::string16& GetTitle() const override;
   bool IsLoading() const override;
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
   GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const override;
+  void ShowTransientContentView(CRWContentView* content_view) override {}
   void AddScriptCommandCallback(const ScriptCommandCallback& callback,
                                 const std::string& command_prefix) override {}
   void RemoveScriptCommandCallback(const std::string& command_prefix) override {
@@ -42,6 +45,8 @@ class TestWebState : public WebState {
   WebInterstitial* GetWebInterstitial() const override;
   void AddObserver(WebStateObserver* observer) override {}
   void RemoveObserver(WebStateObserver* observer) override {}
+  void AddPolicyDecider(WebStatePolicyDecider* decider) override {}
+  void RemovePolicyDecider(WebStatePolicyDecider* decider) override {}
   int DownloadImage(const GURL& url,
                     bool is_favicon,
                     uint32_t max_bitmap_size,
@@ -55,6 +60,7 @@ class TestWebState : public WebState {
 
  private:
   GURL url_;
+  base::string16 title_;
   URLVerificationTrustLevel trust_level_;
   bool content_is_html_;
   std::string mime_type_;

@@ -11,7 +11,7 @@ import("//tools/grit/grit_rule.gni")
 # About the policy component:
 #
 # There should really be two components. One called "policy" that includes all
-# generated code, and one "policy/proto" liek we have now. The proto needs to
+# generated code, and one "policy/proto" like we have now. The proto needs to
 # be separate for cases like SesssionManagerClient which uses the protos to
 # communicate with the Chrome OS system layer, but doesn't need the rest of the
 # policy stuff).
@@ -209,7 +209,7 @@ if (enable_configuration_policy) {
 
     defines = [ "POLICY_COMPONENT_IMPLEMENTATION" ]
 
-    deps = [
+    public_deps = [
       ":cloud_policy_code_generate",
       ":cloud_policy_proto_generated_compile",
       "//base",
@@ -218,13 +218,13 @@ if (enable_configuration_policy) {
   }
 
   group("test_support") {
-    deps = [
+    public_deps = [
       ":chrome_settings_proto_generated_compile",
       ":policy_component",
     ]
   }
 
-  static_library("policy_component_test_support") {
+  source_set("policy_component_test_support") {
     testonly = true
     sources = [
       "core/browser/configuration_policy_pref_store_test.cc",
@@ -266,7 +266,7 @@ if (enable_configuration_policy) {
       ]
     }
 
-    deps = [
+    public_deps = [
       ":policy_component",
       ":test_support",
       "//components/policy/proto",
@@ -277,56 +277,63 @@ if (enable_configuration_policy) {
 
   if (is_android) {
     import("//build/config/android/rules.gni")
-    group("app_restrictions_resources") {
-      resources_zip = "res.java/$target_name.zip"
-      generated_resources_dir = "$root_gen_dir/chrome/app/policy/android"
 
-      copy("${target_name}__consolidate_resources") {
-        sources = [
-          "$root_gen_dir/policy/app_restrictions.xml",
-        ]
-        outputs = [
-          "$generated_resources_dir/xml-v21/app_restrictions.xml",
-        ]
-        deps = [
-          ":policy_templates",
-        ]
-      }
+    resources_name = "app_restrictions_resources"
+    resources_zip = "res.java/$resources_name.zip"
+    generated_resources_dir = "$root_gen_dir/chrome/app/policy/android"
 
-      # TODO(471115): The write_build_config template is in
-      # //build/config/android/internal_rules.gni and is not meant for external
-      # use. The public rules (in rules.gni) should be updated to support what
-      # we are doing here.
-      build_config_path = "$target_gen_dir/$target_name.build_config"
-      write_build_config("${target_name}__build_config") {
-        build_config = build_config_path
-        resources_zip = "$root_build_dir/$resources_zip"
-        type = "android_resources"
-      }
-
-      action("${target_name}__create_zip") {
-        script = "//build/android/gn/zip.py"
-        outputs = [
-          "$root_build_dir/$resources_zip",
-        ]
-        generated_resources =
-            [ "$generated_resources_dir/xml-v21/app_restrictions.xml" ] +
-            policy_templates_android_outputs
-        inputs = generated_resources
-        rebased_inputs = rebase_path(generated_resources, root_build_dir)
-        rebased_resources_dir =
-            rebase_path(generated_resources_dir, root_build_dir)
-        args = [
-          "--inputs=$rebased_inputs",
-          "--output=$resources_zip",
-          "--base-dir=$rebased_resources_dir",
-        ]
-      }
-
+    consolidate_target_name = "${resources_name}__consolidate_resources"
+    copy(consolidate_target_name) {
+      sources = [
+        app_restrictions_path,
+      ]
+      outputs = [
+        "$generated_resources_dir/xml-v21/app_restrictions.xml",
+      ]
       deps = [
-        ":${target_name}__consolidate_resources",
-        ":${target_name}__build_config",
-        ":${target_name}__create_zip",
+        ":cloud_policy_code_generate",
+        ":policy_templates",
+      ]
+    }
+
+    # TODO(471115): The write_build_config template is in
+    # //build/config/android/internal_rules.gni and is not meant for external
+    # use. The public rules (in rules.gni) should be updated to support what
+    # we are doing here.
+    build_config_target_name = "${resources_name}__build_config"
+    write_build_config(build_config_target_name) {
+      build_config = "$target_gen_dir/$resources_name.build_config"
+      resources_zip = "$root_build_dir/$resources_zip"
+      type = "android_resources"
+    }
+
+    zip_target_name = "${resources_name}__create_zip"
+    action(zip_target_name) {
+      script = "//build/android/gn/zip.py"
+      outputs = [
+        "$root_build_dir/$resources_zip",
+      ]
+      generated_resources = get_target_outputs(":$consolidate_target_name") +
+                            policy_templates_android_outputs
+      inputs = generated_resources
+      rebased_inputs = rebase_path(generated_resources, root_build_dir)
+      rebased_resources_dir =
+          rebase_path(generated_resources_dir, root_build_dir)
+      args = [
+        "--inputs=$rebased_inputs",
+        "--output=$resources_zip",
+        "--base-dir=$rebased_resources_dir",
+      ]
+      deps = [
+        ":$consolidate_target_name",
+        ":policy_templates_grit",  # For policy_templates_android_outputs.
+      ]
+    }
+
+    group("app_restrictions_resources") {
+      deps = [
+        ":$build_config_target_name",
+        ":$zip_target_name",
       ]
     }
   }

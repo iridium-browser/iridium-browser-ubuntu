@@ -20,35 +20,37 @@ namespace sandbox {
 FilesystemDispatcher::FilesystemDispatcher(PolicyBase* policy_base)
     : policy_base_(policy_base) {
   static const IPCCall create_params = {
-    {IPC_NTCREATEFILE_TAG, WCHAR_TYPE, UINT32_TYPE, UINT32_TYPE, UINT32_TYPE,
-     UINT32_TYPE, UINT32_TYPE, UINT32_TYPE},
-    reinterpret_cast<CallbackGeneric>(&FilesystemDispatcher::NtCreateFile)
-  };
+      {IPC_NTCREATEFILE_TAG,
+       {WCHAR_TYPE,
+        UINT32_TYPE,
+        UINT32_TYPE,
+        UINT32_TYPE,
+        UINT32_TYPE,
+        UINT32_TYPE,
+        UINT32_TYPE}},
+      reinterpret_cast<CallbackGeneric>(&FilesystemDispatcher::NtCreateFile)};
 
   static const IPCCall open_file = {
-    {IPC_NTOPENFILE_TAG, WCHAR_TYPE, UINT32_TYPE, UINT32_TYPE, UINT32_TYPE,
-     UINT32_TYPE},
-    reinterpret_cast<CallbackGeneric>(&FilesystemDispatcher::NtOpenFile)
-  };
+      {IPC_NTOPENFILE_TAG,
+       {WCHAR_TYPE, UINT32_TYPE, UINT32_TYPE, UINT32_TYPE, UINT32_TYPE}},
+      reinterpret_cast<CallbackGeneric>(&FilesystemDispatcher::NtOpenFile)};
 
   static const IPCCall attribs = {
-    {IPC_NTQUERYATTRIBUTESFILE_TAG, WCHAR_TYPE, UINT32_TYPE, INOUTPTR_TYPE},
-    reinterpret_cast<CallbackGeneric>(
-        &FilesystemDispatcher::NtQueryAttributesFile)
-  };
+      {IPC_NTQUERYATTRIBUTESFILE_TAG, {WCHAR_TYPE, UINT32_TYPE, INOUTPTR_TYPE}},
+      reinterpret_cast<CallbackGeneric>(
+          &FilesystemDispatcher::NtQueryAttributesFile)};
 
   static const IPCCall full_attribs = {
-    {IPC_NTQUERYFULLATTRIBUTESFILE_TAG, WCHAR_TYPE, UINT32_TYPE, INOUTPTR_TYPE},
-    reinterpret_cast<CallbackGeneric>(
-          &FilesystemDispatcher::NtQueryFullAttributesFile)
-  };
+      {IPC_NTQUERYFULLATTRIBUTESFILE_TAG,
+       {WCHAR_TYPE, UINT32_TYPE, INOUTPTR_TYPE}},
+      reinterpret_cast<CallbackGeneric>(
+          &FilesystemDispatcher::NtQueryFullAttributesFile)};
 
   static const IPCCall set_info = {
-    {IPC_NTSETINFO_RENAME_TAG, VOIDPTR_TYPE, INOUTPTR_TYPE, INOUTPTR_TYPE,
-     UINT32_TYPE, UINT32_TYPE},
-    reinterpret_cast<CallbackGeneric>(
-        &FilesystemDispatcher::NtSetInformationFile)
-  };
+      {IPC_NTSETINFO_RENAME_TAG,
+       {VOIDPTR_TYPE, INOUTPTR_TYPE, INOUTPTR_TYPE, UINT32_TYPE, UINT32_TYPE}},
+      reinterpret_cast<CallbackGeneric>(
+          &FilesystemDispatcher::NtSetInformationFile)};
 
   ipc_calls_.push_back(create_params);
   ipc_calls_.push_back(open_file);
@@ -90,7 +92,7 @@ bool FilesystemDispatcher::NtCreateFile(IPCInfo* ipc,
                                         uint32 share_access,
                                         uint32 create_disposition,
                                         uint32 create_options) {
-  if (!PreProcessName(*name, name)) {
+  if (!PreProcessName(name)) {
     // The path requested might contain a reparse point.
     ipc->return_info.nt_status = STATUS_ACCESS_DENIED;
     return true;
@@ -136,7 +138,7 @@ bool FilesystemDispatcher::NtOpenFile(IPCInfo* ipc,
                                       uint32 desired_access,
                                       uint32 share_access,
                                       uint32 open_options) {
-  if (!PreProcessName(*name, name)) {
+  if (!PreProcessName(name)) {
     // The path requested might contain a reparse point.
     ipc->return_info.nt_status = STATUS_ACCESS_DENIED;
     return true;
@@ -182,7 +184,7 @@ bool FilesystemDispatcher::NtQueryAttributesFile(IPCInfo* ipc,
   if (sizeof(FILE_BASIC_INFORMATION) != info->Size())
     return false;
 
-  if (!PreProcessName(*name, name)) {
+  if (!PreProcessName(name)) {
     // The path requested might contain a reparse point.
     ipc->return_info.nt_status = STATUS_ACCESS_DENIED;
     return true;
@@ -222,7 +224,7 @@ bool FilesystemDispatcher::NtQueryFullAttributesFile(IPCInfo* ipc,
   if (sizeof(FILE_NETWORK_OPEN_INFORMATION) != info->Size())
     return false;
 
-  if (!PreProcessName(*name, name)) {
+  if (!PreProcessName(name)) {
     // The path requested might contain a reparse point.
     ipc->return_info.nt_status = STATUS_ACCESS_DENIED;
     return true;
@@ -277,7 +279,7 @@ bool FilesystemDispatcher::NtSetInformationFile(IPCInfo* ipc,
   base::string16 name;
   name.assign(rename_info->FileName, rename_info->FileNameLength /
                                      sizeof(rename_info->FileName[0]));
-  if (!PreProcessName(name, &name)) {
+  if (!PreProcessName(&name)) {
     // The path requested might contain a reparse point.
     ipc->return_info.nt_status = STATUS_ACCESS_DENIED;
     return true;

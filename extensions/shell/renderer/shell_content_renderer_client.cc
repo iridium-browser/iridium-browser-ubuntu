@@ -15,11 +15,10 @@
 #include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/extension_helper.h"
 #include "extensions/renderer/guest_view/extensions_guest_view_container.h"
-#include "extensions/renderer/guest_view/guest_view_container.h"
+#include "extensions/renderer/guest_view/extensions_guest_view_container_dispatcher.h"
 #include "extensions/renderer/guest_view/mime_handler_view/mime_handler_view_container.h"
 #include "extensions/shell/common/shell_extensions_client.h"
 #include "extensions/shell/renderer/shell_extensions_renderer_client.h"
-#include "ipc/ipc_message_macros.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 
 #if !defined(DISABLE_NACL)
@@ -57,14 +56,16 @@ void ShellContentRendererClient::RenderThreadStarted() {
       new Dispatcher(extension_dispatcher_delegate_.get()));
   thread->AddObserver(extension_dispatcher_.get());
 
-  // TODO(jamescook): Init WebSecurityPolicy for chrome-extension: schemes.
-  // See ChromeContentRendererClient for details.
+  guest_view_container_dispatcher_.reset(
+      new ExtensionsGuestViewContainerDispatcher());
+  thread->AddObserver(guest_view_container_dispatcher_.get());
 }
 
 void ShellContentRendererClient::RenderFrameCreated(
     content::RenderFrame* render_frame) {
   // ExtensionFrameHelper destroys itself when the RenderFrame is destroyed.
   new ExtensionFrameHelper(render_frame, extension_dispatcher_.get());
+  extension_dispatcher_->OnRenderFrameCreated(render_frame);
 
   // TODO(jamescook): Do we need to add a new PepperHelper(render_frame) here?
   // It doesn't seem necessary for either Pepper or NaCl.
@@ -77,7 +78,6 @@ void ShellContentRendererClient::RenderFrameCreated(
 void ShellContentRendererClient::RenderViewCreated(
     content::RenderView* render_view) {
   new ExtensionHelper(render_view, extension_dispatcher_.get());
-  extension_dispatcher_->OnRenderViewCreated(render_view);
 }
 
 bool ShellContentRendererClient::OverrideCreatePlugin(
@@ -94,12 +94,6 @@ blink::WebPlugin* ShellContentRendererClient::CreatePluginReplacement(
     const base::FilePath& plugin_path) {
   // Don't provide a custom "failed to load" plugin.
   return NULL;
-}
-
-bool ShellContentRendererClient::ShouldForwardToGuestContainer(
-    const IPC::Message& msg) {
-  return (IPC_MESSAGE_CLASS(msg) == GuestViewMsgStart) ||
-      (IPC_MESSAGE_CLASS(msg) == ExtensionsGuestViewMsgStart);
 }
 
 bool ShellContentRendererClient::WillSendRequest(
@@ -133,8 +127,7 @@ bool ShellContentRendererClient::IsExternalPepperPlugin(
 #endif
 }
 
-bool ShellContentRendererClient::ShouldEnableSiteIsolationPolicy() const {
-  // Extension renderers don't need site isolation.
+bool ShellContentRendererClient::ShouldGatherSiteIsolationStats() const {
   return false;
 }
 

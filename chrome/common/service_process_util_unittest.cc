@@ -8,8 +8,10 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/location.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 
 #if !defined(OS_MACOSX)
@@ -21,7 +23,7 @@
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
+#include "components/version_info/version_info.h"
 #include "testing/multiprocess_func_list.h"
 
 #if defined(OS_WIN)
@@ -52,7 +54,7 @@ void ShutdownTask(base::MessageLoop* loop) {
   // Quit the main message loop.
   ASSERT_FALSE(g_good_shutdown);
   g_good_shutdown = true;
-  loop->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  loop->task_runner()->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
 }
 
 }  // namespace
@@ -60,9 +62,10 @@ void ShutdownTask(base::MessageLoop* loop) {
 TEST(ServiceProcessUtilTest, ScopedVersionedName) {
   std::string test_str = "test";
   std::string scoped_name = GetServiceProcessScopedVersionedName(test_str);
-  chrome::VersionInfo version_info;
-  EXPECT_TRUE(EndsWith(scoped_name, test_str, true));
-  EXPECT_NE(std::string::npos, scoped_name.find(version_info.Version()));
+  EXPECT_TRUE(base::EndsWith(scoped_name, test_str,
+                             base::CompareCase::SENSITIVE));
+  EXPECT_NE(std::string::npos,
+            scoped_name.find(version_info::GetVersionNumber()));
 }
 
 class ServiceProcessStateTest : public base::MultiProcessTest {
@@ -70,8 +73,8 @@ class ServiceProcessStateTest : public base::MultiProcessTest {
   ServiceProcessStateTest();
   ~ServiceProcessStateTest() override;
   void SetUp() override;
-  base::MessageLoopProxy* IOMessageLoopProxy() {
-    return io_thread_.message_loop_proxy().get();
+  base::SingleThreadTaskRunner* IOMessageLoopProxy() {
+    return io_thread_.task_runner().get();
   }
   void LaunchAndWait(const std::string& name);
 
@@ -147,8 +150,9 @@ TEST_F(ServiceProcessStateTest, AutoRun) {
   ASSERT_EQ(std::string::npos, exec_value.find('"'));
   ASSERT_EQ(std::string::npos, exec_value.find('\''));
 
-  base::CommandLine::StringVector argv;
-  base::SplitString(exec_value, ' ', &argv);
+  base::CommandLine::StringVector argv = base::SplitString(
+      exec_value, base::CommandLine::StringType(1, ' '),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   ASSERT_GE(argv.size(), 2U)
       << "Expected at least one command-line option in: " << exec_value;
   autorun_command_line.reset(new base::CommandLine(argv));
@@ -228,11 +232,11 @@ MULTIPROCESS_TEST_MAIN(ServiceProcessStateTestShutdown) {
   ServiceProcessState state;
   EXPECT_TRUE(state.Initialize());
   EXPECT_TRUE(state.SignalReady(
-      io_thread_.message_loop_proxy().get(),
+      io_thread_.task_runner().get(),
       base::Bind(&ShutdownTask, base::MessageLoop::current())));
-  message_loop.PostDelayedTask(FROM_HERE,
-                               base::MessageLoop::QuitClosure(),
-                               TestTimeouts::action_max_timeout());
+  message_loop.task_runner()->PostDelayedTask(
+      FROM_HERE, base::MessageLoop::QuitClosure(),
+      TestTimeouts::action_max_timeout());
   EXPECT_FALSE(g_good_shutdown);
   message_loop.Run();
   EXPECT_TRUE(g_good_shutdown);
@@ -274,7 +278,7 @@ class ServiceProcessStateFileManipulationTest : public ::testing::Test {
         new Launchd::ScopedInstance(mock_launchd_.get()));
     ASSERT_TRUE(service_process_state_.Initialize());
     ASSERT_TRUE(service_process_state_.SignalReady(
-        io_thread_.message_loop_proxy().get(), base::Closure()));
+        io_thread_.task_runner().get(), base::Closure()));
     loop_.PostDelayedTask(FROM_HERE,
                           base::MessageLoop::QuitClosure(),
                           TestTimeouts::action_max_timeout());
@@ -285,8 +289,8 @@ class ServiceProcessStateFileManipulationTest : public ::testing::Test {
   const base::FilePath& bundle_path() const { return bundle_path_; }
   const base::FilePath& GetTempDirPath() const { return temp_dir_.path(); }
 
-  base::MessageLoopProxy* GetIOMessageLoopProxy() {
-    return io_thread_.message_loop_proxy().get();
+  base::SingleThreadTaskRunner* GetIOMessageLoopProxy() {
+    return io_thread_.task_runner().get();
   }
   void Run() { loop_.Run(); }
 

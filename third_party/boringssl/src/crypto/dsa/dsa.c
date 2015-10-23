@@ -82,7 +82,7 @@ DSA *DSA_new(void) { return DSA_new_method(NULL); }
 DSA *DSA_new_method(const ENGINE *engine) {
   DSA *dsa = (DSA *)OPENSSL_malloc(sizeof(DSA));
   if (dsa == NULL) {
-    OPENSSL_PUT_ERROR(DSA, DSA_new_method, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(DSA, ERR_R_MALLOC_FAILURE);
     return NULL;
   }
 
@@ -123,7 +123,7 @@ void DSA_free(DSA *dsa) {
     return;
   }
 
-  if (CRYPTO_add(&dsa->references, -1, CRYPTO_LOCK_DSA) > 0) {
+  if (!CRYPTO_refcount_dec_and_test_zero(&dsa->references)) {
     return;
   }
 
@@ -146,7 +146,7 @@ void DSA_free(DSA *dsa) {
 }
 
 int DSA_up_ref(DSA *dsa) {
-  CRYPTO_add(&dsa->references, 1, CRYPTO_LOCK_DSA);
+  CRYPTO_refcount_inc(&dsa->references);
   return 1;
 }
 

@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 MockModelTypeSyncWorker::MockModelTypeSyncWorker() {
 }
@@ -35,11 +35,9 @@ bool MockModelTypeSyncWorker::HasCommitRequestForTagHash(
   // recent one that applies to the specified tag_hash.
   for (std::vector<CommitRequestDataList>::const_reverse_iterator lists_it =
            commit_request_lists_.rbegin();
-       lists_it != commit_request_lists_.rend();
-       ++lists_it) {
+       lists_it != commit_request_lists_.rend(); ++lists_it) {
     for (CommitRequestDataList::const_iterator it = lists_it->begin();
-         it != lists_it->end();
-         ++it) {
+         it != lists_it->end(); ++it) {
       if (it->client_tag_hash == tag_hash) {
         return true;
       }
@@ -55,11 +53,9 @@ CommitRequestData MockModelTypeSyncWorker::GetLatestCommitRequestForTagHash(
   // recent one that applies to the specified tag_hash.
   for (std::vector<CommitRequestDataList>::const_reverse_iterator lists_it =
            commit_request_lists_.rbegin();
-       lists_it != commit_request_lists_.rend();
-       ++lists_it) {
+       lists_it != commit_request_lists_.rend(); ++lists_it) {
     for (CommitRequestDataList::const_iterator it = lists_it->begin();
-         it != lists_it->end();
-         ++it) {
+         it != lists_it->end(); ++it) {
       if (it->client_tag_hash == tag_hash) {
         return *it;
       }

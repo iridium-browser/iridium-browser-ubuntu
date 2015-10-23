@@ -6,6 +6,7 @@
 #define CONTENT_TEST_WEB_LAYER_TREE_VIEW_IMPL_FOR_TESTING_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "third_party/WebKit/public/platform/WebLayerTreeView.h"
@@ -49,10 +50,10 @@ class WebLayerTreeViewImplForTesting
                                        float new_page_scale,
                                        double duration_sec);
   virtual void setNeedsAnimate();
-  virtual bool commitRequested() const;
   virtual void didStopFlinging();
   virtual void finishAllRendering();
   virtual void setDeferCommits(bool defer_commits);
+  virtual void registerForAnimations(blink::WebLayer* layer);
   virtual void registerViewportLayers(
       const blink::WebLayer* overscrollElasticityLayer,
       const blink::WebLayer* pageScaleLayerLayer,
@@ -73,9 +74,6 @@ class WebLayerTreeViewImplForTesting
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override;
-  void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
-                           float page_scale,
-                           float top_controls_delta) override;
   void RequestNewOutputSurface() override;
   void DidInitializeOutputSurface() override {}
   void DidFailToInitializeOutputSurface() override;
@@ -84,12 +82,17 @@ class WebLayerTreeViewImplForTesting
   void DidCommitAndDrawFrame() override {}
   void DidCompleteSwapBuffers() override {}
   void DidCompletePageScaleAnimation() override {}
+  void RecordFrameTimingEvents(
+      scoped_ptr<cc::FrameTimingTracker::CompositeTimingSet> composite_events,
+      scoped_ptr<cc::FrameTimingTracker::MainFrameTimingSet> main_frame_events)
+      override {}
 
   // cc::LayerTreeHostSingleThreadClient implementation.
   void DidPostSwapBuffers() override {}
   void DidAbortSwapBuffers() override {}
 
  private:
+  cc::TestTaskGraphRunner task_graph_runner_;
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;
 
   DISALLOW_COPY_AND_ASSIGN(WebLayerTreeViewImplForTesting);

@@ -31,6 +31,7 @@
 #ifndef InspectorInputAgent_h
 #define InspectorInputAgent_h
 
+#include "core/CoreExport.h"
 #include "core/InspectorFrontend.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "wtf/Noncopyable.h"
@@ -44,7 +45,7 @@ class PlatformMouseEvent;
 
 typedef String ErrorString;
 
-class InspectorInputAgent final : public InspectorBaseAgent<InspectorInputAgent, InspectorFrontend::Input>, public InspectorBackendDispatcher::InputCommandHandler {
+class CORE_EXPORT InspectorInputAgent final : public InspectorBaseAgent<InspectorInputAgent, InspectorFrontend::Input>, public InspectorBackendDispatcher::InputCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorInputAgent);
 public:
     static PassOwnPtrWillBeRawPtr<InspectorInputAgent> create(InspectorPageAgent* pageAgent)
@@ -52,11 +53,11 @@ public:
         return adoptPtrWillBeNoop(new InspectorInputAgent(pageAgent));
     }
 
-    virtual ~InspectorInputAgent();
+    ~InspectorInputAgent() override;
     DECLARE_VIRTUAL_TRACE();
 
     // Methods called from the frontend for simulating input.
-    virtual void dispatchTouchEvent(ErrorString*, const String& type, const RefPtr<JSONArray>& touchPoints, const int* modifiers, const double* timestamp) override;
+    void dispatchTouchEvent(ErrorString*, const String& type, const RefPtr<JSONArray>& touchPoints, const int* modifiers, const double* timestamp) override;
 private:
     explicit InspectorInputAgent(InspectorPageAgent*);
 

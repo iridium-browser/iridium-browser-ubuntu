@@ -90,7 +90,8 @@ base::string16 GetOption(int string_id,
                          bool secure) {
   base::string16 prompt_format = cloud_print::LoadLocalString(string_id);
   std::vector<base::string16> substitutions(1, default_option);
-  std::cout << ReplaceStringPlaceholders(prompt_format, substitutions, NULL);
+  std::cout <<
+      base::ReplaceStringPlaceholders(prompt_format, substitutions, NULL);
   base::string16 tmp;
   if (secure) {
     DWORD saved_mode = 0;
@@ -128,6 +129,8 @@ base::string16 StateAsString(ServiceController::State state) {
   case ServiceController::STATE_RUNNING:
     string_id = IDS_SERVICE_RUNNING;
     break;
+  case ServiceController::STATE_UNKNOWN:
+    break;
   }
   return string_id ? cloud_print::LoadLocalString(string_id) : base::string16();
 }
@@ -147,7 +150,7 @@ class CloudPrintServiceModule
         controller_(new ServiceController()) {
   }
 
-  static wchar_t* GetAppIdT() {
+  static const wchar_t* GetAppIdT() {
     return ServiceController::GetAppIdT();
   };
 

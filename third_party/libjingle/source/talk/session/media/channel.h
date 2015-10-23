@@ -76,8 +76,7 @@ class BaseChannel
       public MediaChannel::NetworkInterface,
       public ConnectionStatsGetter {
  public:
-  BaseChannel(rtc::Thread* thread, MediaEngineInterface* media_engine,
-              MediaChannel* channel, BaseSession* session,
+  BaseChannel(rtc::Thread* thread, MediaChannel* channel, BaseSession* session,
               const std::string& content_name, bool rtcp);
   virtual ~BaseChannel();
   bool Init();
@@ -108,6 +107,11 @@ class BaseChannel
   bool writable() const { return writable_; }
   bool IsStreamMuted(uint32 ssrc);
 
+  // Activate RTCP mux, regardless of the state so far.  Once
+  // activated, it can not be deactivated, and if the remote
+  // description doesn't support RTCP mux, setting the remote
+  // description will fail.
+  void ActivateRtcpMux();
   bool PushdownLocalDescription(const SessionDescription* local_desc,
                                 ContentAction action,
                                 std::string* error_desc);
@@ -143,72 +147,6 @@ class BaseChannel
     srtp_filter_.set_signal_silent_time(silent_time);
   }
 
-  template <class T>
-  void RegisterSendSink(T* sink,
-                        void (T::*OnPacket)(const void*, size_t, bool),
-                        SinkType type) {
-    rtc::CritScope cs(&signal_send_packet_cs_);
-    if (SINK_POST_CRYPTO == type) {
-      SignalSendPacketPostCrypto.disconnect(sink);
-      SignalSendPacketPostCrypto.connect(sink, OnPacket);
-    } else {
-      SignalSendPacketPreCrypto.disconnect(sink);
-      SignalSendPacketPreCrypto.connect(sink, OnPacket);
-    }
-  }
-
-  void UnregisterSendSink(sigslot::has_slots<>* sink,
-                          SinkType type) {
-    rtc::CritScope cs(&signal_send_packet_cs_);
-    if (SINK_POST_CRYPTO == type) {
-      SignalSendPacketPostCrypto.disconnect(sink);
-    } else {
-      SignalSendPacketPreCrypto.disconnect(sink);
-    }
-  }
-
-  bool HasSendSinks(SinkType type) {
-    rtc::CritScope cs(&signal_send_packet_cs_);
-    if (SINK_POST_CRYPTO == type) {
-      return !SignalSendPacketPostCrypto.is_empty();
-    } else {
-      return !SignalSendPacketPreCrypto.is_empty();
-    }
-  }
-
-  template <class T>
-  void RegisterRecvSink(T* sink,
-                        void (T::*OnPacket)(const void*, size_t, bool),
-                        SinkType type) {
-    rtc::CritScope cs(&signal_recv_packet_cs_);
-    if (SINK_POST_CRYPTO == type) {
-      SignalRecvPacketPostCrypto.disconnect(sink);
-      SignalRecvPacketPostCrypto.connect(sink, OnPacket);
-    } else {
-      SignalRecvPacketPreCrypto.disconnect(sink);
-      SignalRecvPacketPreCrypto.connect(sink, OnPacket);
-    }
-  }
-
-  void UnregisterRecvSink(sigslot::has_slots<>* sink,
-                          SinkType type) {
-    rtc::CritScope cs(&signal_recv_packet_cs_);
-    if (SINK_POST_CRYPTO == type) {
-      SignalRecvPacketPostCrypto.disconnect(sink);
-    } else {
-      SignalRecvPacketPreCrypto.disconnect(sink);
-    }
-  }
-
-  bool HasRecvSinks(SinkType type) {
-    rtc::CritScope cs(&signal_recv_packet_cs_);
-    if (SINK_POST_CRYPTO == type) {
-      return !SignalRecvPacketPostCrypto.is_empty();
-    } else {
-      return !SignalRecvPacketPreCrypto.is_empty();
-    }
-  }
-
   BundleFilter* bundle_filter() { return &bundle_filter_; }
 
   const std::vector<StreamParams>& local_streams() const {
@@ -235,7 +173,6 @@ class BaseChannel
   virtual int SetOption(SocketType type, rtc::Socket::Option o, int val);
 
  protected:
-  MediaEngineInterface* media_engine() const { return media_engine_; }
   virtual MediaChannel* media_channel() const { return media_channel_; }
   // Sets the transport_channel_ and rtcp_transport_channel_.  If
   // |rtcp| is false, set rtcp_transport_channel_ is set to NULL.  Get
@@ -251,6 +188,9 @@ class BaseChannel
   }
   void set_remote_content_direction(MediaContentDirection direction) {
     remote_content_direction_ = direction;
+  }
+  void set_secure_required(bool secure_required) {
+    secure_required_ = secure_required;
   }
   bool IsReadyToReceive() const;
   bool IsReadyToSend() const;
@@ -318,30 +258,21 @@ class BaseChannel
   bool UpdateRemoteStreams_w(const std::vector<StreamParams>& streams,
                              ContentAction action,
                              std::string* error_desc);
-  bool SetBaseLocalContent_w(const MediaContentDescription* content,
-                             ContentAction action,
-                             std::string* error_desc);
   virtual bool SetLocalContent_w(const MediaContentDescription* content,
                                  ContentAction action,
                                  std::string* error_desc) = 0;
-  bool SetBaseRemoteContent_w(const MediaContentDescription* content,
-                              ContentAction action,
-                              std::string* error_desc);
   virtual bool SetRemoteContent_w(const MediaContentDescription* content,
                                   ContentAction action,
                                   std::string* error_desc) = 0;
+  bool SetRtpTransportParameters_w(const MediaContentDescription* content,
+                                   ContentAction action,
+                                   ContentSource src,
+                                   std::string* error_desc);
 
   // Helper method to get RTP Absoulute SendTime extension header id if
   // present in remote supported extensions list.
   void MaybeCacheRtpAbsSendTimeHeaderExtension(
     const std::vector<RtpHeaderExtension>& extensions);
-
-  bool SetRecvRtpHeaderExtensions_w(const MediaContentDescription* content,
-                                    MediaChannel* media_channel,
-                                    std::string* error_desc);
-  bool SetSendRtpHeaderExtensions_w(const MediaContentDescription* content,
-                                    MediaChannel* media_channel,
-                                    std::string* error_desc);
 
   bool CheckSrtpConfig(const std::vector<CryptoParams>& cryptos,
                        bool* dtls,
@@ -350,6 +281,7 @@ class BaseChannel
                  ContentAction action,
                  ContentSource src,
                  std::string* error_desc);
+  void ActivateRtcpMux_w();
   bool SetRtcpMux_w(bool enable,
                     ContentAction action,
                     ContentSource src,
@@ -371,15 +303,7 @@ class BaseChannel
   }
 
  private:
-  sigslot::signal3<const void*, size_t, bool> SignalSendPacketPreCrypto;
-  sigslot::signal3<const void*, size_t, bool> SignalSendPacketPostCrypto;
-  sigslot::signal3<const void*, size_t, bool> SignalRecvPacketPreCrypto;
-  sigslot::signal3<const void*, size_t, bool> SignalRecvPacketPostCrypto;
-  rtc::CriticalSection signal_send_packet_cs_;
-  rtc::CriticalSection signal_recv_packet_cs_;
-
   rtc::Thread* worker_thread_;
-  MediaEngineInterface* media_engine_;
   BaseSession* session_;
   MediaChannel* media_channel_;
   std::vector<StreamParams> local_streams_;
@@ -511,18 +435,26 @@ class VoiceChannel : public BaseChannel {
   void OnSrtpError(uint32 ssrc, SrtpFilter::Mode mode, SrtpFilter::Error error);
 
   static const int kEarlyMediaTimeout = 1000;
+  MediaEngineInterface* media_engine_;
   bool received_media_;
   rtc::scoped_ptr<VoiceMediaMonitor> media_monitor_;
   rtc::scoped_ptr<AudioMonitor> audio_monitor_;
   rtc::scoped_ptr<TypingMonitor> typing_monitor_;
+
+  // Last AudioSendParameters sent down to the media_channel() via
+  // SetSendParameters.
+  AudioSendParameters last_send_params_;
+  // Last AudioRecvParameters sent down to the media_channel() via
+  // SetRecvParameters.
+  AudioRecvParameters last_recv_params_;
 };
 
 // VideoChannel is a specialization for video.
 class VideoChannel : public BaseChannel {
  public:
-  VideoChannel(rtc::Thread* thread, MediaEngineInterface* media_engine,
-               VideoMediaChannel* channel, BaseSession* session,
-               const std::string& content_name, bool rtcp);
+  VideoChannel(rtc::Thread* thread, VideoMediaChannel* channel,
+               BaseSession* session, const std::string& content_name,
+               bool rtcp);
   ~VideoChannel();
   bool Init();
 
@@ -605,6 +537,13 @@ class VideoChannel : public BaseChannel {
   rtc::scoped_ptr<VideoMediaMonitor> media_monitor_;
 
   rtc::WindowEvent previous_we_;
+
+  // Last VideoSendParameters sent down to the media_channel() via
+  // SetSendParameters.
+  VideoSendParameters last_send_params_;
+  // Last VideoRecvParameters sent down to the media_channel() via
+  // SetRecvParameters.
+  VideoRecvParameters last_recv_params_;
 };
 
 // DataChannel is a specialization for data.
@@ -723,6 +662,13 @@ class DataChannel : public BaseChannel {
   // RtpDataChannel instead of using this.
   DataChannelType data_channel_type_;
   bool ready_to_send_data_;
+
+  // Last DataSendParameters sent down to the media_channel() via
+  // SetSendParameters.
+  DataSendParameters last_send_params_;
+  // Last DataRecvParameters sent down to the media_channel() via
+  // SetRecvParameters.
+  DataRecvParameters last_recv_params_;
 };
 
 }  // namespace cricket

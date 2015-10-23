@@ -46,6 +46,8 @@ class WebNode;
 class WebString;
 class WebWidget;
 struct WebCursorInfo;
+struct WebFloatPoint;
+struct WebFloatSize;
 struct WebSize;
 
 class WebWidgetClient {
@@ -78,26 +80,6 @@ public:
     // to schedule a new frame. This call indicates to the embedder that it
     // should suppress compositor scheduling temporarily.
     virtual void suppressCompositorScheduling(bool enable) { }
-
-    // Indicates to the embedder that the compositor is about to begin a
-    // frame. This is primarily to signal to flow control mechanisms that a
-    // frame is beginning, not to perform actual painting work.
-    virtual void willBeginCompositorFrame() { }
-
-    // Indicates to the embedder that the WebWidget is ready for additional
-    // input.
-    virtual void didBecomeReadyForAdditionalInput() { }
-
-    // Called for compositing mode when a frame commit operation has finished.
-    virtual void didCommitCompositorFrame() { }
-
-    // Called for compositing mode when the draw commands for a WebKit-side
-    // frame have been issued.
-    virtual void didCommitAndDrawCompositorFrame() { }
-
-    // Called for compositing mode when swapbuffers has been posted in the GPU
-    // process.
-    virtual void didCompleteSwapBuffers() { }
 
     // Called when a call to WebWidget::animate is required
     virtual void scheduleAnimation() { }
@@ -159,6 +141,9 @@ public:
     // Called when a gesture event is handled.
     virtual void didHandleGestureEvent(const WebGestureEvent& event, bool eventCancelled) { }
 
+    // Called when overscrolled on main thread.
+    virtual void didOverscroll(const WebFloatSize& unusedDelta, const WebFloatSize& accumulatedRootOverScroll, const WebFloatPoint& position, const WebFloatSize& velocity) { }
+
     // Called to update if touch events should be sent.
     virtual void hasTouchEventHandlers(bool) { }
 
@@ -187,6 +172,11 @@ public:
     // something as a result of a tap without explicitly consuming the event.
     virtual void showUnhandledTapUIIfNeeded(const WebPoint& tappedPosition,
         const WebNode& tappedNode, bool pageChanged) { }
+
+    // Called immediately after a mousedown event is dispatched due to a mouse
+    // press or gesture tap.
+    // Note: This is called even when the mouse down event is prevent default.
+    virtual void onMouseDown(const WebNode& mouseDownNode) { }
 protected:
     ~WebWidgetClient() { }
 };

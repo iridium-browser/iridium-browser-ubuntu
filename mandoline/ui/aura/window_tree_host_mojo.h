@@ -23,10 +23,10 @@ class Shell;
 
 namespace mandoline {
 
+class InputMethodMandoline;
 class SurfaceContextFactory;
 
 class WindowTreeHostMojo : public aura::WindowTreeHost,
-                           public ui::EventSource,
                            public mojo::ViewObserver {
  public:
   WindowTreeHostMojo(mojo::Shell* shell, mojo::View* view);
@@ -42,8 +42,8 @@ class WindowTreeHostMojo : public aura::WindowTreeHost,
   // WindowTreeHost:
   ui::EventSource* GetEventSource() override;
   gfx::AcceleratedWidget GetAcceleratedWidget() override;
-  void Show() override;
-  void Hide() override;
+  void ShowImpl() override;
+  void HideImpl() override;
   gfx::Rect GetBounds() const override;
   void SetBounds(const gfx::Rect& bounds) override;
   gfx::Point GetLocationOnNativeScreen() const override;
@@ -53,9 +53,6 @@ class WindowTreeHostMojo : public aura::WindowTreeHost,
   void MoveCursorToNative(const gfx::Point& location) override;
   void OnCursorVisibilityChangedNative(bool show) override;
 
-  // ui::EventSource:
-  ui::EventProcessor* GetEventProcessor() override;
-
   // mojo::ViewObserver:
   void OnViewBoundsChanged(mojo::View* view,
                            const mojo::Rect& old_bounds,
@@ -64,6 +61,8 @@ class WindowTreeHostMojo : public aura::WindowTreeHost,
   mojo::View* view_;
 
   gfx::Rect bounds_;
+
+  scoped_ptr<InputMethodMandoline> input_method_;
 
   scoped_ptr<SurfaceContextFactory> context_factory_;
 

@@ -230,6 +230,7 @@ class SafeBrowsingBlockingPageTest : public ChromeRenderViewHostTestHarness {
         web_contents()->GetRenderProcessHost()->GetID();
     resource->render_view_id =
         web_contents()->GetRenderViewHost()->GetRoutingID();
+    resource->threat_source = SafeBrowsingUIManager::FROM_DEVICE;
   }
 
   UserResponse user_response_;
@@ -548,7 +549,7 @@ TEST_F(SafeBrowsingBlockingPageTest, NavigatingBackAndForth) {
 
   // Proceed, then navigate back.
   ProceedThroughInterstitial(sb_interstitial);
-  Navigate(kBadURL, 2, pending_id, true);  // Commit the navigation.
+  NavigateCrossSite(kBadURL, 2, pending_id, true);  // Commit the navigation.
   GoBack(true);
 
   // We are back on the good page.

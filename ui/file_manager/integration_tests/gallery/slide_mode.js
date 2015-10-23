@@ -13,7 +13,7 @@
  * @return {Promise} Promise to be fulfilled with on success.
  */
 function traverseSlideImages(testVolumeName, volumeType) {
-  var testEntries = [ENTRIES.desktop, ENTRIES.image2, ENTRIES.image3];
+  var testEntries = [ENTRIES.desktop, ENTRIES.image3];
   var launchedPromise = launch(
       testVolumeName, volumeType, testEntries, testEntries.slice(0, 1));
   var appId;
@@ -22,10 +22,6 @@ function traverseSlideImages(testVolumeName, volumeType) {
     return gallery.waitForElement(appId, '.gallery[mode="slide"]');
   }).then(function() {
     return gallery.waitForSlideImage(appId, 800, 600, 'My Desktop Background');
-  }).then(function() {
-    return gallery.waitAndClickElement(appId, '.arrow.right');
-  }).then(function() {
-    return gallery.waitForSlideImage(appId, 1024, 768, 'image2');
   }).then(function() {
     return gallery.waitAndClickElement(appId, '.arrow.right');
   }).then(function() {
@@ -53,16 +49,9 @@ function renameImage(testVolumeName, volumeType) {
     appId = args.appId;
     return gallery.waitForSlideImage(appId, 800, 600, 'My Desktop Background');
   }).then(function() {
-     return gallery.changeNameAndWait(appId, 'New Image Name');
+    return gallery.changeNameAndWait(appId, 'New Image Name');
   }).then(function() {
-     return repeatUntil(function() {
-      return gallery.getFilesUnderVolume(volumeType, ['New Image Name.png'])
-      .then(function(urls) {
-        if (urls.length == 1)
-          return true;
-        return pending('"New Image Name.png" is not found.');
-      });
-    });
+    return gallery.waitForAFile(volumeType, 'New Image Name.png');
   });
 }
 
@@ -82,7 +71,7 @@ function deleteImage(testVolumeName, volumeType) {
     appId = args.appId;
     return gallery.waitForSlideImage(appId, 800, 600, 'My Desktop Background');
   }).then(function() {
-    return gallery.waitAndClickElement(appId, 'button.delete');
+    return gallery.waitAndClickElement(appId, 'paper-button.delete');
   }).then(function() {
     return gallery.waitAndClickElement(appId, '.cr-dialog-ok');
   }).then(function() {

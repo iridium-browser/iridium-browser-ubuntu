@@ -34,13 +34,16 @@
 #include "core/MediaFeatureNames.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValue.h"
+#include "wtf/Allocator.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
-class CSSParserValueList;
+
+class CSSParserToken;
 
 struct MediaQueryExpValue {
+    DISALLOW_ALLOCATION();
     CSSValueID id;
     double value;
     CSSPrimitiveValue::UnitType unit;
@@ -54,7 +57,7 @@ struct MediaQueryExpValue {
     MediaQueryExpValue()
         : id(CSSValueInvalid)
         , value(0)
-        , unit(CSSPrimitiveValue::CSS_UNKNOWN)
+        , unit(CSSPrimitiveValue::UnitType::Unknown)
         , numerator(0)
         , denominator(1)
         , isID(false)
@@ -80,7 +83,7 @@ struct MediaQueryExpValue {
 class CORE_EXPORT MediaQueryExp  : public NoBaseWillBeGarbageCollectedFinalized<MediaQueryExp> {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(MediaQueryExp);
 public:
-    static PassOwnPtrWillBeRawPtr<MediaQueryExp> createIfValid(const String& mediaFeature, CSSParserValueList*);
+    static PassOwnPtrWillBeRawPtr<MediaQueryExp> createIfValid(const String& mediaFeature, const Vector<CSSParserToken, 4>&);
     ~MediaQueryExp();
 
     const String& mediaFeature() const { return m_mediaFeature; }

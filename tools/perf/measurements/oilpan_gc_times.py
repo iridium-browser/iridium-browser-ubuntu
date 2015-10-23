@@ -4,11 +4,11 @@
 
 import os
 
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.page import action_runner
 from telemetry.page import page_test
 from telemetry.timeline.model import TimelineModel
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
 
@@ -155,9 +155,9 @@ class _OilpanGCTimesBase(page_test.PageTest):
       if thread.name == _CR_RENDERER_MAIN:
         _AddTracingResults(thread, results)
 
-  def CleanUpAfterPage(self, page, tab):
-    if tab.browser.platform.tracing_controller.is_tracing_running:
-      tab.browser.platform.tracing_controller.Stop()
+  def DidRunPage(self, platform):
+    if platform.tracing_controller.is_tracing_running:
+      platform.tracing_controller.Stop()
 
 
 class OilpanGCTimesForSmoothness(_OilpanGCTimesBase):

@@ -34,6 +34,8 @@ void GLImageSurfaceTexture::Destroy(bool have_context) {
 
 gfx::Size GLImageSurfaceTexture::GetSize() { return size_; }
 
+unsigned GLImageSurfaceTexture::GetInternalFormat() { return GL_RGBA; }
+
 bool GLImageSurfaceTexture::BindTexImage(unsigned target) {
   TRACE_EVENT0("gpu", "GLImageSurfaceTexture::BindTexImage");
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -76,7 +78,9 @@ bool GLImageSurfaceTexture::BindTexImage(unsigned target) {
   return true;
 }
 
-bool GLImageSurfaceTexture::CopyTexImage(unsigned target) {
+bool GLImageSurfaceTexture::CopyTexSubImage(unsigned target,
+                                            const Point& offset,
+                                            const Rect& rect) {
   return false;
 }
 
@@ -86,6 +90,13 @@ bool GLImageSurfaceTexture::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                                                  const Rect& bounds_rect,
                                                  const RectF& crop_rect) {
   return false;
+}
+
+void GLImageSurfaceTexture::OnMemoryDump(
+    base::trace_event::ProcessMemoryDump* pmd,
+    uint64_t process_tracing_id,
+    const std::string& dump_name) {
+  // TODO(ericrk): Add OnMemoryDump for GLImages. crbug.com/514914
 }
 
 }  // namespace gfx

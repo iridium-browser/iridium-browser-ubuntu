@@ -16,9 +16,12 @@
 
 namespace content {
 
+class FrameNavigationEntry;
 class FrameTreeNode;
 class NavigationControllerImpl;
+class NavigationHandleImpl;
 class NavigationURLLoader;
+class NavigatorDelegate;
 class ResourceRequestBody;
 class SiteInstanceImpl;
 struct NavigationRequestInfo;
@@ -53,15 +56,15 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
     FAILED,
   };
 
-  // Helper function to determine if the navigation request to |url| should be
-  // sent to the network stack.
-  static bool ShouldMakeNetworkRequest(const GURL& url);
-
   // Creates a request for a browser-intiated navigation.
   static scoped_ptr<NavigationRequest> CreateBrowserInitiated(
       FrameTreeNode* frame_tree_node,
+      const GURL& dest_url,
+      const Referrer& dest_referrer,
+      const FrameNavigationEntry& frame_entry,
       const NavigationEntryImpl& entry,
       FrameMsg_Navigate_Type::Value navigation_type,
+      bool is_same_document_history_load,
       base::TimeTicks navigation_start,
       NavigationControllerImpl* controller);
 
@@ -119,6 +122,22 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
     state_ = WAITING_FOR_RENDERER_RESPONSE;
   }
 
+  NavigationHandleImpl* navigation_handle() const {
+    return navigation_handle_.get();
+  }
+
+  // Creates a NavigationHandle. This should be called after any previous
+  // NavigationRequest for the FrameTreeNode has been destroyed.
+  void CreateNavigationHandle(NavigatorDelegate* delegate);
+
+  // Transfers the ownership of the NavigationHandle to |render_frame_host|.
+  // This should be called when the navigation is ready to commit, because the
+  // NavigationHandle outlives the NavigationRequest. The NavigationHandle's
+  // lifetime is the entire navigation, while the NavigationRequest is
+  // destroyed when a navigation is ready for commit.
+  void TransferNavigationHandleOwnership(
+      RenderFrameHostImpl* render_frame_host);
+
  private:
   NavigationRequest(FrameTreeNode* frame_tree_node,
                     const CommonNavigationParams& common_params,
@@ -126,6 +145,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
                     const RequestNavigationParams& request_params,
                     scoped_refptr<ResourceRequestBody> body,
                     bool browser_initiated,
+                    const FrameNavigationEntry* frame_navigation_entry,
                     const NavigationEntryImpl* navitation_entry);
 
   // NavigationURLLoaderDelegate implementation.
@@ -166,6 +186,8 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   NavigationEntryImpl::RestoreType restore_type_;
   bool is_view_source_;
   int bindings_;
+
+  scoped_ptr<NavigationHandleImpl> navigation_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationRequest);
 };

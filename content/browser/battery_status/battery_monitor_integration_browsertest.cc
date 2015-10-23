@@ -88,7 +88,7 @@ class FakeBatteryMonitor : public device::BatteryMonitor {
 // declared above.
 class TestContentBrowserClient : public ContentBrowserClient {
  public:
-  void OverrideRenderProcessMojoServices(ServiceRegistry* registry) override {
+  void RegisterRenderProcessMojoServices(ServiceRegistry* registry) override {
     registry->AddService(base::Bind(&FakeBatteryMonitor::Create));
   }
 
@@ -96,9 +96,10 @@ class TestContentBrowserClient : public ContentBrowserClient {
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      FileDescriptorInfo* mappings) override {
+      FileDescriptorInfo* mappings,
+      std::map<int, base::MemoryMappedFile::Region>* regions) override {
     ShellContentBrowserClient::Get()->GetAdditionalMappedFilesForChildProcess(
-        command_line, child_process_id, mappings);
+        command_line, child_process_id, mappings, regions);
   }
 #endif  // defined(OS_ANDROID)
 };

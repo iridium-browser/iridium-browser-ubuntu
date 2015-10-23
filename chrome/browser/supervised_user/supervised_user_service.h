@@ -12,6 +12,7 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
@@ -30,10 +31,10 @@
 #endif
 
 class Browser;
+class FileDownloader;
 class GoogleServiceAuthError;
 class PermissionRequestCreator;
 class Profile;
-class SupervisedUserBlacklistDownloader;
 class SupervisedUserRegistrationUtility;
 class SupervisedUserServiceObserver;
 class SupervisedUserSettingsService;
@@ -344,14 +345,14 @@ class SupervisedUserService : public KeyedService,
   bool did_shutdown_;
 
   URLFilterContext url_filter_context_;
-  scoped_ptr<SupervisedUserBlacklistDownloader> blacklist_downloader_;
+  scoped_ptr<FileDownloader> blacklist_downloader_;
 
   scoped_ptr<SupervisedUserWhitelistService> whitelist_service_;
 
   // Used to create permission requests.
   ScopedVector<PermissionRequestCreator> permissions_creators_;
 
-  ObserverList<SupervisedUserServiceObserver> observer_list_;
+  base::ObserverList<SupervisedUserServiceObserver> observer_list_;
 
   base::WeakPtrFactory<SupervisedUserService> weak_ptr_factory_;
 };

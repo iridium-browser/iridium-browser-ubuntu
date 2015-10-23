@@ -45,9 +45,9 @@ class UsbConnectionFunction : public UIThreadExtensionFunction {
   ~UsbConnectionFunction() override;
 
   scoped_refptr<device::UsbDeviceHandle> GetDeviceHandle(
-      const extensions::core_api::usb::ConnectionHandle& handle);
+      const extensions::api::usb::ConnectionHandle& handle);
   void ReleaseDeviceHandle(
-      const extensions::core_api::usb::ConnectionHandle& handle);
+      const extensions::api::usb::ConnectionHandle& handle);
 };
 
 class UsbTransferFunction : public UsbConnectionFunction {
@@ -74,14 +74,11 @@ class UsbFindDevicesFunction : public UIThreadExtensionFunction {
 
   void OnGetDevicesComplete(
       const std::vector<scoped_refptr<device::UsbDevice>>& devices);
-  void OnRequestAccessComplete(scoped_refptr<device::UsbDevice> device,
-                               bool success);
   void OnDeviceOpened(scoped_refptr<device::UsbDeviceHandle> device_handle);
   void OpenComplete();
 
   uint16_t vendor_id_;
   uint16_t product_id_;
-  int interface_id_;
   scoped_ptr<base::ListValue> result_;
   base::Closure barrier_;
 
@@ -156,8 +153,6 @@ class UsbOpenDeviceFunction : public UsbPermissionCheckingFunction {
   // ExtensionFunction:
   ResponseAction Run() override;
 
-  void OnRequestAccessComplete(scoped_refptr<device::UsbDevice> device,
-                               bool success);
   void OnDeviceOpened(scoped_refptr<device::UsbDeviceHandle> device_handle);
 
   DISALLOW_COPY_AND_ASSIGN(UsbOpenDeviceFunction);
@@ -349,7 +344,7 @@ class UsbResetDeviceFunction : public UsbConnectionFunction {
 
   void OnComplete(bool success);
 
-  scoped_ptr<extensions::core_api::usb::ResetDevice::Params> parameters_;
+  scoped_ptr<extensions::api::usb::ResetDevice::Params> parameters_;
 
   DISALLOW_COPY_AND_ASSIGN(UsbResetDeviceFunction);
 };

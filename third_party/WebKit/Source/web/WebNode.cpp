@@ -37,7 +37,7 @@
 #include "core/dom/Node.h"
 #include "core/dom/NodeList.h"
 #include "core/dom/TagCollection.h"
-#include "core/editing/markup.h"
+#include "core/editing/serializers/Serialization.h"
 #include "core/events/Event.h"
 #include "core/html/HTMLCollection.h"
 #include "core/html/HTMLElement.h"
@@ -251,11 +251,6 @@ WebElement WebNode::querySelector(const WebString& tag, WebExceptionCode& ec) co
     return element;
 }
 
-WebElement WebNode::rootEditableElement() const
-{
-    return WebElement(m_private->rootEditableElement());
-}
-
 bool WebNode::focused() const
 {
     return m_private->focused();
@@ -294,15 +289,6 @@ WebPluginContainer* WebNode::pluginContainer() const
     }
     return 0;
 }
-
-WebElement WebNode::shadowHost() const
-{
-    if (isNull())
-        return WebElement();
-    const Node* coreNode = constUnwrap<Node>();
-    return WebElement(coreNode->shadowHost());
-}
-
 
 WebAXObject WebNode::accessibilityObject()
 {

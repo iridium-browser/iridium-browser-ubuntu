@@ -37,20 +37,14 @@ ProgressEvent::ProgressEvent()
 
 ProgressEvent::ProgressEvent(const AtomicString& type, const ProgressEventInit& initializer)
     : Event(type, initializer)
-    , m_lengthComputable(false)
-    , m_loaded(0)
-    , m_total(0)
+    , m_lengthComputable(initializer.lengthComputable())
+    , m_loaded(initializer.loaded())
+    , m_total(initializer.total())
 {
-    if (initializer.hasLengthComputable())
-        m_lengthComputable = initializer.lengthComputable();
-    if (initializer.hasLoaded())
-        m_loaded = initializer.loaded();
-    if (initializer.hasTotal())
-        m_total = initializer.total();
 }
 
 ProgressEvent::ProgressEvent(const AtomicString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total)
-    : Event(type, false, true)
+    : Event(type, false, false)
     , m_lengthComputable(lengthComputable)
     , m_loaded(loaded)
     , m_total(total)

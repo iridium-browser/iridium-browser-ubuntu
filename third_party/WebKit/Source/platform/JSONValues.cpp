@@ -59,7 +59,15 @@ inline bool escapeChar(UChar c, StringBuilder* dst)
     return true;
 }
 
-inline void doubleQuoteString(const String& str, StringBuilder* dst)
+void writeIndent(int depth, StringBuilder* output)
+{
+    for (int i = 0; i < depth; ++i)
+        output->appendLiteral("  ");
+}
+
+} // anonymous namespace
+
+void doubleQuoteStringForJSON(const String& str, StringBuilder* dst)
 {
     dst->append('"');
     for (unsigned i = 0; i < str.length(); ++i) {
@@ -80,13 +88,12 @@ inline void doubleQuoteString(const String& str, StringBuilder* dst)
     dst->append('"');
 }
 
-void writeIndent(int depth, StringBuilder* output)
+String JSONValue::quoteString(const String& input)
 {
-    for (int i = 0; i < depth; ++i)
-        output->appendLiteral("  ");
+    StringBuilder builder;
+    doubleQuoteStringForJSON(input, &builder);
+    return builder.toString();
 }
-
-} // anonymous namespace
 
 bool JSONValue::asBoolean(bool*) const
 {
@@ -121,12 +128,6 @@ bool JSONValue::asNumber(unsigned*) const
 bool JSONValue::asString(String*) const
 {
     return false;
-}
-
-bool JSONValue::asValue(RefPtr<JSONValue>* output)
-{
-    *output = this;
-    return true;
 }
 
 bool JSONValue::asObject(RefPtr<JSONObject>*)
@@ -256,7 +257,7 @@ bool JSONString::asString(String* output) const
 void JSONString::writeJSON(StringBuilder* output) const
 {
     ASSERT(type() == TypeString);
-    doubleQuoteString(m_stringValue, output);
+    doubleQuoteStringForJSON(m_stringValue, output);
 }
 
 JSONObjectBase::~JSONObjectBase()
@@ -386,7 +387,7 @@ void JSONObjectBase::writeJSON(StringBuilder* output) const
         ASSERT_WITH_SECURITY_IMPLICATION(it != m_data.end());
         if (i)
             output->append(',');
-        doubleQuoteString(it->key, output);
+        doubleQuoteStringForJSON(it->key, output);
         output->append(':');
         it->value->writeJSON(output);
     }
@@ -402,7 +403,7 @@ void JSONObjectBase::prettyWriteJSONInternal(StringBuilder* output, int depth) c
         if (i)
             output->appendLiteral(",\n");
         writeIndent(depth + 1, output);
-        doubleQuoteString(it->key, output);
+        doubleQuoteStringForJSON(it->key, output);
         output->appendLiteral(": ");
         it->value->prettyWriteJSONInternal(output, depth + 1);
     }

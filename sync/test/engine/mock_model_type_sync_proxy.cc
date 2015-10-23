@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 MockModelTypeSyncProxy::MockModelTypeSyncProxy() : is_synchronous_(true) {
 }
@@ -177,8 +177,7 @@ void MockModelTypeSyncProxy::OnCommitCompletedImpl(
   received_commit_responses_.push_back(response_list);
   type_states_received_on_commit_.push_back(type_state);
   for (CommitResponseDataList::const_iterator it = response_list.begin();
-       it != response_list.end();
-       ++it) {
+       it != response_list.end(); ++it) {
     commit_response_items_.insert(std::make_pair(it->client_tag_hash, *it));
 
     // Server wins.  Set the model's base version.
@@ -195,8 +194,7 @@ void MockModelTypeSyncProxy::OnUpdateReceivedImpl(
   received_pending_updates_.push_back(pending_updates);
   type_states_received_on_update_.push_back(type_state);
   for (UpdateResponseDataList::const_iterator it = response_list.begin();
-       it != response_list.end();
-       ++it) {
+       it != response_list.end(); ++it) {
     update_response_items_.insert(std::make_pair(it->client_tag_hash, *it));
 
     // Server wins.  Set the model's base version.

@@ -15,7 +15,6 @@
 #include "base/files/scoped_file.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/shared_memory.h"
 #include "base/pickle.h"
 #include "base/synchronization/condition_variable.h"
@@ -63,7 +62,7 @@ class NaClIPCAdapter : public base::RefCountedThreadSafe<NaClIPCAdapter>,
   // header is duplicated here so we have a cross-platform definition of the
   // header we're exposing to NaCl.
 #pragma pack(push, 4)
-  struct NaClMessageHeader : public Pickle::Header {
+  struct NaClMessageHeader : public base::Pickle::Header {
     int32 routing;
     uint32 type;
     uint32 flags;

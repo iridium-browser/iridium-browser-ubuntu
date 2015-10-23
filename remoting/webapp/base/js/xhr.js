@@ -100,7 +100,8 @@ remoting.Xhr.prototype.start = function() {
     var that = this;
     if (this.useIdentity_) {
       remoting.identity.getToken().then(function(token) {
-        base.debug.assert(that.nativeXhr_.readyState == 1);
+        console.assert(that.nativeXhr_.readyState == 1,
+                      'Bad |readyState|: ' + that.nativeXhr_.readyState + '.');
         that.setAuthToken_(token);
         that.sendXhr_();
       }).catch(function(error) {
@@ -197,7 +198,7 @@ remoting.Xhr.prototype.maybeSetContentType_ = function(type) {
  */
 remoting.Xhr.prototype.setHeader_ = function(key, value) {
   var wasSet = this.maybeSetHeader_(key, value);
-  base.debug.assert(wasSet);
+  console.assert(wasSet, 'setHeader(' + key + ', ' + value + ') failed.');
 };
 
 /**
@@ -316,7 +317,7 @@ remoting.Xhr.Response.prototype.getText = function() {
  * @return {*} The parsed JSON content of the response.
  */
 remoting.Xhr.Response.prototype.getJson = function() {
-  base.debug.assert(this.allowJson_);
+  console.assert(this.allowJson_, 'getJson() called with |allowJson_| false.');
   if (this.json_ === undefined) {
     this.json_ = JSON.parse(this.text_);
   }
@@ -326,7 +327,7 @@ remoting.Xhr.Response.prototype.getJson = function() {
 /**
  * Takes an associative array of parameters and urlencodes it.
  *
- * @param {Object<string,string>} paramHash The parameter key/value pairs.
+ * @param {Object<string>} paramHash The parameter key/value pairs.
  * @return {string} URLEncoded version of paramHash.
  */
 remoting.Xhr.urlencodeParamHash = function(paramHash) {
@@ -342,6 +343,71 @@ remoting.Xhr.urlencodeParamHash = function(paramHash) {
     return paramArray.join('&');
   }
   return '';
+};
+
+/**
+ * An object that will retry an XHR request upon network failures until
+ * |opt_maxRetryAttempts| is reached.
+ *
+ * According to http://www.w3.org/TR/XMLHttpRequest/#the-status-attribute, the
+ * HTTP status would be 0 when the STATE is UNSENT, which occurs when we have
+ * lost network connectivity.
+ *
+ * @param {remoting.Xhr.Params} params
+ * @param {number=} opt_maxRetryAttempts
+ * @constructor
+ */
+remoting.AutoRetryXhr = function(params, opt_maxRetryAttempts) {
+  /** @private */
+  this.xhrParams_ = params;
+  /**
+   * Retry for 60 x 250ms = 15s by default.
+   * @private
+   */
+  this.retryAttemptsRemaining_ =
+      Number.isInteger(opt_maxRetryAttempts) ? opt_maxRetryAttempts : 60;
+  /** @private */
+  this.deferred_ = new base.Deferred();
+};
+
+/**
+ * Calling this method multiple times will return the same promise and will not
+ * start a new request.
+ *
+ * @return {!Promise<!remoting.Xhr.Response>}
+ */
+remoting.AutoRetryXhr.prototype.start = function() {
+  this.doXhr_();
+  return this.deferred_.promise();
+};
+
+/** @private */
+remoting.AutoRetryXhr.prototype.onNetworkFailure_ = function() {
+  if (--this.retryAttemptsRemaining_ > 0) {
+    var timer = new base.OneShotTimer(this.doXhr_.bind(this), 250);
+  } else {
+    this.deferred_.reject(
+        new remoting.Error(remoting.Error.Tag.NETWORK_FAILURE));
+  }
+};
+
+/** @private */
+remoting.AutoRetryXhr.prototype.doXhr_ = function() {
+  if (!base.isOnline()) {
+    this.deferred_.reject(
+        new remoting.Error(remoting.Error.Tag.NETWORK_FAILURE));
+    return;
+  }
+
+  var that = this;
+  var xhr = new remoting.Xhr(this.xhrParams_);
+  return xhr.start().then(function(response){
+    if (response.status === 0) {
+      that.onNetworkFailure_();
+    } else {
+      that.deferred_.resolve(response);
+    }
+  });
 };
 
 })();
@@ -381,11 +447,11 @@ remoting.Xhr.urlencodeParamHash = function(paramHash) {
  * @typedef {{
  *   method: string,
  *   url:string,
- *   urlParams:(string|Object<string,?string>|undefined),
+ *   urlParams:(string|Object<?string>|undefined),
  *   textContent:(string|undefined),
  *   formContent:(Object|undefined),
  *   jsonContent:(*|undefined),
- *   headers:(Object<string,?string>|undefined),
+ *   headers:(Object<?string>|undefined),
  *   withCredentials:(boolean|undefined),
  *   oauthToken:(string|undefined),
  *   useIdentity:(boolean|undefined),

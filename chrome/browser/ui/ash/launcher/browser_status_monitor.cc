@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/ash/launcher/browser_status_monitor.h"
 
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/shelf/shelf_util.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
@@ -44,21 +45,25 @@ class BrowserStatusMonitor::LocalWebContentsObserver
   void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) override {
-    Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
     ChromeLauncherController::AppState state =
         ChromeLauncherController::APP_STATE_INACTIVE;
-    if (browser->window()->IsActive() &&
-        browser->tab_strip_model()->GetActiveWebContents() == web_contents())
-      state = ChromeLauncherController::APP_STATE_WINDOW_ACTIVE;
-    else if (browser->window()->IsActive())
-      state = ChromeLauncherController::APP_STATE_ACTIVE;
-
+    Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+    // Don't assume that |browser| still exists.
+    if (browser) {
+      if (browser->window()->IsActive() &&
+          browser->tab_strip_model()->GetActiveWebContents() == web_contents())
+        state = ChromeLauncherController::APP_STATE_WINDOW_ACTIVE;
+      else if (browser->window()->IsActive())
+        state = ChromeLauncherController::APP_STATE_ACTIVE;
+    }
     monitor_->UpdateAppItemState(web_contents(), state);
     monitor_->UpdateBrowserItemState();
 
     // Navigating may change the ShelfID associated with the WebContents.
-    if (browser->tab_strip_model()->GetActiveWebContents() == web_contents())
+    if (browser &&
+        browser->tab_strip_model()->GetActiveWebContents() == web_contents()) {
       monitor_->SetShelfIDForBrowserWindowContents(browser, web_contents());
+    }
   }
 
   void WebContentsDestroyed() override {
@@ -164,8 +169,10 @@ void BrowserStatusMonitor::UpdateBrowserItemState() {
       UpdateBrowserItemState();
 }
 
-void BrowserStatusMonitor::OnWindowActivated(aura::Window* gained_active,
-                                             aura::Window* lost_active) {
+void BrowserStatusMonitor::OnWindowActivated(
+    aura::client::ActivationChangeObserver::ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
   Browser* browser = NULL;
   content::WebContents* contents_from_gained = NULL;
   content::WebContents* contents_from_lost = NULL;
@@ -232,8 +239,9 @@ void BrowserStatusMonitor::OnBrowserRemoved(Browser* browser) {
 
 void BrowserStatusMonitor::OnDisplayAdded(const gfx::Display& new_display) {
   // Add a new RootWindow and its ActivationClient to observed list.
-  aura::Window* root_window = ash::Shell::GetInstance()->
-      display_controller()->GetRootWindowForDisplayId(new_display.id());
+  aura::Window* root_window = ash::Shell::GetInstance()
+                                  ->window_tree_host_manager()
+                                  ->GetRootWindowForDisplayId(new_display.id());
   // When the primary root window's display get removed, the existing root
   // window is taken over by the new display and the observer is already set.
   if (!observed_root_windows_.IsObserving(root_window)) {

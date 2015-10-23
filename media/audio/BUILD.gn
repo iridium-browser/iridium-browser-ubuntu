@@ -220,6 +220,7 @@ source_set("audio") {
       packages = [ "libcras" ]
     }
     configs += [ ":libcras" ]
+    deps += [ "//chromeos:chromeos" ]
   }
 
   if (use_pulseaudio) {
@@ -290,6 +291,7 @@ source_set("unittests") {
     "//media/base:test_support",
     "//testing/gmock",
     "//testing/gtest",
+    "//url",
   ]
 
   configs += [
@@ -299,6 +301,7 @@ source_set("unittests") {
 
   if (is_android) {
     sources += [ "android/audio_android_unittest.cc" ]
+    deps += [ "//ui/gl" ]
   } else {
     sources += [ "audio_input_volume_unittest.cc" ]
   }

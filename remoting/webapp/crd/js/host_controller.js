@@ -155,12 +155,7 @@ remoting.HostController.prototype.start = function(hostPin, consent) {
       return null;
     }
   });
-  var newHostId = base.generateUuid();
-  var pinHashPromise = this.hostDaemonFacade_.getPinHash(newHostId, hostPin);
   var hostOwnerPromise = this.getClientBaseJid_();
-
-  /** @type {boolean} */
-  var hostRegistered = false;
 
   // Register the host and extract an auth code from the host response
   // and, optionally an email address for the robot account.
@@ -175,15 +170,24 @@ remoting.HostController.prototype.start = function(hostPin, consent) {
     var keyPair = /** @type {remoting.KeyPair} */ (a[2]);
 
     return remoting.HostListApi.getInstance().register(
-        newHostId, hostName, keyPair.publicKey, hostClientId);
-  }).then(function(/** remoting.HostListApi.RegisterResult */ result) {
-    hostRegistered = true;
-    return result;
+        hostName, keyPair.publicKey, hostClientId);
+  });
+
+  // For convenience, make the host ID available as a separate promise.
+  /** @type {!Promise<string>} */
+  var hostIdPromise = registerResultPromise.then(function(registerResult) {
+    return registerResult.hostId;
+  });
+
+  // Get the PIN hash based on the host ID.
+  /** @type {!Promise<string>} */
+  var pinHashPromise = hostIdPromise.then(function(hostId) {
+    return that.hostDaemonFacade_.getPinHash(hostId, hostPin);
   });
 
   // Get XMPP creditials.
   var xmppCredsPromise = registerResultPromise.then(function(registerResult) {
-    base.debug.assert(registerResult.authCode != '');
+    console.assert(registerResult.authCode != '', '|authCode| is empty.');
     if (registerResult.email) {
       // Use auth code and email supplied by GCD.
       return that.hostDaemonFacade_.getRefreshTokenFromAuthCode(
@@ -222,7 +226,6 @@ remoting.HostController.prototype.start = function(hostPin, consent) {
     var hostConfig = {
       xmpp_login: xmppCreds.userEmail,
       oauth_refresh_token: xmppCreds.refreshToken,
-      host_id: newHostId,
       host_name: hostName,
       host_secret_hash: hostSecretHash,
       private_key: keyPair.privateKey,
@@ -231,9 +234,7 @@ remoting.HostController.prototype.start = function(hostPin, consent) {
     if (hostOwnerEmail != hostOwner) {
       hostConfig['host_owner_email'] = hostOwnerEmail;
     }
-    if (registerResult.gcdId) {
-      hostConfig['gcd_device_id'] = registerResult.gcdId;
-    }
+    hostConfig['host_id'] = registerResult.hostId;
     return hostConfig;
   });
 
@@ -245,24 +246,24 @@ remoting.HostController.prototype.start = function(hostPin, consent) {
       });
 
   // Update the UI or report an error.
-  return startDaemonResultPromise.then(function(result) {
-    if (result == remoting.HostController.AsyncResult.OK) {
-      return hostNamePromise.then(function(hostName) {
-        return keyPairPromise.then(function(keyPair) {
-          remoting.hostList.onLocalHostStarted(
-              hostName, newHostId, keyPair.publicKey);
+  return hostIdPromise.then(function(hostId) {
+    return startDaemonResultPromise.then(function(result) {
+      if (result == remoting.HostController.AsyncResult.OK) {
+        return hostNamePromise.then(function(hostName) {
+          return keyPairPromise.then(function(keyPair) {
+            remoting.hostList.onLocalHostStarted(
+                hostName, hostId, keyPair.publicKey);
+          });
         });
-      });
-    } else if (result == remoting.HostController.AsyncResult.CANCELLED) {
-      throw new remoting.Error(remoting.Error.Tag.CANCELLED);
-    } else {
-      throw remoting.Error.unexpected();
-    }
-  }).catch(function(error) {
-    if (hostRegistered) {
-      remoting.hostList.unregisterHostById(newHostId);
-    }
-    throw error;
+      } else if (result == remoting.HostController.AsyncResult.CANCELLED) {
+        throw new remoting.Error(remoting.Error.Tag.CANCELLED);
+      } else {
+        throw remoting.Error.unexpected();
+      }
+    }).catch(function(error) {
+      remoting.hostList.unregisterHostById(hostId);
+      throw error;
+    });
   });
 };
 
@@ -327,7 +328,7 @@ remoting.HostController.prototype.updatePin = function(newPin, onDone,
   /** @param {remoting.HostController.AsyncResult} result */
   function onConfigUpdated(result) {
     if (result == remoting.HostController.AsyncResult.OK) {
-      onDone();
+      that.clearPairedClients(onDone, onError);
     } else if (result == remoting.HostController.AsyncResult.CANCELLED) {
       onError(new remoting.Error(remoting.Error.Tag.CANCELLED));
     } else {
@@ -351,7 +352,7 @@ remoting.HostController.prototype.updatePin = function(newPin, onDone,
       return;
     }
     /** @type {string} */
-    var hostId = config['host_id'];
+    var hostId = base.getStringAttr(config, 'host_id');
     that.hostDaemonFacade_.getPinHash(hostId, newPin).then(
         updateDaemonConfigWithHash, remoting.Error.handler(onError));
   }
@@ -391,7 +392,7 @@ remoting.HostController.prototype.getLocalHostId = function(onDone) {
   function onConfig(config) {
     var hostId = null;
     if (isHostConfigValid_(config)) {
-      hostId = /** @type {string} */ (config['host_id']);
+      hostId = base.getStringAttr(config, 'host_id');
     }
     onDone(hostId);
   };

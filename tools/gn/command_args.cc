@@ -37,7 +37,7 @@ const char kSwitchShort[] = "short";
 bool DoesLineBeginWithComment(const base::StringPiece& line) {
   // Skip whitespace.
   size_t i = 0;
-  while (i < line.size() && IsAsciiWhitespace(line[i]))
+  while (i < line.size() && base::IsAsciiWhitespace(line[i]))
     i++;
 
   return i < line.size() && line[i] == '#';
@@ -114,7 +114,7 @@ void PrintArgHelp(const base::StringPiece& name, const Value& value) {
 
 int ListArgs(const std::string& build_dir) {
   Setup* setup = new Setup;
-  setup->set_check_for_bad_items(false);
+  setup->build_settings().set_check_for_bad_items(false);
   if (!setup->DoSetup(build_dir, false) || !setup->Run())
     return 1;
 
@@ -211,7 +211,7 @@ bool RunEditor(const base::FilePath& file_to_edit) {
   // but quoting and escaping internal quotes should handle 99.999% of all
   // cases.
   std::string escaped_name = file_to_edit.value();
-  ReplaceSubstringsAfterOffset(&escaped_name, 0, "\"", "\\\"");
+  base::ReplaceSubstringsAfterOffset(&escaped_name, 0, "\"", "\\\"");
   cmd.append(escaped_name);
   cmd.push_back('"');
 
@@ -227,7 +227,7 @@ int EditArgsFile(const std::string& build_dir) {
     // Scope the setup. We only use it for some basic state. We'll do the
     // "real" build below in the gen command.
     Setup setup;
-    setup.set_check_for_bad_items(false);
+    setup.build_settings().set_check_for_bad_items(false);
     // Don't fill build arguments. We're about to edit the file which supplies
     // these in the first place.
     setup.set_fill_arguments(false);
@@ -250,7 +250,8 @@ int EditArgsFile(const std::string& build_dir) {
 #if defined(OS_WIN)
       // Use Windows lineendings for this file since it will often open in
       // Notepad which can't handle Unix ones.
-      ReplaceSubstringsAfterOffset(&argfile_default_contents, 0, "\n", "\r\n");
+      base::ReplaceSubstringsAfterOffset(
+          &argfile_default_contents, 0, "\n", "\r\n");
 #endif
       base::CreateDirectory(arg_file.DirName());
       base::WriteFile(arg_file, argfile_default_contents.c_str(),

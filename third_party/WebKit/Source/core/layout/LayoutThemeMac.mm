@@ -37,6 +37,7 @@
 #import "platform/mac/ColorMac.h"
 #import "platform/mac/LocalCurrentGraphicsContext.h"
 #import "platform/mac/ThemeMac.h"
+#import "platform/mac/VersionUtilMac.h"
 #import "platform/mac/WebCoreNSCellExtras.h"
 #import "platform/text/PlatformLocale.h"
 #import "platform/text/StringTruncator.h"
@@ -238,7 +239,14 @@ void LayoutThemeMac::systemFont(CSSValueID systemFontID, FontStyle& fontStyle, F
     fontStyle = ([fontManager traitsOfFont:font] & NSItalicFontMask) ? FontStyleItalic : FontStyleNormal;
     fontWeight = toFontWeight([fontManager weightOfFont:font]);
     fontSize = [font pointSize];
-    fontFamily = [font webCoreFamilyName];
+    fontFamily = @"BlinkMacSystemFont";
+}
+
+bool LayoutThemeMac::needsHackForTextControlWithFontFamily(const AtomicString& family) const
+{
+    // This hack is only applied on OSX 10.9 and earlier.
+    // https://code.google.com/p/chromium/issues/detail?id=515989#c8
+    return IsOSMavericksOrEarlier() && family == "BlinkMacSystemFont";
 }
 
 static RGBA32 convertNSColorToColor(NSColor *color)
@@ -458,9 +466,9 @@ bool LayoutThemeMac::isControlStyled(const ComputedStyle& style, const AuthorSty
     return LayoutTheme::isControlStyled(style, authorStyle);
 }
 
-void LayoutThemeMac::adjustPaintInvalidationRect(const LayoutObject* o, IntRect& r)
+void LayoutThemeMac::addVisualOverflow(const LayoutObject& object, IntRect& rect)
 {
-    ControlPart part = o->style()->appearance();
+    ControlPart part = object.style()->appearance();
 
 #if USE(NEW_THEME)
     switch (part) {
@@ -470,22 +478,22 @@ void LayoutThemeMac::adjustPaintInvalidationRect(const LayoutObject* o, IntRect&
     case SquareButtonPart:
     case ButtonPart:
     case InnerSpinButtonPart:
-        return LayoutTheme::adjustPaintInvalidationRect(o, r);
+        return LayoutTheme::addVisualOverflow(object, rect);
     default:
         break;
     }
 #endif
 
-    float zoomLevel = o->style()->effectiveZoom();
+    float zoomLevel = object.style()->effectiveZoom();
 
     if (part == MenulistPart) {
-        setPopupButtonCellState(o, r);
+        setPopupButtonCellState(&object, rect);
         IntSize size = popupButtonSizes()[[popupButton() controlSize]];
         size.setHeight(size.height() * zoomLevel);
-        size.setWidth(r.width());
-        r = ThemeMac::inflateRect(r, size, popupButtonMargins(), zoomLevel);
+        size.setWidth(rect.width());
+        rect = ThemeMac::inflateRect(rect, size, popupButtonMargins(), zoomLevel);
     } else if (part == SliderThumbHorizontalPart || part == SliderThumbVerticalPart) {
-        r.setHeight(r.height() + sliderThumbShadowBlur);
+        rect.setHeight(rect.height() + sliderThumbShadowBlur);
     }
 }
 
@@ -592,15 +600,17 @@ void LayoutThemeMac::setFontFromControlSize(ComputedStyle& style, NSControlSize 
     fontDescription.setGenericFamily(FontDescription::SerifFamily);
 
     NSFont* font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:controlSize]];
-    fontDescription.firstFamily().setFamily([font webCoreFamilyName]);
+    fontDescription.firstFamily().setFamily(@"BlinkMacSystemFont");
     fontDescription.setComputedSize([font pointSize] * style.effectiveZoom());
     fontDescription.setSpecifiedSize([font pointSize] * style.effectiveZoom());
 
     // Reset line height.
     style.setLineHeight(ComputedStyle::initialLineHeight());
 
+    // TODO(esprehn): The fontSelector manual management is buggy and error prone.
+    FontSelector* fontSelector = style.font().fontSelector();
     if (style.setFontDescription(fontDescription))
-        style.font().update(nullptr);
+        style.font().update(fontSelector);
 }
 
 NSControlSize LayoutThemeMac::controlSizeForSystemFont(const ComputedStyle& style) const
@@ -795,7 +805,6 @@ void LayoutThemeMac::adjustMenuListStyle(ComputedStyle& style, Element* e) const
     setFontFromControlSize(style, controlSize);
 }
 
-static const int autofillPopupHorizontalPadding = 4;
 static const int paddingBeforeSeparator = 4;
 static const int baseBorderRadius = 5;
 static const int styledPopupPaddingLeft = 8;
@@ -803,16 +812,9 @@ static const int styledPopupPaddingTop = 1;
 static const int styledPopupPaddingBottom = 2;
 
 // These functions are called with MenuListPart or MenulistButtonPart appearance
-// by LayoutMenuList, or with TextFieldPart appearance by
-// AutofillPopupMenuClient. We assume only AutofillPopupMenuClient gives
-// TexfieldPart appearance here. We want to change only Autofill padding.  In
-// the future, we have to separate Autofill popup window logic from WebKit to
-// Chromium.
+// by LayoutMenuList.
 int LayoutThemeMac::popupInternalPaddingLeft(const ComputedStyle& style) const
 {
-    if (style.appearance() == TextFieldPart)
-        return autofillPopupHorizontalPadding;
-
     if (style.appearance() == MenulistPart)
         return popupButtonPadding(controlSizeForFont(style))[ThemeMac::LeftMargin] * style.effectiveZoom();
     if (style.appearance() == MenulistButtonPart)
@@ -822,9 +824,6 @@ int LayoutThemeMac::popupInternalPaddingLeft(const ComputedStyle& style) const
 
 int LayoutThemeMac::popupInternalPaddingRight(const ComputedStyle& style) const
 {
-    if (style.appearance() == TextFieldPart)
-        return autofillPopupHorizontalPadding;
-
     if (style.appearance() == MenulistPart)
         return popupButtonPadding(controlSizeForFont(style))[ThemeMac::RightMargin] * style.effectiveZoom();
     if (style.appearance() == MenulistButtonPart) {
@@ -866,21 +865,20 @@ void LayoutThemeMac::adjustMenuListButtonStyle(ComputedStyle& style, Element*) c
     style.setLineHeight(ComputedStyle::initialLineHeight());
 }
 
-void LayoutThemeMac::setPopupButtonCellState(const LayoutObject* o, const IntRect& r)
+void LayoutThemeMac::setPopupButtonCellState(const LayoutObject* object, const IntRect& rect)
 {
     NSPopUpButtonCell* popupButton = this->popupButton();
 
     // Set the control size based off the rectangle we're painting into.
-    setControlSize(popupButton, popupButtonSizes(), r.size(), o->style()->effectiveZoom());
+    setControlSize(popupButton, popupButtonSizes(), rect.size(), object->style()->effectiveZoom());
 
     // Update the various states we respond to.
-    updateActiveState(popupButton, o);
-    updateCheckedState(popupButton, o);
-    updateEnabledState(popupButton, o);
-    updatePressedState(popupButton, o);
-#if BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
-    updateFocusedState(popupButton, o);
-#endif
+    updateActiveState(popupButton, object);
+    updateCheckedState(popupButton, object);
+    updateEnabledState(popupButton, object);
+    updatePressedState(popupButton, object);
+    if (ThemeMac::drawWithFrameDrawsFocusRing())
+        updateFocusedState(popupButton, object);
 }
 
 const IntSize* LayoutThemeMac::menuListSizes() const
@@ -927,7 +925,7 @@ void LayoutThemeMac::setSearchFieldSize(ComputedStyle& style) const
 }
 
 const int searchFieldBorderWidth = 2;
-void LayoutThemeMac::adjustSearchFieldStyle(ComputedStyle& style, Element*) const
+void LayoutThemeMac::adjustSearchFieldStyle(ComputedStyle& style) const
 {
     // Override border.
     style.resetBorder();
@@ -966,7 +964,7 @@ const IntSize* LayoutThemeMac::cancelButtonSizes() const
     return sizes;
 }
 
-void LayoutThemeMac::adjustSearchFieldCancelButtonStyle(ComputedStyle& style, Element*) const
+void LayoutThemeMac::adjustSearchFieldCancelButtonStyle(ComputedStyle& style) const
 {
     IntSize size = sizeForSystemFont(style, cancelButtonSizes());
     style.setWidth(Length(size.width(), Fixed));
@@ -980,7 +978,7 @@ const IntSize* LayoutThemeMac::resultsButtonSizes() const
     return sizes;
 }
 
-void LayoutThemeMac::adjustSearchFieldDecorationStyle(ComputedStyle& style, Element*) const
+void LayoutThemeMac::adjustSearchFieldDecorationStyle(ComputedStyle& style) const
 {
     NSControlSize controlSize = controlSizeForSystemFont(style);
     IntSize searchFieldSize = searchFieldSizes()[controlSize];
@@ -990,7 +988,7 @@ void LayoutThemeMac::adjustSearchFieldDecorationStyle(ComputedStyle& style, Elem
     style.setBoxShadow(nullptr);
 }
 
-void LayoutThemeMac::adjustSearchFieldResultsDecorationStyle(ComputedStyle& style, Element*) const
+void LayoutThemeMac::adjustSearchFieldResultsDecorationStyle(ComputedStyle& style) const
 {
     IntSize size = sizeForSystemFont(style, resultsButtonSizes());
     style.setWidth(Length(size.width(), Fixed));
@@ -1008,15 +1006,15 @@ int LayoutThemeMac::sliderTickOffsetFromTrackCenter() const
     return -9;
 }
 
-void LayoutThemeMac::adjustSliderThumbSize(ComputedStyle& style, Element*) const
+void LayoutThemeMac::adjustSliderThumbSize(ComputedStyle& style) const
 {
     float zoomLevel = style.effectiveZoom();
     if (style.appearance() == SliderThumbHorizontalPart || style.appearance() == SliderThumbVerticalPart) {
         style.setWidth(Length(static_cast<int>(sliderThumbWidth * zoomLevel), Fixed));
         style.setHeight(Length(static_cast<int>(sliderThumbHeight * zoomLevel), Fixed));
+    } else {
+        adjustMediaSliderThumbSize(style);
     }
-
-    adjustMediaSliderThumbSize(style);
 }
 
 NSPopUpButtonCell* LayoutThemeMac::popupButton() const
@@ -1142,11 +1140,6 @@ void LayoutThemeMac::updateActiveState(NSCell* cell, const LayoutObject* o)
         [cell setControlTint:tint];
 }
 
-bool LayoutThemeMac::shouldShowPlaceholderWhenFocused() const
-{
-    return true;
-}
-
 void LayoutThemeMac::adjustMediaSliderThumbSize(ComputedStyle& style) const
 {
     MediaControlsPainter::adjustMediaSliderThumbSize(style);
@@ -1164,6 +1157,11 @@ String LayoutThemeMac::extraDefaultStyleSheet()
         loadResourceAsASCIIString("themeChromium.css") +
         loadResourceAsASCIIString("themeInputMultipleFields.css") +
         loadResourceAsASCIIString("themeMac.css");
+}
+
+bool LayoutThemeMac::supportsFocusRing(const ComputedStyle& style) const
+{
+    return (style.hasAppearance() && style.appearance() != TextFieldPart && style.appearance() != TextAreaPart && style.appearance() != MenulistButtonPart && style.appearance() != ListboxPart && !shouldUseFallbackTheme(style));
 }
 
 bool LayoutThemeMac::shouldUseFallbackTheme(const ComputedStyle& style) const

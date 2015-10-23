@@ -13,8 +13,8 @@
 #include "ui/gfx/image/image.h"
 
 @interface CredentialItemView(Testing)
-@property(nonatomic, readonly) NSTextField* nameLabel;
-@property(nonatomic, readonly) NSTextField* usernameLabel;
+@property(nonatomic, readonly) NSTextField* upperLabel;
+@property(nonatomic, readonly) NSTextField* lowerLabel;
 @property(nonatomic, readonly) NSImageView* avatarView;
 @end
 
@@ -85,7 +85,7 @@ autofill::PasswordForm CredentialWithName() {
 autofill::PasswordForm CredentialWithAvatar() {
   autofill::PasswordForm credential;
   credential.username_value = base::ASCIIToUTF16("sandwich");
-  credential.avatar_url = GURL("http://sandwich.com/pastrami.jpg");
+  credential.icon_url = GURL("http://sandwich.com/pastrami.jpg");
   return credential;
 }
 
@@ -94,7 +94,7 @@ autofill::PasswordForm CredentialWithNameAndAvatar() {
   autofill::PasswordForm credential;
   credential.username_value = base::ASCIIToUTF16("noodle");
   credential.display_name = base::ASCIIToUTF16("pasta amatriciana");
-  credential.avatar_url = GURL("http://pasta.com/amatriciana.png");
+  credential.icon_url = GURL("http://pasta.com/amatriciana.png");
   return credential;
 }
 
@@ -113,7 +113,9 @@ class CredentialItemViewTest : public CocoaTest {
     return [[[CredentialItemView alloc]
         initWithPasswordForm:form
               credentialType:password_manager::CredentialType::
-                                 CREDENTIAL_TYPE_LOCAL
+                                 CREDENTIAL_TYPE_PASSWORD
+                       style:password_manager_mac::CredentialItemStyle::
+                                 ACCOUNT_CHOOSER
                     delegate:delegate()] autorelease];
   }
 
@@ -126,8 +128,8 @@ TEST_F(CredentialItemViewTest, BasicCredential) {
   CredentialItemView* item = view(form);
 
   EXPECT_NSEQ(base::SysUTF16ToNSString(form.username_value),
-              [item usernameLabel].stringValue);
-  EXPECT_EQ(nil, [item nameLabel]);
+              [item upperLabel].stringValue);
+  EXPECT_EQ(nil, [item lowerLabel]);
   EXPECT_FALSE([delegate() didFetchAvatar]);
   EXPECT_TRUE(
       ImagesEqual([CredentialItemView defaultAvatar], [item avatarView].image));
@@ -137,10 +139,10 @@ TEST_F(CredentialItemViewTest, CredentialWithName) {
   autofill::PasswordForm form(CredentialWithName());
   CredentialItemView* item = view(form);
 
-  EXPECT_NSEQ(base::SysUTF16ToNSString(form.username_value),
-              [item usernameLabel].stringValue);
   EXPECT_NSEQ(base::SysUTF16ToNSString(form.display_name),
-              [item nameLabel].stringValue);
+              [item upperLabel].stringValue);
+  EXPECT_NSEQ(base::SysUTF16ToNSString(form.username_value),
+              [item lowerLabel].stringValue);
   EXPECT_FALSE([delegate() didFetchAvatar]);
   EXPECT_TRUE(
       ImagesEqual([CredentialItemView defaultAvatar], [item avatarView].image));
@@ -151,10 +153,10 @@ TEST_F(CredentialItemViewTest, CredentialWithAvatar) {
   CredentialItemView* item = view(form);
 
   EXPECT_NSEQ(base::SysUTF16ToNSString(form.username_value),
-              [item usernameLabel].stringValue);
-  EXPECT_EQ(nil, [item nameLabel]);
+              [item upperLabel].stringValue);
+  EXPECT_EQ(nil, [item lowerLabel]);
   EXPECT_TRUE([delegate() didFetchAvatar]);
-  EXPECT_EQ(form.avatar_url, [delegate() fetchedAvatarURL]);
+  EXPECT_EQ(form.icon_url, [delegate() fetchedAvatarURL]);
   EXPECT_EQ(item, [delegate() viewForFetchedAvatar]);
   EXPECT_TRUE(
       ImagesEqual([CredentialItemView defaultAvatar], [item avatarView].image));
@@ -167,12 +169,12 @@ TEST_F(CredentialItemViewTest, CredentialWithNameAndAvatar) {
   autofill::PasswordForm form(CredentialWithNameAndAvatar());
   CredentialItemView* item = view(form);
 
-  EXPECT_NSEQ(base::SysUTF16ToNSString(form.username_value),
-              [item usernameLabel].stringValue);
   EXPECT_NSEQ(base::SysUTF16ToNSString(form.display_name),
-              [item nameLabel].stringValue);
+              [item upperLabel].stringValue);
+  EXPECT_NSEQ(base::SysUTF16ToNSString(form.username_value),
+              [item lowerLabel].stringValue);
   EXPECT_TRUE([delegate() didFetchAvatar]);
-  EXPECT_EQ(form.avatar_url, [delegate() fetchedAvatarURL]);
+  EXPECT_EQ(form.icon_url, [delegate() fetchedAvatarURL]);
   EXPECT_EQ(item, [delegate() viewForFetchedAvatar]);
   EXPECT_TRUE(
       ImagesEqual([CredentialItemView defaultAvatar], [item avatarView].image));

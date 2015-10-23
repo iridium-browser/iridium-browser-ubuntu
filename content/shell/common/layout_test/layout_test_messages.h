@@ -27,8 +27,9 @@ IPC_SYNC_MESSAGE_ROUTED1_1(LayoutTestHostMsg_RegisterIsolatedFileSystem,
 IPC_MESSAGE_ROUTED0(LayoutTestHostMsg_ClearAllDatabases)
 IPC_MESSAGE_ROUTED1(LayoutTestHostMsg_SetDatabaseQuota,
                     int /* quota */)
-IPC_MESSAGE_ROUTED1(LayoutTestHostMsg_SimulateWebNotificationClick,
-                    std::string /* title */)
+IPC_MESSAGE_ROUTED2(LayoutTestHostMsg_SimulateWebNotificationClick,
+                    std::string /* title */,
+                    int /* action_index */)
 IPC_MESSAGE_ROUTED1(LayoutTestHostMsg_AcceptAllCookies,
                     bool /* accept */)
 IPC_MESSAGE_ROUTED0(LayoutTestHostMsg_DeleteAllCookies)
@@ -38,3 +39,5 @@ IPC_MESSAGE_ROUTED4(LayoutTestHostMsg_SetPermission,
                     GURL /* origin */,
                     GURL /* embedding_origin */ )
 IPC_MESSAGE_ROUTED0(LayoutTestHostMsg_ResetPermissions)
+IPC_MESSAGE_CONTROL1(LayoutTestHostMsg_SetBluetoothAdapter,
+                     std::string /* name */)

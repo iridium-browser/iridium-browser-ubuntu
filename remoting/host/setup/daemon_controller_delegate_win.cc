@@ -72,8 +72,8 @@ bool ReadConfig(const base::FilePath& filename,
   }
 
   // Parse the JSON configuration, expecting it to contain a dictionary.
-  scoped_ptr<base::Value> value(
-      base::JSONReader::Read(file_content, base::JSON_ALLOW_TRAILING_COMMAS));
+  scoped_ptr<base::Value> value(base::JSONReader::DeprecatedRead(
+      file_content, base::JSON_ALLOW_TRAILING_COMMAS));
 
   base::DictionaryValue* dictionary;
   if (!value || !value->GetAsDictionary(&dictionary)) {
@@ -156,7 +156,7 @@ bool WriteConfig(const std::string& content) {
   }
 
   // Extract the configuration data that the user will verify.
-  scoped_ptr<base::Value> config_value(base::JSONReader::Read(content));
+  scoped_ptr<base::Value> config_value = base::JSONReader::Read(content);
   if (!config_value.get()) {
     return false;
   }
@@ -186,7 +186,7 @@ bool WriteConfig(const std::string& content) {
     }
   }
   std::string unprivileged_config_str;
-  base::JSONWriter::Write(&unprivileged_config_dict, &unprivileged_config_str);
+  base::JSONWriter::Write(unprivileged_config_dict, &unprivileged_config_str);
 
   // Write the full configuration file to a temporary location.
   base::FilePath full_config_file_path =
@@ -263,17 +263,6 @@ void InvokeCompletionCallback(
   DaemonController::AsyncResult async_result =
       success ? DaemonController::RESULT_OK : DaemonController::RESULT_FAILED;
   done.Run(async_result);
-}
-
-bool SetConfig(const std::string& config) {
-  // Determine the config directory path and create it if necessary.
-  base::FilePath config_dir = remoting::GetConfigDir();
-  if (!base::CreateDirectory(config_dir)) {
-    PLOG(ERROR) << "Failed to create the config directory.";
-    return false;
-  }
-
-  return WriteConfig(config);
 }
 
 bool StartDaemon() {
@@ -413,7 +402,7 @@ void DaemonControllerDelegateWin::UpdateConfig(
 
   // Write the updated config.
   std::string config_updated_str;
-  base::JSONWriter::Write(config_old.get(), &config_updated_str);
+  base::JSONWriter::Write(*config_old, &config_updated_str);
   bool result = WriteConfig(config_updated_str);
 
   InvokeCompletionCallback(done, result);
@@ -458,7 +447,7 @@ void DaemonControllerDelegateWin::SetConfigAndStart(
 
   // Set the configuration.
   std::string config_str;
-  base::JSONWriter::Write(config.release(), &config_str);
+  base::JSONWriter::Write(*config, &config_str);
 
   // Determine the config directory path and create it if necessary.
   base::FilePath config_dir = remoting::GetConfigDir();

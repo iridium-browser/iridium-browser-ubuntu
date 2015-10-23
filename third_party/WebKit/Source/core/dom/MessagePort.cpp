@@ -36,6 +36,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/events/MessageEvent.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "public/platform/WebString.h"
 #include "wtf/Functional.h"
@@ -43,11 +44,11 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<MessagePort> MessagePort::create(ExecutionContext& executionContext)
+MessagePort* MessagePort::create(ExecutionContext& executionContext)
 {
-    RefPtrWillBeRawPtr<MessagePort> port = adoptRefWillBeNoop(new MessagePort(executionContext));
+    MessagePort* port = new MessagePort(executionContext);
     port->suspendIfNeeded();
-    return port.release();
+    return port;
 }
 
 MessagePort::MessagePort(ExecutionContext& executionContext)
@@ -65,7 +66,7 @@ MessagePort::~MessagePort()
         m_scriptStateForConversion->disposePerContextData();
 }
 
-void MessagePort::postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
+void MessagePort::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
 {
     if (!isEntangled())
         return;
@@ -82,10 +83,13 @@ void MessagePort::postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValu
                 return;
             }
         }
-        channels = MessagePort::disentanglePorts(ports, exceptionState);
+        channels = MessagePort::disentanglePorts(context, ports, exceptionState);
         if (exceptionState.hadException())
             return;
     }
+
+    if (message->containsTransferableArrayBuffer())
+        executionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "MessagePort cannot send an ArrayBuffer as a transferable object yet. See http://crbug.com/334408"));
 
     WebString messageString = message->toWireString();
     OwnPtr<WebMessagePortChannelArray> webChannels = toWebMessagePortChannelArray(channels.release());
@@ -105,16 +109,16 @@ PassOwnPtr<WebMessagePortChannelArray> MessagePort::toWebMessagePortChannelArray
 }
 
 // static
-PassOwnPtrWillBeRawPtr<MessagePortArray> MessagePort::toMessagePortArray(ExecutionContext* context, const WebMessagePortChannelArray& webChannels)
+MessagePortArray* MessagePort::toMessagePortArray(ExecutionContext* context, const WebMessagePortChannelArray& webChannels)
 {
-    OwnPtrWillBeRawPtr<MessagePortArray> ports = nullptr;
+    MessagePortArray* ports = nullptr;
     if (!webChannels.isEmpty()) {
         OwnPtr<MessagePortChannelArray> channels = adoptPtr(new MessagePortChannelArray(webChannels.size()));
         for (size_t i = 0; i < webChannels.size(); ++i)
             (*channels)[i] = adoptPtr(webChannels[i]);
         ports = MessagePort::entanglePorts(*context, channels.release());
     }
-    return ports.release();
+    return ports;
 }
 
 PassOwnPtr<WebMessagePortChannel> MessagePort::disentangle()
@@ -184,6 +188,13 @@ static bool tryGetMessageFrom(WebMessagePortChannel& webChannel, RefPtr<Serializ
     return true;
 }
 
+bool MessagePort::tryGetMessage(RefPtr<SerializedScriptValue>& message, OwnPtr<MessagePortChannelArray>& channels)
+{
+    if (!m_entangledChannel)
+        return false;
+    return tryGetMessageFrom(*m_entangledChannel, message, channels);
+}
+
 void MessagePort::dispatchMessages()
 {
     // Because close() doesn't cancel any in flight calls to dispatchMessages() we need to check if the port is still open before dispatch.
@@ -197,15 +208,15 @@ void MessagePort::dispatchMessages()
 
     RefPtr<SerializedScriptValue> message;
     OwnPtr<MessagePortChannelArray> channels;
-    while (m_entangledChannel && tryGetMessageFrom(*m_entangledChannel, message, channels)) {
+    while (tryGetMessage(message, channels)) {
         // close() in Worker onmessage handler should prevent next message from dispatching.
         if (executionContext()->isWorkerGlobalScope() && toWorkerGlobalScope(executionContext())->isClosing())
             return;
 
-        OwnPtrWillBeRawPtr<MessagePortArray> ports = MessagePort::entanglePorts(*executionContext(), channels.release());
-        RefPtrWillBeRawPtr<Event> evt = MessageEvent::create(ports.release(), message.release());
+        MessagePortArray* ports = MessagePort::entanglePorts(*executionContext(), channels.release());
+        RefPtrWillBeRawPtr<Event> evt = MessageEvent::create(ports, message.release());
 
-        dispatchEvent(evt.release(), ASSERT_NO_EXCEPTION);
+        dispatchEvent(evt.release());
     }
 }
 
@@ -216,7 +227,7 @@ bool MessagePort::hasPendingActivity() const
     return m_started && isEntangled();
 }
 
-PassOwnPtr<MessagePortChannelArray> MessagePort::disentanglePorts(const MessagePortArray* ports, ExceptionState& exceptionState)
+PassOwnPtr<MessagePortChannelArray> MessagePort::disentanglePorts(ExecutionContext* context, const MessagePortArray* ports, ExceptionState& exceptionState)
 {
     if (!ports || !ports->size())
         return nullptr;
@@ -241,6 +252,8 @@ PassOwnPtr<MessagePortChannelArray> MessagePort::disentanglePorts(const MessageP
         portSet.add(port);
     }
 
+    UseCounter::count(context, UseCounter::MessagePortsTransferred);
+
     // Passed-in ports passed validity checks, so we can disentangle them.
     OwnPtr<MessagePortChannelArray> portArray = adoptPtr(new MessagePortChannelArray(ports->size()));
     for (unsigned i = 0; i < ports->size(); ++i)
@@ -248,24 +261,26 @@ PassOwnPtr<MessagePortChannelArray> MessagePort::disentanglePorts(const MessageP
     return portArray.release();
 }
 
-PassOwnPtrWillBeRawPtr<MessagePortArray> MessagePort::entanglePorts(ExecutionContext& context, PassOwnPtr<MessagePortChannelArray> channels)
+MessagePortArray* MessagePort::entanglePorts(ExecutionContext& context, PassOwnPtr<MessagePortChannelArray> channels)
 {
+    // https://html.spec.whatwg.org/multipage/comms.html#message-ports
+    // |ports| should be an empty array, not null even when there is no ports.
     if (!channels || !channels->size())
-        return nullptr;
+        return new MessagePortArray;
 
-    OwnPtrWillBeRawPtr<MessagePortArray> portArray = adoptPtrWillBeNoop(new MessagePortArray(channels->size()));
+    MessagePortArray* portArray = new MessagePortArray(channels->size());
     for (unsigned i = 0; i < channels->size(); ++i) {
-        RefPtrWillBeRawPtr<MessagePort> port = MessagePort::create(context);
+        MessagePort* port = MessagePort::create(context);
         port->entangle((*channels)[i].release());
-        (*portArray)[i] = port.release();
+        (*portArray)[i] = port;
     }
-    return portArray.release();
+    return portArray;
 }
 
 DEFINE_TRACE(MessagePort)
 {
     ActiveDOMObject::trace(visitor);
-    EventTargetWithInlineData::trace(visitor);
+    RefCountedGarbageCollectedEventTargetWithInlineData<MessagePort>::trace(visitor);
 }
 
 v8::Isolate* MessagePort::scriptIsolate()

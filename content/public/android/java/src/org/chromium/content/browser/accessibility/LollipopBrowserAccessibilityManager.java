@@ -10,8 +10,8 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content.browser.ContentViewCore;
 
 /**
@@ -64,6 +64,12 @@ public class LollipopBrowserAccessibilityManager extends BrowserAccessibilityMan
     }
 
     @Override
+    protected void setAccessibilityNodeInfoViewIdResourceName(
+            AccessibilityNodeInfo node, String viewIdResourceName) {
+        node.setViewIdResourceName(viewIdResourceName);
+    }
+
+    @Override
     protected void setAccessibilityEventLollipopAttributes(AccessibilityEvent event,
             boolean canOpenPopup,
             boolean contentInvalid,
@@ -107,8 +113,9 @@ public class LollipopBrowserAccessibilityManager extends BrowserAccessibilityMan
     @Override
     protected void addAccessibilityNodeInfoActions(AccessibilityNodeInfo node,
             int virtualViewId, boolean canScrollForward, boolean canScrollBackward,
-            boolean clickable, boolean editableText, boolean enabled, boolean focusable,
-            boolean focused) {
+            boolean canScrollUp, boolean canScrollDown, boolean canScrollLeft,
+            boolean canScrollRight, boolean clickable, boolean editableText, boolean enabled,
+            boolean focusable, boolean focused) {
         node.addAction(AccessibilityAction.ACTION_NEXT_HTML_ELEMENT);
         node.addAction(AccessibilityAction.ACTION_PREVIOUS_HTML_ELEMENT);
         node.addAction(AccessibilityAction.ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
@@ -126,6 +133,9 @@ public class LollipopBrowserAccessibilityManager extends BrowserAccessibilityMan
         if (canScrollBackward) {
             node.addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD);
         }
+
+        // TODO(dmazzoni): add custom actions for scrolling up, down,
+        // left, and right.
 
         if (focusable) {
             if (focused) {

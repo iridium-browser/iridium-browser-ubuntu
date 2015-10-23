@@ -8,7 +8,6 @@
 
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
-#include "v8/include/v8.h"
 
 std::string AndroidAboutAppInfo::GetOsInfo() {
   std::string android_info_str;
@@ -26,7 +25,7 @@ std::string AndroidAboutAppInfo::GetOsInfo() {
   // Append information about the device.
   bool semicolon_inserted = false;
   std::string android_build_codename = base::SysInfo::GetAndroidBuildCodename();
-  std::string android_device_name = base::SysInfo::GetDeviceName();
+  std::string android_device_name = base::SysInfo::HardwareModelName();
   if ("REL" == android_build_codename && android_device_name.size() > 0) {
     android_info_str += "; " + android_device_name;
     semicolon_inserted = true;
@@ -42,10 +41,4 @@ std::string AndroidAboutAppInfo::GetOsInfo() {
   }
 
   return android_info_str;
-}
-
-std::string AndroidAboutAppInfo::GetJavaScriptVersion() {
-  std::string js_version(v8::V8::GetVersion());
-  std::string js_engine = "V8";
-  return js_engine + " " + js_version;
 }

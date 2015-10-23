@@ -174,3 +174,38 @@ def InitializeSysroots(blueprint):
   sysroot.WriteConfig(sysroot.GenerateBrickConfig(brick_stack, bsp))
   sysroot.GeneratePortageConfig()
   sysroot.UpdateToolchain()
+
+
+def RunUnittests(sysroot, packages, extra_env=None, verbose=False,
+                 retries=None):
+  """Runs the unit tests for |packages|.
+
+  Args:
+    sysroot: Path to the sysroot to build the tests in.
+    packages: List of packages to test.
+    extra_env: Python dictionary containing the extra environment variable to
+      pass to the build command.
+    verbose: If True, show the output from emerge, even when the tests succeed.
+    retries: Number of time we should retry a failed packages. If None, use
+      parallel_emerge's default.
+
+  Raises:
+    RunCommandError if the unit tests failed.
+  """
+  env = extra_env.copy() if extra_env else {}
+  env.update({
+      'FEATURES': 'test',
+      'PKGDIR': os.path.join(sysroot, 'test-packages'),
+  })
+
+  command = [os.path.join(constants.CHROMITE_BIN_DIR, 'parallel_emerge'),
+             '--sysroot=%s' % sysroot, '--nodeps', '--buildpkgonly']
+  if verbose:
+    command += ['--show-output']
+
+  if retries is not None:
+    command += ['--retries=%s' % retries]
+
+  command += list(packages)
+
+  cros_build_lib.SudoRunCommand(command, extra_env=env, mute_output=False)

@@ -32,21 +32,20 @@ class LayoutFieldset final : public LayoutBlockFlow {
 public:
     explicit LayoutFieldset(Element*);
 
-    enum FindLegendOption { IgnoreFloatingOrOutOfFlow, IncludeFloatingOrOutOfFlow };
-    LayoutBox* findLegend(FindLegendOption = IgnoreFloatingOrOutOfFlow) const;
+    LayoutBox* findInFlowLegend() const;
 
-    virtual const char* name() const override { return "LayoutFieldset"; }
+    const char* name() const override { return "LayoutFieldset"; }
 
 private:
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectFieldset || LayoutBlockFlow::isOfType(type); }
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectFieldset || LayoutBlockFlow::isOfType(type); }
 
-    virtual LayoutObject* layoutSpecialExcludedChild(bool relayoutChildren, SubtreeLayoutScope&) override;
+    LayoutObject* layoutSpecialExcludedChild(bool relayoutChildren, SubtreeLayoutScope&) override;
 
-    virtual void computePreferredLogicalWidths() override;
-    virtual bool avoidsFloats() const override { return true; }
+    void computePreferredLogicalWidths() override;
+    bool avoidsFloats() const override { return true; }
 
-    virtual void paintBoxDecorationBackground(const PaintInfo&, const LayoutPoint&) override;
-    virtual void paintMask(const PaintInfo&, const LayoutPoint&) override;
+    void paintBoxDecorationBackground(const PaintInfo&, const LayoutPoint&) override;
+    void paintMask(const PaintInfo&, const LayoutPoint&) override;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutFieldset, isFieldset());

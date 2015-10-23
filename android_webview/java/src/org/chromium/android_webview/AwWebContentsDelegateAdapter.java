@@ -207,7 +207,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
 
         Message resend = handler.obtainMessage(msgContinuePendingReload);
         Message dontResend = handler.obtainMessage(msgCancelPendingReload);
-        mContentsClient.onFormResubmission(dontResend, resend);
+        mContentsClient.getCallbackHelper().postOnFormResubmission(dontResend, resend);
     }
 
     @Override
@@ -231,7 +231,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
                 }
                 GetDisplayNameTask task = new GetDisplayNameTask(
                         mContext.getContentResolver(), processId, renderId, modeFlags, results);
-                task.execute();
+                task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
             }
         }, params);
     }
@@ -266,6 +266,11 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
         } else {
             mContentViewClient.exitFullscreen();
         }
+    }
+
+    @Override
+    public void loadingStateChanged() {
+        mContentsClient.updateTitle(mAwContents.getTitle(), false);
     }
 
     private static class GetDisplayNameTask extends AsyncTask<Void, Void, String[]> {

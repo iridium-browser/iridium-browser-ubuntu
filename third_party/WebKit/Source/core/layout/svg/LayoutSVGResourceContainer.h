@@ -40,14 +40,14 @@ class DeprecatedPaintLayer;
 class LayoutSVGResourceContainer : public LayoutSVGHiddenContainer {
 public:
     explicit LayoutSVGResourceContainer(SVGElement*);
-    virtual ~LayoutSVGResourceContainer();
+    ~LayoutSVGResourceContainer() override;
 
     virtual void removeAllClientsFromCache(bool markForInvalidation = true) = 0;
     virtual void removeClientFromCache(LayoutObject*, bool markForInvalidation = true) = 0;
 
-    virtual void layout() override;
-    virtual void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override final;
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVGResourceContainer || LayoutSVGHiddenContainer::isOfType(type); }
+    void layout() override;
+    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) final;
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVGResourceContainer || LayoutSVGHiddenContainer::isOfType(type); }
 
     virtual LayoutSVGResourceType resourceType() const = 0;
 
@@ -64,7 +64,7 @@ public:
     void addClientLayer(DeprecatedPaintLayer*);
     void removeClientLayer(DeprecatedPaintLayer*);
 
-    void invalidateCacheAndMarkForLayout(SubtreeLayoutScope* = 0);
+    void invalidateCacheAndMarkForLayout(SubtreeLayoutScope* = nullptr);
 
     static void markForLayoutAndParentResourceInvalidation(LayoutObject*, bool needsLayout = true);
 
@@ -84,14 +84,16 @@ protected:
     void markAllClientLayersForInvalidation();
     void markClientForInvalidation(LayoutObject*, InvalidationMode);
 
+    void willBeDestroyed() override;
+
     bool m_isInLayout;
 
 private:
     friend class SVGResourcesCache;
     void addClient(LayoutObject*);
     void removeClient(LayoutObject*);
+    void detachAllClients();
 
-    virtual void willBeDestroyed() override final;
     void registerResource();
 
     AtomicString m_id;
@@ -109,12 +111,12 @@ private:
 inline LayoutSVGResourceContainer* getLayoutSVGResourceContainerById(TreeScope& treeScope, const AtomicString& id)
 {
     if (id.isEmpty())
-        return 0;
+        return nullptr;
 
     if (LayoutSVGResourceContainer* layoutResource = treeScope.document().accessSVGExtensions().resourceById(id))
         return layoutResource;
 
-    return 0;
+    return nullptr;
 }
 
 template<typename Layout>
@@ -124,7 +126,7 @@ Layout* getLayoutSVGResourceById(TreeScope& treeScope, const AtomicString& id)
         if (container->resourceType() == Layout::s_resourceType)
             return static_cast<Layout*>(container);
     }
-    return 0;
+    return nullptr;
 }
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGResourceContainer, isSVGResourceContainer());

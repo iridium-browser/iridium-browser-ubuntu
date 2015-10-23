@@ -52,6 +52,8 @@ using extensions::AppWindow;
 
 namespace {
 
+const int kActivateThrottlePeriodSeconds = 2;
+
 NSRect GfxToCocoaBounds(gfx::Rect bounds) {
   typedef AppWindow::BoundsSpecification BoundsSpecification;
 
@@ -97,6 +99,10 @@ std::vector<gfx::Rect> CalculateNonDraggableRegions(
 
 @synthesize appWindow = appWindow_;
 
+- (void)setTitlebarBackgroundView:(NSView*)view {
+  titlebar_background_view_.reset([view retain]);
+}
+
 - (void)windowWillClose:(NSNotification*)notification {
   if (appWindow_)
     appWindow_->WindowWillClose();
@@ -110,6 +116,14 @@ std::vector<gfx::Rect> CalculateNonDraggableRegions(
 - (void)windowDidResignKey:(NSNotification*)notification {
   if (appWindow_)
     appWindow_->WindowDidResignKey();
+}
+
+- (void)windowDidBecomeMain:(NSNotification*)notification {
+  [titlebar_background_view_ setNeedsDisplay:YES];
+}
+
+- (void)windowDidResignMain:(NSNotification*)notification {
+  [titlebar_background_view_ setNeedsDisplay:YES];
 }
 
 - (void)windowDidResize:(NSNotification*)notification {
@@ -159,10 +173,6 @@ std::vector<gfx::Rect> CalculateNonDraggableRegions(
 - (NSSize)window:(NSWindow *)window
     willUseFullScreenContentSize:(NSSize)proposedSize {
   return proposedSize;
-}
-
-- (void)executeCommand:(int)command {
-  // No-op, swallow the event.
 }
 
 - (BOOL)handledByExtensionCommand:(NSEvent*)event
@@ -247,7 +257,6 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
       inactive_frame_color_(params.inactive_frame_color) {
   Observe(WebContents());
 
-  base::scoped_nsobject<NSWindow> window;
   Class window_class = has_frame_ ?
       [AppNSWindow class] : [AppFramelessNSWindow class];
 
@@ -255,11 +264,11 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
   // the window bounds and constraints can be set precisely.
   NSRect cocoa_bounds = GfxToCocoaBounds(
       params.GetInitialWindowBounds(gfx::Insets()));
-  window.reset([[window_class alloc]
-      initWithContentRect:cocoa_bounds
-                styleMask:GetWindowStyleMask()
-                  backing:NSBackingStoreBuffered
-                    defer:NO]);
+  NSWindow* window =
+      [[window_class alloc] initWithContentRect:cocoa_bounds
+                                      styleMask:GetWindowStyleMask()
+                                        backing:NSBackingStoreBuffered
+                                          defer:NO];
 
   std::string name;
   const extensions::Extension* extension = app_window_->GetExtension();
@@ -267,11 +276,6 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
     name = extension->name();
   [window setTitle:base::SysUTF8ToNSString(name)];
   [[window contentView] setWantsLayer:YES];
-  if (has_frame_ && has_frame_color_) {
-    [TitlebarBackgroundView addToNSWindow:window
-                              activeColor:active_frame_color_
-                            inactiveColor:inactive_frame_color_];
-  }
 
   if (base::mac::IsOSSnowLeopard() &&
       [window respondsToSelector:@selector(setBottomCornerRounded:)])
@@ -284,14 +288,22 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
                                          params.visible_on_all_workspaces);
 
   window_controller_.reset(
-      [[NativeAppWindowController alloc] initWithWindow:window.release()]);
+      [[NativeAppWindowController alloc] initWithWindow:window]);
+
+  if (has_frame_ && has_frame_color_) {
+    TitlebarBackgroundView* view =
+        [TitlebarBackgroundView addToNSWindow:window
+                                  activeColor:active_frame_color_
+                                inactiveColor:inactive_frame_color_];
+    [window_controller_ setTitlebarBackgroundView:view];
+  }
 
   NSView* view = WebContents()->GetNativeView();
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
   InstallView();
 
-  [[window_controller_ window] setDelegate:window_controller_];
+  [window setDelegate:window_controller_];
   [window_controller_ setAppWindow:this];
 
   // We can now compute the precise window bounds and constraints.
@@ -301,7 +313,7 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
                             params.GetContentMaximumSize(insets));
 
   // Initialize |restored_bounds_|.
-  restored_bounds_ = [this->window() frame];
+  restored_bounds_ = [window frame];
 
   extension_keybinding_registry_.reset(new ExtensionKeybindingRegistryCocoa(
       Profile::FromBrowserContext(app_window_->browser_context()),
@@ -362,7 +374,7 @@ bool NativeAppWindowCocoa::IsActive() const {
 }
 
 bool NativeAppWindowCocoa::IsMaximized() const {
-  return is_maximized_;
+  return is_maximized_ && !IsMinimized();
 }
 
 bool NativeAppWindowCocoa::IsMinimized() const {
@@ -466,16 +478,28 @@ gfx::Rect NativeAppWindowCocoa::GetBounds() const {
 
 void NativeAppWindowCocoa::Show() {
   if (is_hidden_with_app_) {
-    // If there is a shim to gently request attention, return here. Otherwise
-    // show the window as usual.
-    if (apps::ExtensionAppShimHandler::ActivateAndRequestUserAttentionForWindow(
-            app_window_)) {
-      return;
-    }
+    apps::ExtensionAppShimHandler::UnhideWithoutActivationForWindow(
+        app_window_);
+    is_hidden_with_app_ = false;
   }
 
-  [window_controller_ showWindow:nil];
-  Activate();
+  // Workaround for http://crbug.com/459306. When requests to change key windows
+  // on Mac overlap, AppKit may attempt to make two windows simultaneously have
+  // key status. This causes key events to go the wrong window, and key status
+  // to get "stuck" until Chrome is deactivated. To reduce the possibility of
+  // this occurring, throttle activation requests. To balance a possible Hide(),
+  // always show the window, but don't make it key.
+  base::Time now = base::Time::Now();
+  if (now - last_activate_ <
+      base::TimeDelta::FromSeconds(kActivateThrottlePeriodSeconds)) {
+    [window() orderFront:window_controller_];
+    return;
+  }
+
+  last_activate_ = now;
+
+  [window() makeKeyAndOrderFront:nil];
+  [NSApp activateIgnoringOtherApps:YES];
 }
 
 void NativeAppWindowCocoa::ShowInactive() {
@@ -491,7 +515,7 @@ void NativeAppWindowCocoa::Close() {
 }
 
 void NativeAppWindowCocoa::Activate() {
-  [BrowserWindowUtils activateWindowForController:window_controller_];
+  Show();
 }
 
 void NativeAppWindowCocoa::Deactivate() {
@@ -500,9 +524,14 @@ void NativeAppWindowCocoa::Deactivate() {
 }
 
 void NativeAppWindowCocoa::Maximize() {
+  if (is_fullscreen_)
+    return;
+
   UpdateRestoredBounds();
   is_maximized_ = true;  // See top of file NOTE: State Before Update.
   [window() setFrame:[[window() screen] visibleFrame] display:YES animate:YES];
+  if (IsMinimized())
+    [window() deminiaturize:window_controller_];
 }
 
 void NativeAppWindowCocoa::Minimize() {
@@ -512,13 +541,12 @@ void NativeAppWindowCocoa::Minimize() {
 void NativeAppWindowCocoa::Restore() {
   DCHECK(!IsFullscreenOrPending());   // SetFullscreen, not Restore, expected.
 
-  if (IsMaximized()) {
+  if (is_maximized_) {
     is_maximized_ = false;  // See top of file NOTE: State Before Update.
     [window() setFrame:restored_bounds() display:YES animate:YES];
-  } else if (IsMinimized()) {
-    is_maximized_ = false;  // See top of file NOTE: State Before Update.
-    [window() deminiaturize:window_controller_];
   }
+  if (IsMinimized())
+    [window() deminiaturize:window_controller_];
 }
 
 void NativeAppWindowCocoa::SetBounds(const gfx::Rect& bounds) {
@@ -677,8 +705,7 @@ bool NativeAppWindowCocoa::CanHaveAlphaEnabled() const {
 }
 
 gfx::NativeView NativeAppWindowCocoa::GetHostView() const {
-  NOTIMPLEMENTED();
-  return NULL;
+  return WebContents()->GetNativeView();
 }
 
 gfx::Point NativeAppWindowCocoa::GetDialogPosition(const gfx::Size& size) {
@@ -767,10 +794,8 @@ void NativeAppWindowCocoa::WindowDidDeminiaturize() {
 }
 
 void NativeAppWindowCocoa::WindowDidEnterFullscreen() {
-  if (!is_fullscreen_) {
-    is_fullscreen_ = true;
-    app_window_->OSFullscreen();
-  }
+  is_maximized_ = false;
+  is_fullscreen_ = true;
   app_window_->OnNativeWindowChanged();
 }
 
@@ -779,7 +804,8 @@ void NativeAppWindowCocoa::WindowDidExitFullscreen() {
   if (!shows_fullscreen_controls_)
     gfx::SetNSWindowCanFullscreen(window(), false);
 
-  app_window_->Restore();
+  WindowDidFinishResize();
+
   app_window_->OnNativeWindowChanged();
 }
 
@@ -807,11 +833,6 @@ void NativeAppWindowCocoa::ShowWithApp() {
 void NativeAppWindowCocoa::HideWithApp() {
   is_hidden_with_app_ = true;
   HideWithoutMarkingHidden();
-}
-
-void NativeAppWindowCocoa::UpdateShelfMenu() {
-  // TODO(tmdiep): To be implemented for Mac.
-  NOTIMPLEMENTED();
 }
 
 gfx::Size NativeAppWindowCocoa::GetContentMinimumSize() const {

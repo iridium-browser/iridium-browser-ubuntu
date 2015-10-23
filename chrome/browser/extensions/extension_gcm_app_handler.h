@@ -12,8 +12,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
+#include "components/gcm_driver/common/gcm_messages.h"
 #include "components/gcm_driver/gcm_app_handler.h"
 #include "components/gcm_driver/gcm_client.h"
+#include "components/gcm_driver/instance_id/instance_id.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_registry_observer.h"
 
@@ -26,6 +28,9 @@ class BrowserContext;
 namespace gcm {
 class GCMDriver;
 class GCMProfileService;
+}
+namespace instance_id {
+class InstanceIDDriver;
 }
 
 namespace extensions {
@@ -48,7 +53,7 @@ class ExtensionGCMAppHandler : public gcm::GCMAppHandler,
   // gcm::GCMAppHandler implementation.
   void ShutdownHandler() override;
   void OnMessage(const std::string& app_id,
-                 const gcm::GCMClient::IncomingMessage& message) override;
+                 const gcm::IncomingMessage& message) override;
   void OnMessagesDeleted(const std::string& app_id) override;
   void OnSendError(
       const std::string& app_id,
@@ -60,12 +65,15 @@ class ExtensionGCMAppHandler : public gcm::GCMAppHandler,
   // Could be overridden by testing purpose.
   virtual void OnUnregisterCompleted(const std::string& app_id,
                                      gcm::GCMClient::Result result);
+  virtual void OnDeleteIDCompleted(const std::string& app_id,
+                                   instance_id::InstanceID::Result result);
   virtual void AddAppHandler(const std::string& app_id);
   virtual void RemoveAppHandler(const std::string& app_id);
 
   gcm::GCMDriver* GetGCMDriver() const;
+  instance_id::InstanceIDDriver* GetInstanceIDDriver() const;
 
-private:
+ private:
   friend class BrowserContextKeyedAPIFactory<ExtensionGCMAppHandler>;
 
   // ExtensionRegistryObserver implementation.
@@ -78,6 +86,7 @@ private:
                               const Extension* extension,
                               extensions::UninstallReason reason) override;
 
+  void RemoveInstanceID(const std::string& app_id);
   void AddDummyAppHandler();
   void RemoveDummyAppHandler();
 

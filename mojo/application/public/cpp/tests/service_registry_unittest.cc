@@ -4,6 +4,7 @@
 
 #include "mojo/application/public/cpp/lib/service_registry.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "mojo/application/public/cpp/service_connector.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,10 +37,11 @@ TEST(ServiceRegistryTest, Ownership) {
 
   // Removal.
   {
-    ServiceRegistry registry;
+    scoped_ptr<ServiceRegistry> registry(new ServiceRegistry);
     ServiceConnector* c = new TestConnector(&delete_count);
-    registry.SetServiceConnectorForName(c, "TC1");
-    registry.RemoveServiceConnectorForName("TC1");
+    registry->SetServiceConnectorForName(c, "TC1");
+    registry->RemoveServiceConnectorForName("TC1");
+    registry.reset();
     EXPECT_EQ(2, delete_count);
   }
 

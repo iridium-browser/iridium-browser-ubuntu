@@ -115,28 +115,28 @@ PP_VideoProfile PP_FromMediaVideoProfile(media::VideoCodecProfile profile) {
   }
 }
 
-media::VideoFrame::Format PP_ToMediaVideoFormat(PP_VideoFrame_Format format) {
+media::VideoPixelFormat PP_ToMediaVideoFormat(PP_VideoFrame_Format format) {
   switch (format) {
     case PP_VIDEOFRAME_FORMAT_UNKNOWN:
-      return media::VideoFrame::UNKNOWN;
+      return media::PIXEL_FORMAT_UNKNOWN;
     case PP_VIDEOFRAME_FORMAT_YV12:
-      return media::VideoFrame::YV12;
+      return media::PIXEL_FORMAT_YV12;
     case PP_VIDEOFRAME_FORMAT_I420:
-      return media::VideoFrame::I420;
+      return media::PIXEL_FORMAT_I420;
     case PP_VIDEOFRAME_FORMAT_BGRA:
-      return media::VideoFrame::UNKNOWN;
+      return media::PIXEL_FORMAT_UNKNOWN;
     // No default case, to catch unhandled PP_VideoFrame_Format values.
   }
-  return media::VideoFrame::UNKNOWN;
+  return media::PIXEL_FORMAT_UNKNOWN;
 }
 
-PP_VideoFrame_Format PP_FromMediaVideoFormat(media::VideoFrame::Format format) {
+PP_VideoFrame_Format PP_FromMediaVideoFormat(media::VideoPixelFormat format) {
   switch (format) {
-    case media::VideoFrame::UNKNOWN:
+    case media::PIXEL_FORMAT_UNKNOWN:
       return PP_VIDEOFRAME_FORMAT_UNKNOWN;
-    case media::VideoFrame::YV12:
+    case media::PIXEL_FORMAT_YV12:
       return PP_VIDEOFRAME_FORMAT_YV12;
-    case media::VideoFrame::I420:
+    case media::PIXEL_FORMAT_I420:
       return PP_VIDEOFRAME_FORMAT_I420;
     default:
       return PP_VIDEOFRAME_FORMAT_UNKNOWN;
@@ -190,11 +190,10 @@ PepperVideoEncoderHost::PepperVideoEncoderHost(RendererPpapiHost* host,
     : ResourceHost(host->GetPpapiHost(), instance, resource),
       renderer_ppapi_host_(host),
       buffer_manager_(this),
-      command_buffer_(nullptr),
       initialized_(false),
       encoder_last_error_(PP_ERROR_FAILED),
       frame_count_(0),
-      media_input_format_(media::VideoFrame::UNKNOWN),
+      media_input_format_(media::PIXEL_FORMAT_UNKNOWN),
       weak_ptr_factory_(this) {
 }
 
@@ -251,7 +250,7 @@ int32_t PepperVideoEncoderHost::OnHostMsgInitialize(
     return PP_ERROR_FAILED;
 
   media_input_format_ = PP_ToMediaVideoFormat(input_format);
-  if (media_input_format_ == media::VideoFrame::UNKNOWN)
+  if (media_input_format_ == media::PIXEL_FORMAT_UNKNOWN)
     return PP_ERROR_BADARGUMENT;
 
   media::VideoCodecProfile media_profile =
@@ -391,9 +390,8 @@ void PepperVideoEncoderHost::RequireBitstreamBuffers(
   for (size_t i = 0; i < shm_buffers_.size(); ++i) {
     encoder_->UseOutputBitstreamBuffer(shm_buffers_[i]->ToBitstreamBuffer());
     handles.push_back(SerializedHandle(
-        renderer_ppapi_host_->ShareHandleWithRemote(
-            PlatformFileFromSharedMemoryHandle(shm_buffers_[i]->shm->handle()),
-            false),
+        renderer_ppapi_host_->ShareSharedMemoryHandleWithRemote(
+            shm_buffers_[i]->shm->handle()),
         output_buffer_size));
   }
 
@@ -503,8 +501,8 @@ bool PepperVideoEncoderHost::EnsureGpuChannel() {
 
   std::vector<int32> attribs(1, PP_GRAPHICS3DATTRIB_NONE);
   command_buffer_ = channel_->CreateOffscreenCommandBuffer(
-      gfx::Size(), nullptr, attribs, GURL::EmptyGURL(),
-      gfx::PreferIntegratedGpu);
+      gfx::Size(), nullptr, GpuChannelHost::kDefaultStreamId, attribs,
+      GURL::EmptyGURL(), gfx::PreferIntegratedGpu);
   if (!command_buffer_) {
     Close();
     return false;
@@ -522,7 +520,7 @@ bool PepperVideoEncoderHost::EnsureGpuChannel() {
 }
 
 bool PepperVideoEncoderHost::InitializeHardware(
-    media::VideoFrame::Format input_format,
+    media::VideoPixelFormat input_format,
     const gfx::Size& input_visible_size,
     media::VideoCodecProfile output_profile,
     uint32_t initial_bitrate) {
@@ -544,11 +542,7 @@ void PepperVideoEncoderHost::Close() {
   DCHECK(RenderThreadImpl::current());
 
   encoder_ = nullptr;
-  if (command_buffer_) {
-    DCHECK(channel_);
-    channel_->DestroyCommandBuffer(command_buffer_);
-    command_buffer_ = nullptr;
-  }
+  command_buffer_ = nullptr;
 }
 
 void PepperVideoEncoderHost::AllocateVideoFrames() {
@@ -601,11 +595,10 @@ void PepperVideoEncoderHost::AllocateVideoFrames() {
   }
 
   DCHECK(get_video_frames_reply_context_.is_valid());
-  get_video_frames_reply_context_.params.AppendHandle(SerializedHandle(
-      renderer_ppapi_host_->ShareHandleWithRemote(
-          PlatformFileFromSharedMemoryHandle(buffer_manager_.shm()->handle()),
-          false),
-      total_size));
+  get_video_frames_reply_context_.params.AppendHandle(
+      SerializedHandle(renderer_ppapi_host_->ShareSharedMemoryHandleWithRemote(
+                           buffer_manager_.shm()->handle()),
+                       total_size));
 
   host()->SendReply(get_video_frames_reply_context_,
                     PpapiPluginMsg_VideoEncoder_GetVideoFramesReply(
@@ -632,13 +625,16 @@ scoped_refptr<media::VideoFrame> PepperVideoEncoderHost::CreateVideoFrame(
   uint32_t shm_offset = static_cast<uint8*>(buffer->video.data) -
                         static_cast<uint8*>(buffer_manager_.shm()->memory());
 
-  return media::VideoFrame::WrapExternalPackedMemory(
-      media_input_format_, input_coded_size_, gfx::Rect(input_coded_size_),
-      input_coded_size_, static_cast<uint8*>(buffer->video.data),
-      buffer->video.data_size, buffer_manager_.shm()->handle(), shm_offset,
-      base::TimeDelta(),
+  scoped_refptr<media::VideoFrame> frame =
+      media::VideoFrame::WrapExternalSharedMemory(
+          media_input_format_, input_coded_size_, gfx::Rect(input_coded_size_),
+          input_coded_size_, static_cast<uint8*>(buffer->video.data),
+          buffer->video.data_size, buffer_manager_.shm()->handle(), shm_offset,
+          base::TimeDelta());
+  frame->AddDestructionObserver(
       base::Bind(&PepperVideoEncoderHost::FrameReleased,
                  weak_ptr_factory_.GetWeakPtr(), reply_context, frame_id));
+  return frame;
 }
 
 void PepperVideoEncoderHost::FrameReleased(

@@ -4,12 +4,17 @@
 
 import os
 
+from core import perf_benchmark
+
 from telemetry import benchmark
 from telemetry.core import util
 from telemetry import page as page_module
-from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry.page import shared_page_state
+from telemetry import story
 from telemetry.value import list_of_scalar_values
+
+from page_sets import webgl_supported_shared_state
 
 
 BLINK_PERF_BASE_DIR = os.path.join(util.GetChromiumSrcDir(),
@@ -17,7 +22,9 @@ BLINK_PERF_BASE_DIR = os.path.join(util.GetChromiumSrcDir(),
 SKIPPED_FILE = os.path.join(BLINK_PERF_BASE_DIR, 'Skipped')
 
 
-def CreatePageSetFromPath(path, skipped_file):
+def CreateStorySetFromPath(path, skipped_file,
+                          shared_page_state_class=(
+                            shared_page_state.SharedPageState)):
   assert os.path.exists(path)
 
   page_urls = []
@@ -54,10 +61,12 @@ def CreatePageSetFromPath(path, skipped_file):
     _AddDir(path, tuple(skipped))
   else:
     _AddPage(path)
-  ps = page_set.PageSet(file_path=os.getcwd()+os.sep,
+  ps = story.StorySet(base_dir=os.getcwd()+os.sep,
                         serving_dirs=serving_dirs)
   for url in page_urls:
-    ps.AddUserStory(page_module.Page(url, ps, ps.base_dir))
+    ps.AddStory(page_module.Page(
+      url, ps, ps.base_dir,
+      shared_page_state_class=shared_page_state_class))
   return ps
 
 
@@ -113,21 +122,8 @@ class _BlinkPerfFullFrameMeasurement(_BlinkPerfMeasurement):
     assert 'content-shell' in options.browser_type
     options.AppendExtraBrowserArgs(['--expose-internals-for-testing'])
 
-
-class BlinkPerfAnimation(benchmark.Benchmark):
-  tag = 'animation'
-  test = _BlinkPerfMeasurement
-
-  @classmethod
-  def Name(cls):
-    return 'blink_perf.animation'
-
-  def CreatePageSet(self, options):
-    path = os.path.join(BLINK_PERF_BASE_DIR, 'Animation')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
-
-
-class BlinkPerfBindings(benchmark.Benchmark):
+@benchmark.Disabled  # http://crbug.com/500958
+class BlinkPerfBindings(perf_benchmark.PerfBenchmark):
   tag = 'bindings'
   test = _BlinkPerfMeasurement
 
@@ -135,13 +131,13 @@ class BlinkPerfBindings(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.bindings'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Bindings')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
 @benchmark.Enabled('content-shell')
-class BlinkPerfBlinkGC(benchmark.Benchmark):
+class BlinkPerfBlinkGC(perf_benchmark.PerfBenchmark):
   tag = 'blink_gc'
   test = _BlinkPerfMeasurement
 
@@ -149,12 +145,12 @@ class BlinkPerfBlinkGC(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.blink_gc'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'BlinkGC')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
-class BlinkPerfCSS(benchmark.Benchmark):
+class BlinkPerfCSS(perf_benchmark.PerfBenchmark):
   tag = 'css'
   test = _BlinkPerfMeasurement
 
@@ -162,13 +158,16 @@ class BlinkPerfCSS(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.css'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'CSS')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
-@benchmark.Disabled('win')  # http://crbug.com/488493
-class BlinkPerfCanvas(benchmark.Benchmark):
+@benchmark.Disabled('xp',  # http://crbug.com/488059
+                    'win7',  # http://crbug.com/522972
+                    'android',  # http://crbug.com/496707
+                    'reference')  # http://crbug.com/520092
+class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
   tag = 'canvas'
   test = _BlinkPerfMeasurement
 
@@ -176,12 +175,20 @@ class BlinkPerfCanvas(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.canvas'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Canvas')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    story_set = CreateStorySetFromPath(
+      path, SKIPPED_FILE,
+      shared_page_state_class=(
+        webgl_supported_shared_state.WebGLSupportedSharedState))
+    # WebGLSupportedSharedState requires the skipped_gpus property to
+    # be set on each page.
+    for page in story_set:
+      page.skipped_gpus = []
+    return story_set
 
 
-class BlinkPerfDOM(benchmark.Benchmark):
+class BlinkPerfDOM(perf_benchmark.PerfBenchmark):
   tag = 'dom'
   test = _BlinkPerfMeasurement
 
@@ -189,13 +196,13 @@ class BlinkPerfDOM(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.dom'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'DOM')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
 @benchmark.Disabled('release_x64')  # http://crbug.com/480999
-class BlinkPerfEvents(benchmark.Benchmark):
+class BlinkPerfEvents(perf_benchmark.PerfBenchmark):
   tag = 'events'
   test = _BlinkPerfMeasurement
 
@@ -203,13 +210,13 @@ class BlinkPerfEvents(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.events'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Events')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
 @benchmark.Disabled('win8')  # http://crbug.com/462350
-class BlinkPerfLayout(benchmark.Benchmark):
+class BlinkPerfLayout(perf_benchmark.PerfBenchmark):
   tag = 'layout'
   test = _BlinkPerfMeasurement
 
@@ -217,9 +224,9 @@ class BlinkPerfLayout(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.layout'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Layout')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
 @benchmark.Enabled('content-shell')
@@ -232,7 +239,7 @@ class BlinkPerfLayoutFullLayout(BlinkPerfLayout):
     return 'blink_perf.layout_full_frame'
 
 
-class BlinkPerfMutation(benchmark.Benchmark):
+class BlinkPerfMutation(perf_benchmark.PerfBenchmark):
   tag = 'mutation'
   test = _BlinkPerfMeasurement
 
@@ -240,12 +247,13 @@ class BlinkPerfMutation(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.mutation'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Mutation')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
-class BlinkPerfParser(benchmark.Benchmark):
+@benchmark.Disabled('win')  # crbug.com/488493
+class BlinkPerfParser(perf_benchmark.PerfBenchmark):
   tag = 'parser'
   test = _BlinkPerfMeasurement
 
@@ -253,12 +261,12 @@ class BlinkPerfParser(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.parser'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Parser')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
-class BlinkPerfSVG(benchmark.Benchmark):
+class BlinkPerfSVG(perf_benchmark.PerfBenchmark):
   tag = 'svg'
   test = _BlinkPerfMeasurement
 
@@ -266,9 +274,9 @@ class BlinkPerfSVG(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.svg'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'SVG')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
 @benchmark.Enabled('content-shell')
@@ -281,7 +289,7 @@ class BlinkPerfSVGFullLayout(BlinkPerfSVG):
     return 'blink_perf.svg_full_frame'
 
 
-class BlinkPerfShadowDOM(benchmark.Benchmark):
+class BlinkPerfShadowDOM(perf_benchmark.PerfBenchmark):
   tag = 'shadow_dom'
   test = _BlinkPerfMeasurement
 
@@ -289,14 +297,14 @@ class BlinkPerfShadowDOM(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.shadow_dom'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'ShadowDOM')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
 # This benchmark is for local testing, doesn't need to run on bots.
 @benchmark.Disabled()
-class BlinkPerfXMLHttpRequest(benchmark.Benchmark):
+class BlinkPerfXMLHttpRequest(perf_benchmark.PerfBenchmark):
   tag = 'xml_http_request'
   test = _BlinkPerfMeasurement
 
@@ -304,6 +312,6 @@ class BlinkPerfXMLHttpRequest(benchmark.Benchmark):
   def Name(cls):
     return 'blink_perf.xml_http_request'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'XMLHttpRequest')
-    return CreatePageSetFromPath(path, SKIPPED_FILE)
+    return CreateStorySetFromPath(path, SKIPPED_FILE)

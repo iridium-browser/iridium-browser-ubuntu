@@ -18,14 +18,12 @@
 #include "content/common/input/input_event_stream_validator.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 
-struct InputHostMsg_HandleInputEvent_ACK_Params;
-
 namespace IPC {
 class Sender;
 }
 
 namespace ui {
-struct LatencyInfo;
+class LatencyInfo;
 }
 
 namespace content {
@@ -34,6 +32,7 @@ class InputAckHandler;
 class InputRouterClient;
 class OverscrollController;
 struct DidOverscrollParams;
+struct InputEventAck;
 
 // A default implementation for browser input event routing.
 class CONTENT_EXPORT InputRouterImpl
@@ -60,14 +59,13 @@ class CONTENT_EXPORT InputRouterImpl
   void SendMouseEvent(const MouseEventWithLatencyInfo& mouse_event) override;
   void SendWheelEvent(
       const MouseWheelEventWithLatencyInfo& wheel_event) override;
-  void SendKeyboardEvent(const NativeWebKeyboardEvent& key_event,
-                         const ui::LatencyInfo& latency_info,
+  void SendKeyboardEvent(const NativeWebKeyboardEventWithLatencyInfo& key_event,
                          bool is_keyboard_shortcut) override;
   void SendGestureEvent(
       const GestureEventWithLatencyInfo& gesture_event) override;
   void SendTouchEvent(const TouchEventWithLatencyInfo& touch_event) override;
   const NativeWebKeyboardEvent* GetLastKeyboardEvent() const override;
-  void OnViewUpdated(int view_flags) override;
+  void NotifySiteIsMobileOptimized(bool is_mobile_optimized) override;
   void RequestNotificationWhenFlushed() override;
   bool HasPendingEvents() const override;
 
@@ -124,7 +122,7 @@ private:
                        bool is_keyboard_shortcut);
 
   // IPC message handlers
-  void OnInputEventAck(const InputHostMsg_HandleInputEvent_ACK_Params& ack);
+  void OnInputEventAck(const InputEventAck& ack);
   void OnDidOverscroll(const DidOverscrollParams& params);
   void OnMsgMoveCaretAck();
   void OnSelectMessageAck();
@@ -145,15 +143,18 @@ private:
   void ProcessInputEventAck(blink::WebInputEvent::Type event_type,
                             InputEventAckState ack_result,
                             const ui::LatencyInfo& latency_info,
+                            uint32 unique_touch_event_id,
                             AckSource ack_source);
 
   // Dispatches the ack'ed event to |ack_handler_|.
   void ProcessKeyboardAck(blink::WebInputEvent::Type type,
-                          InputEventAckState ack_result);
+                          InputEventAckState ack_result,
+                          const ui::LatencyInfo& latency);
 
   // Forwards a valid |next_mouse_move_| if |type| is MouseMove.
   void ProcessMouseAck(blink::WebInputEvent::Type type,
-                       InputEventAckState ack_result);
+                       InputEventAckState ack_result,
+                       const ui::LatencyInfo& latency);
 
   // Dispatches the ack'ed event to |ack_handler_|, forwarding queued events
   // from |coalesced_mouse_wheel_events_|.
@@ -169,7 +170,8 @@ private:
   // Forwards the event ack to |touch_event_queue_|, potentially triggering
   // dispatch of queued touch events, or the creation of gesture events.
   void ProcessTouchAck(InputEventAckState ack_result,
-                       const ui::LatencyInfo& latency);
+                       const ui::LatencyInfo& latency,
+                       uint32 unique_touch_event_id);
 
   // Called when a touch timeout-affecting bit has changed, in turn toggling the
   // touch ack timeout feature of the |touch_event_queue_| as appropriate. Input
@@ -211,6 +213,7 @@ private:
   // The next mouse move event to send (only non-null while mouse_move_pending_
   // is true).
   scoped_ptr<MouseEventWithLatencyInfo> next_mouse_move_;
+  MouseEventWithLatencyInfo current_mouse_move_;
 
   // (Similar to |mouse_move_pending_|.) True if a mouse wheel event was sent
   // and we are waiting for a corresponding ack.
@@ -230,14 +233,11 @@ private:
   // A queue of keyboard events. We can't trust data from the renderer so we
   // stuff key events into a queue and pop them out on ACK, feeding our copy
   // back to whatever unhandled handler instead of the returned version.
-  typedef std::deque<NativeWebKeyboardEvent> KeyQueue;
+  typedef std::deque<NativeWebKeyboardEventWithLatencyInfo> KeyQueue;
   KeyQueue key_queue_;
 
   // The time when an input event was sent to the client.
   base::TimeTicks input_event_start_time_;
-
-  // Cached flags from |OnViewUpdated()|, defaults to 0.
-  int current_view_flags_;
 
   // The source of the ack within the scope of |ProcessInputEventAck()|.
   // Defaults to ACK_SOURCE_NONE.

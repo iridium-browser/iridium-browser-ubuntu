@@ -22,7 +22,7 @@ var remoting = remoting || {};
 remoting.StatsAccumulator = function() {
   /**
    * A map from names to lists of values.
-   * @private {Object<string, Array<number>>}
+   * @private {Object<Array<number>>}
    */
   this.valueLists_ = {};
 
@@ -37,13 +37,13 @@ remoting.StatsAccumulator = function() {
 /**
  * Adds values to this object.
  *
- * @param {Object<string, number>} newValues
+ * @param {Object<number>} newValues
  */
 remoting.StatsAccumulator.prototype.add = function(newValues) {
   for (var key in newValues) {
     this.getValueList(key).push(newValues[key]);
   }
-  if (!this.timeOfFirstValue_) {
+  if (this.timeOfFirstValue_ === null) {
     this.timeOfFirstValue_ = new Date().getTime();
   }
 };
@@ -63,7 +63,7 @@ remoting.StatsAccumulator.prototype.empty = function() {
  * @return {number} milliseconds since the first value
  */
 remoting.StatsAccumulator.prototype.getTimeSinceFirstValue = function() {
-  if (!this.timeOfFirstValue_) {
+  if (this.timeOfFirstValue_ === null) {
     return 0;
   }
   return new Date().getTime() - this.timeOfFirstValue_;
@@ -121,4 +121,25 @@ remoting.StatsAccumulator.prototype.getValueList = function(key) {
     this.valueLists_[key] = valueList;
   }
   return valueList;
+};
+
+/**
+ * @return {?remoting.ClientSession.PerfStats} returns null if all fields are
+ *     zero.
+ */
+remoting.StatsAccumulator.prototype.getPerfStats = function() {
+  var stats = new remoting.ClientSession.PerfStats();
+  stats.videoBandwidth = this.calcMean('videoBandwidth');
+  stats.captureLatency = this.calcMean('captureLatency');
+  stats.encodeLatency = this.calcMean('encodeLatency');
+  stats.decodeLatency = this.calcMean('decodeLatency');
+  stats.renderLatency = this.calcMean('renderLatency');
+  stats.roundtripLatency = this.calcMean('roundtripLatency');
+
+  for (var key in stats) {
+    if (stats[key] !== 0) {
+      return stats;
+    }
+  }
+  return null;
 };

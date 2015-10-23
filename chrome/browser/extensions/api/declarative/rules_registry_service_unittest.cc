@@ -10,6 +10,9 @@
 #include "content/public/test/test_browser_thread.h"
 #include "extensions/browser/api/declarative/test_rules_registry.h"
 #include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_builder.h"
+#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -17,8 +20,8 @@ const char kExtensionId[] = "foo";
 
 void InsertRule(scoped_refptr<extensions::RulesRegistry> registry,
                 const std::string& id) {
-  std::vector<linked_ptr<extensions::RulesRegistry::Rule> > add_rules;
-  add_rules.push_back(make_linked_ptr(new extensions::RulesRegistry::Rule));
+  std::vector<linked_ptr<extensions::api::events::Rule>> add_rules;
+  add_rules.push_back(make_linked_ptr(new extensions::api::events::Rule));
   add_rules[0]->id.reset(new std::string(id));
   std::string error = registry->AddRules(kExtensionId, add_rules);
   EXPECT_TRUE(error.empty());
@@ -26,7 +29,7 @@ void InsertRule(scoped_refptr<extensions::RulesRegistry> registry,
 
 void VerifyNumberOfRules(scoped_refptr<extensions::RulesRegistry> registry,
                          size_t expected_number_of_rules) {
-  std::vector<linked_ptr<extensions::RulesRegistry::Rule> > get_rules;
+  std::vector<linked_ptr<extensions::api::events::Rule>> get_rules;
   registry->GetAllRules(kExtensionId, &get_rules);
   EXPECT_EQ(expected_number_of_rules, get_rules.size());
 }
@@ -96,8 +99,16 @@ TEST_F(RulesRegistryServiceTest, TestConstructionAndMultiThreading) {
   message_loop_.RunUntilIdle();
 
   // Test extension uninstalling.
-
-  registry_service.SimulateExtensionUninstalled(kExtensionId);
+  scoped_ptr<base::DictionaryValue> manifest = DictionaryBuilder()
+                                                   .Set("name", "Extension")
+                                                   .Set("version", "1.0")
+                                                   .Set("manifest_version", 2)
+                                                   .Build();
+  scoped_refptr<Extension> extension = ExtensionBuilder()
+                                           .SetManifest(manifest.Pass())
+                                           .SetID(kExtensionId)
+                                           .Build();
+  registry_service.SimulateExtensionUninstalled(extension.get());
 
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,

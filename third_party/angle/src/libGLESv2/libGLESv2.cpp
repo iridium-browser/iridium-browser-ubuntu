@@ -1256,6 +1256,11 @@ void GL_APIENTRY glRenderbufferStorageMultisampleANGLE(GLenum target, GLsizei sa
     return gl::RenderbufferStorageMultisampleANGLE(target, samples, internalformat, width, height);
 }
 
+void GL_APIENTRY glDiscardFramebufferEXT(GLenum target, GLsizei numAttachments, const GLenum *attachments)
+{
+    return gl::DiscardFramebufferEXT(target, numAttachments, attachments);
+}
+
 void GL_APIENTRY glDeleteFencesNV(GLsizei n, const GLuint* fences)
 {
     return gl::DeleteFencesNV(n, fences);
@@ -1411,4 +1416,28 @@ void GL_APIENTRY glFlushMappedBufferRangeEXT(GLenum target, GLintptr offset, GLs
     return gl::FlushMappedBufferRangeEXT(target, offset, length);
 }
 
+void GL_APIENTRY glInsertEventMarkerEXT(GLsizei length, const char *marker)
+{
+    return gl::InsertEventMarkerEXT(length, marker);
+}
+
+void GL_APIENTRY glPushGroupMarkerEXT(GLsizei length, const char *marker)
+{
+    return gl::PushGroupMarkerEXT(length, marker);
+}
+
+void GL_APIENTRY glPopGroupMarkerEXT()
+{
+    return gl::PopGroupMarkerEXT();
+}
+
+void GL_APIENTRY glEGLImageTargetTexture2DOES(GLenum target, GLeglImageOES image)
+{
+    return gl::EGLImageTargetTexture2DOES(target, image);
+}
+
+void GL_APIENTRY glEGLImageTargetRenderbufferStorageOES(GLenum target, GLeglImageOES image)
+{
+    return gl::EGLImageTargetRenderbufferStorageOES(target, image);
+}
 }

@@ -8,6 +8,7 @@
 #include "gm.h"
 #include "SkLightingImageFilter.h"
 #include "SkOffsetImageFilter.h"
+#include "SkPoint3.h"
 
 #define WIDTH 330
 #define HEIGHT 660
@@ -57,9 +58,9 @@ protected:
             make_bitmap();
             fInitialized = true;
         }
-        canvas->clear(0xFF101010);
+        canvas->clear(sk_tool_utils::color_to_565(0xFF101010));
         SkPaint checkPaint;
-        checkPaint.setColor(0xFF202020);
+        checkPaint.setColor(sk_tool_utils::color_to_565(0xFF202020));
         for (int y = 0; y < HEIGHT; y += 16) {
           for (int x = 0; x < WIDTH; x += 16) {
             canvas->save();
@@ -69,14 +70,18 @@ protected:
             canvas->restore();
           }
         }
-        SkPoint3 pointLocation(0, 0, SkIntToScalar(10));
+        SkPoint3 pointLocation = SkPoint3::Make(0, 0, SkIntToScalar(10));
         SkScalar azimuthRad = SkDegreesToRadians(SkIntToScalar(225));
         SkScalar elevationRad = SkDegreesToRadians(SkIntToScalar(5));
-        SkPoint3 distantDirection(SkScalarMul(SkScalarCos(azimuthRad), SkScalarCos(elevationRad)),
-                                  SkScalarMul(SkScalarSin(azimuthRad), SkScalarCos(elevationRad)),
-                                  SkScalarSin(elevationRad));
-        SkPoint3 spotLocation(SkIntToScalar(-10), SkIntToScalar(-10), SkIntToScalar(20));
-        SkPoint3 spotTarget(SkIntToScalar(40), SkIntToScalar(40), 0);
+        SkPoint3 distantDirection = SkPoint3::Make(SkScalarMul(SkScalarCos(azimuthRad),
+                                                               SkScalarCos(elevationRad)),
+                                                   SkScalarMul(SkScalarSin(azimuthRad),
+                                                               SkScalarCos(elevationRad)),
+                                                   SkScalarSin(elevationRad));
+        SkPoint3 spotLocation = SkPoint3::Make(SkIntToScalar(-10),
+                                               SkIntToScalar(-10),
+                                               SkIntToScalar(20));
+        SkPoint3 spotTarget = SkPoint3::Make(SkIntToScalar(40), SkIntToScalar(40), 0);
         SkScalar spotExponent = SK_Scalar1;
         SkScalar cutoffAngle = SkIntToScalar(15);
         SkScalar kd = SkIntToScalar(2);
@@ -165,7 +170,6 @@ private:
 
 //////////////////////////////////////////////////////////////////////////////
 
-static GM* MyFactory(void*) { return new ImageLightingGM; }
-static GMRegistry reg(MyFactory);
+DEF_GM( return SkNEW(ImageLightingGM); )
 
 }

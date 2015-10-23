@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry import story
 
 from page_sets import webgl_supported_shared_state
 
@@ -19,6 +19,12 @@ class ToughWebglCasesPage(page_module.Page):
     self.archive_data_file = 'data/tough_webgl_cases.json'
 
 
+  @property
+  def skipped_gpus(self):
+    # crbug.com/462729
+    return ['arm', 'broadcom', 'hisilicon', 'imagination', 'qualcomm',
+            'vivante']
+
   def RunNavigateSteps(self, action_runner):
     super(ToughWebglCasesPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition(
@@ -30,7 +36,7 @@ class ToughWebglCasesPage(page_module.Page):
       action_runner.Wait(5)
 
 
-class ToughWebglCasesPageSet(page_set_module.PageSet):
+class ToughWebglCasesPageSet(story.StorySet):
 
   """
   Description: Self-driven WebGL animation examples
@@ -39,7 +45,7 @@ class ToughWebglCasesPageSet(page_set_module.PageSet):
   def __init__(self):
     super(ToughWebglCasesPageSet, self).__init__(
       archive_data_file='data/tough_webgl_cases.json',
-      bucket=page_set_module.PUBLIC_BUCKET)
+      cloud_storage_bucket=story.PUBLIC_BUCKET)
 
     urls_list = [
       # pylint: disable=C0301
@@ -57,4 +63,4 @@ class ToughWebglCasesPageSet(page_set_module.PageSet):
       'http://webglsamples.googlecode.com/hg/dynamic-cubemap/dynamic-cubemap.html'
     ]
     for url in urls_list:
-      self.AddUserStory(ToughWebglCasesPage(url, self))
+      self.AddStory(ToughWebglCasesPage(url, self))

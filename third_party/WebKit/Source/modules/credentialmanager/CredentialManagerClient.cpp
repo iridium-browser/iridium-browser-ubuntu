@@ -58,25 +58,25 @@ void CredentialManagerClient::dispatchFailedSignIn(const WebCredential& credenti
     m_client->dispatchFailedSignIn(credential, callbacks);
 }
 
-void CredentialManagerClient::dispatchSignedIn(const WebCredential& credential, WebCredentialManagerClient::NotificationCallbacks* callbacks)
+void CredentialManagerClient::dispatchStore(const WebCredential& credential, WebCredentialManagerClient::NotificationCallbacks* callbacks)
 {
     if (!m_client)
         return;
-    m_client->dispatchSignedIn(credential, callbacks);
+    m_client->dispatchStore(credential, callbacks);
 }
 
-void CredentialManagerClient::dispatchSignedOut(WebCredentialManagerClient::NotificationCallbacks* callbacks)
+void CredentialManagerClient::dispatchRequireUserMediation(WebCredentialManagerClient::NotificationCallbacks* callbacks)
 {
     if (!m_client)
         return;
-    m_client->dispatchSignedOut(callbacks);
+    m_client->dispatchRequireUserMediation(callbacks);
 }
 
-void CredentialManagerClient::dispatchRequest(bool zeroClickOnly, const WebVector<WebURL>& federations, WebCredentialManagerClient::RequestCallbacks* callbacks)
+void CredentialManagerClient::dispatchGet(bool zeroClickOnly, const WebVector<WebURL>& federations, WebCredentialManagerClient::RequestCallbacks* callbacks)
 {
     if (!m_client)
         return;
-    m_client->dispatchRequest(zeroClickOnly, federations, callbacks);
+    m_client->dispatchGet(zeroClickOnly, federations, callbacks);
 }
 
 } // namespace blink

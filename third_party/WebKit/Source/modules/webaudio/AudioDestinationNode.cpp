@@ -26,11 +26,12 @@
 #if ENABLE(WEB_AUDIO)
 #include "modules/webaudio/AudioDestinationNode.h"
 
-#include "modules/webaudio/AudioContext.h"
+#include "modules/webaudio/AbstractAudioContext.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "platform/audio/AudioUtilities.h"
 #include "platform/audio/DenormalDisabler.h"
+#include "wtf/Atomics.h"
 
 namespace blink {
 
@@ -90,12 +91,13 @@ void AudioDestinationHandler::render(AudioBus* sourceBus, AudioBus* destinationB
     context()->handlePostRenderTasks();
 
     // Advance current sample-frame.
-    m_currentSampleFrame += numberOfFrames;
+    size_t newSampleFrame = m_currentSampleFrame + numberOfFrames;
+    releaseStore(&m_currentSampleFrame, newSampleFrame);
 }
 
 // ----------------------------------------------------------------
 
-AudioDestinationNode::AudioDestinationNode(AudioContext& context)
+AudioDestinationNode::AudioDestinationNode(AbstractAudioContext& context)
     : AudioNode(context)
 {
 }

@@ -13,16 +13,8 @@
 #include "SkBlitRow.h"
 #include "SkBlitRow_opts_SSE2.h"
 #include "SkBlitRow_opts_SSE4.h"
-#include "SkBlurImage_opts_SSE2.h"
-#include "SkBlurImage_opts_SSE4.h"
 #include "SkLazyPtr.h"
-#include "SkMorphology_opts.h"
-#include "SkMorphology_opts_SSE2.h"
 #include "SkRTConf.h"
-#include "SkUtils.h"
-#include "SkUtils_opts_SSE2.h"
-#include "SkXfermode.h"
-#include "SkXfermode_proccoeff.h"
 
 #if defined(_MSC_VER) && defined(_WIN64)
 #include <intrin.h>
@@ -260,30 +252,6 @@ SkBlitRow::Proc32 SkBlitRow::PlatformProcs32(unsigned flags) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-SkBlitMask::ColorProc SkBlitMask::PlatformColorProcs(SkColorType dstCT,
-                                                     SkMask::Format maskFormat,
-                                                     SkColor color) {
-    if (SkMask::kA8_Format != maskFormat) {
-        return NULL;
-    }
-
-    ColorProc proc = NULL;
-    if (supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
-        switch (dstCT) {
-            case kN32_SkColorType:
-                // The SSE2 version is not (yet) faster for black, so we check
-                // for that.
-                if (SK_ColorBLACK != color) {
-                    proc = SkARGB32_A8_BlitMask_SSE2;
-                }
-                break;
-            default:
-                break;
-        }
-    }
-    return proc;
-}
-
 SkBlitMask::BlitLCD16RowProc SkBlitMask::PlatformBlitRowProcs16(bool isOpaque) {
     if (supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
         if (isOpaque) {
@@ -298,96 +266,5 @@ SkBlitMask::BlitLCD16RowProc SkBlitMask::PlatformBlitRowProcs16(bool isOpaque) {
 }
 
 SkBlitMask::RowProc SkBlitMask::PlatformRowProcs(SkColorType, SkMask::Format, RowFlags) {
-    return NULL;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-SkMemset16Proc SkMemset16GetPlatformProc() {
-    if (supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
-        return sk_memset16_SSE2;
-    } else {
-        return NULL;
-    }
-}
-
-SkMemset32Proc SkMemset32GetPlatformProc() {
-    if (supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
-        return sk_memset32_SSE2;
-    } else {
-        return NULL;
-    }
-}
-
-SkMemcpy32Proc SkMemcpy32GetPlatformProc() {
-    if (supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
-        return sk_memcpy32_SSE2;
-    } else {
-        return NULL;
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-SkMorphologyImageFilter::Proc SkMorphologyGetPlatformProc(SkMorphologyProcType type) {
-    if (!supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
-        return NULL;
-    }
-    switch (type) {
-        case kDilateX_SkMorphologyProcType:
-            return SkDilateX_SSE2;
-        case kDilateY_SkMorphologyProcType:
-            return SkDilateY_SSE2;
-        case kErodeX_SkMorphologyProcType:
-            return SkErodeX_SSE2;
-        case kErodeY_SkMorphologyProcType:
-            return SkErodeY_SSE2;
-        default:
-            return NULL;
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool SkBoxBlurGetPlatformProcs(SkBoxBlurProc* boxBlurX,
-                               SkBoxBlurProc* boxBlurXY,
-                               SkBoxBlurProc* boxBlurYX) {
-    if (supports_simd(SK_CPU_SSE_LEVEL_SSE41)) {
-        return SkBoxBlurGetPlatformProcs_SSE4(boxBlurX, boxBlurXY, boxBlurYX);
-    }
-    else if (supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
-        return SkBoxBlurGetPlatformProcs_SSE2(boxBlurX, boxBlurXY, boxBlurYX);
-    }
-    return false;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-extern SkProcCoeffXfermode* SkPlatformXfermodeFactory_impl_SSE2(const ProcCoeff& rec,
-                                                                SkXfermode::Mode mode);
-
-SkProcCoeffXfermode* SkPlatformXfermodeFactory_impl(const ProcCoeff& rec,
-                                                    SkXfermode::Mode mode);
-
-SkProcCoeffXfermode* SkPlatformXfermodeFactory_impl(const ProcCoeff& rec,
-                                                    SkXfermode::Mode mode) {
-    return NULL;
-}
-
-SkProcCoeffXfermode* SkPlatformXfermodeFactory(const ProcCoeff& rec,
-                                               SkXfermode::Mode mode);
-
-SkProcCoeffXfermode* SkPlatformXfermodeFactory(const ProcCoeff& rec,
-                                               SkXfermode::Mode mode) {
-    if (supports_simd(SK_CPU_SSE_LEVEL_SSE2)) {
-        return SkPlatformXfermodeFactory_impl_SSE2(rec, mode);
-    } else {
-        return SkPlatformXfermodeFactory_impl(rec, mode);
-    }
-}
-
-SkXfermodeProc SkPlatformXfermodeProcFactory(SkXfermode::Mode mode);
-
-SkXfermodeProc SkPlatformXfermodeProcFactory(SkXfermode::Mode mode) {
     return NULL;
 }

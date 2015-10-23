@@ -10,7 +10,7 @@ var filelist = {};
 /**
  * Custom column model for advanced auto-resizing.
  *
- * @param {!Array.<cr.ui.table.TableColumn>} tableColumns Table columns.
+ * @param {!Array<cr.ui.table.TableColumn>} tableColumns Table columns.
  * @extends {cr.ui.table.TableColumnModel}
  * @constructor
  */
@@ -37,7 +37,7 @@ FileTableColumnModel.MIN_WIDTH_ = 10;
  * than MIN_WIDTH_.
  *
  * @private
- * @param {Array.<number>} newPos Positions of each column dividers.
+ * @param {Array<number>} newPos Positions of each column dividers.
  */
 FileTableColumnModel.prototype.applyColumnPositions_ = function(newPos) {
   // Check the minimum width and adjust the positions.
@@ -465,7 +465,7 @@ FileTable.decorate = function(
    * @param {number} y Y coordinate value.
    * @param {number=} opt_width Width of the coordinate.
    * @param {number=} opt_height Height of the coordinate.
-   * @return {Array.<number>} Index list of hit elements.
+   * @return {Array<number>} Index list of hit elements.
    * @this {cr.ui.List}
    */
   self.list.getHitElements = function(x, y, opt_width, opt_height) {
@@ -478,16 +478,6 @@ FileTable.decorate = function(
     }
     return currentSelection;
   };
-};
-
-/**
- * @override
- */
-FileTable.prototype.sort = function(i) {
-  this.dataModel.sort(this.columnModel.getId(i),
-                      this.columnModel.getDefaultOrder(i));
-  if (this.selectionModel.selectedIndex === -1)
-    this.list.scrollTop = 0;
 };
 
 /**
@@ -685,9 +675,11 @@ FileTable.prototype.renderName_ = function(entry, columnId, table) {
   var label = /** @type {!HTMLDivElement} */
       (this.ownerDocument.createElement('div'));
 
-  var icon = filelist.renderFileTypeIcon(this.ownerDocument, entry);
-  if (FileType.isImage(entry) || FileType.isVideo(entry) ||
-      FileType.isRaw(entry)) {
+  var mimeType = this.metadataModel_.getCache([entry],
+      ['contentMimeType'])[0].contentMimeType;
+  var icon = filelist.renderFileTypeIcon(this.ownerDocument, entry, mimeType);
+  if (FileType.isImage(entry, mimeType) || FileType.isVideo(entry, mimeType) ||
+      FileType.isRaw(entry, mimeType)) {
     icon.appendChild(this.renderThumbnail_(entry));
   }
   icon.appendChild(this.renderCheckmark_());
@@ -827,7 +819,11 @@ FileTable.prototype.renderType_ = function(entry, columnId, table) {
   var div = /** @type {!HTMLDivElement} */
       (this.ownerDocument.createElement('div'));
   div.className = 'type';
-  div.textContent = FileListModel.getFileTypeString(FileType.getType(entry));
+
+  var mimeType = this.metadataModel_.getCache([entry],
+      ['contentMimeType'])[0].contentMimeType;
+  div.textContent = FileListModel.getFileTypeString(
+      FileType.getType(entry, mimeType));
   return div;
 };
 
@@ -908,7 +904,7 @@ FileTable.prototype.updateFileMetadata = function(item, entry) {
 /**
  * Updates list items 'in place' on metadata change.
  * @param {string} type Type of metadata change.
- * @param {Array.<Entry>} entries Entries to update.
+ * @param {Array<Entry>} entries Entries to update.
  */
 FileTable.prototype.updateListItemsMetadata = function(type, entries) {
   var urls = util.entriesToURLs(entries);
@@ -1085,12 +1081,13 @@ filelist.decorateListItem = function(li, entry, metadataModel) {
  * Render the type column of the detail table.
  * @param {!Document} doc Owner document.
  * @param {!Entry} entry The Entry object to render.
+ * @param {string=} opt_mimeType Optional mime type for the file.
  * @return {!HTMLDivElement} Created element.
  */
-filelist.renderFileTypeIcon = function(doc, entry) {
+filelist.renderFileTypeIcon = function(doc, entry, opt_mimeType) {
   var icon = /** @type {!HTMLDivElement} */ (doc.createElement('div'));
   icon.className = 'detail-icon';
-  icon.setAttribute('file-type-icon', FileType.getIcon(entry));
+  icon.setAttribute('file-type-icon', FileType.getIcon(entry, opt_mimeType));
   return icon;
 };
 

@@ -44,29 +44,6 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/*  Scalars (the fractional value type in skia) can be implemented either as
-    floats or 16.16 integers (fixed). Exactly one of these two symbols must be
-    defined.
-*/
-//#define SK_SCALAR_IS_FLOAT
-//#define SK_SCALAR_IS_FIXED
-
-
-/*  Somewhat independent of how SkScalar is implemented, Skia also wants to know
-    if it can use floats at all. Naturally, if SK_SCALAR_IS_FLOAT is defined,
-    then so muse SK_CAN_USE_FLOAT, but if scalars are fixed, SK_CAN_USE_FLOAT
-    can go either way.
- */
-//#define SK_CAN_USE_FLOAT
-
-/*  For some performance-critical scalar operations, skia will optionally work
-    around the standard float operators if it knows that the CPU does not have
-    native support for floats. If your environment uses software floating point,
-    define this flag.
- */
-//#define SK_SOFTWARE_FLOAT
-
-
 /*  Skia has lots of debug-only code. Often this is just null checks or other
     parameter checking, but sometimes it can be quite intrusive (e.g. check that
     each 32bit pixel is in premultiplied form). This code can be very useful
@@ -96,18 +73,6 @@
  */
 //#define SK_CPU_BENDIAN
 //#define SK_CPU_LENDIAN
-
-
-/*  Some compilers don't support long long for 64bit integers. If yours does
-    not, define this to the appropriate type.
- */
-//#define SkLONGLONG int64_t
-
-
-/*  Some envorinments do not suport writable globals (eek!). If yours does not,
-    define this flag.
- */
-//#define SK_USE_RUNTIME_GLOBALS
 
 /*  If zlib is available and you want to support the flate compression
     algorithm (used in PDF generation), define SK_ZLIB_INCLUDE to be the
@@ -245,44 +210,20 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_GETTOPDEVICE
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_IMAGEFILTER_CTM
-#   define SK_SUPPORT_LEGACY_IMAGEFILTER_CTM
-#endif
-
-#ifndef    SK_LEGACY_DRAWPICTURECALLBACK
-#   define SK_LEGACY_DRAWPICTURECALLBACK
-#endif
-
 #ifndef    SK_SUPPORT_LEGACY_GETDEVICE
 #   define SK_SUPPORT_LEGACY_GETDEVICE
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_PUBLIC_IMAGEINFO_FIELDS
-#   define SK_SUPPORT_LEGACY_PUBLIC_IMAGEINFO_FIELDS
 #endif
 
 #ifndef    SK_IGNORE_ETC1_SUPPORT
 #   define SK_IGNORE_ETC1_SUPPORT
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_IMAGEFILTER_TRANSFORM_SCRATCH_LAYTER
-#   define SK_SUPPORT_LEGACY_IMAGEFILTER_TRANSFORM_SCRATCH_LAYTER
-#endif
-
 #ifndef    SK_IGNORE_GPU_DITHER
 #   define SK_IGNORE_GPU_DITHER
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_INT_COLORMATRIX
-#   define SK_SUPPORT_LEGACY_INT_COLORMATRIX
-#endif
-
-#ifndef    SK_LEGACY_STROKE_CURVES
-#   define SK_LEGACY_STROKE_CURVES
-#endif
-
-#ifndef    SK_PREFER_LEGACY_FLOAT_XFERMODES
-#   define SK_PREFER_LEGACY_FLOAT_XFERMODES
+#ifndef    SK_SUPPORT_LEGACY_SHADERBITMAPTYPE
+#   define SK_SUPPORT_LEGACY_SHADERBITMAPTYPE
 #endif
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
@@ -301,7 +242,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
  */
 #define SK_GDI_ALWAYS_USE_TEXTMETRICS_FOR_FONT_METRICS
 
-#define IGNORE_ROT_AA_RECT_OPT
 #define SK_IGNORE_BLURRED_RRECT_OPT
 #define SK_USE_DISCARDABLE_SCALEDIMAGECACHE
 #define SK_WILL_NEVER_DRAW_PERSPECTIVE_TEXT

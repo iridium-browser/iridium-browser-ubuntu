@@ -32,9 +32,9 @@
 #define RenderedPosition_h
 
 #include "core/CoreExport.h"
-#include "core/dom/Position.h"
-#include "core/editing/TextAffinity.h"
+#include "core/editing/Position.h"
 #include "core/layout/line/InlineBox.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
@@ -44,10 +44,12 @@ class VisiblePosition;
 struct CompositedSelectionBound;
 
 class RenderedPosition {
+    STACK_ALLOCATED();
 public:
     RenderedPosition();
     explicit RenderedPosition(const VisiblePosition&);
-    explicit RenderedPosition(const Position&, EAffinity);
+    RenderedPosition(const Position&, TextAffinity);
+    RenderedPosition(const PositionInComposedTree&, TextAffinity);
     bool isEquivalent(const RenderedPosition&) const;
 
     bool isNull() const { return !m_layoutObject; }

@@ -1,7 +1,7 @@
 Name: Android Platform engineering tools
 Short Name: android platform development
 URL: https://android.googlesource.com/platform/development
-Version: 0
+Version: unknown
 Date: 2014/05/02
 Revision: 1b10ec4
 License: Apache 2.0
@@ -26,7 +26,8 @@ include, but are not limited to, the following:
 Added memoization of addr2line and objdump.
 Added option to change the amount of symbolization done.
 Updated output directories to use environment variable.
-When calling addr2line, check the symbol is a file (and not a directory).
+When calling addr2line, check the symbol is a file that looks like it contains
+    symbols.
 Added support for parsing LOG(FATAL) and DCHECK errors and their
     stack traces, as emitted by src/base/debug/stack_trace_android.cc
 Added support for finding symbols when library is loaded directly from the APK.
@@ -40,7 +41,13 @@ Android relocation packing tool details:
     Create a nativehelper/ScopedFd.h to satisfy inclusion from main.cc
     Create gyp build
     Create gn build (currently packer only; no unit tests)
-    Apply https://android-review.googlesource.com/#/c/143878/
-    Apply https://android-review.googlesource.com/#/c/147620/
-          https://android-review.googlesource.com/#/c/147745/
-          https://android-review.googlesource.com/#/c/148073/
+    List of bionic changes currently included:
+      Refresh: https://android-review.googlesource.com/#/c/143878/
+      Refresh: https://android-review.googlesource.com/#/c/147620/
+               https://android-review.googlesource.com/#/c/147745/
+               https://android-review.googlesource.com/#/c/148073/
+      Refresh: https://android-review.googlesource.com/#/c/151901/
+               https://android-review.googlesource.com/#/c/149300/
+               https://android-review.googlesource.com/#/c/148822/
+               https://android-review.googlesource.com/#/c/148492/
+               https://android-review.googlesource.com/#/c/148175/

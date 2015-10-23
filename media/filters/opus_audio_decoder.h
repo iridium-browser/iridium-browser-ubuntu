@@ -33,7 +33,7 @@ class MEDIA_EXPORT OpusAudioDecoder : public AudioDecoder {
   // AudioDecoder implementation.
   std::string GetDisplayName() const override;
   void Initialize(const AudioDecoderConfig& config,
-                  const PipelineStatusCB& status_cb,
+                  const InitCB& init_cb,
                   const OutputCB& output_cb) override;
   void Decode(const scoped_refptr<DecoderBuffer>& buffer,
               const DecodeCB& decode_cb) override;
@@ -56,11 +56,6 @@ class MEDIA_EXPORT OpusAudioDecoder : public AudioDecoder {
   AudioDecoderConfig config_;
   OutputCB output_cb_;
   OpusMSDecoder* opus_decoder_;
-
-  // When the input timestamp is |start_input_timestamp_| the decoder needs to
-  // drop |config_.codec_delay()| frames.
-  base::TimeDelta start_input_timestamp_;
-
   scoped_ptr<AudioDiscardHelper> discard_helper_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(OpusAudioDecoder);

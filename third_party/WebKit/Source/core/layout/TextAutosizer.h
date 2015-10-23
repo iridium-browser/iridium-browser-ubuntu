@@ -65,14 +65,17 @@ public:
     void record(const LayoutBlock*);
     void destroy(const LayoutBlock*);
 
+    bool pageNeedsAutosizing() const;
+
     DECLARE_TRACE();
 
     class LayoutScope {
+        STACK_ALLOCATED();
     public:
         explicit LayoutScope(LayoutBlock*);
         ~LayoutScope();
     protected:
-        TextAutosizer* m_textAutosizer;
+        RawPtrWillBeMember<TextAutosizer> m_textAutosizer;
         LayoutBlock* m_block;
     };
 
@@ -148,10 +151,10 @@ private:
     };
 
     struct Cluster {
-        explicit Cluster(const LayoutBlock* root, BlockFlags flags, Cluster* parent, Supercluster* supercluster = 0)
+        explicit Cluster(const LayoutBlock* root, BlockFlags flags, Cluster* parent, Supercluster* supercluster = nullptr)
             : m_root(root)
             , m_flags(flags)
-            , m_deepestBlockContainingAllText(0)
+            , m_deepestBlockContainingAllText(nullptr)
             , m_parent(parent)
             , m_multiplier(0)
             , m_hasEnoughTextToAutosize(UnknownAmountOfText)
@@ -260,9 +263,9 @@ private:
     void resetMultipliers();
     BeginLayoutBehavior prepareForLayout(const LayoutBlock*);
     void prepareClusterStack(const LayoutObject*);
-    bool clusterHasEnoughTextToAutosize(Cluster*, const LayoutBlock* widthProvider = 0);
-    bool superclusterHasEnoughTextToAutosize(Supercluster*, const LayoutBlock* widthProvider = 0);
-    bool clusterWouldHaveEnoughTextToAutosize(const LayoutBlock* root, const LayoutBlock* widthProvider = 0);
+    bool clusterHasEnoughTextToAutosize(Cluster*, const LayoutBlock* widthProvider = nullptr);
+    bool superclusterHasEnoughTextToAutosize(Supercluster*, const LayoutBlock* widthProvider = nullptr);
+    bool clusterWouldHaveEnoughTextToAutosize(const LayoutBlock* root, const LayoutBlock* widthProvider = nullptr);
     Fingerprint getFingerprint(const LayoutObject*);
     Fingerprint computeFingerprint(const LayoutObject*);
     Cluster* maybeCreateCluster(const LayoutBlock*);

@@ -8,6 +8,7 @@
   ],
   'targets': [
     {
+      # TODO bug 512902 this needs to be ported to GN.
       'target_name': 'shared_test_files',
       'type': 'none',
       'variables': {
@@ -123,7 +124,7 @@
           # Note that the .nexe names are embedded in this file.
           'extension_validation_cache/manifest.json',
           'load_util.js',
-	  'simple_cc.js',
+          'simple_cc.js',
         ],
       },
     },
@@ -650,16 +651,22 @@
       'target_name': 'pnacl_error_handling_test',
       'type': 'none',
       'variables': {
+        'nexe_target': 'pnacl_errors',
+        'extra_args': ['--nonstable-pnacl'],
         'build_pnacl_newlib': 1,
         'nexe_destination_dir': 'nacl_test_data',
-        # Use prebuilt NMF files.
+        'sources': [
+          'simple.cc',
+        ],
         'generate_nmf': 0,
         'test_files': [
           'pnacl_error_handling/pnacl_error_handling.html',
           'pnacl_error_handling/bad.pexe',
           'pnacl_error_handling/pnacl_bad_pexe.nmf',
+          'pnacl_error_handling/pnacl_bad_pexe_O0.nmf',
           'pnacl_error_handling/pnacl_bad_doesnotexist.nmf',
           'pnacl_error_handling/pnacl_illformed_manifest.nmf',
+          'pnacl_error_handling/pnacl_nonfinal_pexe_O0.nmf',
         ],
       },
     },
@@ -857,7 +864,7 @@
     },
   ],
   'conditions': [
-    ['target_arch!="arm"', {
+    ['target_arch!="arm" and disable_newlib==0', {
       # Source file does not have asm for ARM.
       'targets': [
         {

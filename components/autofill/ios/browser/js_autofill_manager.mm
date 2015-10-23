@@ -10,26 +10,13 @@
 
 @implementation JsAutofillManager
 
-- (void)fetchFormsWithRequirements:(autofill::RequirementsMask)requirements
-        minimumRequiredFieldsCount:(NSUInteger)requiredFieldsCount
-                 completionHandler:(void (^)(NSString*))completionHandler {
+- (void)fetchFormsWithMinimumRequiredFieldsCount:(NSUInteger)requiredFieldsCount
+                               completionHandler:
+                                   (void (^)(NSString*))completionHandler {
   DCHECK(completionHandler);
-  // Convert from C++ enum to JS enum.
-  NSString* requirementsJS = nil;
-  switch (requirements) {
-    case autofill::REQUIRE_NONE:
-      requirementsJS = @"__gCrWeb.autofill.REQUIREMENTS_MASK_NONE";
-      break;
-    case autofill::REQUIRE_AUTOCOMPLETE:
-      requirementsJS =
-          @"__gCrWeb.autofill.REQUIREMENTS_MASK_REQUIRE_AUTOCOMPLETE";
-      break;
-  }
-  DCHECK(requirementsJS);
-
   NSString* extractFormsJS = [NSString
-      stringWithFormat:@"__gCrWeb.autofill.extractForms(%" PRIuNS ", %@);",
-                       requiredFieldsCount, requirementsJS];
+      stringWithFormat:@"__gCrWeb.autofill.extractForms(%" PRIuNS ");",
+                       requiredFieldsCount];
   [self evaluate:extractFormsJS
       stringResultHandler:^(NSString* result, NSError*) {
         completionHandler(result);
@@ -47,6 +34,16 @@
   return @"__gCrWeb.autofill";
 }
 
+- (void)storeActiveElement {
+  NSString* js = @"__gCrWeb.autofill.storeActiveElement()";
+  [self evaluate:js stringResultHandler:nil];
+}
+
+- (void)clearActiveElement {
+  NSString* js = @"__gCrWeb.autofill.clearActiveElement()";
+  [self evaluate:js stringResultHandler:nil];
+}
+
 - (void)fillActiveFormField:(NSString*)dataString
           completionHandler:(ProceduralBlock)completionHandler {
   web::JavaScriptCompletion resultHandler = ^void(NSString*, NSError*) {
@@ -60,32 +57,34 @@
 }
 
 - (void)fillForm:(NSString*)dataString
-    completionHandler:(ProceduralBlock)completionHandler {
+    forceFillFieldName:(NSString*)forceFillFieldName
+     completionHandler:(ProceduralBlock)completionHandler {
   DCHECK(completionHandler);
-  NSString* fillFormJS = [NSString
-      stringWithFormat:@"__gCrWeb.autofill.fillForm(%@);", dataString];
+  std::string fieldName =
+      forceFillFieldName
+          ? base::GetQuotedJSONString([forceFillFieldName UTF8String])
+          : "null";
+  NSString* fillFormJS =
+      [NSString stringWithFormat:@"__gCrWeb.autofill.fillForm(%@, %s);",
+                                 dataString, fieldName.c_str()];
   id stringResultHandler = ^(NSString*, NSError*) {
     completionHandler();
   };
   return [self evaluate:fillFormJS stringResultHandler:stringResultHandler];
 }
 
-- (void)dispatchAutocompleteEvent:(NSString*)formName {
-  NSString* dispatchAutocompleteEventJS = [NSString
-      stringWithFormat:@"__gCrWeb.autofill.dispatchAutocompleteEvent(%s);",
-                       base::GetQuotedJSONString([formName UTF8String])
-                           .c_str()];
-  [self evaluate:dispatchAutocompleteEventJS stringResultHandler:nil];
-}
+- (void)clearAutofilledFieldsForFormNamed:(NSString*)formName
+                        completionHandler:(ProceduralBlock)completionHandler {
+  DCHECK(completionHandler);
+  web::JavaScriptCompletion resultHandler = ^void(NSString*, NSError*) {
+    completionHandler();
+  };
 
-- (void)dispatchAutocompleteErrorEvent:(NSString*)formName
-                            withReason:(NSString*)reason {
-  NSString* autocompleteErrorJS = [NSString
-      stringWithFormat:
-          @"__gCrWeb.autofill.dispatchAutocompleteErrorEvent(%s, %s);",
-          base::GetQuotedJSONString([formName UTF8String]).c_str(),
-          base::GetQuotedJSONString([reason UTF8String]).c_str()];
-  [self evaluate:autocompleteErrorJS stringResultHandler:nil];
+  NSString* js =
+      [NSString stringWithFormat:
+                    @"__gCrWeb.autofill.clearAutofilledFields(%s);",
+                    base::GetQuotedJSONString([formName UTF8String]).c_str()];
+  [self evaluate:js stringResultHandler:resultHandler];
 }
 
 - (void)fillPredictionData:(NSString*)dataString {

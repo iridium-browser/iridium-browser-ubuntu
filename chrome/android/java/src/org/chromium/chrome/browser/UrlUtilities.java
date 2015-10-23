@@ -8,6 +8,7 @@ import android.text.TextUtils;
 
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.Log;
+import org.chromium.base.VisibleForTesting;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
@@ -35,7 +36,7 @@ public class UrlUtilities {
      * URI schemes that Chrome can download.
      */
     private static final HashSet<String> DOWNLOADABLE_SCHEMES = CollectionUtil.newHashSet(
-            "data", "filesystem", "http", "https");
+            "data", "filesystem", "http", "https", "blob", "file");
 
     /**
      * URI schemes that are internal to Chrome.
@@ -125,7 +126,7 @@ public class UrlUtilities {
     }
 
     /**
-     * Refer to url_fixer::FixupURL.
+     * Refer to url_formatter::FixupURL.
      *
      * Given a URL-like string, returns a real URL or null. For example:
      *  - "google.com" -> "http://google.com/"
@@ -231,13 +232,14 @@ public class UrlUtilities {
      * URL, as specified at
      * https://developer.chrome.com/multidevice/android/intents#syntax.
      */
+    @VisibleForTesting
     public static boolean validateIntentUrl(String url) {
         if (url == null) {
             Log.d(TAG, "url was null");
             return false;
         }
 
-        URI parsed = null;
+        URI parsed;
         try {
             parsed = new URI(url);
         } catch (URISyntaxException e) {
@@ -252,7 +254,8 @@ public class UrlUtilities {
             return false;
         }
 
-        if (!parsed.getScheme().equals("intent")) {
+        String scheme = parsed.getScheme();
+        if (scheme == null || !scheme.equals("intent")) {
             Log.d(TAG, "scheme was not 'intent'");
             return false;
         }

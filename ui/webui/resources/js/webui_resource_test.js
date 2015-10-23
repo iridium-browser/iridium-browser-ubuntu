@@ -121,7 +121,7 @@ function assertDeepEquals(expected, observed, opt_message) {
 (function(exports) {
   /**
    * List of test cases.
-   * @type {Array.<string>} List of function names for tests to run.
+   * @type {Array<string>} List of function names for tests to run.
    */
   var testCases = [];
 
@@ -143,11 +143,26 @@ function assertDeepEquals(expected, observed, opt_message) {
    */
   function runTests() {
     for (var name in window) {
-      if (typeof window[name] == 'function' && /^test/.test(name))
-        testCases.push(name);
+      try {
+        if (typeof window[name] == 'function' && /^test/.test(name))
+          testCases.push(name);
+      } catch(e) {
+        if (location.protocol == 'data:' && e.name == 'SecurityError') {
+          // Sometimes this file gets loaded as a data: URI. That causes issues
+          // when it touches window.caches or window.cookie.
+        } else {
+          throw e;
+        }
+      }
     }
     if (!testCases.length) {
       console.error('Failed to find test cases.');
+      cleanTestRun = false;
+    }
+    try {
+      if (window.setUpPage)
+        window.setUpPage();
+    } catch(err) {
       cleanTestRun = false;
     }
     continueTesting();

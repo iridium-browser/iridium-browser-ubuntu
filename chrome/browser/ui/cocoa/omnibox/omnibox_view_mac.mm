@@ -17,13 +17,14 @@
 #include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_popup_view_mac.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
-#include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/omnibox/chrome_omnibox_client.h"
+#include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/omnibox/autocomplete_input.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/omnibox_field_trial.h"
+#include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/omnibox_edit_controller.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/omnibox_popup_model.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/constants.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
@@ -141,7 +142,10 @@ OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
                                Profile* profile,
                                CommandUpdater* command_updater,
                                AutocompleteTextField* field)
-    : OmniboxView(profile, controller, command_updater),
+    : OmniboxView(
+          controller,
+          make_scoped_ptr(new ChromeOmniboxClient(controller, profile))),
+      profile_(profile),
       popup_view_(new OmniboxPopupViewMac(this, model(), field)),
       field_(field),
       saved_temporary_selection_(NSMakeRange(0, 0)),
@@ -219,11 +223,25 @@ void OmniboxViewMac::Update() {
     controller()->GetToolbarModel()->set_url_replacement_enabled(true);
     model()->UpdatePermanentText();
 
+    const bool was_select_all = IsSelectAll();
+    NSTextView* text_view =
+        base::mac::ObjCCastStrict<NSTextView>([field_ currentEditor]);
+    const bool was_reversed =
+        [text_view selectionAffinity] == NSSelectionAffinityUpstream;
+
     // Restore everything to the baseline look.
     RevertAll();
 
-    // TODO(shess): Figure out how this case is used, to make sure
-    // we're getting the selection and popup right.
+    // Only select all when we have focus.  If we don't have focus, selecting
+    // all is unnecessary since the selection will change on regaining focus,
+    // and can in fact cause artifacts, e.g. if the user is on the NTP and
+    // clicks a link to navigate, causing |was_select_all| to be vacuously true
+    // for the empty omnibox, and we then select all here, leading to the
+    // trailing portion of a long URL being scrolled into view.  We could try
+    // and address cases like this, but it seems better to just not muck with
+    // things when the omnibox isn't focused to begin with.
+    if (was_select_all && model()->has_focus())
+      SelectAll(was_reversed);
   } else {
     // TODO(shess): This corresponds to _win and _gtk, except those
     // guard it with a test for whether the security level changed.
@@ -343,13 +361,17 @@ void OmniboxViewMac::GetSelectionBounds(base::string16::size_type* start,
 }
 
 void OmniboxViewMac::SelectAll(bool reversed) {
-  // TODO(shess): Figure out what |reversed| implies.  The gtk version
-  // has it imply inverting the selection front to back, but I don't
-  // even know if that makes sense for Mac.
+  DCHECK(!in_coalesced_update_block_);
+  if (!model()->has_focus())
+    return;
 
-  // TODO(shess): Verify that we should be stealing focus at this
-  // point.
-  SetSelectedRange(NSMakeRange(0, GetTextLength()));
+  NSTextView* text_view =
+      base::mac::ObjCCastStrict<NSTextView>([field_ currentEditor]);
+  NSSelectionAffinity affinity =
+      reversed ? NSSelectionAffinityUpstream : NSSelectionAffinityDownstream;
+  NSRange range = NSMakeRange(0, GetTextLength());
+
+  [text_view setSelectedRange:range affinity:affinity stillSelecting:NO];
 }
 
 void OmniboxViewMac::RevertAll() {
@@ -409,11 +431,11 @@ void OmniboxViewMac::SetTextInternal(const base::string16& display_text) {
   }
 
   NSString* ss = base::SysUTF16ToNSString(display_text);
-  NSMutableAttributedString* as =
+  NSMutableAttributedString* attributedString =
       [[[NSMutableAttributedString alloc] initWithString:ss] autorelease];
 
-  ApplyTextAttributes(display_text, as);
-  [field_ setAttributedStringValue:as];
+  ApplyTextAttributes(display_text, attributedString);
+  [field_ setAttributedStringValue:attributedString];
 
   // TODO(shess): This may be an appropriate place to call:
   //   model()->OnChanged();
@@ -464,9 +486,11 @@ void OmniboxViewMac::EmphasizeURLComponents() {
   }
 }
 
-void OmniboxViewMac::ApplyTextStyle(NSMutableAttributedString* as) {
-  [as addAttribute:NSFontAttributeName value:GetFieldFont(gfx::Font::NORMAL)
-             range:NSMakeRange(0, [as length])];
+void OmniboxViewMac::ApplyTextStyle(
+    NSMutableAttributedString* attributedString) {
+  [attributedString addAttribute:NSFontAttributeName
+                           value:GetFieldFont(gfx::Font::NORMAL)
+                           range:NSMakeRange(0, [attributedString length])];
 
   // Make a paragraph style locking in the standard line height as the maximum,
   // otherwise the baseline may shift "downwards".
@@ -476,67 +500,74 @@ void OmniboxViewMac::ApplyTextStyle(NSMutableAttributedString* as) {
   [paragraph_style setMaximumLineHeight:line_height];
   [paragraph_style setMinimumLineHeight:line_height];
   [paragraph_style setLineBreakMode:NSLineBreakByTruncatingTail];
-  [as addAttribute:NSParagraphStyleAttributeName value:paragraph_style
-             range:NSMakeRange(0, [as length])];
+  [attributedString addAttribute:NSParagraphStyleAttributeName
+                           value:paragraph_style
+                           range:NSMakeRange(0, [attributedString length])];
 }
 
-void OmniboxViewMac::ApplyTextAttributes(const base::string16& display_text,
-                                         NSMutableAttributedString* as) {
-  NSUInteger as_length = [as length];
+void OmniboxViewMac::ApplyTextAttributes(
+    const base::string16& display_text,
+    NSMutableAttributedString* attributedString) {
+  NSUInteger as_length = [attributedString length];
   NSRange as_entire_string = NSMakeRange(0, as_length);
 
-  ApplyTextStyle(as);
+  ApplyTextStyle(attributedString);
 
   // A kinda hacky way to add breaking at periods. This is what Safari does.
   // This works for IDNs too, despite the "en_US".
-  [as addAttribute:@"NSLanguage" value:@"en_US_POSIX"
-             range:as_entire_string];
+  [attributedString addAttribute:@"NSLanguage"
+                           value:@"en_US_POSIX"
+                           range:as_entire_string];
 
   url::Component scheme, host;
   AutocompleteInput::ParseForEmphasizeComponents(
-      display_text, ChromeAutocompleteSchemeClassifier(profile()),
-      &scheme, &host);
+      display_text, ChromeAutocompleteSchemeClassifier(profile_), &scheme,
+      &host);
   bool grey_out_url = display_text.substr(scheme.begin, scheme.len) ==
       base::UTF8ToUTF16(extensions::kExtensionScheme);
   if (model()->CurrentTextIsURL() &&
       (host.is_nonempty() || grey_out_url)) {
-    [as addAttribute:NSForegroundColorAttributeName value:BaseTextColor()
-               range:as_entire_string];
+    [attributedString addAttribute:NSForegroundColorAttributeName
+                             value:BaseTextColor()
+                             range:as_entire_string];
 
     if (!grey_out_url) {
-      [as addAttribute:NSForegroundColorAttributeName value:HostTextColor()
-               range:ComponentToNSRange(host)];
+      [attributedString addAttribute:NSForegroundColorAttributeName
+                               value:HostTextColor()
+                               range:ComponentToNSRange(host)];
     }
   }
 
+  ChromeToolbarModel* chrome_toolbar_model =
+      static_cast<ChromeToolbarModel*>(controller()->GetToolbarModel());
   // TODO(shess): GTK has this as a member var, figure out why.
   // [Could it be to not change if no change?  If so, I'm guessing
   // AppKit may already handle that.]
-  const ConnectionSecurityHelper::SecurityLevel security_level =
-      controller()->GetToolbarModel()->GetSecurityLevel(false);
+  const connection_security::SecurityLevel security_level =
+      chrome_toolbar_model->GetSecurityLevel(false);
 
   // Emphasize the scheme for security UI display purposes (if necessary).
   if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
-      scheme.is_nonempty() &&
-      (security_level != ConnectionSecurityHelper::NONE)) {
+      scheme.is_nonempty() && (security_level != connection_security::NONE)) {
     NSColor* color;
-    if (security_level == ConnectionSecurityHelper::EV_SECURE ||
-        security_level == ConnectionSecurityHelper::SECURE) {
+    if (security_level == connection_security::EV_SECURE ||
+        security_level == connection_security::SECURE) {
       color = SecureSchemeColor();
-    } else if (security_level == ConnectionSecurityHelper::SECURITY_ERROR) {
+    } else if (security_level == connection_security::SECURITY_ERROR) {
       color = SecurityErrorSchemeColor();
       // Add a strikethrough through the scheme.
-      [as addAttribute:NSStrikethroughStyleAttributeName
+      [attributedString addAttribute:NSStrikethroughStyleAttributeName
                  value:[NSNumber numberWithInt:NSUnderlineStyleSingle]
                  range:ComponentToNSRange(scheme)];
-    } else if (security_level == ConnectionSecurityHelper::SECURITY_WARNING) {
+    } else if (security_level == connection_security::SECURITY_WARNING) {
       color = BaseTextColor();
     } else {
       NOTREACHED();
       color = BaseTextColor();
     }
-    [as addAttribute:NSForegroundColorAttributeName value:color
-               range:ComponentToNSRange(scheme)];
+    [attributedString addAttribute:NSForegroundColorAttributeName
+                             value:color
+                             range:ComponentToNSRange(scheme)];
   }
 }
 
@@ -701,6 +732,21 @@ void OmniboxViewMac::OnDidChange() {
 
 void OmniboxViewMac::OnDidEndEditing() {
   ClosePopup();
+}
+
+void OmniboxViewMac::OnInsertText() {
+  // If |insert_char_time_| is not null, there's a pending insert char operation
+  // that hasn't been painted yet. Keep the earlier time.
+  if (insert_char_time_.is_null())
+    insert_char_time_ = base::TimeTicks::Now();
+}
+
+void OmniboxViewMac::OnDidDrawRect() {
+  if (!insert_char_time_.is_null()) {
+    UMA_HISTOGRAM_TIMES("Omnibox.CharTypedToRepaintLatency",
+                        base::TimeTicks::Now() - insert_char_time_);
+    insert_char_time_ = base::TimeTicks();
+  }
 }
 
 bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
@@ -1001,6 +1047,22 @@ NSFont* OmniboxViewMac::GetFieldFont(int style) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return rb.GetFontList(ui::ResourceBundle::BaseFont).Derive(1, style)
       .GetPrimaryFont().GetNativeFont();
+}
+
+NSFont* OmniboxViewMac::GetLargeFont(int style) {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb.GetFontList(ui::ResourceBundle::LargeFont)
+      .Derive(1, style)
+      .GetPrimaryFont()
+      .GetNativeFont();
+}
+
+NSFont* OmniboxViewMac::GetSmallFont(int style) {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb.GetFontList(ui::ResourceBundle::SmallFont)
+      .Derive(1, style)
+      .GetPrimaryFont()
+      .GetNativeFont();
 }
 
 int OmniboxViewMac::GetOmniboxTextLength() const {

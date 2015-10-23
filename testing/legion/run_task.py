@@ -34,10 +34,10 @@ def main():
   logging.info(
       'Registering with registration server at %s using OTP "%s"',
       args.controller, args.otp)
-  common_lib.ConnectToServer(args.controller).RegisterTask(
-      args.otp, common_lib.MY_IP)
+  rpc_server.RpcServer.Connect(args.controller).RegisterTask(args.otp,
+                                                             common_lib.MY_IP)
 
-  server = rpc_server.RPCServer(args.controller, args.idle_timeout)
+  server = rpc_server.RpcServer(args.controller, args.idle_timeout)
 
   server.serve_forever()
   logging.info('Server shutdown complete')

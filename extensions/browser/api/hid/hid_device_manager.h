@@ -13,14 +13,15 @@
 #include "base/memory/scoped_vector.h"
 #include "base/scoped_observer.h"
 #include "base/threading/thread_checker.h"
-#include "device/hid/hid_device_info.h"
 #include "device/hid/hid_service.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_event_histogram_value.h"
 #include "extensions/common/api/hid.h"
 
 namespace device {
 class HidDeviceFilter;
+class HidDeviceInfo;
 }
 
 namespace extensions {
@@ -55,10 +56,18 @@ class HidDeviceManager : public BrowserContextKeyedAPI,
                      const std::vector<device::HidDeviceFilter>& filters,
                      const GetApiDevicesCallback& callback);
 
+  // Converts a list of HidDeviceInfo objects into a value that can be returned
+  // through the API.
+  scoped_ptr<base::ListValue> GetApiDevicesFromList(
+      const std::vector<scoped_refptr<device::HidDeviceInfo>>& devices);
+
   scoped_refptr<device::HidDeviceInfo> GetDeviceInfo(int resource_id);
 
-  static bool HasPermission(const Extension* extension,
-                            scoped_refptr<device::HidDeviceInfo> device_info);
+  // Checks if |extension| has permission to open |device_info|. Set
+  // |update_last_used| to update the timestamp in the DevicePermissionsManager.
+  bool HasPermission(const Extension* extension,
+                     scoped_refptr<device::HidDeviceInfo> device_info,
+                     bool update_last_used);
 
  private:
   friend class BrowserContextKeyedAPIFactory<HidDeviceManager>;
@@ -98,18 +107,20 @@ class HidDeviceManager : public BrowserContextKeyedAPI,
   void OnEnumerationComplete(
       const std::vector<scoped_refptr<device::HidDeviceInfo>>& devices);
 
-  void DispatchEvent(const std::string& event_name,
+  void DispatchEvent(events::HistogramValue histogram_value,
+                     const std::string& event_name,
                      scoped_ptr<base::ListValue> event_args,
                      scoped_refptr<device::HidDeviceInfo> device_info);
 
   base::ThreadChecker thread_checker_;
-  EventRouter* event_router_;
-  bool initialized_;
+  content::BrowserContext* browser_context_ = nullptr;
+  EventRouter* event_router_ = nullptr;
+  bool initialized_ = false;
   ScopedObserver<device::HidService, device::HidService::Observer>
       hid_service_observer_;
-  bool enumeration_ready_;
+  bool enumeration_ready_ = false;
   ScopedVector<GetApiDevicesParams> pending_enumerations_;
-  int next_resource_id_;
+  int next_resource_id_ = 0;
   ResourceIdToDeviceIdMap device_ids_;
   DeviceIdToResourceIdMap resource_ids_;
   base::WeakPtrFactory<HidDeviceManager> weak_factory_;

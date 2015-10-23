@@ -344,6 +344,8 @@ class RepresentationSelector {
     } else if (upper->Is(Type::Number())) {
       // multiple uses => pick kRepFloat64.
       return kRepFloat64;
+    } else if (upper->Is(Type::Internal())) {
+      return kMachPtr;
     }
     return kRepTagged;
   }
@@ -412,6 +414,29 @@ class RepresentationSelector {
     }
   }
 
+  void VisitCall(Node* node, SimplifiedLowering* lowering) {
+    const CallDescriptor* desc = OpParameter<const CallDescriptor*>(node->op());
+    const MachineSignature* sig = desc->GetMachineSignature();
+    int params = static_cast<int>(sig->parameter_count());
+    // Propagate representation information from call descriptor.
+    for (int i = 0; i < node->InputCount(); i++) {
+      if (i == 0) {
+        // The target of the call.
+        ProcessInput(node, i, 0);
+      } else if ((i - 1) < params) {
+        ProcessInput(node, i, sig->GetParam(i - 1));
+      } else {
+        ProcessInput(node, i, 0);
+      }
+    }
+
+    if (sig->return_count() > 0) {
+      SetOutput(node, desc->GetMachineSignature()->GetReturn());
+    } else {
+      SetOutput(node, kMachAnyTagged);
+    }
+  }
+
   void VisitStateValues(Node* node) {
     if (phase_ == PROPAGATE) {
       for (int i = 0; i < node->InputCount(); i++) {
@@ -444,7 +469,9 @@ class RepresentationSelector {
   }
 
   bool CanLowerToInt32Binop(Node* node, MachineTypeUnion use) {
-    return BothInputsAre(node, Type::Signed32()) && !CanObserveNonInt32(use);
+    return BothInputsAre(node, Type::Signed32()) &&
+           (!CanObserveNonInt32(use) ||
+            NodeProperties::GetBounds(node).upper->Is(Type::Signed32()));
   }
 
   bool CanLowerToInt32AdditiveBinop(Node* node, MachineTypeUnion use) {
@@ -453,7 +480,9 @@ class RepresentationSelector {
   }
 
   bool CanLowerToUint32Binop(Node* node, MachineTypeUnion use) {
-    return BothInputsAre(node, Type::Unsigned32()) && !CanObserveNonUint32(use);
+    return BothInputsAre(node, Type::Unsigned32()) &&
+           (!CanObserveNonUint32(use) ||
+            NodeProperties::GetBounds(node).upper->Is(Type::Unsigned32()));
   }
 
   bool CanLowerToUint32AdditiveBinop(Node* node, MachineTypeUnion use) {
@@ -527,6 +556,8 @@ class RepresentationSelector {
         return VisitSelect(node, use, lowering);
       case IrOpcode::kPhi:
         return VisitPhi(node, use, lowering);
+      case IrOpcode::kCall:
+        return VisitCall(node, lowering);
 
 //------------------------------------------------------------------
 // JavaScript operators.
@@ -683,6 +714,21 @@ class RepresentationSelector {
         if (lower()) node->set_op(Float64Op(node));
         break;
       }
+      case IrOpcode::kNumberShiftLeft: {
+        VisitBinop(node, kMachInt32, kMachUint32, kMachInt32);
+        if (lower()) lowering->DoShift(node, lowering->machine()->Word32Shl());
+        break;
+      }
+      case IrOpcode::kNumberShiftRight: {
+        VisitBinop(node, kMachInt32, kMachUint32, kMachInt32);
+        if (lower()) lowering->DoShift(node, lowering->machine()->Word32Sar());
+        break;
+      }
+      case IrOpcode::kNumberShiftRightLogical: {
+        VisitBinop(node, kMachUint32, kMachUint32, kMachUint32);
+        if (lower()) lowering->DoShift(node, lowering->machine()->Word32Shr());
+        break;
+      }
       case IrOpcode::kNumberToInt32: {
         MachineTypeUnion use_rep = use & kRepMask;
         Node* input = node->InputAt(0);
@@ -706,8 +752,10 @@ class RepresentationSelector {
           // Require the input in float64 format and perform truncation.
           // TODO(turbofan): avoid a truncation with a smi check.
           VisitUnop(node, kTypeInt32 | kRepFloat64, kTypeInt32 | kRepWord32);
-          if (lower())
-            node->set_op(lowering->machine()->TruncateFloat64ToInt32());
+          if (lower()) {
+            node->set_op(lowering->machine()->TruncateFloat64ToInt32(
+                TruncationMode::kJavaScript));
+          }
         }
         break;
       }
@@ -734,8 +782,10 @@ class RepresentationSelector {
           // Require the input in float64 format and perform truncation.
           // TODO(turbofan): avoid a truncation with a smi check.
           VisitUnop(node, kTypeUint32 | kRepFloat64, kTypeUint32 | kRepWord32);
-          if (lower())
-            node->set_op(lowering->machine()->TruncateFloat64ToInt32());
+          if (lower()) {
+            node->set_op(lowering->machine()->TruncateFloat64ToInt32(
+                TruncationMode::kJavaScript));
+          }
         }
         break;
       }
@@ -774,11 +824,6 @@ class RepresentationSelector {
       case IrOpcode::kStringLessThanOrEqual: {
         VisitBinop(node, kMachAnyTagged, kRepBit);
         if (lower()) lowering->DoStringLessThanOrEqual(node);
-        break;
-      }
-      case IrOpcode::kStringAdd: {
-        VisitBinop(node, kMachAnyTagged, kMachAnyTagged);
-        if (lower()) lowering->DoStringAdd(node);
         break;
       }
       case IrOpcode::kAllocate: {
@@ -992,6 +1037,9 @@ class RepresentationSelector {
       case IrOpcode::kTruncateFloat64ToFloat32:
         return VisitUnop(node, kTypeNumber | kRepFloat64,
                          kTypeNumber | kRepFloat32);
+      case IrOpcode::kTruncateFloat64ToInt32:
+        return VisitUnop(node, kTypeNumber | kRepFloat64,
+                         kTypeInt32 | kRepWord32);
       case IrOpcode::kTruncateInt64ToInt32:
         // TODO(titzer): Is kTypeInt32 correct here?
         return VisitUnop(node, kTypeInt32 | kRepWord64,
@@ -1037,6 +1085,7 @@ class RepresentationSelector {
       case IrOpcode::kFloat64InsertHighWord32:
         return VisitBinop(node, kMachFloat64, kMachInt32, kMachFloat64);
       case IrOpcode::kLoadStackPointer:
+      case IrOpcode::kLoadFramePointer:
         return VisitLeaf(node, kMachPtr);
       case IrOpcode::kStateValues:
         VisitStateValues(node);
@@ -1083,7 +1132,7 @@ class RepresentationSelector {
 
  private:
   JSGraph* jsgraph_;
-  int count_;                       // number of nodes in the graph
+  size_t const count_;              // number of nodes in the graph
   NodeInfo* info_;                  // node id -> usage information
   NodeVector nodes_;                // collected nodes
   NodeVector replacements_;         // replacements to be done after lowering
@@ -1114,6 +1163,14 @@ Node* SimplifiedLowering::IsTagged(Node* node) {
   return graph()->NewNode(machine()->WordAnd(), node,
                           jsgraph()->Int32Constant(kSmiTagMask));
 }
+
+
+SimplifiedLowering::SimplifiedLowering(JSGraph* jsgraph, Zone* zone,
+                                       SourcePositionTable* source_positions)
+    : jsgraph_(jsgraph),
+      zone_(zone),
+      zero_thirtyone_range_(Type::Range(0, 31, zone)),
+      source_positions_(source_positions) {}
 
 
 void SimplifiedLowering::LowerAllNodes() {
@@ -1268,7 +1325,7 @@ void SimplifiedLowering::DoLoadBuffer(Node* node, MachineType output_type,
     Node* ephi = graph()->NewNode(common()->EffectPhi(2), etrue, efalse, merge);
 
     // Replace effect uses of {node} with the {ephi}.
-    NodeProperties::ReplaceWithValue(node, node, ephi);
+    NodeProperties::ReplaceUses(node, node, ephi);
 
     // Turn the {node} into a Phi.
     node->set_op(common()->Phi(output_type, 2));
@@ -1307,26 +1364,9 @@ void SimplifiedLowering::DoStoreElement(Node* node) {
 }
 
 
-void SimplifiedLowering::DoStringAdd(Node* node) {
-  Operator::Properties properties = node->op()->properties();
-  Callable callable = CodeFactory::StringAdd(
-      jsgraph()->isolate(), STRING_ADD_CHECK_NONE, NOT_TENURED);
-  CallDescriptor::Flags flags = CallDescriptor::kNoFlags;
-  CallDescriptor* desc = Linkage::GetStubCallDescriptor(
-      jsgraph()->isolate(), zone(), callable.descriptor(), 0, flags,
-      properties);
-  node->set_op(common()->Call(desc));
-  node->InsertInput(graph()->zone(), 0,
-                    jsgraph()->HeapConstant(callable.code()));
-  node->AppendInput(graph()->zone(), jsgraph()->UndefinedConstant());
-  node->AppendInput(graph()->zone(), graph()->start());
-  node->AppendInput(graph()->zone(), graph()->start());
-}
-
-
 Node* SimplifiedLowering::StringComparison(Node* node, bool requires_ordering) {
   Runtime::FunctionId f =
-      requires_ordering ? Runtime::kStringCompareRT : Runtime::kStringEquals;
+      requires_ordering ? Runtime::kStringCompare : Runtime::kStringEquals;
   ExternalReference ref(f, jsgraph()->isolate());
   Operator::Properties props = node->op()->properties();
   // TODO(mstarzinger): We should call StringCompareStub here instead, once an
@@ -1588,6 +1628,17 @@ Node* SimplifiedLowering::Uint32Mod(Node* const node) {
 
   Node* merge0 = graph()->NewNode(merge_op, if_true0, if_false0);
   return graph()->NewNode(phi_op, true0, false0, merge0);
+}
+
+
+void SimplifiedLowering::DoShift(Node* node, Operator const* op) {
+  node->set_op(op);
+  Node* const rhs = NodeProperties::GetValueInput(node, 1);
+  Type* const rhs_type = NodeProperties::GetBounds(rhs).upper;
+  if (!rhs_type->Is(zero_thirtyone_range_)) {
+    node->ReplaceInput(1, graph()->NewNode(machine()->Word32And(), rhs,
+                                           jsgraph()->Int32Constant(0x1f)));
+  }
 }
 
 

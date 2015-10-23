@@ -21,6 +21,7 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/mouse_constants.h"
+#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
@@ -172,7 +173,8 @@ const char* MenuButton::GetClassName() const {
 }
 
 bool MenuButton::OnMousePressed(const ui::MouseEvent& event) {
-  RequestFocus();
+  if (request_focus_on_press())
+    RequestFocus();
   if (state() != STATE_DISABLED && ShouldEnterPushedState(event) &&
       HitTestPoint(event.location())) {
     TimeDelta delta = TimeTicks::Now() - menu_closed_time_;

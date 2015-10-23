@@ -5,13 +5,53 @@
 (function() {
   'use strict';
 
-  /**
-   * @constructor
-   * @extends {PolymerElement}
-   */
-  var VolumeControllerElement = function() {};
+  Polymer({
+    is: 'volume-controller',
 
-  VolumeControllerElement.prototype = {
+    properties: {
+      /**
+       * Width of the element in pixels. Must be specified before ready() is
+       * called. Dynamic change is not supported.
+       * @type {number}
+       */
+      width: {
+        type: Number,
+        value: 32
+      },
+
+      /**
+       * Height of the element in pixels. Must be specified before ready() is
+       * called. Dynamic change is not supported.
+       * @type {number}
+       */
+      height: {
+        type: Number,
+        value: 100
+      },
+
+      /**
+       * Volume. 0 is silent, and 100 is maximum.
+       * @type {number}
+       */
+      value: {
+        type: Number,
+        value: 50,
+        observer: 'valueChanged',
+        notify: true
+      },
+
+      /**
+       * Volume. 100 is silent, and 0 is maximum.
+       * @type {number}
+       */
+      rawValue: {
+        type: Number,
+        value: 0,
+        observer: 'rawValueChanged',
+        notify: true
+      }
+    },
+
     /**
      * Initializes an element. This method is called automatically when the
      * element is ready.
@@ -37,71 +77,23 @@
     },
 
     /**
-     * Registers handlers for changing of external variables
-     */
-    observe: {
-      'model.volume': 'onVolumeChanged',
-    },
-
-    /**
-     * Model object of the Audio Player.
-     * @type {AudioPlayerModel}
-     */
-    model: null,
-
-    /**
-     * Invoked when the model changed.
-     * @param {AudioPlayerModel} oldValue Old Value.
-     * @param {AudioPlayerModel} newValue New Value.
-     */
-    modelChanged: function(oldValue, newValue) {
-      this.onVolumeChanged((oldValue || {}).volume, (newValue || {}).volume);
-    },
-
-    /**
-     * Volume. 0 is silent, and 100 is maximum.
-     * @type {number}
-     */
-    value: 50,
-
-    /**
-     * Volume. 1000 is silent, and 0 is maximum.
-     * @type {number}
-     */
-    rawValue: 0,
-
-    /**
-     * Height of the element in pixels. Must be specified before ready() is
-     * called. Dynamic change is not supported.
-     * @type {number}
-     */
-    height: 100,
-
-    /**
-     * Width of the element in pixels. Must be specified before ready() is
-     * called. Dynamic change is not supported.
-     * @type {number}
-     */
-    width: 32,
-
-    /**
-     * Invoked when the 'volume' value in the model is changed.
-     * @param {number} oldValue Old value.
+     * Invoked when the 'volume' value is changed.
      * @param {number} newValue New value.
+     * @param {number} oldValue Old value.
      */
-    onVolumeChanged: function(oldValue, newValue) {
+    valueChanged: function(newValue, oldValue) {
       if (oldValue != newValue)
         this.rawValue = 100 - newValue;
     },
 
     /**
      * Invoked when the 'rawValue' property is changed.
-     * @param {number} oldValue Old value.
      * @param {number} newValue New value.
+     * @param {number} oldValue Old value.
      */
-    rawValueChanged: function(oldValue, newValue) {
-      if (oldValue != newValue)
-        this.model.volume = 100 - newValue;
+    rawValueChanged: function(newValue, oldValue) {
+      if (oldValue !== newValue)
+        this.value = 100 - newValue;
     },
 
     /**
@@ -120,7 +112,13 @@
           break;
       }
     },
-  };
 
-  Polymer('volume-controller', VolumeControllerElement.prototype);
+    /**
+     * Computes style for '.filled' element based on raw value.
+     * @return {string}
+     */
+    computeFilledStyle_: function(rawValue) {
+      return 'height: ' + rawValue + '%;';
+    }
+  });
 })();  // Anonymous closure

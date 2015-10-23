@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -78,7 +79,6 @@ class CONTENT_EXPORT EmbeddedWorkerRegistry
                                bool success);
   void OnWorkerStarted(int process_id, int embedded_worker_id);
   void OnWorkerStopped(int process_id, int embedded_worker_id);
-  void OnPausedAfterDownload(int process_id, int embedded_worker_id);
   void OnReportException(int embedded_worker_id,
                          const base::string16& error_message,
                          int line_number,
@@ -109,6 +109,9 @@ class CONTENT_EXPORT EmbeddedWorkerRegistry
  private:
   friend class base::RefCounted<EmbeddedWorkerRegistry>;
   friend class EmbeddedWorkerInstance;
+  friend class EmbeddedWorkerInstanceTest;
+  FRIEND_TEST_ALL_PREFIXES(EmbeddedWorkerInstanceTest,
+                           RemoveWorkerInSharedProcess);
 
   typedef std::map<int, EmbeddedWorkerInstance*> WorkerInstanceMap;
   typedef std::map<int, IPC::Sender*> ProcessToSenderMap;

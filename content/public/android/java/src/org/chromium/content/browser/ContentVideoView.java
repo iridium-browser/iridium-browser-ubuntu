@@ -9,7 +9,6 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.graphics.Point;
 import android.provider.Settings;
-import android.util.Log;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -24,9 +23,10 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 /**
  * This class implements accelerated fullscreen video playback using surface view.
@@ -35,7 +35,7 @@ import org.chromium.base.ThreadUtils;
 public class ContentVideoView extends FrameLayout
         implements SurfaceHolder.Callback {
 
-    private static final String TAG = "ContentVideoView";
+    private static final String TAG = "cr.ContentVideoView";
 
     /* Do not change these values without updating their counterparts
      * in include/media/mediaplayer.h!
@@ -87,7 +87,6 @@ public class ContentVideoView extends FrameLayout
     private View mProgressView;
 
     private final ContentVideoViewClient mClient;
-    private final ContentViewCore mContentViewCore;
 
     private boolean mInitialOrientation;
     private boolean mPossibleAccidentalChange;
@@ -163,12 +162,11 @@ public class ContentVideoView extends FrameLayout
         }
     };
 
-    private ContentVideoView(Context context, ContentViewCore contentViewCore,
-            long nativeContentVideoView) {
+    private ContentVideoView(Context context, long nativeContentVideoView,
+            ContentVideoViewClient client) {
         super(context);
         mNativeContentVideoView = nativeContentVideoView;
-        mContentViewCore = contentViewCore;
-        mClient = mContentViewCore.getContentVideoViewClient();
+        mClient = client;
         mUmaRecorded = false;
         mPossibleAccidentalChange = false;
         initResources(context);
@@ -218,7 +216,7 @@ public class ContentVideoView extends FrameLayout
 
     @CalledByNative
     public void onMediaPlayerError(int errorType) {
-        Log.d(TAG, "OnMediaPlayerError: " + errorType);
+        Log.d(TAG, "OnMediaPlayerError: %d", errorType);
         if (mCurrentState == STATE_ERROR || mCurrentState == STATE_PLAYBACK_COMPLETED) {
             return;
         }
@@ -267,7 +265,7 @@ public class ContentVideoView extends FrameLayout
                     .setCancelable(false)
                     .show();
             } catch (RuntimeException e) {
-                Log.e(TAG, "Cannot show the alert dialog, error message: " + message, e);
+                Log.e(TAG, "Cannot show the alert dialog, error message: %s", message, e);
             }
         }
     }
@@ -362,11 +360,8 @@ public class ContentVideoView extends FrameLayout
         ThreadUtils.assertOnUiThread();
         Context context = contentViewCore.getContext();
         ContentVideoViewClient client = contentViewCore.getContentVideoViewClient();
-        ContentVideoView videoView = new ContentVideoView(
-                context, contentViewCore, nativeContentVideoView);
+        ContentVideoView videoView = new ContentVideoView(context, nativeContentVideoView, client);
         client.enterFullscreenVideo(videoView);
-        contentViewCore.updateDoubleTapSupport(false);
-        contentViewCore.updateMultiTouchZoomSupport(false);
         return videoView;
     }
 
@@ -393,8 +388,6 @@ public class ContentVideoView extends FrameLayout
             }
             nativeExitFullscreen(mNativeContentVideoView, relaseMediaPlayer);
             mNativeContentVideoView = 0;
-            mContentViewCore.updateDoubleTapSupport(true);
-            mContentViewCore.updateMultiTouchZoomSupport(true);
         }
     }
 

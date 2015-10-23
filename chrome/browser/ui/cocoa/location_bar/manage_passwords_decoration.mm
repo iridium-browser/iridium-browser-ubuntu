@@ -6,9 +6,9 @@
 
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/cocoa/passwords/manage_passwords_bubble_cocoa.h"
-#include "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 // ManagePasswordsIconCocoa
@@ -55,12 +55,11 @@ bool ManagePasswordsDecoration::AcceptsMousePress() {
 }
 
 bool ManagePasswordsDecoration::OnMousePressed(NSRect frame, NSPoint location) {
-  bool result = ImageDecoration::OnMousePressed(frame, location);
   if (ManagePasswordsBubbleCocoa::instance())
     ManagePasswordsBubbleCocoa::instance()->Close();
   else
     command_updater_->ExecuteCommand(IDC_MANAGE_PASSWORDS_FOR_PAGE);
-  return result;
+  return true;
 }
 
 NSString* ManagePasswordsDecoration::GetToolTip() {

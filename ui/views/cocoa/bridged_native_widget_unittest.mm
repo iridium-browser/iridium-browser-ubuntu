@@ -14,11 +14,13 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "testing/gtest_mac.h"
+#import "ui/base/cocoa/window_size_constants.h"
+#include "ui/base/ime/input_method.h"
 #import "ui/gfx/test/ui_cocoa_test_helper.h"
 #import "ui/views/cocoa/bridged_content_view.h"
 #import "ui/views/cocoa/native_widget_mac_nswindow.h"
+#import "ui/views/cocoa/views_nswindow_delegate.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/ime/input_method.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/native_widget_mac.h"
 #include "ui/views/widget/root_view.h"
@@ -267,23 +269,83 @@ TEST_F(BridgedNativeWidgetTest, ViewSizeTracksWindow) {
   EXPECT_EQ(kTestNewHeight, view_->height());
 }
 
-TEST_F(BridgedNativeWidgetTest, CreateInputMethodShouldNotReturnNull) {
-  scoped_ptr<views::InputMethod> input_method(bridge()->CreateInputMethod());
-  EXPECT_TRUE(input_method);
-}
-
-TEST_F(BridgedNativeWidgetTest, GetHostInputMethodShouldNotReturnNull) {
-  EXPECT_TRUE(bridge()->GetHostInputMethod());
+TEST_F(BridgedNativeWidgetTest, GetInputMethodShouldNotReturnNull) {
+  EXPECT_TRUE(bridge()->GetInputMethod());
 }
 
 // A simpler test harness for testing initialization flows.
-typedef BridgedNativeWidgetTestBase BridgedNativeWidgetInitTest;
+class BridgedNativeWidgetInitTest : public BridgedNativeWidgetTestBase {
+ public:
+  BridgedNativeWidgetInitTest() {}
+
+  // Prepares a new |window_| and |widget_| for a call to PerformInit().
+  void CreateNewWidgetToInit(NSUInteger style_mask) {
+    window_.reset(
+        [[NSWindow alloc] initWithContentRect:ui::kWindowSizeDeterminedLater
+                                    styleMask:style_mask
+                                      backing:NSBackingStoreBuffered
+                                        defer:NO]);
+    [window_ setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
+    widget_.reset(new Widget);
+    native_widget_mac_ = new MockNativeWidgetMac(widget_.get());
+    init_params_.native_widget = native_widget_mac_;
+  }
+
+  void PerformInit() {
+    widget_->Init(init_params_);
+    bridge()->Init(window_, init_params_);
+  }
+
+ protected:
+  base::scoped_nsobject<NSWindow> window_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BridgedNativeWidgetInitTest);
+};
 
 // Test that BridgedNativeWidget remains sane if Init() is never called.
 TEST_F(BridgedNativeWidgetInitTest, InitNotCalled) {
   EXPECT_FALSE(bridge()->ns_view());
   EXPECT_FALSE(bridge()->ns_window());
   bridge().reset();
+}
+
+// Tests the shadow type given in InitParams.
+TEST_F(BridgedNativeWidgetInitTest, ShadowType) {
+  // Verify Widget::InitParam defaults and arguments added from SetUp().
+  EXPECT_EQ(Widget::InitParams::TYPE_WINDOW_FRAMELESS, init_params_.type);
+  EXPECT_EQ(Widget::InitParams::OPAQUE_WINDOW, init_params_.opacity);
+  EXPECT_EQ(Widget::InitParams::SHADOW_TYPE_DEFAULT, init_params_.shadow_type);
+
+  CreateNewWidgetToInit(NSBorderlessWindowMask);
+  EXPECT_FALSE([window_ hasShadow]);  // Default for NSBorderlessWindowMask.
+  PerformInit();
+
+  // Borderless is 0, so isn't really a mask. Check that nothing is set.
+  EXPECT_EQ(NSBorderlessWindowMask, [window_ styleMask]);
+  EXPECT_TRUE([window_ hasShadow]);  // SHADOW_TYPE_DEFAULT means a shadow.
+
+  CreateNewWidgetToInit(NSBorderlessWindowMask);
+  init_params_.shadow_type = Widget::InitParams::SHADOW_TYPE_NONE;
+  PerformInit();
+  EXPECT_FALSE([window_ hasShadow]);  // Preserves lack of shadow.
+
+  // Default for Widget::InitParams::TYPE_WINDOW.
+  NSUInteger kBorderedMask =
+      NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask |
+      NSResizableWindowMask | NSTexturedBackgroundWindowMask;
+  CreateNewWidgetToInit(kBorderedMask);
+  EXPECT_TRUE([window_ hasShadow]);  // Default for non-borderless.
+  PerformInit();
+  EXPECT_FALSE([window_ hasShadow]);  // SHADOW_TYPE_NONE removes shadow.
+
+  init_params_.shadow_type = Widget::InitParams::SHADOW_TYPE_DEFAULT;
+  CreateNewWidgetToInit(kBorderedMask);
+  PerformInit();
+  EXPECT_TRUE([window_ hasShadow]);  // Preserves shadow.
+
+  window_.reset();
+  widget_.reset();
 }
 
 // Test getting complete string using text input protocol.
@@ -459,7 +521,7 @@ TEST_F(BridgedNativeWidgetSimulateFullscreenTest, FailToEnterAndExit) {
           initWithContentRect:NSMakeRect(50, 50, 400, 300)
                     styleMask:NSBorderlessWindowMask
                       backing:NSBackingStoreBuffered
-                        defer:YES]);
+                        defer:NO]);
   [owned_window setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
   bridge()->Init(owned_window, init_params_);  // Transfers ownership.
 
@@ -489,7 +551,8 @@ TEST_F(BridgedNativeWidgetSimulateFullscreenTest, FailToEnterAndExit) {
   // Cocoa follows up with a failure message sent to the NSWindowDelegate (there
   // is no equivalent notification for failure). Called via id so that this
   // compiles on 10.6.
-  id window_delegate = [window delegate];
+  ViewsNSWindowDelegate* window_delegate =
+      base::mac::ObjCCast<ViewsNSWindowDelegate>([window delegate]);
   [window_delegate windowDidFailToEnterFullScreen:window];
   EXPECT_FALSE(bridge()->target_fullscreen_state());
 

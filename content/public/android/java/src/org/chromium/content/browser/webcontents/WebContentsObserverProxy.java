@@ -4,11 +4,11 @@
 
 package org.chromium.content.browser.webcontents;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ObserverList.RewindableIterator;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content_public.browser.WebContentsObserver;
 
 /**
@@ -94,10 +94,10 @@ class WebContentsObserverProxy extends WebContentsObserver {
     @Override
     @CalledByNative
     public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
-            String description, String failingUrl) {
+            String description, String failingUrl, boolean wasIgnoredByHandler) {
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
-            mObserversIterator.next().didFailLoad(
-                    isProvisionalLoad, isMainFrame, errorCode, description, failingUrl);
+            mObserversIterator.next().didFailLoad(isProvisionalLoad, isMainFrame, errorCode,
+                    description, failingUrl, wasIgnoredByHandler);
         }
     }
 
@@ -165,9 +165,9 @@ class WebContentsObserverProxy extends WebContentsObserver {
 
     @Override
     @CalledByNative
-    public void documentLoadedInFrame(long frameId) {
+    public void documentLoadedInFrame(long frameId, boolean isMainFrame) {
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
-            mObserversIterator.next().documentLoadedInFrame(frameId);
+            mObserversIterator.next().documentLoadedInFrame(frameId, isMainFrame);
         }
     }
 
@@ -208,6 +208,14 @@ class WebContentsObserverProxy extends WebContentsObserver {
     public void didStartNavigationToPendingEntry(String url) {
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
             mObserversIterator.next().didStartNavigationToPendingEntry(url);
+        }
+    }
+
+    @Override
+    @CalledByNative
+    public void mediaSessionStateChanged(boolean isControllable, boolean isSuspended) {
+        for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
+            mObserversIterator.next().mediaSessionStateChanged(isControllable, isSuspended);
         }
     }
 

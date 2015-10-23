@@ -23,11 +23,14 @@ class SkBitmap;
 
 #if defined(__OBJC__)
 @class CRWJSInjectionReceiver;
+@protocol CRWScrollableContent;
 @protocol CRWWebViewProxy;
 typedef id<CRWWebViewProxy> CRWWebViewProxyType;
 @class UIView;
+typedef UIView<CRWScrollableContent> CRWContentView;
 #else
 class CRWJSInjectionReceiver;
+typedef void CRWContentView;
 typedef void* CRWWebViewProxyType;
 class UIView;
 #endif  // defined(__OBJC__)
@@ -42,6 +45,7 @@ class BrowserState;
 class NavigationManager;
 class WebInterstitial;
 class WebStateObserver;
+class WebStatePolicyDecider;
 
 // Core interface for interaction with the web.
 class WebState : public base::SupportsUserData {
@@ -115,6 +119,10 @@ class WebState : public base::SupportsUserData {
   // Returns true if the current page is a web view with HTML.
   virtual bool ContentIsHTML() const = 0;
 
+  // Returns the current navigation title. This could be the title of the page
+  // if it is available or the URL.
+  virtual const base::string16& GetTitle() const = 0;
+
   // Returns true if the current page is loading.
   virtual bool IsLoading() const = 0;
 
@@ -136,6 +144,10 @@ class WebState : public base::SupportsUserData {
   // TODO(stuartmorgan): Figure out a clean API for this.
   // See http://crbug.com/457679
   virtual GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const = 0;
+
+  // Resizes |content_view| to the content area's size and adds it to the
+  // hierarchy.  A navigation will remove the view from the hierarchy.
+  virtual void ShowTransientContentView(CRWContentView* content_view) = 0;
 
   // Returns true if a WebInterstitial is currently displayed.
   virtual bool IsShowingWebInterstitial() const = 0;
@@ -185,6 +197,7 @@ class WebState : public base::SupportsUserData {
 
  protected:
   friend class WebStateObserver;
+  friend class WebStatePolicyDecider;
 
   // Adds and removes observers for page navigation notifications. The order in
   // which notifications are sent to observers is undefined. Clients must be
@@ -192,6 +205,13 @@ class WebState : public base::SupportsUserData {
   // TODO(droger): Move these methods to WebStateImpl once it is in ios/.
   virtual void AddObserver(WebStateObserver* observer) = 0;
   virtual void RemoveObserver(WebStateObserver* observer) = 0;
+
+  // Adds and removes policy deciders for navigation actions. The order in which
+  // deciders are called is undefined, and will stop on the first decider that
+  // refuses a navigation. Clients must be sure to remove the deciders before
+  // they go away.
+  virtual void AddPolicyDecider(WebStatePolicyDecider* decider) = 0;
+  virtual void RemovePolicyDecider(WebStatePolicyDecider* decider) = 0;
 
   WebState() {}
 };

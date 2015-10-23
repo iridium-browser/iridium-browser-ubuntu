@@ -9,7 +9,6 @@
 #include "base/base64.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string_number_conversions.h"
 #include "cc/layers/layer.h"
 #include "content/common/input/synthetic_gesture_params.h"
@@ -289,15 +288,29 @@ bool BeginSmoothScroll(v8::Isolate* isolate,
   if (!context.Init(false))
     return false;
 
+  // Convert coordinates from CSS pixels to density independent pixels (DIPs).
+  float page_scale_factor = context.web_view()->pageScaleFactor();
+
+  if (gesture_source_type == SyntheticGestureParams::MOUSE_INPUT) {
+    // Ensure the mouse is centered and visible, in case it will
+    // trigger any hover or mousemove effects.
+    context.web_view()->setIsActive(true);
+    blink::WebRect contentRect =
+        context.web_view()->mainFrame()->visibleContentRect();
+    blink::WebMouseEvent mouseMove;
+    mouseMove.type = blink::WebInputEvent::MouseMove;
+    mouseMove.x = (contentRect.x + contentRect.width / 2) * page_scale_factor;
+    mouseMove.y = (contentRect.y + contentRect.height / 2) * page_scale_factor;
+    context.web_view()->handleInputEvent(mouseMove);
+    context.web_view()->setCursorVisibilityState(true);
+  }
+
   scoped_refptr<CallbackAndContext> callback_and_context =
       new CallbackAndContext(
           isolate, callback, context.web_frame()->mainWorldScriptContext());
 
   scoped_ptr<SyntheticSmoothScrollGestureParams> gesture_params(
       new SyntheticSmoothScrollGestureParams);
-
-  // Convert coordinates from CSS pixels to density independent pixels (DIPs).
-  float page_scale_factor = context.web_view()->pageScaleFactor();
 
   if (gesture_source_type < 0 ||
       gesture_source_type > SyntheticGestureParams::GESTURE_SOURCE_TYPE_MAX) {

@@ -10,8 +10,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/download/download_history.h"
-#include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/download_service_impl.h"
 #include "chrome/browser/download/download_ui_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -56,7 +56,7 @@ void TestDelegate::OnNewDownloadReady(content::DownloadItem* item) {
 }
 
 // A DownloadService that returns a custom DownloadHistory.
-class TestDownloadService : public DownloadService {
+class TestDownloadService : public DownloadServiceImpl {
  public:
   explicit TestDownloadService(Profile* profile);
   ~TestDownloadService() override;
@@ -71,7 +71,7 @@ class TestDownloadService : public DownloadService {
 };
 
 TestDownloadService::TestDownloadService(Profile* profile)
-    : DownloadService(profile) {
+    : DownloadServiceImpl(profile) {
 }
 
 TestDownloadService::~TestDownloadService() {
@@ -135,7 +135,7 @@ class DownloadUIControllerTest : public ChromeRenderViewHostTestHarness {
   };
 
   // Constructs and returns a TestDownloadService.
-  static KeyedService* TestingDownloadServiceFactory(
+  static scoped_ptr<KeyedService> TestingDownloadServiceFactory(
       content::BrowserContext* browser_context);
 
   scoped_ptr<MockDownloadManager> manager_;
@@ -148,9 +148,11 @@ class DownloadUIControllerTest : public ChromeRenderViewHostTestHarness {
 };
 
 // static
-KeyedService* DownloadUIControllerTest::TestingDownloadServiceFactory(
+scoped_ptr<KeyedService>
+DownloadUIControllerTest::TestingDownloadServiceFactory(
     content::BrowserContext* browser_context) {
-  return new TestDownloadService(Profile::FromBrowserContext(browser_context));
+  return make_scoped_ptr(
+      new TestDownloadService(Profile::FromBrowserContext(browser_context)));
 }
 
 DownloadUIControllerTest::DownloadUIControllerTest()
@@ -227,6 +229,7 @@ DownloadUIControllerTest::CreateMockInProgressDownload() {
   EXPECT_CALL(*item, GetOpened()).WillRepeatedly(Return(false));
   EXPECT_CALL(*item, GetMimeType()).WillRepeatedly(Return(std::string()));
   EXPECT_CALL(*item, GetURL()).WillRepeatedly(testing::ReturnRefOfCopy(GURL()));
+  EXPECT_CALL(*item, GetWebContents()).WillRepeatedly(Return(nullptr));
   EXPECT_CALL(*item, IsTemporary()).WillRepeatedly(Return(false));
   return item.Pass();
 }

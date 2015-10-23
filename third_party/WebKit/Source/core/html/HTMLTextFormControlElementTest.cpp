@@ -5,12 +5,12 @@
 #include "config.h"
 #include "core/html/HTMLTextFormControlElement.h"
 
-#include "core/dom/Position.h"
 #include "core/dom/Text.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/SpellChecker.h"
+#include "core/editing/Position.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/spellcheck/SpellChecker.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLDocument.h"
@@ -24,13 +24,11 @@
 #include "wtf/OwnPtr.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 class HTMLTextFormControlElementTest : public ::testing::Test {
 protected:
-    virtual void SetUp() override;
+    void SetUp() override;
 
     DummyPageHolder& page() const { return *m_dummyPageHolder; }
     HTMLDocument& document() const { return *m_document; }
@@ -53,17 +51,17 @@ class DummyTextCheckerClient : public EmptyTextCheckerClient {
 public:
     ~DummyTextCheckerClient() { }
 
-    virtual bool shouldEraseMarkersAfterChangeSelection(TextCheckingType) const override { return false; }
+    bool shouldEraseMarkersAfterChangeSelection(TextCheckingType) const override { return false; }
 };
 
 class DummySpellCheckerClient : public EmptySpellCheckerClient {
 public:
     virtual ~DummySpellCheckerClient() { }
 
-    virtual bool isContinuousSpellCheckingEnabled() override { return true; }
-    virtual bool isGrammarCheckingEnabled() override { return true; }
+    bool isContinuousSpellCheckingEnabled() override { return true; }
+    bool isGrammarCheckingEnabled() override { return true; }
 
-    virtual TextCheckerClient& textChecker() override { return m_dummyTextCheckerClient; }
+    TextCheckerClient& textChecker() override { return m_dummyTextCheckerClient; }
 
 private:
     DummyTextCheckerClient m_dummyTextCheckerClient;
@@ -79,7 +77,7 @@ void HTMLTextFormControlElementTest::SetUp()
 
     m_document = toHTMLDocument(&m_dummyPageHolder->document());
     m_document->documentElement()->setInnerHTML("<body><textarea id=textarea></textarea><input id=input /></body>", ASSERT_NO_EXCEPTION);
-    m_document->view()->updateLayoutAndStyleForPainting();
+    m_document->view()->updateAllLifecyclePhases();
     m_textControl = toHTMLTextFormControlElement(m_document->getElementById("textarea"));
     m_textControl->focus();
     m_input = toHTMLInputElement(m_document->getElementById("input"));
@@ -141,7 +139,7 @@ void testFunctionEquivalence(const Position& position, PositionFunction position
     VisiblePosition visiblePosition(position);
     VisiblePosition expected = visibleFunction(visiblePosition);
     VisiblePosition actual = VisiblePosition(positionFunction(position));
-    EXPECT_EQ(expected, actual);
+    EXPECT_EQ(expected.deepEquivalent(), actual.deepEquivalent());
 }
 
 static VisiblePosition startOfWord(const VisiblePosition& position)
@@ -159,7 +157,7 @@ void testBoundary(HTMLDocument& document, HTMLTextFormControlElement& textContro
     for (unsigned i = 0; i < textControl.innerEditorValue().length(); i++) {
         textControl.setSelectionRange(i, i);
         Position position = document.frame()->selection().start();
-        SCOPED_TRACE(::testing::Message() << "offset " << position.deprecatedEditingOffset() << " of " << nodePositionAsStringForTesting(position.deprecatedNode()).ascii().data());
+        SCOPED_TRACE(::testing::Message() << "offset " << position.computeEditingOffset() << " of " << nodePositionAsStringForTesting(position.anchorNode()).ascii().data());
         {
             SCOPED_TRACE("HTMLTextFormControlElement::startOfWord");
             testFunctionEquivalence(position, HTMLTextFormControlElement::startOfWord, startOfWord);
@@ -213,8 +211,8 @@ TEST_F(HTMLTextFormControlElementTest, SpellCheckDoesNotCauseUpdateLayout)
     input->setValue("Hello, input field");
     VisibleSelection oldSelection = document().frame()->selection().selection();
 
-    Position newPosition(input->innerEditorElement()->firstChild(), 3, Position::PositionIsOffsetInAnchor);
-    VisibleSelection newSelection(newPosition, DOWNSTREAM);
+    Position newPosition(input->innerEditorElement()->firstChild(), 3);
+    VisibleSelection newSelection(newPosition, TextAffinity::Downstream);
     document().frame()->selection().setSelection(newSelection, FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle | FrameSelection::DoNotUpdateAppearance);
     ASSERT_EQ(3, input->selectionStart());
 
@@ -225,4 +223,4 @@ TEST_F(HTMLTextFormControlElementTest, SpellCheckDoesNotCauseUpdateLayout)
     EXPECT_EQ(startCount, layoutCount());
 }
 
-}
+} // namespace blink

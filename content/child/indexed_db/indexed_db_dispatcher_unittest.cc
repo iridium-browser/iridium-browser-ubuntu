@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "content/child/indexed_db/indexed_db_dispatcher.h"
 #include "content/child/indexed_db/webidbcursor_impl.h"
@@ -59,22 +60,27 @@ class MockDispatcher : public IndexedDBDispatcher {
   DISALLOW_COPY_AND_ASSIGN(MockDispatcher);
 };
 
+class MockSyncMessageFilter : public IPC::SyncMessageFilter {
+ public:
+  MockSyncMessageFilter()
+      : SyncMessageFilter(nullptr, false /* is_channel_send_thread_safe */) {}
+
+ private:
+  ~MockSyncMessageFilter() override {}
+};
+
 }  // namespace
 
 class IndexedDBDispatcherTest : public testing::Test {
  public:
   IndexedDBDispatcherTest()
-      : message_loop_proxy_(base::MessageLoopProxy::current()),
-        sync_message_filter_(new IPC::SyncMessageFilter(NULL)),
-        thread_safe_sender_(new ThreadSafeSender(message_loop_proxy_.get(),
-                                                 sync_message_filter_.get())) {}
+      : thread_safe_sender_(new ThreadSafeSender(
+            base::ThreadTaskRunnerHandle::Get(), new MockSyncMessageFilter)) {}
 
   void TearDown() override { blink::WebHeap::collectAllGarbageForTesting(); }
 
  protected:
   base::MessageLoop message_loop_;
-  scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
-  scoped_refptr<IPC::SyncMessageFilter> sync_message_filter_;
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
 
  private:
@@ -82,7 +88,11 @@ class IndexedDBDispatcherTest : public testing::Test {
 };
 
 TEST_F(IndexedDBDispatcherTest, ValueSizeTest) {
-  const std::vector<char> data(kMaxIDBValueSizeInBytes + 1);
+  // For testing use a much smaller maximum size to prevent allocating >100 MB
+  // of memory, which crashes on memory-constrained systems.
+  const size_t kMaxValueSizeForTesting = 10 * 1024 * 1024;  // 10 MB
+
+  const std::vector<char> data(kMaxValueSizeForTesting + 1);
   const WebData value(&data.front(), data.size());
   const WebVector<WebBlobInfo> web_blob_info;
   const int32 ipc_dummy_id = -1;
@@ -91,6 +101,7 @@ TEST_F(IndexedDBDispatcherTest, ValueSizeTest) {
 
   MockCallbacks callbacks;
   IndexedDBDispatcher dispatcher(thread_safe_sender_.get());
+  dispatcher.max_put_value_size_ = kMaxValueSizeForTesting;
   IndexedDBKey key(0, blink::WebIDBKeyTypeNumber);
   dispatcher.RequestIDBDatabasePut(ipc_dummy_id,
                                    transaction_id,
@@ -107,9 +118,12 @@ TEST_F(IndexedDBDispatcherTest, ValueSizeTest) {
 }
 
 TEST_F(IndexedDBDispatcherTest, KeyAndValueSizeTest) {
+  // For testing use a much smaller maximum size to prevent allocating >100 MB
+  // of memory, which crashes on memory-constrained systems.
+  const size_t kMaxValueSizeForTesting = 10 * 1024 * 1024;  // 10 MB
   const size_t kKeySize = 1024 * 1024;
 
-  const std::vector<char> data(kMaxIDBValueSizeInBytes - kKeySize);
+  const std::vector<char> data(kMaxValueSizeForTesting - kKeySize);
   const WebData value(&data.front(), data.size());
   const WebVector<WebBlobInfo> web_blob_info;
   const IndexedDBKey key(
@@ -121,6 +135,7 @@ TEST_F(IndexedDBDispatcherTest, KeyAndValueSizeTest) {
 
   MockCallbacks callbacks;
   IndexedDBDispatcher dispatcher(thread_safe_sender_.get());
+  dispatcher.max_put_value_size_ = kMaxValueSizeForTesting;
   dispatcher.RequestIDBDatabasePut(ipc_dummy_id,
                                    transaction_id,
                                    object_store_id,

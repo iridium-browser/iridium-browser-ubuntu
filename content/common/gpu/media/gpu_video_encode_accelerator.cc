@@ -16,6 +16,7 @@
 #include "content/common/gpu/media/gpu_video_accelerator_util.h"
 #include "content/public/common/content_switches.h"
 #include "ipc/ipc_message_macros.h"
+#include "media/base/bind_to_current_loop.h"
 #include "media/base/limits.h"
 #include "media/base/video_frame.h"
 
@@ -51,7 +52,7 @@ GpuVideoEncodeAccelerator::GpuVideoEncodeAccelerator(int32 host_route_id,
                                                      GpuCommandBufferStub* stub)
     : host_route_id_(host_route_id),
       stub_(stub),
-      input_format_(media::VideoFrame::UNKNOWN),
+      input_format_(media::PIXEL_FORMAT_UNKNOWN),
       output_buffer_size_(0),
       weak_this_factory_(this) {
   stub_->AddDestructionObserver(this);
@@ -66,7 +67,7 @@ GpuVideoEncodeAccelerator::~GpuVideoEncodeAccelerator() {
 }
 
 void GpuVideoEncodeAccelerator::Initialize(
-    media::VideoFrame::Format input_format,
+    media::VideoPixelFormat input_format,
     const gfx::Size& input_visible_size,
     media::VideoCodecProfile output_profile,
     uint32 initial_bitrate,
@@ -226,28 +227,25 @@ GpuVideoEncodeAccelerator::CreateAndroidVEA() {
   return encoder.Pass();
 }
 
-void GpuVideoEncodeAccelerator::OnEncode(int32 frame_id,
-                                         base::SharedMemoryHandle buffer_handle,
-                                         uint32 buffer_offset,
-                                         uint32 buffer_size,
-                                         bool force_keyframe) {
-  DVLOG(3) << "GpuVideoEncodeAccelerator::OnEncode(): frame_id=" << frame_id
-           << ", buffer_size=" << buffer_size
-           << ", force_keyframe=" << force_keyframe;
+void GpuVideoEncodeAccelerator::OnEncode(
+    const AcceleratedVideoEncoderMsg_Encode_Params& params) {
+  DVLOG(3) << "GpuVideoEncodeAccelerator::OnEncode: frame_id = "
+           << params.frame_id << ", buffer_size=" << params.buffer_size
+           << ", force_keyframe=" << params.force_keyframe;
   if (!encoder_)
     return;
-  if (frame_id < 0) {
-    DLOG(ERROR) << "GpuVideoEncodeAccelerator::OnEncode(): invalid frame_id="
-                << frame_id;
+  if (params.frame_id < 0) {
+    DLOG(ERROR) << "GpuVideoEncodeAccelerator::OnEncode(): invalid "
+                   "frame_id=" << params.frame_id;
     NotifyError(media::VideoEncodeAccelerator::kPlatformFailureError);
     return;
   }
 
-  uint32 aligned_offset =
-      buffer_offset % base::SysInfo::VMAllocationGranularity();
-  base::CheckedNumeric<off_t> map_offset = buffer_offset;
+  const uint32 aligned_offset =
+      params.buffer_offset % base::SysInfo::VMAllocationGranularity();
+  base::CheckedNumeric<off_t> map_offset = params.buffer_offset;
   map_offset -= aligned_offset;
-  base::CheckedNumeric<size_t> map_size = buffer_size;
+  base::CheckedNumeric<size_t> map_size = params.buffer_size;
   map_size += aligned_offset;
 
   if (!map_offset.IsValid() || !map_size.IsValid()) {
@@ -258,44 +256,41 @@ void GpuVideoEncodeAccelerator::OnEncode(int32 frame_id,
   }
 
   scoped_ptr<base::SharedMemory> shm(
-      new base::SharedMemory(buffer_handle, true));
+      new base::SharedMemory(params.buffer_handle, true));
   if (!shm->MapAt(map_offset.ValueOrDie(), map_size.ValueOrDie())) {
     DLOG(ERROR) << "GpuVideoEncodeAccelerator::OnEncode(): "
-                   "could not map frame_id=" << frame_id;
+                   "could not map frame_id=" << params.frame_id;
     NotifyError(media::VideoEncodeAccelerator::kPlatformFailureError);
     return;
   }
 
   uint8* shm_memory = reinterpret_cast<uint8*>(shm->memory()) + aligned_offset;
   scoped_refptr<media::VideoFrame> frame =
-      media::VideoFrame::WrapExternalPackedMemory(
+      media::VideoFrame::WrapExternalSharedMemory(
           input_format_,
           input_coded_size_,
           gfx::Rect(input_visible_size_),
           input_visible_size_,
           shm_memory,
-          buffer_size,
-          buffer_handle,
-          buffer_offset,
-          base::TimeDelta(),
-          // It's turtles all the way down...
-          base::Bind(base::IgnoreResult(
-                         &base::SingleThreadTaskRunner::PostTask),
-                     base::ThreadTaskRunnerHandle::Get(),
-                     FROM_HERE,
-                     base::Bind(&GpuVideoEncodeAccelerator::EncodeFrameFinished,
-                                weak_this_factory_.GetWeakPtr(),
-                                frame_id,
-                                base::Passed(&shm))));
+          params.buffer_size,
+          params.buffer_handle,
+          params.buffer_offset,
+          base::TimeDelta());
+  frame->AddDestructionObserver(
+      media::BindToCurrentLoop(
+          base::Bind(&GpuVideoEncodeAccelerator::EncodeFrameFinished,
+                     weak_this_factory_.GetWeakPtr(),
+                     params.frame_id,
+                     base::Passed(&shm))));
 
   if (!frame.get()) {
-    DLOG(ERROR) << "GpuVideoEncodeAccelerator::OnEncode(): "
-                   "could not create VideoFrame for frame_id=" << frame_id;
+    DLOG(ERROR) << "GpuVideoEncodeAccelerator::OnEncode(): could not create "
+                   "VideoFrame for frame_id=" << params.frame_id;
     NotifyError(media::VideoEncodeAccelerator::kPlatformFailureError);
     return;
   }
 
-  encoder_->Encode(frame, force_keyframe);
+  encoder_->Encode(frame, params.force_keyframe);
 }
 
 void GpuVideoEncodeAccelerator::OnUseOutputBitstreamBuffer(
@@ -344,7 +339,7 @@ void GpuVideoEncodeAccelerator::EncodeFrameFinished(
     scoped_ptr<base::SharedMemory> shm) {
   Send(new AcceleratedVideoEncoderHostMsg_NotifyInputDone(host_route_id_,
                                                           frame_id));
-  // Just let shm fall out of scope.
+  // Just let |shm| fall out of scope.
 }
 
 void GpuVideoEncodeAccelerator::Send(IPC::Message* message) {

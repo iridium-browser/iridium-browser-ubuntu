@@ -12,7 +12,7 @@ import android.text.style.StrikethroughSpan;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.ssl.ConnectionSecurityHelperSecurityLevel;
+import org.chromium.chrome.browser.ssl.ConnectionSecurityLevel;
 
 import java.util.Locale;
 
@@ -109,24 +109,6 @@ public class OmniboxUrlEmphasizer {
     }
 
     /**
-     * Make the whole url greyed out (trailing url color).
-     *
-     * @param url The URL spannable to grey out. This variable is modified.
-     * @param resources Resources for the given application context.
-     * @param useDarkColors Whether the text colors should be dark (i.e.
-     *                      appropriate for use on a light background).
-     */
-    public static void greyOutUrl(Spannable url, Resources resources, boolean useDarkColors) {
-        int nonEmphasizedColorId = R.color.url_emphasis_non_emphasized_text;
-        if (!useDarkColors) {
-            nonEmphasizedColorId = R.color.url_emphasis_light_non_emphasized_text;
-        }
-        UrlEmphasisColorSpan span = new UrlEmphasisColorSpan(
-                resources.getColor(nonEmphasizedColorId));
-        url.setSpan(span, 0, url.toString().length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-    }
-
-    /**
      * Modifies the given URL to emphasize the TLD and second domain.
      * TODO(sashab): Make this take an EmphasizeComponentsResponse object to
      *               prevent calling parseForEmphasizeComponents() again.
@@ -135,7 +117,7 @@ public class OmniboxUrlEmphasizer {
      *            modified.
      * @param resources Resources for the given application context.
      * @param profile The profile viewing the given URL.
-     * @param securityLevel A valid ConnectionSecurityHelperSecurityLevel for the specified
+     * @param securityLevel A valid ConnectionSecurityLevel for the specified
      *                      web contents.
      * @param isInternalPage Whether this page is an internal Chrome page.
      * @param useDarkColors Whether the text colors should be dark (i.e.
@@ -145,9 +127,10 @@ public class OmniboxUrlEmphasizer {
     public static void emphasizeUrl(Spannable url, Resources resources, Profile profile,
             int securityLevel, boolean isInternalPage,
             boolean useDarkColors, boolean emphasizeHttpsScheme) {
-        assert (securityLevel == ConnectionSecurityHelperSecurityLevel.SECURITY_ERROR
-                || securityLevel == ConnectionSecurityHelperSecurityLevel.SECURITY_WARNING)
-                ? emphasizeHttpsScheme : true;
+        assert (securityLevel == ConnectionSecurityLevel.SECURITY_ERROR
+                || securityLevel == ConnectionSecurityLevel.SECURITY_WARNING)
+                ? emphasizeHttpsScheme
+                : true;
 
         String urlString = url.toString();
 
@@ -170,27 +153,33 @@ public class OmniboxUrlEmphasizer {
         if (emphasizeResponse.hasScheme()) {
             int colorId = nonEmphasizedColorId;
             if (!isInternalPage && emphasizeHttpsScheme) {
+                boolean strikeThroughScheme = false;
                 switch (securityLevel) {
-                    case ConnectionSecurityHelperSecurityLevel.NONE:
+                    case ConnectionSecurityLevel.NONE:
                         colorId = nonEmphasizedColorId;
                         break;
-                    case ConnectionSecurityHelperSecurityLevel.SECURITY_WARNING:
+                    case ConnectionSecurityLevel.SECURITY_WARNING:
                         colorId = R.color.url_emphasis_start_scheme_security_warning;
+                        strikeThroughScheme = true;
                         break;
-                    case ConnectionSecurityHelperSecurityLevel.SECURITY_ERROR:
+                    case ConnectionSecurityLevel.SECURITY_ERROR:
                         colorId = R.color.url_emphasis_start_scheme_security_error;
-                        UrlEmphasisSecurityErrorSpan ss = new UrlEmphasisSecurityErrorSpan();
-                        url.setSpan(ss, startSchemeIndex, endSchemeIndex,
-                                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        strikeThroughScheme = true;
                         break;
-                    case ConnectionSecurityHelperSecurityLevel.EV_SECURE:
+                    case ConnectionSecurityLevel.EV_SECURE:
                         colorId = R.color.url_emphasis_start_scheme_ev_secure;
                         break;
-                    case ConnectionSecurityHelperSecurityLevel.SECURE:
+                    case ConnectionSecurityLevel.SECURE:
                         colorId = R.color.url_emphasis_start_scheme_secure;
                         break;
                     default:
                         assert false;
+                }
+
+                if (strikeThroughScheme) {
+                    UrlEmphasisSecurityErrorSpan ss = new UrlEmphasisSecurityErrorSpan();
+                    url.setSpan(ss, startSchemeIndex, endSchemeIndex,
+                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
             span = new UrlEmphasisColorSpan(resources.getColor(colorId));

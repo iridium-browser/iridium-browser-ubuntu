@@ -15,6 +15,7 @@
 #include "./vp9_rtcd.h"
 
 #include "vpx_mem/vpx_mem.h"
+#include "vpx_ports/mem.h"
 
 #include "vp9/common/vp9_common.h"
 #include "vp9/common/vp9_entropy.h"
@@ -36,7 +37,6 @@
 #include "vp9/encoder/vp9_ratectrl.h"
 #include "vp9/encoder/vp9_rd.h"
 #include "vp9/encoder/vp9_tokenize.h"
-#include "vp9/encoder/vp9_variance.h"
 
 #define RD_THRESH_POW      1.25
 #define RD_MULT_EPB_RATIO  64
@@ -93,7 +93,7 @@ static void fill_token_costs(vp9_coeff_cost *c,
       for (j = 0; j < REF_TYPES; ++j)
         for (k = 0; k < COEF_BANDS; ++k)
           for (l = 0; l < BAND_COEFF_CONTEXTS(k); ++l) {
-            vp9_prob probs[ENTROPY_NODES];
+            vpx_prob probs[ENTROPY_NODES];
             vp9_model_to_full_probs(p[t][i][j][k][l], probs);
             vp9_cost_tokens((int *)c[t][i][j][k][0][l], probs,
                             vp9_coef_tree);
@@ -128,7 +128,7 @@ static void init_me_luts_bd(int *bit16lut, int *bit4lut, int range,
   }
 }
 
-void vp9_init_me_luts() {
+void vp9_init_me_luts(void) {
   init_me_luts_bd(sad_per_bit16lut_8, sad_per_bit4lut_8, QINDEX_RANGE,
                   VPX_BITS_8);
 #if CONFIG_VP9_HIGHBITDEPTH
@@ -264,6 +264,7 @@ static void set_block_thresholds(const VP9_COMMON *cm, RD_OPT *rd) {
 void vp9_initialize_rd_consts(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
+  MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   RD_OPT *const rd = &cpi->rd;
   int i;
 
@@ -279,6 +280,7 @@ void vp9_initialize_rd_consts(VP9_COMP *cpi) {
                        cm->frame_type != KEY_FRAME) ? 0 : 1;
 
   set_block_thresholds(cm, rd);
+  set_partition_probs(cm, xd);
 
   if (!cpi->sf.use_nonrd_pick_mode || cm->frame_type == KEY_FRAME)
     fill_token_costs(x->token_costs, cm->fc->coef_probs);
@@ -286,7 +288,7 @@ void vp9_initialize_rd_consts(VP9_COMP *cpi) {
   if (cpi->sf.partition_search_type != VAR_BASED_PARTITION ||
       cm->frame_type == KEY_FRAME) {
     for (i = 0; i < PARTITION_CONTEXTS; ++i)
-      vp9_cost_tokens(cpi->partition_cost[i], get_partition_probs(cm, i),
+      vp9_cost_tokens(cpi->partition_cost[i], get_partition_probs(xd, i),
                       vp9_partition_tree);
   }
 
@@ -449,8 +451,6 @@ void vp9_get_entropy_contexts(BLOCK_SIZE bsize, TX_SIZE tx_size,
 void vp9_mv_pred(VP9_COMP *cpi, MACROBLOCK *x,
                  uint8_t *ref_y_buffer, int ref_y_stride,
                  int ref_frame, BLOCK_SIZE block_size) {
-  MACROBLOCKD *xd = &x->e_mbd;
-  MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
   int i;
   int zero_seen = 0;
   int best_index = 0;
@@ -465,13 +465,14 @@ void vp9_mv_pred(VP9_COMP *cpi, MACROBLOCK *x,
                      block_size < x->max_partition_size);
 
   MV pred_mv[3];
-  pred_mv[0] = mbmi->ref_mvs[ref_frame][0].as_mv;
-  pred_mv[1] = mbmi->ref_mvs[ref_frame][1].as_mv;
+  pred_mv[0] = x->mbmi_ext->ref_mvs[ref_frame][0].as_mv;
+  pred_mv[1] = x->mbmi_ext->ref_mvs[ref_frame][1].as_mv;
   pred_mv[2] = x->pred_mv[ref_frame];
   assert(num_mv_refs <= (int)(sizeof(pred_mv) / sizeof(pred_mv[0])));
 
   near_same_nearest =
-      mbmi->ref_mvs[ref_frame][0].as_int == mbmi->ref_mvs[ref_frame][1].as_int;
+      x->mbmi_ext->ref_mvs[ref_frame][0].as_int ==
+          x->mbmi_ext->ref_mvs[ref_frame][1].as_int;
   // Get the sad for each candidate reference mv.
   for (i = 0; i < num_mv_refs; ++i) {
     const MV *this_mv = &pred_mv[i];

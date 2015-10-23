@@ -168,11 +168,13 @@ class VideoCodingModuleImpl : public VideoCodingModule {
 
   int32_t SetVideoProtection(VCMVideoProtection videoProtection,
                              bool enable) override {
-    sender_->SetVideoProtection(enable, videoProtection);
+    // TODO(pbos): Remove enable from receive-side protection modes as well.
+    if (enable)
+      sender_->SetVideoProtection(videoProtection);
     return receiver_->SetVideoProtection(videoProtection, enable);
   }
 
-  int32_t AddVideoFrame(const I420VideoFrame& videoFrame,
+  int32_t AddVideoFrame(const VideoFrame& videoFrame,
                         const VideoContentMetrics* contentMetrics,
                         const CodecSpecificInfo* codecSpecificInfo) override {
     return sender_->AddVideoFrame(
@@ -189,15 +191,6 @@ class VideoCodingModuleImpl : public VideoCodingModule {
 
   int32_t SentFrameCount(VCMFrameCount& frameCount) const override {
     return sender_->SentFrameCount(&frameCount);
-  }
-
-  int StartDebugRecording(const char* file_name_utf8) override {
-    return sender_->StartDebugRecording(file_name_utf8);
-  }
-
-  int StopDebugRecording() override {
-    sender_->StopDebugRecording();
-    return VCM_OK;
   }
 
   void SuspendBelowMinBitrate() override {

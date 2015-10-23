@@ -9,6 +9,7 @@
 
 #include "base/timer/timer.h"
 #include "chrome/browser/sync/glue/sync_backend_host_impl.h"
+#include "components/invalidation/public/invalidation.h"
 #include "components/sync_driver/system_encryptor.h"
 #include "sync/internal_api/public/base/cancelation_signal.h"
 #include "sync/internal_api/public/sessions/type_debug_info_observer.h"
@@ -26,10 +27,11 @@ struct DoInitializeOptions {
       base::MessageLoop* sync_loop,
       SyncBackendRegistrar* registrar,
       const syncer::ModelSafeRoutingInfo& routing_info,
-      const std::vector<scoped_refptr<syncer::ModelSafeWorker> >& workers,
+      const std::vector<scoped_refptr<syncer::ModelSafeWorker>>& workers,
       const scoped_refptr<syncer::ExtensionsActivity>& extensions_activity,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
       const GURL& service_url,
+      const std::string& sync_user_agent,
       scoped_ptr<syncer::HttpPostProviderFactory> http_bridge_factory,
       const syncer::SyncCredentials& credentials,
       const std::string& invalidator_client_id,
@@ -38,9 +40,12 @@ struct DoInitializeOptions {
       const std::string& restored_key_for_bootstrapping,
       const std::string& restored_keystore_key_for_bootstrapping,
       scoped_ptr<syncer::InternalComponentsFactory> internal_components_factory,
-      scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
-      syncer::ReportUnrecoverableErrorFunction
-          report_unrecoverable_error_function);
+      const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+          unrecoverable_error_handler,
+      const base::Closure& report_unrecoverable_error_function,
+      scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state,
+      syncer::PassphraseTransitionClearDataOption clear_data_option,
+      const std::map<syncer::ModelType, int64>& invalidation_versions);
   ~DoInitializeOptions();
 
   base::MessageLoop* sync_loop;
@@ -50,6 +55,7 @@ struct DoInitializeOptions {
   scoped_refptr<syncer::ExtensionsActivity> extensions_activity;
   syncer::WeakHandle<syncer::JsEventHandler> event_handler;
   GURL service_url;
+  std::string sync_user_agent;
   // Overridden by tests.
   scoped_ptr<syncer::HttpPostProviderFactory> http_bridge_factory;
   syncer::SyncCredentials credentials;
@@ -60,9 +66,12 @@ struct DoInitializeOptions {
   std::string restored_key_for_bootstrapping;
   std::string restored_keystore_key_for_bootstrapping;
   scoped_ptr<syncer::InternalComponentsFactory> internal_components_factory;
-  scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler;
-  syncer::ReportUnrecoverableErrorFunction
-      report_unrecoverable_error_function;
+  const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>
+      unrecoverable_error_handler;
+  base::Closure report_unrecoverable_error_function;
+  scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state;
+  const syncer::PassphraseTransitionClearDataOption clear_data_option;
+  const std::map<syncer::ModelType, int64> invalidation_versions;
 };
 
 // Helper struct to handle currying params to
@@ -117,6 +126,8 @@ class SyncBackendHostCore
       syncer::Cryptographer* cryptographer) override;
   void OnPassphraseTypeChanged(syncer::PassphraseType type,
                                base::Time passphrase_time) override;
+  void OnLocalSetPassphraseEncryption(
+      const syncer::SyncEncryptionHandler::NigoriState& nigori_state) override;
 
   // TypeDebugInfoObserver implementation
   void OnCommitCountersUpdated(syncer::ModelType type,
@@ -238,6 +249,9 @@ class SyncBackendHostCore
   // application is backgrounded.
   void SaveChanges();
 
+  void DoClearServerData(
+      const syncer::SyncManager::ClearServerDataCallback& frontend_callback);
+
  private:
   friend class base::RefCountedThreadSafe<SyncBackendHostCore>;
   friend class SyncBackendHostForProfileSyncTest;
@@ -249,6 +263,8 @@ class SyncBackendHostCore
   // This must be called from the thread on which SaveChanges is intended to
   // be run on; the host's |registrar_->sync_thread()|.
   void StartSavingChanges();
+
+  void ClearServerDataDone(const base::Closure& frontend_callback);
 
   // Name used for debugging.
   const std::string name_;
@@ -299,6 +315,12 @@ class SyncBackendHostCore
 
   // Set when the forwarding of per-type debug counters is enabled.
   bool forward_type_info_;
+
+  // A map of data type -> invalidation version to track the most recently
+  // received invalidation version for each type.
+  // This allows dropping any invalidations with versions older than those
+  // most recently received for that data type.
+  std::map<syncer::ModelType, int64> last_invalidation_versions_;
 
   base::WeakPtrFactory<SyncBackendHostCore> weak_ptr_factory_;
 

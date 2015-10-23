@@ -15,12 +15,19 @@
 
 #include <EGL/eglext.h>
 
+#include <iostream>
+
 namespace egl
 {
 
-Surface::Surface(rx::SurfaceImpl *impl, EGLint surfaceType, const egl::Config *config, const AttributeMap &attributes)
-    : FramebufferAttachmentObject(0), // id unused
+Surface::Surface(rx::SurfaceImpl *impl,
+                 EGLint surfaceType,
+                 const egl::Config *config,
+                 const AttributeMap &attributes)
+    : FramebufferAttachmentObject(),
       mImplementation(impl),
+      mCurrentCount(0),
+      mDestroyed(false),
       mType(surfaceType),
       mConfig(config),
       mPostSubBufferRequested(false),
@@ -32,10 +39,8 @@ Surface::Surface(rx::SurfaceImpl *impl, EGLint surfaceType, const egl::Config *c
       // FIXME: Determine actual pixel aspect ratio
       mPixelAspectRatio(static_cast<EGLint>(1.0 * EGL_DISPLAY_SCALING)),
       mRenderBuffer(EGL_BACK_BUFFER),
-      mSwapBehavior(EGL_BUFFER_PRESERVED)
+      mSwapBehavior(impl->getSwapBehavior())
 {
-    addRef();
-
     mPostSubBufferRequested = (attributes.get(EGL_POST_SUB_BUFFER_SUPPORTED_NV, EGL_FALSE) == EGL_TRUE);
 
     mFixedSize = (attributes.get(EGL_FIXED_SIZE_ANGLE, EGL_FALSE) == EGL_TRUE);
@@ -65,6 +70,32 @@ Surface::~Surface()
     }
 
     SafeDelete(mImplementation);
+}
+
+void Surface::setIsCurrent(bool isCurrent)
+{
+    if (isCurrent)
+    {
+        mCurrentCount++;
+    }
+    else
+    {
+        ASSERT(mCurrentCount > 0);
+        mCurrentCount--;
+        if (mCurrentCount == 0 && mDestroyed)
+        {
+            delete this;
+        }
+    }
+}
+
+void Surface::onDestroy()
+{
+    mDestroyed = true;
+    if (mCurrentCount == 0)
+    {
+        delete this;
+    }
 }
 
 EGLint Surface::getType() const
@@ -134,12 +165,12 @@ EGLint Surface::isFixedSize() const
 
 EGLint Surface::getWidth() const
 {
-    return mFixedSize ? mFixedWidth : mImplementation->getWidth();
+    return mFixedSize ? static_cast<EGLint>(mFixedWidth) : mImplementation->getWidth();
 }
 
 EGLint Surface::getHeight() const
 {
-    return mFixedSize ? mFixedHeight : mImplementation->getHeight();
+    return mFixedSize ? static_cast<EGLint>(mFixedHeight) : mImplementation->getHeight();
 }
 
 Error Surface::bindTexImage(gl::Texture *texture, EGLint buffer)
@@ -177,4 +208,9 @@ GLsizei Surface::getAttachmentSamples(const gl::FramebufferAttachment::Target &t
     return getConfig()->samples;
 }
 
+GLuint Surface::getId() const
+{
+    UNREACHABLE();
+    return 0;
+}
 }

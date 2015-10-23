@@ -4,8 +4,10 @@
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import org.chromium.chrome.browser.Tab;
+import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanelDelegate;
+import org.chromium.chrome.browser.customtabs.CustomTab;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.common.TopControlsState;
 
@@ -23,22 +25,17 @@ public interface ContextualSearchManagementDelegate {
      *
      * @param enabled Whether the preference should be set to enabled.
      */
-    public void setPreferenceState(boolean enabled);
+    void setPreferenceState(boolean enabled);
 
     /**
      * @return Whether the Opt-out promo is available to be be shown in the panel.
      */
-    boolean isOptOutPromoAvailable();
+    boolean isPromoAvailable();
 
     /**
      * Called when the promo Panel gets closed, to log the outcome.
      */
     void logPromoOutcome();
-
-    /**
-     * @return Whether or not the Contextual Search Bar is peeking.
-     */
-    boolean isSearchBarPeeking();
 
     /**
      * Updates the top controls state for the base tab.  As these values are set at the renderer
@@ -53,9 +50,8 @@ public interface ContextualSearchManagementDelegate {
 
     /**
      * Promotes the current Content View Core in the Contextual Search Panel to its own Tab.
-     * @param shouldFocusOmnibox Whether the Omnibox should be focused after promoting.
      */
-    void promoteToTab(boolean shouldFocusOmnibox);
+    void promoteToTab();
 
     /**
      * Resets the Search Content View scroll position.
@@ -108,12 +104,23 @@ public interface ContextualSearchManagementDelegate {
 
     /**
      * Notifies that the Contextual Search Panel did get closed.
+     * @param reason The reason the panel is closing.
      */
-    void onCloseContextualSearch();
+    void onCloseContextualSearch(StateChangeReason reason);
 
     /**
      * Gets the {@code ContentViewCore} associated with Contextual Search Panel.
      * @return Contextual Search Panel's {@code ContentViewCore}.
      */
     ContentViewCore getSearchContentViewCore();
+
+    /**
+     * @return The resource id that contains how large the top controls are.
+     */
+    int getControlContainerHeightResource();
+
+    /**
+     * @return Whether the current activity contains a {@link CustomTab}.
+     */
+    boolean isCustomTab();
 }

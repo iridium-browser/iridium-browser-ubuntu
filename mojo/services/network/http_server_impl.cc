@@ -25,8 +25,10 @@ const int kBackLog = 10;
 void HttpServerImpl::Create(
     NetAddressPtr local_address,
     HttpServerDelegatePtr delegate,
+    scoped_ptr<mojo::AppRefCount> app_refcount,
     const Callback<void(NetworkErrorPtr, NetAddressPtr)>& callback) {
-  HttpServerImpl* http_server = new HttpServerImpl(delegate.Pass());
+  HttpServerImpl* http_server = new HttpServerImpl(
+      delegate.Pass(), app_refcount.Pass());
 
   int net_error = http_server->Start(local_address.Pass());
   if (net_error != net::OK) {
@@ -37,10 +39,12 @@ void HttpServerImpl::Create(
   callback.Run(MakeNetworkError(net::OK), http_server->GetLocalAddress());
 }
 
-HttpServerImpl::HttpServerImpl(HttpServerDelegatePtr delegate)
-    : delegate_(delegate.Pass()) {
+HttpServerImpl::HttpServerImpl(
+    HttpServerDelegatePtr delegate,
+    scoped_ptr<mojo::AppRefCount> app_refcount)
+    : delegate_(delegate.Pass()), app_refcount_(app_refcount.Pass()) {
   DCHECK(delegate_);
-  delegate_.set_error_handler(this);
+  delegate_.set_connection_error_handler([this]() { delete this; });
 }
 
 HttpServerImpl::~HttpServerImpl() {}
@@ -110,10 +114,6 @@ void HttpServerImpl::OnWebSocketMessage(int connection_id,
 void HttpServerImpl::OnClose(int connection_id) {
   DCHECK(connections_.find(connection_id) != connections_.end());
   connections_.erase(connection_id);
-}
-
-void HttpServerImpl::OnConnectionError() {
-  delete this;
 }
 
 }  // namespace mojo

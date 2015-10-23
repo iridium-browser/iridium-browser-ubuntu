@@ -17,7 +17,7 @@
 #include "third_party/skia/include/core/SkRegion.h"
 
 namespace app_current_window_internal =
-    extensions::core_api::app_current_window_internal;
+    extensions::api::app_current_window_internal;
 
 namespace Show = app_current_window_internal::Show;
 namespace SetBounds = app_current_window_internal::SetBounds;
@@ -125,12 +125,12 @@ BoundsType GetBoundsType(const std::string& type_as_string) {
 bool AppCurrentWindowInternalExtensionFunction::RunSync() {
   AppWindowRegistry* registry = AppWindowRegistry::Get(browser_context());
   DCHECK(registry);
-  content::RenderViewHost* rvh = render_view_host();
-  if (!rvh)
+  content::WebContents* web_contents = GetSenderWebContents();
+  if (!web_contents)
     // No need to set an error, since we won't return to the caller anyway if
     // there's no RVH.
     return false;
-  AppWindow* window = registry->GetAppWindowForRenderViewHost(rvh);
+  AppWindow* window = registry->GetAppWindowForWebContents(web_contents);
   if (!window) {
     error_ = kNoAssociatedAppWindow;
     return false;

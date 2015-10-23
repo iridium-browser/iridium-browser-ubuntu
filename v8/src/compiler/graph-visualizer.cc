@@ -28,7 +28,7 @@ namespace compiler {
 FILE* OpenVisualizerLogFile(CompilationInfo* info, const char* phase,
                             const char* suffix, const char* mode) {
   EmbeddedVector<char, 256> filename(0);
-  SmartArrayPointer<char> function_name;
+  base::SmartArrayPointer<char> function_name;
   if (info->has_shared_info()) {
     function_name = info->shared_info()->DebugName()->ToCString();
     if (strlen(function_name.get()) > 0) {
@@ -122,8 +122,7 @@ class JSONGraphNodeWriter {
       os_ << ",\"rankInputs\":[0]";
     }
     SourcePosition position = positions_->GetSourcePosition(node);
-    if (!position.IsUnknown()) {
-      DCHECK(!position.IsInvalid());
+    if (position.IsKnown()) {
       os_ << ",\"pos\":" << position.raw();
     }
     os_ << ",\"opcode\":\"" << IrOpcode::Mnemonic(node->opcode()) << "\"";
@@ -493,7 +492,7 @@ void GraphC1Visualizer::PrintIntProperty(const char* name, int value) {
 void GraphC1Visualizer::PrintCompilation(const CompilationInfo* info) {
   Tag tag(this, "compilation");
   if (info->IsOptimizing()) {
-    Handle<String> name = info->function()->debug_name();
+    Handle<String> name = info->literal()->debug_name();
     PrintStringProperty("name", name->ToCString().get());
     PrintIndent();
     os_ << "method \"" << name->ToCString().get() << ":"
@@ -650,8 +649,7 @@ void GraphC1Visualizer::PrintSchedule(const char* phase,
         }
         if (positions != NULL) {
           SourcePosition position = positions->GetSourcePosition(node);
-          if (!position.IsUnknown()) {
-            DCHECK(!position.IsInvalid());
+          if (position.IsKnown()) {
             os_ << " pos:" << position.raw();
           }
         }
@@ -828,6 +826,6 @@ std::ostream& operator<<(std::ostream& os, const AsRPO& ar) {
   }
   return os;
 }
-}
-}
-}  // namespace v8::internal::compiler
+}  // namespace compiler
+}  // namespace internal
+}  // namespace v8

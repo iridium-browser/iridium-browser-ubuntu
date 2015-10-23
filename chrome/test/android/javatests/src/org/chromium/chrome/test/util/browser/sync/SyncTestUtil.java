@@ -30,7 +30,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -75,28 +78,6 @@ public final class SyncTestUtil {
     private static Pair<String, String> newPair(String first, String second) {
         return Pair.create(first.toLowerCase(Locale.US).trim(),
                 second.toLowerCase(Locale.US).trim());
-    }
-
-    /**
-     * Creates a {@link Map} containing the counts of each entity by model type.
-     */
-    private static Map<String, Integer> createModelTypeCount(String rawJson) throws JSONException {
-        Map<String, Integer> modelTypeCount = new HashMap<String, Integer>();
-        JSONObject aboutInfo = new JSONObject(rawJson);
-
-        JSONArray typeStatusArray = aboutInfo.getJSONArray("type_status");
-        for (int i = 0; i < typeStatusArray.length(); i++) {
-            JSONObject typeInfo = typeStatusArray.getJSONObject(i);
-            String name = typeInfo.getString("name");
-            try {
-                int total = typeInfo.getInt("num_entries");
-                modelTypeCount.put(name, total);
-            } catch (JSONException e) {
-                // This is the header entry which does not have a valid count. Don't include it in
-                // the map.
-            }
-        }
-        return modelTypeCount;
     }
 
     /**
@@ -258,10 +239,10 @@ public final class SyncTestUtil {
     }
 
     /**
-     * Waits for a possible async initialization of the sync backend.
+     * Waits for sync to become active.
      */
-    public static void ensureSyncInitialized(final Context context) throws InterruptedException {
-        Assert.assertTrue("Timed out waiting for syncing to be initialized.",
+    public static void waitForSyncActive(final Context context) throws InterruptedException {
+        Assert.assertTrue("Timed out waiting for sync to become active.",
                 CriteriaHelper.pollForCriteria(new Criteria() {
                     @Override
                     public boolean isSatisfied() {
@@ -269,9 +250,7 @@ public final class SyncTestUtil {
                                 new Callable<Boolean>() {
                                     @Override
                                     public Boolean call() throws Exception {
-                                        return ProfileSyncService.get(context)
-                                                .isSyncInitialized();
-
+                                        return ProfileSyncService.get(context).isSyncActive();
                                     }
                                 });
                     }
@@ -279,11 +258,11 @@ public final class SyncTestUtil {
     }
 
     /**
-     * Verifies that the sync status is "READY" and sync is signed in with the account.
+     * Verifies that the sync is active and signed in with the given account.
      */
-    public static void verifySyncIsSignedIn(Context context, Account account)
+    public static void verifySyncIsActiveForAccount(Context context, Account account)
             throws InterruptedException {
-        ensureSyncInitialized(context);
+        waitForSyncActive(context);
         triggerSyncAndWaitForCompletion(context);
         verifySignedInWithAccount(context, account);
     }
@@ -369,6 +348,132 @@ public final class SyncTestUtil {
     }
 
     /**
+     * Retrieves the local Sync data as a JSONArray via ProfileSyncService.
+     *
+     * This method blocks until the data is available or until it times out.
+     */
+    private static JSONArray getAllNodesAsJsonArray(final Context context) throws JSONException {
+        final Semaphore semaphore = new Semaphore(0);
+        final ProfileSyncService.GetAllNodesCallback callback =
+                new ProfileSyncService.GetAllNodesCallback() {
+                    @Override
+                    public void onResult(String nodesString) {
+                        super.onResult(nodesString);
+                        semaphore.release();
+                    }
+        };
+
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                ProfileSyncService.get(context).getAllNodes(callback);
+            }
+        });
+
+        try {
+            Assert.assertTrue("Semaphore should have been released.",
+                    semaphore.tryAcquire(UI_TIMEOUT_MS, TimeUnit.MILLISECONDS));
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        return callback.getNodesAsJsonArray();
+    }
+
+
+    /**
+     * Extracts datatype-specific information from the given JSONObject. The returned JSONObject
+     * contains the same data as a specifics protocol buffer (e.g., TypedUrlSpecifics).
+     */
+    private static JSONObject extractSpecifics(JSONObject node) throws JSONException {
+        JSONObject specifics = node.getJSONObject("SPECIFICS");
+        // The key name here is type-specific (e.g., "typed_url" for Typed URLs), so we
+        // can't hard code a value.
+        Iterator<String> keysIterator = specifics.keys();
+        String key = null;
+        if (!keysIterator.hasNext()) {
+            throw new JSONException("Specifics object has 0 keys.");
+        }
+        key = keysIterator.next();
+
+        if (keysIterator.hasNext()) {
+            throw new JSONException("Specifics object has more than 1 key.");
+        }
+
+        if (key.equals("bookmark")) {
+            JSONObject bookmarkSpecifics = specifics.getJSONObject(key);
+            bookmarkSpecifics.put("parent_id", node.getString("PARENT_ID"));
+            return bookmarkSpecifics;
+        }
+        return specifics.getJSONObject(key);
+    }
+
+    /**
+     * Converts the given ID to the format stored by the server.
+     *
+     * See the SyncableId (C++) class for more information about ID encoding. To paraphrase,
+     * the client prepends "s" or "c" to the server's ID depending on the commit state of the data.
+     * IDs can also be "r" to indicate the root node, but that entity is not supported here.
+     *
+     * @param clientId the ID to be converted
+     * @return the converted ID
+     */
+    private static String convertToServerId(String clientId) {
+        if (clientId == null) {
+            throw new IllegalArgumentException("Client entity ID cannot be null.");
+        } else if (clientId.isEmpty()) {
+            throw new IllegalArgumentException("Client ID cannot be empty.");
+        } else if (!clientId.startsWith("s") && !clientId.startsWith("c")) {
+            throw new IllegalArgumentException(String.format(
+                    "Client ID (%s) must start with c or s.", clientId));
+        }
+
+        return clientId.substring(1);
+    }
+
+    /**
+     * Returns the local Sync data present for a single datatype.
+     *
+     * For each data entity, a Pair is returned. The first piece of data is the entity's server ID.
+     * This is useful for activities like deleting an entity on the server. The second piece of data
+     * is a JSONObject representing the datatype-specific information for the entity. This data is
+     * the same as the data stored in a specifics protocol buffer (e.g., TypedUrlSpecifics).
+     *
+     * @param context the Context used to retreive the correct ProfileSyncService
+     * @param typeString a String representing a specific datatype.
+     *
+     * TODO(pvalenzuela): Replace typeString with the native ModelType enum or something else
+     * that will avoid callers needing to specify the native string version.
+     *
+     * @return a List of Pair<String, JSONObject> representing the local Sync data
+     */
+    public static List<Pair<String, JSONObject>> getLocalData(
+            Context context, String typeString) throws JSONException {
+        JSONArray localData = getAllNodesAsJsonArray(context);
+        JSONArray datatypeNodes = new JSONArray();
+        for (int i = 0; i < localData.length(); i++) {
+            JSONObject datatypeObject = localData.getJSONObject(i);
+            if (datatypeObject.getString("type").equals(typeString)) {
+                datatypeNodes = datatypeObject.getJSONArray("nodes");
+                break;
+            }
+        }
+
+        List<Pair<String, JSONObject>> localDataForDatatype =
+                new ArrayList<Pair<String, JSONObject>>(datatypeNodes.length());
+        for (int i = 0; i < datatypeNodes.length(); i++) {
+            JSONObject entity = datatypeNodes.getJSONObject(i);
+            if (!entity.getString("UNIQUE_SERVER_TAG").isEmpty()) {
+                // Ignore permanent items (e.g., root datatype folders).
+                continue;
+            }
+            String id = convertToServerId(entity.getString("ID"));
+            localDataForDatatype.add(Pair.create(id, extractSpecifics(entity)));
+        }
+        return localDataForDatatype;
+    }
+
+    /**
      * Retrieves the sync internals information which is the basis for chrome://sync-internals and
      * makes the result available in {@link AboutSyncInfoGetter#getAboutInfo()}.
      *
@@ -378,12 +483,10 @@ public final class SyncTestUtil {
         private static final String TAG = "AboutSyncInfoGetter";
         final Context mContext;
         Map<Pair<String, String>, String> mAboutInfo;
-        Map<String, Integer> mModelTypeCount;
 
         public AboutSyncInfoGetter(Context context) {
             mContext = context.getApplicationContext();
             mAboutInfo = new HashMap<Pair<String, String>, String>();
-            mModelTypeCount = new HashMap<String, Integer>();
         }
 
         @Override
@@ -391,7 +494,6 @@ public final class SyncTestUtil {
             String info = ProfileSyncService.get(mContext).getSyncInternalsInfoForTest();
             try {
                 mAboutInfo = getAboutInfoStats(info);
-                mModelTypeCount = createModelTypeCount(info);
             } catch (JSONException e) {
                 Log.w(TAG, "Unable to parse JSON message: " + info, e);
             }
@@ -399,10 +501,6 @@ public final class SyncTestUtil {
 
         public Map<Pair<String, String>, String> getAboutInfo() {
             return mAboutInfo;
-        }
-
-        public Map<String, Integer> getModelTypeCount() {
-            return mModelTypeCount;
         }
     }
 

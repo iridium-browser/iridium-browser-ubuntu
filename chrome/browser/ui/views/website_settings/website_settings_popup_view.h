@@ -5,23 +5,18 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_WEBSITE_SETTINGS_WEBSITE_SETTINGS_POPUP_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_WEBSITE_SETTINGS_WEBSITE_SETTINGS_POPUP_VIEW_H_
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/views/website_settings/permission_selector_view_observer.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
-#include "content/public/common/signed_certificate_timestamp_id_and_status.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane_listener.h"
 
-class Browser;
 class GURL;
-class PermissionSelectorView;
 class PopupHeaderView;
 class Profile;
 
@@ -48,22 +43,23 @@ class WebsiteSettingsPopupView
  public:
   ~WebsiteSettingsPopupView() override;
 
+  // If |anchor_view| is null, |anchor_rect| is used to anchor the bubble.
   static void ShowPopup(views::View* anchor_view,
+                        const gfx::Rect& anchor_rect,
                         Profile* profile,
                         content::WebContents* web_contents,
                         const GURL& url,
-                        const content::SSLStatus& ssl,
-                        Browser* browser);
+                        const content::SSLStatus& ssl);
 
   static bool IsPopupShowing();
 
  private:
   WebsiteSettingsPopupView(views::View* anchor_view,
+                           gfx::NativeView parent_window,
                            Profile* profile,
                            content::WebContents* web_contents,
                            const GURL& url,
-                           const content::SSLStatus& ssl,
-                           Browser* browser);
+                           const content::SSLStatus& ssl);
 
   // PermissionSelectorViewObserver implementation.
   void OnPermissionChanged(
@@ -89,7 +85,6 @@ class WebsiteSettingsPopupView
   void SetPermissionInfo(
       const PermissionInfoList& permission_info_list) override;
   void SetIdentityInfo(const IdentityInfo& identity_info) override;
-  void SetFirstVisit(const base::string16& first_visit) override;
   void SetSelectedTab(TabId tab_id) override;
 
   // Creates the contents of the "Permissions" tab. The ownership of the
@@ -119,7 +114,6 @@ class WebsiteSettingsPopupView
                               const base::string16& headline,
                               const base::string16& text,
                               views::Link* link,
-                              views::Link* secondary_link,
                               views::LabelButton* reset_decisions_button);
 
   // Used to asynchronously handle clicks since these calls may cause the
@@ -130,9 +124,6 @@ class WebsiteSettingsPopupView
   // The web contents of the current tab. The popup can't live longer than a
   // tab.
   content::WebContents* web_contents_;
-
-  // The Browser is used to load the help center page.
-  Browser* browser_;
 
   // The presenter that controls the Website Settings UI.
   scoped_ptr<WebsiteSettings> presenter_;
@@ -162,21 +153,16 @@ class WebsiteSettingsPopupView
   // provided by the website. If the site does not provide a certificate then
   // |certificate_dialog_link_| is NULL.
   views::Link* certificate_dialog_link_;
-  // The link to open the signed certificate timestamps viewer for displaying
-  // Certificate Transparency info. If no such SCTs accompany the certificate
-  // then |signed_certificate_timestamps_link_| is NULL.
-  views::Link* signed_certificate_timestamps_link_;
   // The button to reset the Allow/Deny certificate errors decision for the
   // current host.
   views::LabelButton* reset_decisions_button_;
+  // The view that contains the contents of the "What Do These Mean?" section
+  // from the "Connection" tab.
+  views::View* help_center_content_;
 
   // The ID of the certificate provided by the site. If the site does not
   // provide a certificate then |cert_id_| is 0.
   int cert_id_;
-  // The IDs and validation status of Signed Certificate Timestamps provided
-  // by the site. Empty if no SCTs accompany the certificate.
-  content::SignedCertificateTimestampIDStatusList
-      signed_certificate_timestamp_ids_;
 
   // The link to open the help center page that contains more information about
   // the connection status icons.
@@ -187,7 +173,6 @@ class WebsiteSettingsPopupView
   views::Link* site_settings_link_;
 
   views::View* connection_info_content_;
-  views::View* page_info_content_;
 
   base::WeakPtrFactory<WebsiteSettingsPopupView> weak_factory_;
 

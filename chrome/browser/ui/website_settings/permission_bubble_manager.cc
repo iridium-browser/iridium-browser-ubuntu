@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 
 #include "base/command_line.h"
-#include "base/metrics/field_trial.h"
 #include "base/metrics/user_metrics_action.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
 #include "chrome/common/chrome_switches.h"
@@ -14,11 +13,6 @@
 #include "content/public/browser/user_metrics.h"
 
 namespace {
-
-// String constants to control whether bubbles are enabled by default.
-const char kTrialName[] = "PermissionBubbleRollout";
-const char kEnabled[] = "Enabled";
-const char kDisabled[] = "Disabled";
 
 class CancelledRequest : public PermissionBubbleRequest {
  public:
@@ -55,35 +49,41 @@ class CancelledRequest : public PermissionBubbleRequest {
 
 }  // namespace
 
+// PermissionBubbleManager::Observer -------------------------------------------
+
+PermissionBubbleManager::Observer::~Observer() {
+}
+
+void PermissionBubbleManager::Observer::OnBubbleAdded() {
+}
+
+// PermissionBubbleManager -----------------------------------------------------
+
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(PermissionBubbleManager);
 
 // static
 bool PermissionBubbleManager::Enabled() {
-  // Command line flags take precedence.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnablePermissionsBubbles))
-    return true;
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  return false;
+#endif
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisablePermissionsBubbles))
     return false;
-
-  std::string group(base::FieldTrialList::FindFullName(kTrialName));
-  if (group == kEnabled)
-    return true;
-  if (group == kDisabled)
-    return false;
-
-  return false;
+  return true;
 }
 
 PermissionBubbleManager::PermissionBubbleManager(
     content::WebContents* web_contents)
-  : content::WebContentsObserver(web_contents),
-    require_user_gesture_(false),
-    bubble_showing_(false),
-    view_(NULL),
-    request_url_has_loaded_(false),
-    weak_factory_(this) {}
+    : content::WebContentsObserver(web_contents),
+      require_user_gesture_(false),
+#if !defined(OS_ANDROID)  // No bubbles in android tests.
+      view_factory_(base::Bind(&PermissionBubbleView::Create)),
+#endif
+      view_(nullptr),
+      main_frame_has_fully_loaded_(false),
+      auto_response_for_test_(NONE),
+      weak_factory_(this) {
+}
 
 PermissionBubbleManager::~PermissionBubbleManager() {
   if (view_ != NULL)
@@ -124,7 +124,7 @@ void PermissionBubbleManager::AddRequest(PermissionBubbleRequest* request) {
     return;
   }
 
-  if (bubble_showing_) {
+  if (IsBubbleVisible()) {
     if (is_main_frame) {
       content::RecordAction(
           base::UserMetricsAction("PermissionBubbleRequestQueued"));
@@ -174,13 +174,17 @@ void PermissionBubbleManager::CancelRequest(PermissionBubbleRequest* request) {
 
     // We can simply erase the current entry in the request table if we aren't
     // showing the dialog, or if we are showing it and it can accept the update.
-    bool can_erase = !bubble_showing_ ||
-                     !view_ || view_->CanAcceptRequestUpdate();
+    bool can_erase = !IsBubbleVisible() || view_->CanAcceptRequestUpdate();
     if (can_erase) {
       (*requests_iter)->RequestFinished();
       requests_.erase(requests_iter);
       accept_states_.erase(accepts_iter);
-      TriggerShowBubble();  // Will redraw the bubble if it is being shown.
+
+      if (IsBubbleVisible()) {
+        view_->Hide();
+        // Will redraw the bubble if it is being shown.
+        TriggerShowBubble();
+      }
       return;
     }
 
@@ -195,31 +199,58 @@ void PermissionBubbleManager::CancelRequest(PermissionBubbleRequest* request) {
   NOTREACHED();  // Callers should not cancel requests that are not pending.
 }
 
-void PermissionBubbleManager::SetView(PermissionBubbleView* view) {
-  if (view == view_)
-    return;
-
+void PermissionBubbleManager::HideBubble() {
   // Disengage from the existing view if there is one.
-  if (view_ != NULL) {
-    view_->SetDelegate(NULL);
-    view_->Hide();
-    bubble_showing_ = false;
-  }
-
-  view_ = view;
-  if (!view)
+  if (!view_)
     return;
 
-  view->SetDelegate(this);
+  view_->SetDelegate(nullptr);
+  view_->Hide();
+  view_.reset();
+}
+
+void PermissionBubbleManager::DisplayPendingRequests(Browser* browser) {
+  if (IsBubbleVisible())
+    return;
+
+  view_ = view_factory_.Run(browser);
+  view_->SetDelegate(this);
+
   TriggerShowBubble();
+}
+
+void PermissionBubbleManager::UpdateAnchorPosition() {
+  if (view_)
+    view_->UpdateAnchorPosition();
+}
+
+bool PermissionBubbleManager::IsBubbleVisible() {
+  return view_ && view_->IsVisible();
+}
+
+gfx::NativeWindow PermissionBubbleManager::GetBubbleWindow() {
+  if (view_)
+    return view_->GetNativeWindow();
+  return nullptr;
 }
 
 void PermissionBubbleManager::RequireUserGesture(bool required) {
   require_user_gesture_ = required;
 }
 
+void PermissionBubbleManager::DidNavigateMainFrame(
+    const content::LoadCommittedDetails& details,
+    const content::FrameNavigateParams& params) {
+  if (details.is_in_page)
+    return;
+
+  CancelPendingQueues();
+  FinalizeBubble();
+  main_frame_has_fully_loaded_ = false;
+}
+
 void PermissionBubbleManager::DocumentOnLoadCompletedInMainFrame() {
-  request_url_has_loaded_ = true;
+  main_frame_has_fully_loaded_ = true;
   // This is scheduled because while all calls to the browser have been
   // issued at DOMContentLoaded, they may be bouncing around in scheduled
   // callbacks finding the UI thread still. This makes sure we allow those
@@ -230,26 +261,7 @@ void PermissionBubbleManager::DocumentOnLoadCompletedInMainFrame() {
 
 void PermissionBubbleManager::DocumentLoadedInFrame(
     content::RenderFrameHost* render_frame_host) {
-  if (request_url_has_loaded_)
-    ScheduleShowBubble();
-}
-
-void PermissionBubbleManager::NavigationEntryCommitted(
-    const content::LoadCommittedDetails& details) {
-  // No permissions requests pending.
-  if (request_url_.is_empty())
-    return;
-
-  // If we have navigated to a new url or reloaded the page...
-  // GetAsReferrer strips fragment and username/password, meaning
-  // the navigation is really to the same page.
-  if ((request_url_.GetAsReferrer() !=
-       web_contents()->GetLastCommittedURL().GetAsReferrer()) ||
-      details.type == content::NAVIGATION_TYPE_EXISTING_PAGE) {
-    // Kill off existing bubble and cancel any pending requests.
-    CancelPendingQueues();
-    FinalizeBubble();
-  }
+  ScheduleShowBubble();
 }
 
 void PermissionBubbleManager::WebContentsDestroyed() {
@@ -305,6 +317,11 @@ void PermissionBubbleManager::Closing() {
 }
 
 void PermissionBubbleManager::ScheduleShowBubble() {
+  // ::ScheduleShowBubble() will be called again when the main frame will be
+  // loaded.
+  if (!main_frame_has_fully_loaded_)
+    return;
+
   content::BrowserThread::PostTask(
       content::BrowserThread::UI,
       FROM_HERE,
@@ -315,9 +332,9 @@ void PermissionBubbleManager::ScheduleShowBubble() {
 void PermissionBubbleManager::TriggerShowBubble() {
   if (!view_)
     return;
-  if (bubble_showing_)
+  if (IsBubbleVisible())
     return;
-  if (!request_url_has_loaded_)
+  if (!main_frame_has_fully_loaded_)
     return;
   if (requests_.empty() && queued_requests_.empty() &&
       queued_frame_requests_.empty()) {
@@ -342,16 +359,17 @@ void PermissionBubbleManager::TriggerShowBubble() {
     accept_states_.resize(requests_.size(), true);
   }
 
-  // Note: this should appear above Show() for testing, since in that
-  // case we may do in-line calling of finalization.
-  bubble_showing_ = true;
   view_->Show(requests_, accept_states_);
+  NotifyBubbleAdded();
+
+  // If in testing mode, automatically respond to the bubble that was shown.
+  if (auto_response_for_test_ != NONE)
+    DoAutoResponseForTesting();
 }
 
 void PermissionBubbleManager::FinalizeBubble() {
   if (view_)
     view_->Hide();
-  bubble_showing_ = false;
 
   std::vector<PermissionBubbleRequest*>::iterator requests_iter;
   for (requests_iter = requests_.begin();
@@ -414,3 +432,30 @@ bool PermissionBubbleManager::HasUserGestureRequest(
   return false;
 }
 
+void PermissionBubbleManager::AddObserver(Observer* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void PermissionBubbleManager::RemoveObserver(Observer* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
+void PermissionBubbleManager::NotifyBubbleAdded() {
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnBubbleAdded());
+}
+
+void PermissionBubbleManager::DoAutoResponseForTesting() {
+  switch (auto_response_for_test_) {
+    case ACCEPT_ALL:
+      Accept();
+      break;
+    case DENY_ALL:
+      Deny();
+      break;
+    case DISMISS:
+      Closing();
+      break;
+    case NONE:
+      NOTREACHED();
+  }
+}

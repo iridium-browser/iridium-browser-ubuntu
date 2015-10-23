@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
+#include "src/runtime/runtime-utils.h"
 
 #include "src/arguments.h"
+#include "src/conversions-inl.h"
+#include "src/elements.h"
+#include "src/factory.h"
 #include "src/messages.h"
-#include "src/runtime/runtime-utils.h"
+#include "src/prototype.h"
 
 namespace v8 {
 namespace internal {
@@ -54,6 +57,26 @@ RUNTIME_FUNCTION(Runtime_SpecialArrayFunctions) {
 }
 
 
+RUNTIME_FUNCTION(Runtime_FixedArrayGet) {
+  SealHandleScope shs(isolate);
+  DCHECK(args.length() == 2);
+  CONVERT_ARG_CHECKED(FixedArray, object, 0);
+  CONVERT_SMI_ARG_CHECKED(index, 1);
+  return object->get(index);
+}
+
+
+RUNTIME_FUNCTION(Runtime_FixedArraySet) {
+  SealHandleScope shs(isolate);
+  DCHECK(args.length() == 3);
+  CONVERT_ARG_CHECKED(FixedArray, object, 0);
+  CONVERT_SMI_ARG_CHECKED(index, 1);
+  CONVERT_ARG_CHECKED(Object, value, 2);
+  object->set(index, value);
+  return isolate->heap()->undefined_value();
+}
+
+
 RUNTIME_FUNCTION(Runtime_TransitionElementsKind) {
   HandleScope scope(isolate);
   RUNTIME_ASSERT(args.length() == 2);
@@ -81,7 +104,8 @@ RUNTIME_FUNCTION(Runtime_PushIfAbsent) {
 
   // Strict not needed. Used for cycle detection in Array join implementation.
   RETURN_FAILURE_ON_EXCEPTION(
-      isolate, JSObject::SetFastElement(array, length, element, SLOPPY, true));
+      isolate, JSObject::AddDataElement(array, length, element, NONE));
+  JSObject::ValidateElements(array);
   return isolate->heap()->true_value();
 }
 
@@ -111,7 +135,7 @@ class ArrayConcatVisitor {
   ~ArrayConcatVisitor() { clear_storage(); }
 
   void visit(uint32_t i, Handle<Object> elm) {
-    if (i > JSObject::kMaxElementCount - index_offset_) {
+    if (i >= JSObject::kMaxElementCount - index_offset_) {
       set_exceeds_array_limit(true);
       return;
     }
@@ -132,8 +156,10 @@ class ArrayConcatVisitor {
     DCHECK(!fast_elements());
     Handle<SeededNumberDictionary> dict(
         SeededNumberDictionary::cast(*storage_));
+    // The object holding this backing store has just been allocated, so
+    // it cannot yet be used as a prototype.
     Handle<SeededNumberDictionary> result =
-        SeededNumberDictionary::AtNumberPut(dict, index, elm);
+        SeededNumberDictionary::AtNumberPut(dict, index, elm, false);
     if (!result.is_identical_to(dict)) {
       // Dictionary needed to grow.
       clear_storage();
@@ -185,8 +211,11 @@ class ArrayConcatVisitor {
       HandleScope loop_scope(isolate_);
       Handle<Object> element(current_storage->get(i), isolate_);
       if (!element->IsTheHole()) {
+        // The object holding this backing store has just been allocated, so
+        // it cannot yet be used as a prototype.
         Handle<SeededNumberDictionary> new_storage =
-            SeededNumberDictionary::AtNumberPut(slow_storage, i, element);
+            SeededNumberDictionary::AtNumberPut(slow_storage, i, element,
+                                                false);
         if (!new_storage.is_identical_to(slow_storage)) {
           slow_storage = loop_scope.CloseAndEscape(new_storage);
         }
@@ -273,9 +302,9 @@ static uint32_t EstimateElementCount(Handle<JSArray> array) {
       }
       break;
     }
-    case SLOPPY_ARGUMENTS_ELEMENTS:
+    case FAST_SLOPPY_ARGUMENTS_ELEMENTS:
+    case SLOW_SLOPPY_ARGUMENTS_ELEMENTS:
 #define TYPED_ARRAY_CASE(Type, type, TYPE, ctype, size) \
-  case EXTERNAL_##TYPE##_ELEMENTS:                      \
   case TYPE##_ELEMENTS:
 
       TYPED_ARRAYS(TYPED_ARRAY_CASE)
@@ -395,7 +424,6 @@ static void CollectElementIndices(Handle<JSObject> object, uint32_t range,
     }
 #define TYPED_ARRAY_CASE(Type, type, TYPE, ctype, size) \
   case TYPE##_ELEMENTS:                                 \
-  case EXTERNAL_##TYPE##_ELEMENTS:
 
       TYPED_ARRAYS(TYPED_ARRAY_CASE)
 #undef TYPED_ARRAY_CASE
@@ -414,13 +442,10 @@ static void CollectElementIndices(Handle<JSObject> object, uint32_t range,
         if (length == range) return;  // All indices accounted for already.
         break;
       }
-    case SLOPPY_ARGUMENTS_ELEMENTS: {
-      MaybeHandle<Object> length_obj =
-          Object::GetProperty(object, isolate->factory()->length_string());
-      double length_num = length_obj.ToHandleChecked()->Number();
-      uint32_t length = static_cast<uint32_t>(DoubleToInt32(length_num));
+    case FAST_SLOPPY_ARGUMENTS_ELEMENTS:
+    case SLOW_SLOPPY_ARGUMENTS_ELEMENTS: {
       ElementsAccessor* accessor = object->GetElementsAccessor();
-      for (uint32_t i = 0; i < length; i++) {
+      for (uint32_t i = 0; i < range; i++) {
         if (accessor->HasElement(object, i)) {
           indices->Add(i);
         }
@@ -448,9 +473,9 @@ static bool IterateElementsSlow(Isolate* isolate, Handle<JSObject> receiver,
     if (!maybe.IsJust()) return false;
     if (maybe.FromJust()) {
       Handle<Object> element_value;
-      ASSIGN_RETURN_ON_EXCEPTION_VALUE(
-          isolate, element_value,
-          Runtime::GetElementOrCharAt(isolate, receiver, i), false);
+      ASSIGN_RETURN_ON_EXCEPTION_VALUE(isolate, element_value,
+                                       Object::GetElement(isolate, receiver, i),
+                                       false);
       visitor->visit(i, element_value);
     }
   }
@@ -586,15 +611,6 @@ static bool IterateElements(Isolate* isolate, Handle<JSObject> receiver,
       }
       break;
     }
-    case EXTERNAL_UINT8_CLAMPED_ELEMENTS: {
-      Handle<ExternalUint8ClampedArray> pixels(
-          ExternalUint8ClampedArray::cast(receiver->elements()));
-      for (uint32_t j = 0; j < length; j++) {
-        Handle<Smi> e(Smi::FromInt(pixels->get_scalar(j)), isolate);
-        visitor->visit(j, e);
-      }
-      break;
-    }
     case UINT8_CLAMPED_ELEMENTS: {
       Handle<FixedUint8ClampedArray> pixels(
       FixedUint8ClampedArray::cast(receiver->elements()));
@@ -604,19 +620,9 @@ static bool IterateElements(Isolate* isolate, Handle<JSObject> receiver,
       }
       break;
     }
-    case EXTERNAL_INT8_ELEMENTS: {
-      IterateTypedArrayElements<ExternalInt8Array, int8_t>(
-          isolate, receiver, true, true, visitor);
-      break;
-    }
     case INT8_ELEMENTS: {
       IterateTypedArrayElements<FixedInt8Array, int8_t>(
       isolate, receiver, true, true, visitor);
-      break;
-    }
-    case EXTERNAL_UINT8_ELEMENTS: {
-      IterateTypedArrayElements<ExternalUint8Array, uint8_t>(
-          isolate, receiver, true, true, visitor);
       break;
     }
     case UINT8_ELEMENTS: {
@@ -624,19 +630,9 @@ static bool IterateElements(Isolate* isolate, Handle<JSObject> receiver,
       isolate, receiver, true, true, visitor);
       break;
     }
-    case EXTERNAL_INT16_ELEMENTS: {
-      IterateTypedArrayElements<ExternalInt16Array, int16_t>(
-          isolate, receiver, true, true, visitor);
-      break;
-    }
     case INT16_ELEMENTS: {
       IterateTypedArrayElements<FixedInt16Array, int16_t>(
       isolate, receiver, true, true, visitor);
-      break;
-    }
-    case EXTERNAL_UINT16_ELEMENTS: {
-      IterateTypedArrayElements<ExternalUint16Array, uint16_t>(
-          isolate, receiver, true, true, visitor);
       break;
     }
     case UINT16_ELEMENTS: {
@@ -644,19 +640,9 @@ static bool IterateElements(Isolate* isolate, Handle<JSObject> receiver,
       isolate, receiver, true, true, visitor);
       break;
     }
-    case EXTERNAL_INT32_ELEMENTS: {
-      IterateTypedArrayElements<ExternalInt32Array, int32_t>(
-          isolate, receiver, true, false, visitor);
-      break;
-    }
     case INT32_ELEMENTS: {
       IterateTypedArrayElements<FixedInt32Array, int32_t>(
       isolate, receiver, true, false, visitor);
-      break;
-    }
-    case EXTERNAL_UINT32_ELEMENTS: {
-      IterateTypedArrayElements<ExternalUint32Array, uint32_t>(
-          isolate, receiver, true, false, visitor);
       break;
     }
     case UINT32_ELEMENTS: {
@@ -664,19 +650,9 @@ static bool IterateElements(Isolate* isolate, Handle<JSObject> receiver,
       isolate, receiver, true, false, visitor);
       break;
     }
-    case EXTERNAL_FLOAT32_ELEMENTS: {
-      IterateTypedArrayElements<ExternalFloat32Array, float>(
-          isolate, receiver, false, false, visitor);
-      break;
-    }
     case FLOAT32_ELEMENTS: {
       IterateTypedArrayElements<FixedFloat32Array, float>(
       isolate, receiver, false, false, visitor);
-      break;
-    }
-    case EXTERNAL_FLOAT64_ELEMENTS: {
-      IterateTypedArrayElements<ExternalFloat64Array, double>(
-          isolate, receiver, false, false, visitor);
       break;
     }
     case FLOAT64_ELEMENTS: {
@@ -684,17 +660,15 @@ static bool IterateElements(Isolate* isolate, Handle<JSObject> receiver,
       isolate, receiver, false, false, visitor);
       break;
     }
-    case SLOPPY_ARGUMENTS_ELEMENTS: {
-      ElementsAccessor* accessor = receiver->GetElementsAccessor();
+    case FAST_SLOPPY_ARGUMENTS_ELEMENTS:
+    case SLOW_SLOPPY_ARGUMENTS_ELEMENTS: {
       for (uint32_t index = 0; index < length; index++) {
         HandleScope loop_scope(isolate);
-        if (accessor->HasElement(receiver, index)) {
-          Handle<Object> element;
-          ASSIGN_RETURN_ON_EXCEPTION_VALUE(
-              isolate, element, accessor->Get(receiver, receiver, index),
-              false);
-          visitor->visit(index, element);
-        }
+        Handle<Object> element;
+        ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+            isolate, element, Object::GetElement(isolate, receiver, index),
+            false);
+        visitor->visit(index, element);
       }
       break;
     }
@@ -707,17 +681,18 @@ static bool IterateElements(Isolate* isolate, Handle<JSObject> receiver,
 static bool IsConcatSpreadable(Isolate* isolate, Handle<Object> obj) {
   HandleScope handle_scope(isolate);
   if (!obj->IsSpecObject()) return false;
-  if (obj->IsJSArray()) return true;
-  if (FLAG_harmony_arrays) {
+  if (FLAG_harmony_concat_spreadable) {
     Handle<Symbol> key(isolate->factory()->is_concat_spreadable_symbol());
     Handle<Object> value;
     MaybeHandle<Object> maybeValue =
         i::Runtime::GetObjectProperty(isolate, obj, key);
     if (maybeValue.ToHandle(&value)) {
-      return value->BooleanValue();
+      if (!value->IsUndefined()) {
+        return value->BooleanValue();
+      }
     }
   }
-  return false;
+  return obj->IsJSArray();
 }
 
 
@@ -1050,8 +1025,8 @@ static Object* ArrayConstructorCommon(Isolate* isolate,
     Handle<Object> argument_one = caller_args->at<Object>(0);
     if (argument_one->IsSmi()) {
       int value = Handle<Smi>::cast(argument_one)->value();
-      if (value < 0 || JSArray::SetElementsLengthWouldNormalize(isolate->heap(),
-                                                                argument_one)) {
+      if (value < 0 ||
+          JSArray::SetLengthWouldNormalize(isolate->heap(), value)) {
         // the array is a dictionary in this case.
         can_use_type_feedback = false;
       } else if (value != 0) {
@@ -1090,8 +1065,8 @@ static Object* ArrayConstructorCommon(Isolate* isolate,
       allocation_site = site;
     }
 
-    array = Handle<JSArray>::cast(factory->NewJSObjectFromMap(
-        initial_map, NOT_TENURED, true, allocation_site));
+    array = Handle<JSArray>::cast(
+        factory->NewJSObjectFromMap(initial_map, NOT_TENURED, allocation_site));
   } else {
     array = Handle<JSArray>::cast(factory->NewJSObject(constructor));
 
@@ -1210,8 +1185,7 @@ RUNTIME_FUNCTION(Runtime_NormalizeElements) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 1);
   CONVERT_ARG_HANDLE_CHECKED(JSObject, array, 0);
-  RUNTIME_ASSERT(!array->HasExternalArrayElements() &&
-                 !array->HasFixedTypedArrayElements() &&
+  RUNTIME_ASSERT(!array->HasFixedTypedArrayElements() &&
                  !array->IsJSGlobalProxy());
   JSObject::NormalizeElements(array);
   return *array;
@@ -1221,7 +1195,7 @@ RUNTIME_FUNCTION(Runtime_NormalizeElements) {
 // GrowArrayElements returns a sentinel Smi if the object was normalized.
 RUNTIME_FUNCTION(Runtime_GrowArrayElements) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
+  DCHECK(args.length() == 2);
   CONVERT_ARG_HANDLE_CHECKED(JSObject, object, 0);
   CONVERT_NUMBER_CHECKED(int, key, Int32, args[1]);
 
@@ -1240,16 +1214,7 @@ RUNTIME_FUNCTION(Runtime_GrowArrayElements) {
     }
 
     uint32_t new_capacity = JSObject::NewElementsCapacity(index + 1);
-    ElementsKind kind = object->GetElementsKind();
-    if (IsFastDoubleElementsKind(kind)) {
-      JSObject::SetFastDoubleElementsCapacity(object, new_capacity);
-    } else {
-      JSObject::SetFastElementsCapacitySmiMode set_capacity_mode =
-          object->HasFastSmiElements() ? JSObject::kAllowSmiElements
-                                       : JSObject::kDontAllowSmiElements;
-      JSObject::SetFastElementsCapacity(object, new_capacity,
-                                        set_capacity_mode);
-    }
+    object->GetElementsAccessor()->GrowCapacityAndConvert(object, new_capacity);
   }
 
   // On success, return the fixed array elements.
@@ -1273,98 +1238,11 @@ RUNTIME_FUNCTION(Runtime_HasComplexElements) {
       return isolate->heap()->true_value();
     }
     if (!current->HasDictionaryElements()) continue;
-    if (current->element_dictionary()
-            ->HasComplexElements<DictionaryEntryType::kObjects>()) {
+    if (current->element_dictionary()->HasComplexElements()) {
       return isolate->heap()->true_value();
     }
   }
   return isolate->heap()->false_value();
-}
-
-
-// TODO(dcarney): remove this function when TurboFan supports it.
-// Takes the object to be iterated over and the result of GetPropertyNamesFast
-// Returns pair (cache_array, cache_type).
-RUNTIME_FUNCTION_RETURN_PAIR(Runtime_ForInInit) {
-  SealHandleScope scope(isolate);
-  DCHECK(args.length() == 2);
-  // This simulates CONVERT_ARG_HANDLE_CHECKED for calls returning pairs.
-  // Not worth creating a macro atm as this function should be removed.
-  if (!args[0]->IsJSReceiver() || !args[1]->IsObject()) {
-    Object* error = isolate->ThrowIllegalOperation();
-    return MakePair(error, isolate->heap()->undefined_value());
-  }
-  Handle<JSReceiver> object = args.at<JSReceiver>(0);
-  Handle<Object> cache_type = args.at<Object>(1);
-  if (cache_type->IsMap()) {
-    // Enum cache case.
-    if (Map::EnumLengthBits::decode(Map::cast(*cache_type)->bit_field3()) ==
-        0) {
-      // 0 length enum.
-      // Can't handle this case in the graph builder,
-      // so transform it into the empty fixed array case.
-      return MakePair(isolate->heap()->empty_fixed_array(), Smi::FromInt(1));
-    }
-    return MakePair(object->map()->instance_descriptors()->GetEnumCache(),
-                    *cache_type);
-  } else {
-    // FixedArray case.
-    Smi* new_cache_type = Smi::FromInt(object->IsJSProxy() ? 0 : 1);
-    return MakePair(*Handle<FixedArray>::cast(cache_type), new_cache_type);
-  }
-}
-
-
-// TODO(dcarney): remove this function when TurboFan supports it.
-RUNTIME_FUNCTION(Runtime_ForInCacheArrayLength) {
-  SealHandleScope shs(isolate);
-  DCHECK(args.length() == 2);
-  CONVERT_ARG_HANDLE_CHECKED(Object, cache_type, 0);
-  CONVERT_ARG_HANDLE_CHECKED(FixedArray, array, 1);
-  int length = 0;
-  if (cache_type->IsMap()) {
-    length = Map::cast(*cache_type)->EnumLength();
-  } else {
-    DCHECK(cache_type->IsSmi());
-    length = array->length();
-  }
-  return Smi::FromInt(length);
-}
-
-
-// TODO(dcarney): remove this function when TurboFan supports it.
-// Takes (the object to be iterated over,
-//        cache_array from ForInInit,
-//        cache_type from ForInInit,
-//        the current index)
-// Returns pair (array[index], needs_filtering).
-RUNTIME_FUNCTION_RETURN_PAIR(Runtime_ForInNext) {
-  SealHandleScope scope(isolate);
-  DCHECK(args.length() == 4);
-  int32_t index;
-  // This simulates CONVERT_ARG_HANDLE_CHECKED for calls returning pairs.
-  // Not worth creating a macro atm as this function should be removed.
-  if (!args[0]->IsJSReceiver() || !args[1]->IsFixedArray() ||
-      !args[2]->IsObject() || !args[3]->ToInt32(&index)) {
-    Object* error = isolate->ThrowIllegalOperation();
-    return MakePair(error, isolate->heap()->undefined_value());
-  }
-  Handle<JSReceiver> object = args.at<JSReceiver>(0);
-  Handle<FixedArray> array = args.at<FixedArray>(1);
-  Handle<Object> cache_type = args.at<Object>(2);
-  // Figure out first if a slow check is needed for this object.
-  bool slow_check_needed = false;
-  if (cache_type->IsMap()) {
-    if (object->map() != Map::cast(*cache_type)) {
-      // Object transitioned.  Need slow check.
-      slow_check_needed = true;
-    }
-  } else {
-    // No slow check needed for proxies.
-    slow_check_needed = Smi::cast(*cache_type)->value() == 1;
-  }
-  return MakePair(array->get(index),
-                  isolate->heap()->ToBoolean(slow_check_needed));
 }
 
 
@@ -1398,5 +1276,5 @@ RUNTIME_FUNCTION(Runtime_FastOneByteArrayJoin) {
   // to a slow path.
   return isolate->heap()->undefined_value();
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

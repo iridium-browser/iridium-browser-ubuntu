@@ -59,13 +59,18 @@ void RecordGeopositionErrorCode(Geoposition::ErrorCode error_code) {
 }  // namespace
 
 GeolocationServiceImpl::GeolocationServiceImpl(
+    mojo::InterfaceRequest<GeolocationService> request,
     GeolocationServiceContext* context,
     const base::Closure& update_callback)
-    : context_(context),
+    : binding_(this, request.Pass()),
+      context_(context),
       update_callback_(update_callback),
       high_accuracy_(false),
       has_position_to_report_(false) {
   DCHECK(context_);
+  binding_.set_connection_error_handler(
+      base::Bind(&GeolocationServiceImpl::OnConnectionError,
+                 base::Unretained(this)));
 }
 
 GeolocationServiceImpl::~GeolocationServiceImpl() {

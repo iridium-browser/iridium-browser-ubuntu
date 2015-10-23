@@ -28,9 +28,9 @@
 
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/RejectedPromises.h"
+#include "bindings/core/v8/RetainedDOMInfo.h"
 #include "bindings/core/v8/ScriptCallStackFactory.h"
 #include "bindings/core/v8/ScriptController.h"
-#include "bindings/core/v8/ScriptProfiler.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMException.h"
@@ -38,6 +38,7 @@
 #include "bindings/core/v8/V8ErrorHandler.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "bindings/core/v8/V8History.h"
+#include "bindings/core/v8/V8IdleTaskRunner.h"
 #include "bindings/core/v8/V8Location.h"
 #include "bindings/core/v8/V8PerContextData.h"
 #include "bindings/core/v8/V8Window.h"
@@ -55,14 +56,15 @@
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
-#include "platform/heap/AddressSanitizer.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
 #include "public/platform/WebThread.h"
+#include "wtf/AddressSanitizer.h"
 #include "wtf/ArrayBufferContents.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 #include <v8-debug.h>
+#include <v8-profiler.h>
 
 namespace blink {
 
@@ -147,7 +149,11 @@ static void messageHandlerInMainThread(v8::Local<v8::Message> message, v8::Local
     int scriptId = 0;
     RefPtrWillBeRawPtr<ScriptCallStack> callStack = extractCallStack(isolate, message, &scriptId);
     String resourceName = extractResourceName(message, enteredWindow->document());
-    AccessControlStatus corsStatus = message->IsSharedCrossOrigin() ? SharableCrossOrigin : NotSharableCrossOrigin;
+    AccessControlStatus accessControlStatus = NotSharableCrossOrigin;
+    if (message->IsOpaque())
+        accessControlStatus = OpaqueResource;
+    else if (message->IsSharedCrossOrigin())
+        accessControlStatus = SharableCrossOrigin;
 
     ScriptState* scriptState = ScriptState::current(isolate);
     String errorMessage = toCoreStringWithNullCheck(message->Get());
@@ -178,9 +184,9 @@ static void messageHandlerInMainThread(v8::Local<v8::Message> message, v8::Local
         // other isolated worlds (which means that the error events won't fire any event listeners
         // in user's scripts).
         EventDispatchForbiddenScope::AllowUserAgentEvents allowUserAgentEvents;
-        enteredWindow->document()->reportException(event.release(), scriptId, callStack, corsStatus);
+        enteredWindow->document()->reportException(event.release(), scriptId, callStack, accessControlStatus);
     } else {
-        enteredWindow->document()->reportException(event.release(), scriptId, callStack, corsStatus);
+        enteredWindow->document()->reportException(event.release(), scriptId, callStack, accessControlStatus);
     }
 }
 
@@ -363,21 +369,21 @@ static void initializeV8Common(v8::Isolate* isolate)
 namespace {
 
 class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
-    virtual void* Allocate(size_t size) override
+    void* Allocate(size_t size) override
     {
         void* data;
         WTF::ArrayBufferContents::allocateMemory(size, WTF::ArrayBufferContents::ZeroInitialize, data);
         return data;
     }
 
-    virtual void* AllocateUninitialized(size_t size) override
+    void* AllocateUninitialized(size_t size) override
     {
         void* data;
         WTF::ArrayBufferContents::allocateMemory(size, WTF::ArrayBufferContents::DontInitialize, data);
         return data;
     }
 
-    virtual void Free(void* data, size_t size) override
+    void Free(void* data, size_t size) override
     {
         WTF::ArrayBufferContents::freeMemory(data, size);
     }
@@ -406,13 +412,18 @@ void V8Initializer::initializeMainThreadIfNeeded()
     v8::V8::SetFailedAccessCheckCallbackFunction(failedAccessCheckCallbackInMainThread);
     v8::V8::SetAllowCodeGenerationFromStringsCallback(codeGenerationCheckCallbackInMainThread);
 
-    if (RuntimeEnabledFeatures::v8IdleTasksEnabled())
-        Platform::current()->currentThread()->scheduler()->postIdleTask(FROM_HERE, WTF::bind<double>(idleGCTaskInMainThread));
+    if (RuntimeEnabledFeatures::v8IdleTasksEnabled()) {
+        WebScheduler* scheduler = Platform::current()->currentThread()->scheduler();
+        V8PerIsolateData::enableIdleTasks(isolate, adoptPtr(new V8IdleTaskRunner(scheduler)));
+        // FIXME: Remove idleGCTaskInMainThread once V8 starts posting idle task explicity.
+        scheduler->postIdleTask(FROM_HERE, WTF::bind<double>(idleGCTaskInMainThread));
+    }
 
     isolate->SetEventLogger(timerTraceProfilerInMainThread);
     isolate->SetPromiseRejectCallback(promiseRejectHandlerInMainThread);
 
-    ScriptProfiler::initialize();
+    if (v8::HeapProfiler* profiler = isolate->GetHeapProfiler())
+        profiler->SetWrapperClassInfoProvider(WrapperTypeInfo::NodeClassId, &RetainedDOMInfo::retainedDOMInfo);
 }
 
 static void reportFatalErrorInWorker(const char* location, const char* message)

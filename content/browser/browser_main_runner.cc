@@ -14,11 +14,13 @@
 #include "base/profiler/scoped_tracker.h"
 #include "base/trace_event/trace_event.h"
 #include "base/tracked_objects.h"
+#include "components/tracing/tracing_switches.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/browser_shutdown_profile_dumper.h"
 #include "content/browser/notification_service_impl.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "third_party/skia/include/core/SkGraphics.h"
 #include "ui/base/ime/input_method_initializer.h"
 
 #if defined(OS_WIN)
@@ -38,6 +40,7 @@ namespace content {
 #if defined(OS_WIN)
 namespace {
 
+#if !defined(_WIN64)
 // Pointer to the original CryptVerifyCertificateSignatureEx function.
 net::sha256_interception::CryptVerifyCertificateSignatureExFunc
     g_real_crypt_verify_signature_stub = NULL;
@@ -58,6 +61,7 @@ BOOL WINAPI CryptVerifyCertificateSignatureExStub(
       g_real_crypt_verify_signature_stub, provider, encoding_type, subject_type,
       subject_data, issuer_type, issuer_data, flags, extra);
 }
+#endif  // !defined(_WIN64)
 
 // If necessary, install an interception
 void InstallSha256LegacyHooks() {
@@ -143,6 +147,8 @@ class BrowserMainRunnerImpl : public BrowserMainRunner {
     if (!initialization_started_) {
       initialization_started_ = true;
 
+      SkGraphics::Init();
+
 #if !defined(OS_IOS)
       if (parameters.command_line.HasSwitch(switches::kWaitForDebugger))
         base::debug::WaitForDebugger(60, true);
@@ -186,7 +192,9 @@ class BrowserMainRunnerImpl : public BrowserMainRunner {
       if (!main_loop_->InitializeToolkit())
         return 1;
 
+      main_loop_->PreMainMessageLoopStart();
       main_loop_->MainMessageLoopStart();
+      main_loop_->PostMainMessageLoopStart();
 
 // WARNING: If we get a WM_ENDSESSION, objects created on the stack here
 // are NOT deleted. If you need something to run during WM_ENDSESSION add it

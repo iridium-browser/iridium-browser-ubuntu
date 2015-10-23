@@ -11,7 +11,9 @@ vars = {
   # chrome_rev: 314402
   "valgrind_rev": "59886873b4b8258a8e0f098c23e1958e0d0c0a26", # from svn revision 231553
   "tools_valgrind_rev": "b81cde70b77b0461b18ad24616bdadb98a466647", # from svn revision 275834
-  "clang_rev": "0825693c3460f23b1d78ad272999f850447ad333", # from cr commit position 313267
+  # NOTE: be sure to update clang_lib_version in SConstruct whenever
+  # updating this clang_rev (e.g., if LLVM changes from version 3.7 to 3.8).
+  "clang_rev": "44f7f0bbbce9e581d9328e80d5b0ae88efbc3db4", # from cr commit position 327281
 
   # NOTE!  These five should be kept up to date with their counterparts in
   # chromium/src/DEPS.
@@ -32,7 +34,7 @@ vars = {
   "mingw_rev": "3cc8b140b883a9fe4986d12cfd46c16a093d3527", # from svn revision 7064
   "nsis_rev": "21b6ad22daa7bfc04b9f1c1805a34622e2607a93", # from svn revision 7071
   "ragel_rev": "da42bb33f1b67c2d70b38ec1d2edf5263271b635", # from svn revision 9010
-  "validator_snapshots_rev": "e74fe4a1a1e5daa97b89b32c1a2a3a3956d9fd7e",
+  "validator_snapshots_rev": "ef053694ef9b0d98d9bed0b9bb649963084bfc81",
 
   "chromium_git": "https://chromium.googlesource.com",
 
@@ -40,6 +42,10 @@ vars = {
   # the commit queue can handle CLs rolling build tools
   # and whatever else without interference from each other.
   "buildtools_revision": "93b3d0af1b30db55ee42bd2e983f7753153217db",
+  # Three lines of non-changing comments so that
+  # the commit queue can handle CLs rolling V8
+  # and whatever else without interference from each other.
+  "gn_config_revision": "11eb422004ff8a7a3fa8fdee1d3982aa5931dfe2",
 }
 
 deps = {
@@ -49,6 +55,9 @@ deps = {
   "buildtools":
     Var("chromium_git") + "/chromium/buildtools.git@" +
      Var("buildtools_revision"),
+  "build":
+    Var("chromium_git") + "/native_client/gn_config.git@" +
+    Var("gn_config_revision"),
   "testing/gtest":
     Var("chromium_git") + "/external/googletest.git@" + Var("gtest_rev"),
   "third_party":

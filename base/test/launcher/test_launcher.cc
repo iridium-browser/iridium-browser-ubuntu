@@ -25,6 +25,7 @@
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -560,8 +561,9 @@ void TestLauncher::OnTestFinished(const TestResult& result) {
                  << ": " << print_test_stdio;
   }
   if (print_snippet) {
-    std::vector<std::string> snippet_lines;
-    SplitStringDontTrim(result.output_snippet, '\n', &snippet_lines);
+    std::vector<std::string> snippet_lines = SplitString(
+        result.output_snippet, "\n", base::KEEP_WHITESPACE,
+        base::SPLIT_WANT_ALL);
     if (snippet_lines.size() > kOutputSnippetLinesLimit) {
       size_t truncated_size = snippet_lines.size() - kOutputSnippetLinesLimit;
       snippet_lines.erase(
@@ -569,7 +571,7 @@ void TestLauncher::OnTestFinished(const TestResult& result) {
           snippet_lines.begin() + truncated_size);
       snippet_lines.insert(snippet_lines.begin(), "<truncated>");
     }
-    fprintf(stdout, "%s", JoinString(snippet_lines, "\n").c_str());
+    fprintf(stdout, "%s", base::JoinString(snippet_lines, "\n").c_str());
     fflush(stdout);
   }
 
@@ -790,8 +792,8 @@ bool TestLauncher::Init() {
       return false;
     }
 
-    std::vector<std::string> filter_lines;
-    SplitString(filter, '\n', &filter_lines);
+    std::vector<std::string> filter_lines = SplitString(
+        filter, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     for (size_t i = 0; i < filter_lines.size(); i++) {
       if (filter_lines[i].empty())
         continue;
@@ -807,13 +809,18 @@ bool TestLauncher::Init() {
     std::string filter = command_line->GetSwitchValueASCII(kGTestFilterFlag);
     size_t dash_pos = filter.find('-');
     if (dash_pos == std::string::npos) {
-      SplitString(filter, ':', &positive_test_filter_);
+      positive_test_filter_ = SplitString(
+          filter, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     } else {
       // Everything up to the dash.
-      SplitString(filter.substr(0, dash_pos), ':', &positive_test_filter_);
+      positive_test_filter_ = SplitString(
+          filter.substr(0, dash_pos), ":", base::TRIM_WHITESPACE,
+          base::SPLIT_WANT_ALL);
 
       // Everything after the dash.
-      SplitString(filter.substr(dash_pos + 1), ':', &negative_test_filter_);
+      negative_test_filter_ = SplitString(
+          filter.substr(dash_pos + 1), ":", base::TRIM_WHITESPACE,
+          base::SPLIT_WANT_ALL);
     }
   }
 
@@ -896,9 +903,9 @@ void TestLauncher::RunTests() {
   std::vector<std::string> test_names;
   for (size_t i = 0; i < tests_.size(); i++) {
     std::string test_name = FormatFullTestName(
-        tests_[i].first, tests_[i].second);
+        tests_[i].test_case_name, tests_[i].test_name);
 
-    results_tracker_.AddTest(test_name);
+    results_tracker_.AddTest(test_name, tests_[i].file, tests_[i].line);
 
     const CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (test_name.find("DISABLED") != std::string::npos) {
@@ -909,8 +916,10 @@ void TestLauncher::RunTests() {
         continue;
     }
 
-    if (!launcher_delegate_->ShouldRunTest(tests_[i].first, tests_[i].second))
+    if (!launcher_delegate_->ShouldRunTest(
+        tests_[i].test_case_name, tests_[i].test_name)) {
       continue;
+    }
 
     // Skip the test that doesn't match the filter (if given).
     if (!positive_test_filter_.empty()) {

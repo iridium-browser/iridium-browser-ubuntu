@@ -7,9 +7,9 @@ package org.chromium.net;
 import android.content.Context;
 import android.os.ConditionVariable;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 /**
  * Wrapper class to start a Quic test server.
@@ -17,7 +17,7 @@ import org.chromium.base.Log;
 @JNINamespace("cronet")
 public final class QuicTestServer {
     private static final ConditionVariable sBlock = new ConditionVariable();
-    private static final String TAG = Log.makeTag("QuicTestServer");
+    private static final String TAG = "cr.QuicTestServer";
 
     public static void startQuicTestServer(Context context) {
         TestFilesInstaller.installIfNeeded(context);

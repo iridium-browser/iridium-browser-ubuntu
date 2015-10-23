@@ -7,8 +7,12 @@
 #include "base/callback.h"
 #include "base/lazy_instance.h"
 #include "cc/blink/web_layer_impl.h"
+#include "components/test_runner/test_common.h"
+#include "components/test_runner/web_frame_test_proxy.h"
+#include "components/test_runner/web_test_proxy.h"
+#include "content/browser/bluetooth/bluetooth_dispatcher_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
-#include "content/child/bluetooth/web_bluetooth_impl.h"
 #include "content/child/geofencing/web_geofencing_provider_impl.h"
 #include "content/common/gpu/image_transport_surface.h"
 #include "content/public/common/page_state.h"
@@ -20,9 +24,7 @@
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
-#include "content/shell/renderer/test_runner/test_common.h"
-#include "content/shell/renderer/test_runner/web_frame_test_proxy.h"
-#include "content/shell/renderer/test_runner/web_test_proxy.h"
+#include "device/bluetooth/bluetooth_adapter.h"
 #include "third_party/WebKit/public/platform/WebBatteryStatus.h"
 #include "third_party/WebKit/public/platform/WebGamepads.h"
 #include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceMotionData.h"
@@ -46,41 +48,46 @@ namespace content {
 
 namespace {
 
-base::LazyInstance<base::Callback<void(RenderView*, WebTestProxyBase*)> >::Leaky
+base::LazyInstance<
+    base::Callback<void(RenderView*, test_runner::WebTestProxyBase*)>>::Leaky
     g_callback = LAZY_INSTANCE_INITIALIZER;
 
-RenderViewImpl* CreateWebTestProxy(const ViewMsg_New_Params& params) {
-  typedef WebTestProxy<RenderViewImpl, const ViewMsg_New_Params&> ProxyType;
-  ProxyType* render_view_proxy = new ProxyType(params);
+RenderViewImpl* CreateWebTestProxy(CompositorDependencies* compositor_deps,
+                                   const ViewMsg_New_Params& params) {
+  typedef test_runner::WebTestProxy<RenderViewImpl, CompositorDependencies*,
+                                    const ViewMsg_New_Params&> ProxyType;
+  ProxyType* render_view_proxy = new ProxyType(compositor_deps, params);
   if (g_callback == 0)
     return render_view_proxy;
   g_callback.Get().Run(render_view_proxy, render_view_proxy);
   return render_view_proxy;
 }
 
-WebTestProxyBase* GetWebTestProxyBase(RenderViewImpl* render_view) {
-  typedef WebTestProxy<RenderViewImpl, ViewMsg_New_Params*> ViewProxy;
+test_runner::WebTestProxyBase* GetWebTestProxyBase(
+    RenderViewImpl* render_view) {
+  typedef test_runner::WebTestProxy<RenderViewImpl, const ViewMsg_New_Params&>
+      ViewProxy;
 
   ViewProxy* render_view_proxy = static_cast<ViewProxy*>(render_view);
-  return static_cast<WebTestProxyBase*>(render_view_proxy);
+  return static_cast<test_runner::WebTestProxyBase*>(render_view_proxy);
 }
 
 RenderFrameImpl* CreateWebFrameTestProxy(
-    RenderViewImpl* render_view,
-    int32 routing_id) {
-  typedef WebFrameTestProxy<RenderFrameImpl, RenderViewImpl*, int32> FrameProxy;
+    const RenderFrameImpl::CreateParams& params) {
+  typedef test_runner::WebFrameTestProxy<
+      RenderFrameImpl, const RenderFrameImpl::CreateParams&> FrameProxy;
 
-  FrameProxy* render_frame_proxy = new FrameProxy(render_view, routing_id);
-  render_frame_proxy->set_base_proxy(GetWebTestProxyBase(render_view));
+  FrameProxy* render_frame_proxy = new FrameProxy(params);
+  render_frame_proxy->set_base_proxy(GetWebTestProxyBase(params.render_view));
 
   return render_frame_proxy;
 }
 
 }  // namespace
 
-
 void EnableWebTestProxyCreation(
-    const base::Callback<void(RenderView*, WebTestProxyBase*)>& callback) {
+    const base::Callback<void(RenderView*, test_runner::WebTestProxyBase*)>&
+        callback) {
   g_callback.Get() = callback;
   RenderViewImpl::InstallCreateHook(CreateWebTestProxy);
   RenderFrameImpl::InstallCreateHook(CreateWebFrameTestProxy);
@@ -105,9 +112,10 @@ void FetchManifest(blink::WebView* view, const GURL& url,
   // ownership and thus nulls the scoped_ptr. On MSVS this happens before
   // the call to Start, resulting in a crash.
   fetcher->Start(view->mainFrame(),
-    base::Bind(&FetchManifestDoneCallback,
-               base::Passed(&autodeleter),
-               callback));
+                 false,
+                 base::Bind(&FetchManifestDoneCallback,
+                            base::Passed(&autodeleter),
+                            callback));
 }
 
 void SetMockGamepadProvider(scoped_ptr<RendererGamepadProvider> provider) {
@@ -154,7 +162,7 @@ int GetLocalSessionHistoryLength(RenderView* render_view) {
 }
 
 void SyncNavigationState(RenderView* render_view) {
-  static_cast<RenderViewImpl*>(render_view)->SyncNavigationState();
+  static_cast<RenderViewImpl*>(render_view)->SendUpdateState();
 }
 
 void SetFocusAndActivate(RenderView* render_view, bool enable) {
@@ -312,11 +320,17 @@ void SetDeviceColorProfile(RenderView* render_view, const std::string& name) {
       SetDeviceColorProfileForTesting(color_profile);
 }
 
-void SetBluetoothMockDataSetForTesting(const std::string& name) {
-  RenderThreadImpl::current()
-      ->blink_platform_impl()
-      ->BluetoothImplForTesting()
-      ->SetBluetoothMockDataSetForTesting(name);
+void SetBluetoothAdapter(int render_process_id,
+                         scoped_refptr<device::BluetoothAdapter> adapter) {
+  RenderProcessHostImpl* render_process_host_impl =
+      static_cast<RenderProcessHostImpl*>(
+          RenderProcessHost::FromID(render_process_id));
+
+  BluetoothDispatcherHost* dispatcher_host =
+      render_process_host_impl->GetBluetoothDispatcherHost();
+
+  if (dispatcher_host != NULL)
+    dispatcher_host->SetBluetoothAdapterForTesting(adapter.Pass());
 }
 
 void SetGeofencingMockProvider(bool service_available) {
@@ -381,7 +395,8 @@ std::string DumpHistoryItem(HistoryEntry::HistoryNode* node,
     result.append(indent, ' ');
   }
 
-  std::string url = NormalizeLayoutTestURL(item.urlString().utf8());
+  std::string url =
+      test_runner::NormalizeLayoutTestURL(item.urlString().utf8());
   result.append(url);
   if (!item.target().isEmpty()) {
     result.append(" (in frame \"");
@@ -414,6 +429,12 @@ std::string DumpBackForwardList(std::vector<PageState>& page_state,
   }
   result.append("===============================================\n");
   return result;
+}
+
+scoped_refptr<cc::TextureLayer> CreateTextureLayerForMailbox(
+    cc::TextureLayerClient* client) {
+  return cc::TextureLayer::CreateForMailbox(
+      cc_blink::WebLayerImpl::LayerSettings(), client);
 }
 
 blink::WebLayer* InstantiateWebLayer(scoped_refptr<cc::TextureLayer> layer) {

@@ -31,11 +31,14 @@
 
 class GURL;
 
+namespace syncer_v2 {
+class SyncContext;
+}
+
 namespace syncer {
 
 class ModelTypeRegistry;
 class SyncAPIServerConnectionManager;
-class SyncContext;
 class TypeDebugInfoObserver;
 class WriteNode;
 class WriteTransaction;
@@ -94,7 +97,7 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl
   void SaveChanges() override;
   void ShutdownOnSyncThread(ShutdownReason reason) override;
   UserShare* GetUserShare() override;
-  syncer::SyncContextProxy* GetSyncContextProxy() override;
+  syncer_v2::SyncContextProxy* GetSyncContextProxy() override;
   const std::string cache_guid() override;
   bool ReceivedExperiment(Experiments* experiments) override;
   bool HasUnsyncedItems() override;
@@ -109,6 +112,7 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl
   bool HasDirectoryTypeDebugInfoObserver(
       syncer::TypeDebugInfoObserver* observer) override;
   void RequestEmitDebugInfo() override;
+  void ClearServerData(const ClearServerDataCallback& callback) override;
 
   // SyncEncryptionHandler::Observer implementation.
   void OnPassphraseRequired(
@@ -123,6 +127,8 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl
   void OnCryptographerStateChanged(Cryptographer* cryptographer) override;
   void OnPassphraseTypeChanged(PassphraseType type,
                                base::Time explicit_passphrase_time) override;
+  void OnLocalSetPassphraseEncryption(
+      const SyncEncryptionHandler::NigoriState& nigori_state) override;
 
   // SyncEngineEventListener implementation.
   void OnSyncCycleEvent(const SyncCycleEvent& event) override;
@@ -273,7 +279,7 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl
   // OpenDirectory() and ShutdownOnSyncThread().
   WeakHandle<SyncManager::ChangeObserver> change_observer_;
 
-  ObserverList<SyncManager::Observer> observers_;
+  base::ObserverList<SyncManager::Observer> observers_;
 
   // The ServerConnectionManager used to abstract communication between the
   // client (the Syncer) and the sync server.
@@ -284,8 +290,8 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl
   scoped_ptr<ModelTypeRegistry> model_type_registry_;
 
   // The main interface for non-blocking sync types and a thread-safe wrapper.
-  scoped_ptr<SyncContext> sync_context_;
-  scoped_ptr<SyncContextProxy> sync_context_proxy_;
+  scoped_ptr<syncer_v2::SyncContext> sync_context_;
+  scoped_ptr<syncer_v2::SyncContextProxy> sync_context_proxy_;
 
   // A container of various bits of information used by the SyncScheduler to
   // create SyncSessions.  Must outlive the SyncScheduler.
@@ -329,8 +335,7 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl
 
   ProtocolEventBuffer protocol_event_buffer_;
 
-  scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler_;
-  ReportUnrecoverableErrorFunction report_unrecoverable_error_function_;
+  base::Closure report_unrecoverable_error_function_;
 
   // Sync's encryption handler. It tracks the set of encrypted types, manages
   // changing passphrases, and in general handles sync-specific interactions

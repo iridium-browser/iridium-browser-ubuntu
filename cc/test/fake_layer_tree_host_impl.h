@@ -32,7 +32,7 @@ class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
   void CreatePendingTree() override;
 
   BeginFrameArgs CurrentBeginFrameArgs() const override;
-  void SetCurrentBeginFrameArgs(const BeginFrameArgs& args);
+  void AdvanceToNextFrame(base::TimeDelta advance_by);
   void UpdateNumChildrenAndDrawPropertiesForActiveTree();
   static void UpdateNumChildrenAndDrawProperties(LayerTreeImpl* layerTree);
   static int RecursiveUpdateNumChildren(LayerImpl* layer);
@@ -43,7 +43,6 @@ class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
   using LayerTreeHostImpl::RemoveRenderPasses;
 
  private:
-  BeginFrameArgs current_begin_frame_args_;
   FakeLayerTreeHostImplClient client_;
   FakeRenderingStatsInstrumentation stats_instrumentation_;
 };

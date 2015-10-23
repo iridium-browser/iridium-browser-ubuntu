@@ -18,6 +18,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/browser_plugin_guest_mode.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -72,7 +73,9 @@ class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
   }
 
   void RenderProcessGone(base::TerminationStatus status) override {
-    // If the embedder crashes, then destroy the guest.
+    if (destroyed_)
+      return;
+    // If the embedder process is destroyed, then destroy the guest.
     Destroy();
   }
 
@@ -85,10 +88,7 @@ class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
   }
 
   void MainFrameWasResized(bool width_changed) override {
-    if (destroyed_)
-      return;
-
-    if (!web_contents()->GetDelegate())
+    if (destroyed_ || !web_contents()->GetDelegate())
       return;
 
     bool current_fullscreen =
@@ -108,17 +108,15 @@ class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
   void Destroy() {
     if (destroyed_)
       return;
-
     destroyed_ = true;
-    guest_->EmbedderWillBeDestroyed();
     guest_->Destroy();
   }
 
   DISALLOW_COPY_AND_ASSIGN(OwnerContentsObserver);
 };
 
-// This observer ensures that the GuestViewBase destroys itself when its
-// embedder goes away.
+// This observer ensures that the GuestViewBase destroys itself if its opener
+// WebContents goes away before the GuestViewBase is attached.
 class GuestViewBase::OpenerLifetimeObserver : public WebContentsObserver {
  public:
   OpenerLifetimeObserver(GuestViewBase* guest)
@@ -318,6 +316,13 @@ void GuestViewBase::SetSize(const SetSizeParams& params) {
 }
 
 // static
+void GuestViewBase::CleanUp(content::BrowserContext* browser_context,
+                            int embedder_process_id,
+                            int view_instance_id) {
+  // TODO(paulmeyer): Add in any general GuestView cleanup work here.
+}
+
+// static
 GuestViewBase* GuestViewBase::FromWebContents(const WebContents* web_contents) {
   WebContentsGuestViewMap* guest_map = webcontents_guestview_map.Pointer();
   auto it = guest_map->find(web_contents);
@@ -361,10 +366,6 @@ bool GuestViewBase::IsPreferredSizeModeEnabled() const {
   return false;
 }
 
-bool GuestViewBase::IsDragAndDropEnabled() const {
-  return false;
-}
-
 bool GuestViewBase::ZoomPropagatesFromEmbedderToGuest() const {
   return true;
 }
@@ -404,6 +405,24 @@ void GuestViewBase::DidDetach() {
   owner_web_contents()->Send(new GuestViewMsg_GuestDetached(
       element_instance_id_));
   element_instance_id_ = kInstanceIDNone;
+}
+
+bool GuestViewBase::Find(int request_id,
+                         const base::string16& search_text,
+                         const blink::WebFindOptions& options) {
+  if (ShouldHandleFindRequestsForEmbedder()) {
+    web_contents()->Find(request_id, search_text, options);
+    return true;
+  }
+  return false;
+}
+
+bool GuestViewBase::StopFinding(content::StopFindAction action) {
+  if (ShouldHandleFindRequestsForEmbedder()) {
+    web_contents()->StopFinding(action);
+    return true;
+  }
+  return false;
 }
 
 WebContents* GuestViewBase::GetOwnerWebContents() const {
@@ -480,10 +499,12 @@ void GuestViewBase::WillAttach(content::WebContents* embedder_web_contents,
                                int element_instance_id,
                                bool is_full_page_plugin,
                                const base::Closure& callback) {
+  // Stop tracking the old embedder's zoom level.
+  if (owner_web_contents())
+    StopTrackingEmbedderZoomLevel();
+
   if (owner_web_contents_ != embedder_web_contents) {
     DCHECK_EQ(owner_contents_observer_->web_contents(), owner_web_contents_);
-    // Stop tracking the old embedder's zoom level.
-    StopTrackingEmbedderZoomLevel();
     owner_web_contents_ = embedder_web_contents;
     owner_contents_observer_.reset(
         new OwnerContentsObserver(this, embedder_web_contents));
@@ -510,6 +531,10 @@ void GuestViewBase::SignalWhenReady(const base::Closure& callback) {
   callback.Run();
 }
 
+bool GuestViewBase::ShouldHandleFindRequestsForEmbedder() const {
+  return false;
+}
+
 int GuestViewBase::LogicalPixelsToPhysicalPixels(double logical_pixels) const {
   DCHECK(logical_pixels >= 0);
   double zoom_factor = GetEmbedderZoomFactor();
@@ -527,13 +552,6 @@ void GuestViewBase::DidStopLoading() {
 
   if (IsPreferredSizeModeEnabled())
     rvh->EnablePreferredSizeMode();
-  if (!IsDragAndDropEnabled()) {
-    const char script[] =
-        "window.addEventListener('dragstart', function() { "
-        "  window.event.preventDefault(); "
-        "});";
-    rvh->GetMainFrame()->ExecuteJavaScript(base::ASCIIToUTF16(script));
-  }
   GuestViewDidStopLoading();
 }
 
@@ -558,6 +576,13 @@ void GuestViewBase::DidNavigateMainFrame(
     const content::FrameNavigateParams& params) {
   if (attached() && ZoomPropagatesFromEmbedderToGuest())
     SetGuestZoomLevelToMatchEmbedder();
+
+  // TODO(lazyboy): This breaks guest visibility in --site-per-process because
+  // we do not take the widget's visibility into account.  We need to also
+  // stay hidden during "visibility:none" state.
+  if (content::BrowserPluginGuestMode::UseCrossProcessFramesForGuests()) {
+    web_contents()->WasShown();
+  }
 }
 
 void GuestViewBase::ActivateContents(WebContents* web_contents) {
@@ -666,6 +691,23 @@ void GuestViewBase::UpdateTargetURL(content::WebContents* source,
 
 bool GuestViewBase::ShouldResumeRequestsForCreatedWindow() {
   return false;
+}
+
+void GuestViewBase::FindReply(WebContents* source,
+                              int request_id,
+                              int number_of_matches,
+                              const gfx::Rect& selection_rect,
+                              int active_match_ordinal,
+                              bool final_update) {
+  if (ShouldHandleFindRequestsForEmbedder() &&
+      attached() && embedder_web_contents()->GetDelegate()) {
+    embedder_web_contents()->GetDelegate()->FindReply(embedder_web_contents(),
+                                                      request_id,
+                                                      number_of_matches,
+                                                      selection_rect,
+                                                      active_match_ordinal,
+                                                      final_update);
+  }
 }
 
 GuestViewBase::~GuestViewBase() {

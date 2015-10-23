@@ -68,7 +68,7 @@ public:
 
     void parseAuthorStyleSheet(const CSSStyleSheetResource*, const SecurityOrigin*);
     void parseString(const String&);
-    void parseStringAtPosition(const String&, const TextPosition&, bool);
+    void parseStringAtPosition(const String&, const TextPosition&);
 
     bool isCacheable() const;
 
@@ -87,8 +87,6 @@ public:
     bool loadCompleted() const;
     bool hasFailedOrCanceledSubresources() const;
 
-    KURL completeURL(const String& url) const;
-
     void setHasSyntacticallyValidCSSHeader(bool isValidCss);
     bool hasSyntacticallyValidCSSHeader() const { return m_hasSyntacticallyValidCSSHeader; }
 
@@ -98,7 +96,6 @@ public:
 
     void parserAddNamespace(const AtomicString& prefix, const AtomicString& uri);
     void parserAppendRule(PassRefPtrWillBeRawPtr<StyleRuleBase>);
-    void parserSetUsesRemUnits(bool b) { m_usesRemUnits = b; }
 
     void clearRules();
 
@@ -120,8 +117,6 @@ public:
 
     unsigned ruleCount() const;
     StyleRuleBase* ruleAt(unsigned index) const;
-
-    bool usesRemUnits() const { return m_usesRemUnits; }
 
     unsigned estimatedSizeInBytes() const;
 
@@ -154,7 +149,6 @@ public:
 
     bool didLoadErrorOccur() const { return m_didLoadErrorOccur; }
 
-    void shrinkToFit();
     RuleSet& ruleSet() { ASSERT(m_ruleSet); return *m_ruleSet.get(); }
     RuleSet& ensureRuleSet(const MediaQueryEvaluator&, AddRuleFlags);
     void clearRuleSet();
@@ -183,7 +177,6 @@ private:
 
     bool m_hasSyntacticallyValidCSSHeader : 1;
     bool m_didLoadErrorOccur : 1;
-    bool m_usesRemUnits : 1;
     bool m_isMutable : 1;
     bool m_isInMemoryCache : 1;
     bool m_hasFontFaceRule : 1;

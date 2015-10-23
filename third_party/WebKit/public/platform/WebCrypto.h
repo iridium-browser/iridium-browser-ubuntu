@@ -45,6 +45,7 @@
 namespace blink {
 
 class CryptoResult;
+class CryptoResultCancel;
 class WebString;
 
 enum WebCryptoErrorType {
@@ -94,14 +95,15 @@ public:
     BLINK_PLATFORM_EXPORT bool cancelled() const;
 
 #if INSIDE_BLINK
-    BLINK_PLATFORM_EXPORT explicit WebCryptoResult(const PassRefPtrWillBeRawPtr<CryptoResult>&);
+    BLINK_PLATFORM_EXPORT WebCryptoResult(CryptoResult*, const PassRefPtr<CryptoResultCancel>&);
 #endif
 
 private:
     BLINK_PLATFORM_EXPORT void reset();
     BLINK_PLATFORM_EXPORT void assign(const WebCryptoResult&);
 
-    WebPrivatePtr<CryptoResult> m_impl;
+    WebPrivatePtr<CryptoResult, WebPrivatePtrDestructionCrossThread> m_impl;
+    WebPrivatePtr<CryptoResultCancel, WebPrivatePtrDestructionCrossThread> m_cancel;
 };
 
 class WebCryptoDigestor {
@@ -216,7 +218,7 @@ public:
     // if it fails to create a WebCryptoDigestor. If it succeeds, the
     // WebCryptoDigestor returned by createDigestor must be freed by the
     // caller.
-    virtual WebCryptoDigestor* createDigestor(WebCryptoAlgorithmId algorithmId) { return 0; }
+    virtual WebCryptoDigestor* createDigestor(WebCryptoAlgorithmId algorithmId) { return nullptr; }
 
     // -----------------------
     // Structured clone

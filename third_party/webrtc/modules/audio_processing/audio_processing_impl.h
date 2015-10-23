@@ -13,6 +13,7 @@
 
 #include <list>
 #include <string>
+#include <vector>
 
 #include "webrtc/base/scoped_ptr.h"
 #include "webrtc/base/thread_annotations.h"
@@ -22,6 +23,7 @@ namespace webrtc {
 
 class AgcManagerDirect;
 class AudioBuffer;
+class AudioConverter;
 
 template<typename T>
 class Beamformer;
@@ -38,6 +40,7 @@ class NoiseSuppressionImpl;
 class ProcessingComponent;
 class TransientSuppressor;
 class VoiceDetectionImpl;
+class IntelligibilityEnhancer;
 
 #ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
 namespace audioproc {
@@ -46,44 +49,6 @@ class Event;
 
 }  // namespace audioproc
 #endif
-
-class AudioRate {
- public:
-  explicit AudioRate(int sample_rate_hz)
-      : rate_(sample_rate_hz),
-        samples_per_channel_(AudioProcessing::kChunkSizeMs * rate_ / 1000) {}
-  virtual ~AudioRate() {}
-
-  void set(int rate) {
-    rate_ = rate;
-    samples_per_channel_ = AudioProcessing::kChunkSizeMs * rate_ / 1000;
-  }
-
-  int rate() const { return rate_; }
-  int samples_per_channel() const { return samples_per_channel_; }
-
- private:
-  int rate_;
-  int samples_per_channel_;
-};
-
-class AudioFormat : public AudioRate {
- public:
-  AudioFormat(int sample_rate_hz, int num_channels)
-      : AudioRate(sample_rate_hz),
-        num_channels_(num_channels) {}
-  virtual ~AudioFormat() {}
-
-  void set(int rate, int num_channels) {
-    AudioRate::set(rate);
-    num_channels_ = num_channels;
-  }
-
-  int num_channels() const { return num_channels_; }
-
- private:
-  int num_channels_;
-};
 
 class AudioProcessingImpl : public AudioProcessing {
  public:
@@ -101,6 +66,7 @@ class AudioProcessingImpl : public AudioProcessing {
                  ChannelLayout input_layout,
                  ChannelLayout output_layout,
                  ChannelLayout reverse_layout) override;
+  int Initialize(const ProcessingConfig& processing_config) override;
   void SetExtraOptions(const Config& config) override;
   int set_sample_rate_hz(int rate) override;
   int input_sample_rate_hz() const override;
@@ -120,11 +86,20 @@ class AudioProcessingImpl : public AudioProcessing {
                     int output_sample_rate_hz,
                     ChannelLayout output_layout,
                     float* const* dest) override;
+  int ProcessStream(const float* const* src,
+                    const StreamConfig& input_config,
+                    const StreamConfig& output_config,
+                    float* const* dest) override;
   int AnalyzeReverseStream(AudioFrame* frame) override;
+  int ProcessReverseStream(AudioFrame* frame) override;
   int AnalyzeReverseStream(const float* const* data,
                            int samples_per_channel,
                            int sample_rate_hz,
                            ChannelLayout layout) override;
+  int ProcessReverseStream(const float* const* src,
+                           const StreamConfig& reverse_input_config,
+                           const StreamConfig& reverse_output_config,
+                           float* const* dest) override;
   int set_stream_delay_ms(int delay) override;
   int stream_delay_ms() const override;
   bool was_stream_delay_set() const override;
@@ -136,6 +111,7 @@ class AudioProcessingImpl : public AudioProcessing {
   int StartDebugRecording(FILE* handle) override;
   int StartDebugRecordingForPlatformFile(rtc::PlatformFile handle) override;
   int StopDebugRecording() override;
+  void UpdateHistogramsOnCallEnd() override;
   EchoCancellation* echo_cancellation() const override;
   EchoControlMobile* echo_control_mobile() const override;
   GainControl* gain_control() const override;
@@ -149,30 +125,28 @@ class AudioProcessingImpl : public AudioProcessing {
   virtual int InitializeLocked() EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
  private:
-  int InitializeLocked(int input_sample_rate_hz,
-                       int output_sample_rate_hz,
-                       int reverse_sample_rate_hz,
-                       int num_input_channels,
-                       int num_output_channels,
-                       int num_reverse_channels)
+  int InitializeLocked(const ProcessingConfig& config)
       EXCLUSIVE_LOCKS_REQUIRED(crit_);
-  int MaybeInitializeLocked(int input_sample_rate_hz,
-                            int output_sample_rate_hz,
-                            int reverse_sample_rate_hz,
-                            int num_input_channels,
-                            int num_output_channels,
-                            int num_reverse_channels)
+  int MaybeInitializeLocked(const ProcessingConfig& config)
       EXCLUSIVE_LOCKS_REQUIRED(crit_);
+  // TODO(ekm): Remove once all clients updated to new interface.
+  int AnalyzeReverseStream(const float* const* src,
+                           const StreamConfig& input_config,
+                           const StreamConfig& output_config);
   int ProcessStreamLocked() EXCLUSIVE_LOCKS_REQUIRED(crit_);
-  int AnalyzeReverseStreamLocked() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+  int ProcessReverseStreamLocked() EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
   bool is_data_processed() const;
   bool output_copy_needed(bool is_data_processed) const;
   bool synthesis_needed(bool is_data_processed) const;
   bool analysis_needed(bool is_data_processed) const;
+  bool is_rev_processed() const;
+  bool rev_conversion_needed() const;
   void InitializeExperimentalAgc() EXCLUSIVE_LOCKS_REQUIRED(crit_);
   void InitializeTransient() EXCLUSIVE_LOCKS_REQUIRED(crit_);
   void InitializeBeamformer() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+  void InitializeIntelligibility() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+  void MaybeUpdateHistograms() EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
   EchoCancellationImpl* echo_cancellation_;
   EchoControlMobileImpl* echo_control_mobile_;
@@ -187,6 +161,7 @@ class AudioProcessingImpl : public AudioProcessing {
   CriticalSectionWrapper* crit_;
   rtc::scoped_ptr<AudioBuffer> render_audio_;
   rtc::scoped_ptr<AudioBuffer> capture_audio_;
+  rtc::scoped_ptr<AudioConverter> render_converter_;
 #ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
   // TODO(andrew): make this more graceful. Ideally we would split this stuff
   // out into a separate class with an "enabled" and "disabled" implementation.
@@ -197,18 +172,23 @@ class AudioProcessingImpl : public AudioProcessing {
   std::string event_str_;  // Memory for protobuf serialization.
 #endif
 
-  AudioFormat fwd_in_format_;
-  // This one is an AudioRate, because the forward processing number of channels
-  // is mutable and is tracked by the capture_audio_.
-  AudioRate fwd_proc_format_;
-  AudioFormat fwd_out_format_;
-  AudioFormat rev_in_format_;
-  AudioFormat rev_proc_format_;
+  // Format of processing streams at input/output call sites.
+  ProcessingConfig api_format_;
+
+  // Only the rate and samples fields of fwd_proc_format_ are used because the
+  // forward processing number of channels is mutable and is tracked by the
+  // capture_audio_.
+  StreamConfig fwd_proc_format_;
+  StreamConfig rev_proc_format_;
   int split_rate_;
 
   int stream_delay_ms_;
   int delay_offset_ms_;
   bool was_stream_delay_set_;
+  int last_stream_delay_ms_;
+  int last_aec_system_delay_ms_;
+  int stream_delay_jumps_;
+  int aec_system_delay_jumps_;
 
   bool output_will_be_muted_ GUARDED_BY(crit_);
 
@@ -225,7 +205,8 @@ class AudioProcessingImpl : public AudioProcessing {
   rtc::scoped_ptr<Beamformer<float>> beamformer_;
   const std::vector<Point> array_geometry_;
 
-  const bool supports_48kHz_;
+  bool intelligibility_enabled_;
+  rtc::scoped_ptr<IntelligibilityEnhancer> intelligibility_enhancer_;
 };
 
 }  // namespace webrtc

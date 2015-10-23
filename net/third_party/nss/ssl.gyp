@@ -3,22 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'conditions': [
-    [ 'os_posix == 1 and OS != "mac" and OS != "ios"', {
-      'conditions': [
-        ['sysroot!=""', {
-          'variables': {
-            'pkg-config': '../../../build/linux/pkg-config-wrapper "<(sysroot)" "<(target_arch)" "<(system_libdir)"',
-          },
-        }, {
-          'variables': {
-            'pkg-config': 'pkg-config'
-          },
-        }],
-      ],
-    }],
-  ],
-
   'targets': [
     {
       'target_name': 'libssl',
@@ -78,7 +62,7 @@
         'NSS_ENABLE_ECC',
         'USE_UTIL_DIRECTLY',
       ],
-      'msvs_disabled_warnings': [4018, 4244, 4267],
+      'msvs_disabled_warnings': [4244, 4267],
       'variables': {
         'clang_warning_flags_unset': [
           # ssl uses PR_ASSERT(!"foo") instead of PR_ASSERT(false && "foo")

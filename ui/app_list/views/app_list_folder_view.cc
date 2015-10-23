@@ -248,6 +248,10 @@ void AppListFolderView::UpdateFolderNameVisibility(bool visible) {
   folder_header_view_->UpdateFolderNameVisibility(visible);
 }
 
+void AppListFolderView::SetBackButtonLabel(bool folder) {
+  app_list_main_view_->search_box_view()->SetBackButtonLabel(folder);
+}
+
 bool AppListFolderView::IsPointOutsideOfFolderBoundary(
     const gfx::Point& point) {
   if (!GetLocalBounds().Contains(point))
@@ -298,6 +302,7 @@ void AppListFolderView::DispatchEndDragEventForReparent(
     bool cancel_drag) {
   container_view_->apps_grid_view()->EndDragFromReparentItemInRootLevel(
       events_forwarded_to_drag_drop_host, cancel_drag);
+  container_view_->ReparentDragEnded();
 }
 
 void AppListFolderView::HideViewImmediately() {

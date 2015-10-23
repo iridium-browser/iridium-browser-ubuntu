@@ -28,7 +28,6 @@
 #include "chrome/browser/chromeos/login/easy_unlock/bootstrap_user_context_initializer.h"
 #include "chrome/browser/chromeos/login/easy_unlock/bootstrap_user_flow.h"
 #include "chrome/browser/chromeos/login/helper.h"
-#include "chrome/browser/chromeos/login/reauth_stats.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_token_initializer.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
@@ -44,12 +43,10 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/device_disabling_manager.h"
-#include "chrome/browser/signin/chrome_signin_client.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
@@ -64,6 +61,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/signin/core/browser/signin_client.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
@@ -157,7 +155,6 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
       login_display_(host_->CreateLoginDisplay(this)),
       num_login_attempts_(0),
       cros_settings_(CrosSettings::Get()),
-      offline_failed_(false),
       is_login_in_progress_(false),
       password_changed_(false),
       auth_mode_(LoginPerformer::AUTH_MODE_EXTENSION),
@@ -367,8 +364,7 @@ void ExistingUserController::Login(const UserContext& user_context,
 void ExistingUserController::PerformLogin(
     const UserContext& user_context,
     LoginPerformer::AuthorizationMode auth_mode) {
-  // TODO(antrim): remove this output once crash reason is found.
-  LOG(ERROR) << "Setting flow from PerformLogin";
+  VLOG(1) << "Setting flow from PerformLogin";
   ChromeUserManager::Get()
       ->GetUserFlow(user_context.GetUserID())
       ->SetHost(host_);
@@ -452,6 +448,14 @@ void ExistingUserController::Signout() {
   NOTREACHED();
 }
 
+bool ExistingUserController::IsUserWhitelisted(const std::string& user_id) {
+  bool wildcard_match = false;
+  if (login_performer_.get())
+    return login_performer_->IsUserWhitelisted(user_id, &wildcard_match);
+
+  return chromeos::CrosSettings::IsWhitelisted(user_id, &wildcard_match);
+}
+
 void ExistingUserController::OnConsumerKioskAutoLaunchCheckCompleted(
     KioskAppManager::ConsumerKioskAutoLaunchStatus status) {
   if (status == KioskAppManager::CONSUMER_KIOSK_AUTO_LAUNCH_CONFIGURABLE)
@@ -510,7 +514,6 @@ void ExistingUserController::ShowTPMError() {
 //
 
 void ExistingUserController::OnAuthFailure(const AuthFailure& failure) {
-  offline_failed_ = true;
   guest_mode_url_ = GURL::EmptyGURL();
   std::string error = failure.GetErrorString();
 
@@ -532,8 +535,6 @@ void ExistingUserController::OnAuthFailure(const AuthFailure& failure) {
         base::TimeDelta::FromMilliseconds(kSafeModeRestartUiDelayMs));
   } else if (failure.reason() == AuthFailure::TPM_ERROR) {
     ShowTPMError();
-  } else if (!online_succeeded_for_.empty()) {
-    ShowGaiaPasswordChanged(online_succeeded_for_);
   } else if (last_login_attempt_username_ == chromeos::login::kGuestUserName) {
     // Show no errors, just re-enable input.
     login_display_->ClearAndEnablePassword();
@@ -586,7 +587,6 @@ void ExistingUserController::OnAuthFailure(const AuthFailure& failure) {
 
 void ExistingUserController::OnAuthSuccess(const UserContext& user_context) {
   is_login_in_progress_ = false;
-  offline_failed_ = false;
   login_display_->set_signin_completed(true);
 
   // Login performer will be gone so cache this value to use
@@ -650,7 +650,6 @@ void ExistingUserController::OnProfilePrepared(Profile* profile,
 
 void ExistingUserController::OnOffTheRecordAuthSuccess() {
   is_login_in_progress_ = false;
-  offline_failed_ = false;
 
   // Mark the device as registered., i.e. the second part of OOBE as completed.
   if (!StartupUtils::IsDeviceRegistered())
@@ -664,7 +663,6 @@ void ExistingUserController::OnOffTheRecordAuthSuccess() {
 
 void ExistingUserController::OnPasswordChangeDetected() {
   is_login_in_progress_ = false;
-  offline_failed_ = false;
 
   // Must not proceed without signature verification.
   if (CrosSettingsProvider::TRUSTED != cros_settings_->PrepareTrustedValues(
@@ -701,20 +699,8 @@ void ExistingUserController::OnPasswordChangeDetected() {
 
 void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
   PerformLoginFinishedActions(true /* start public session timer */);
-  offline_failed_ = false;
 
-  if (StartupUtils::IsWebviewSigninEnabled()) {
-    login_display_->ShowWhitelistCheckFailedError();
-  } else {
-    if (g_browser_process->platform_part()
-            ->browser_policy_connector_chromeos()
-            ->IsEnterpriseManaged()) {
-      ShowError(IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST, email);
-    } else {
-      ShowError(IDS_LOGIN_ERROR_WHITELIST, email);
-    }
-    login_display_->ShowSigninUI(email);
-  }
+  login_display_->ShowWhitelistCheckFailedError();
 
   if (auth_status_consumer_) {
     auth_status_consumer_->OnAuthFailure(
@@ -728,18 +714,7 @@ void ExistingUserController::PolicyLoadFailed() {
   ShowError(IDS_LOGIN_ERROR_OWNER_KEY_LOST, "");
 
   PerformLoginFinishedActions(false /* don't start public session timer */);
-  offline_failed_ = false;
   display_email_.clear();
-}
-
-void ExistingUserController::OnOnlineChecked(const std::string& username,
-                                             bool success) {
-  if (success && last_login_attempt_username_ == username) {
-    online_succeeded_for_ = username;
-    // Wait for login attempt to end, if it hasn't yet.
-    if (offline_failed_ && !is_login_in_progress_)
-      ShowGaiaPasswordChanged(username);
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -776,18 +751,8 @@ void ExistingUserController::LoginAsGuest() {
   bool allow_guest;
   cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &allow_guest);
   if (!allow_guest) {
-    // Disallowed. The UI should normally not show the guest pod but if for some
-    // reason this has been made available to the user here is the time to tell
-    // this nicely.
-    if (g_browser_process->platform_part()
-            ->browser_policy_connector_chromeos()
-            ->IsEnterpriseManaged()) {
-      login_display_->ShowError(IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST, 1,
-                                HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
-    } else {
-      login_display_->ShowError(IDS_LOGIN_ERROR_WHITELIST, 1,
-                                HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
-    }
+    // Disallowed. The UI should normally not show the guest session button.
+    LOG(ERROR) << "Guest login attempt when guest mode is disallowed.";
     PerformLoginFinishedActions(true /* start public session timer */);
     display_email_.clear();
     return;
@@ -986,18 +951,6 @@ void ExistingUserController::ShowError(int error_id,
   login_display_->ShowError(error_id, num_login_attempts_, help_topic_id);
 }
 
-void ExistingUserController::ShowGaiaPasswordChanged(
-    const std::string& username) {
-  // Invalidate OAuth token, since it can't be correct after password is
-  // changed.
-  user_manager::UserManager::Get()->SaveUserOAuthStatus(
-      username, user_manager::User::OAUTH2_TOKEN_STATUS_INVALID);
-  RecordReauthReason(username, ReauthReason::OTHER);
-
-  login_display_->SetUIEnabled(true);
-  login_display_->ShowGaiaPasswordChanged(username);
-}
-
 void ExistingUserController::SendAccessibilityAlert(
     const std::string& alert_text) {
   AutomationManagerAura::GetInstance()->HandleAlert(
@@ -1043,10 +996,6 @@ void ExistingUserController::PerformPreLoginActions(
   if (last_login_attempt_username_ != user_context.GetUserID()) {
     last_login_attempt_username_ = user_context.GetUserID();
     num_login_attempts_ = 0;
-
-    // Also reset state variables, which are used to determine password change.
-    offline_failed_ = false;
-    online_succeeded_for_.clear();
   }
 
   // Guard in cases when we're called twice but login process is still active.
@@ -1130,9 +1079,15 @@ void ExistingUserController::DoCompleteLogin(
     bool is_ephemeral =
         ChromeUserManager::Get()->AreEphemeralUsersEnabled() &&
         user_context.GetUserID() != ChromeUserManager::Get()->GetOwnerEmail();
-    device_id = ChromeSigninClient::GenerateSigninScopedDeviceID(is_ephemeral);
+    device_id = SigninClient::GenerateSigninScopedDeviceID(is_ephemeral);
   }
   user_context.SetDeviceId(device_id);
+
+  const std::string& gaps_cookie = user_context.GetGAPSCookie();
+  if (!gaps_cookie.empty()) {
+    user_manager::UserManager::Get()->SetKnownUserGAPSCookie(
+        user_context.GetUserID(), gaps_cookie);
+  }
 
   PerformPreLoginActions(user_context);
 

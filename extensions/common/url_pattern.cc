@@ -6,6 +6,7 @@
 
 #include <ostream>
 
+#include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -236,11 +237,12 @@ URLPattern::ParseResult URLPattern::Parse(const std::string& pattern) {
     host_ = pattern.substr(host_start_pos, host_end_pos - host_start_pos);
 
     // The first component can optionally be '*' to match all subdomains.
-    std::vector<std::string> host_components;
-    base::SplitString(host_, '.', &host_components);
+    std::vector<std::string> host_components = base::SplitString(
+        host_, ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
     // Could be empty if the host only consists of whitespace characters.
-    if (host_components.empty())
+    if (host_components.empty() ||
+        (host_components.size() == 1 && host_components[0].empty()))
       return PARSE_ERROR_EMPTY_HOST;
 
     if (host_components[0] == "*") {
@@ -248,7 +250,7 @@ URLPattern::ParseResult URLPattern::Parse(const std::string& pattern) {
       host_components.erase(host_components.begin(),
                             host_components.begin() + 1);
     }
-    host_ = JoinString(host_components, '.');
+    host_ = base::JoinString(host_components, ".");
 
     path_start_pos = host_end_pos;
   }
@@ -329,8 +331,8 @@ void URLPattern::SetPath(const std::string& path) {
   spec_.clear();
   path_ = path;
   path_escaped_ = path_;
-  ReplaceSubstringsAfterOffset(&path_escaped_, 0, "\\", "\\\\");
-  ReplaceSubstringsAfterOffset(&path_escaped_, 0, "?", "\\?");
+  base::ReplaceSubstringsAfterOffset(&path_escaped_, 0, "\\", "\\\\");
+  base::ReplaceSubstringsAfterOffset(&path_escaped_, 0, "?", "\\?");
 }
 
 bool URLPattern::SetPort(const std::string& port) {
@@ -478,7 +480,7 @@ bool URLPattern::MatchesPath(const std::string& test) const {
   if (test + "/*" == path_escaped_)
     return true;
 
-  return MatchPattern(test, path_escaped_);
+  return base::MatchPattern(test, path_escaped_);
 }
 
 const std::string& URLPattern::GetAsString() const {

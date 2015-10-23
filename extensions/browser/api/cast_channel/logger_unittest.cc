@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "base/test/simple_test_tick_clock.h"
+#include "base/test/simple_test_clock.h"
 #include "extensions/browser/api/cast_channel/cast_auth_util.h"
 #include "extensions/browser/api/cast_channel/logger.h"
 #include "extensions/browser/api/cast_channel/logger_util.h"
@@ -13,7 +13,7 @@
 #include "third_party/zlib/zlib.h"
 
 namespace extensions {
-namespace core_api {
+namespace api {
 namespace cast_channel {
 
 const int kTestNssErrorCode = -8164;
@@ -27,9 +27,8 @@ class CastChannelLoggerTest : public testing::Test {
  public:
   // |logger_| will take ownership of |clock_|.
   CastChannelLoggerTest()
-      : clock_(new base::SimpleTestTickClock),
-        logger_(new Logger(scoped_ptr<base::TickClock>(clock_),
-                           base::TimeTicks())) {}
+      : clock_(new base::SimpleTestClock),
+        logger_(new Logger(scoped_ptr<base::Clock>(clock_), base::Time())) {}
   ~CastChannelLoggerTest() override {}
 
   bool Uncompress(const char* input, int length, std::string* output) {
@@ -83,7 +82,7 @@ class CastChannelLoggerTest : public testing::Test {
   }
 
  protected:
-  base::SimpleTestTickClock* clock_;
+  base::SimpleTestClock* clock_;
   scoped_refptr<Logger> logger_;
 };
 
@@ -331,5 +330,5 @@ TEST_F(CastChannelLoggerTest, Reset) {
 }
 
 }  // namespace cast_channel
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions

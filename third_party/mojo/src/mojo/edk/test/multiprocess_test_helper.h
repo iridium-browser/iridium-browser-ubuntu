@@ -7,11 +7,11 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/process/process.h"
 #include "base/test/multiprocess_test.h"
 #include "base/test/test_timeouts.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
+#include "mojo/public/cpp/system/macros.h"
 #include "testing/multiprocess_func_list.h"
 
 namespace mojo {
@@ -31,6 +31,12 @@ class MultiprocessTestHelper {
   // declared using |MOJO_MULTIPROCESS_TEST_CHILD_MAIN()| or
   // |MOJO_MULTIPROCESS_TEST_CHILD_TEST()| (below).
   void StartChild(const std::string& test_child_name);
+  // Like |StartChild()|, but appends an extra switch (with ASCII value) to the
+  // command line. (The switch must not already be present in the default
+  // command line.)
+  void StartChildWithExtraSwitch(const std::string& test_child_name,
+                                 const std::string& switch_string,
+                                 const std::string& switch_value);
   // Wait for the child process to terminate.
   // Returns the exit code of the child process. Note that, though it's declared
   // to be an |int|, the exit code is subject to mangling by the OS. E.g., we
@@ -60,7 +66,7 @@ class MultiprocessTestHelper {
   // Valid after |StartChild()| and before |WaitForChildShutdown()|.
   base::Process test_child_;
 
-  DISALLOW_COPY_AND_ASSIGN(MultiprocessTestHelper);
+  MOJO_DISALLOW_COPY_AND_ASSIGN(MultiprocessTestHelper);
 };
 
 // Use this to declare the child process's "main()" function for tests using

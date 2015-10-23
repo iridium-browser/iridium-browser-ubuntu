@@ -36,16 +36,16 @@ class HTMLTrackElement;
 
 class LoadableTextTrack final : public TextTrack {
 public:
-    static PassRefPtrWillBeRawPtr<LoadableTextTrack> create(HTMLTrackElement* track)
+    static LoadableTextTrack* create(HTMLTrackElement* track)
     {
-        return adoptRefWillBeNoop(new LoadableTextTrack(track));
+        return new LoadableTextTrack(track);
     }
-    virtual ~LoadableTextTrack();
+    ~LoadableTextTrack() override;
 
     // TextTrack method.
-    virtual void setMode(const AtomicString&) override;
+    void setMode(const AtomicString&) override;
 
-    void addRegions(const WillBeHeapVector<RefPtrWillBeMember<VTTRegion>>&);
+    void addRegions(const HeapVector<Member<VTTRegion>>&);
     using TextTrack::addListOfCues;
 
     size_t trackElementIndex();
@@ -54,7 +54,7 @@ public:
     void clearTrackElement();
 #endif
 
-    virtual bool isDefault() const override;
+    bool isDefault() const override;
 
     DECLARE_VIRTUAL_TRACE();
 

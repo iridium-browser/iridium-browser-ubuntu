@@ -13,7 +13,7 @@ goog.provide('__crWeb.coreDynamic');
 __gCrWeb.core_dynamic = {};
 
 /* Beginning of anonymous object. */
-new function() {
+(function() {
   /**
    * Adds WKWebView specific event listeners.
    */
@@ -47,13 +47,4 @@ new function() {
     if (__gCrWeb.common.updatePluginPlaceholders())
       __gCrWeb.message.invokeOnHost({'command': 'addPluginPlaceholders'});
   }
-
-  /**
-   * Sends window.history.willChangeState message. Called when
-   * history.pushState and history.replaceState are invoked.
-   */
-  __gCrWeb.core_dynamic.historyWillChangeState = function() {
-    __gCrWeb.message.invokeOnHost(
-        {'command': 'window.history.willChangeState'});
-  };
-}
+}());

@@ -138,7 +138,7 @@ void RealPanWalletClient::OnURLFetchComplete(const net::URLFetcher* source) {
     // Valid response.
     case net::HTTP_OK: {
       std::string error_code;
-      scoped_ptr<base::Value> message_value(base::JSONReader::Read(data));
+      scoped_ptr<base::Value> message_value = base::JSONReader::Read(data);
       if (message_value.get() &&
           message_value->IsType(base::Value::TYPE_DICTIONARY)) {
         response_dict.reset(
@@ -147,7 +147,7 @@ void RealPanWalletClient::OnURLFetchComplete(const net::URLFetcher* source) {
         response_dict->GetString("error.code", &error_code);
       }
 
-      if (LowerCaseEqualsASCII(error_code, "internal"))
+      if (base::LowerCaseEqualsASCII(error_code, "internal"))
         result = AutofillClient::TRY_AGAIN_FAILURE;
       else if (real_pan.empty() || !error_code.empty())
         result = AutofillClient::PERMANENT_FAILURE;
@@ -244,7 +244,7 @@ void RealPanWalletClient::CreateRequest() {
     request_dict.SetInteger("expiration_year", value);
 
   std::string json_request;
-  base::JSONWriter::Write(&request_dict, &json_request);
+  base::JSONWriter::Write(request_dict, &json_request);
   std::string post_body =
       base::StringPrintf(kUnmaskCardRequestFormat,
                          net::EscapeUrlEncodedData(json_request, true).c_str(),
@@ -264,7 +264,7 @@ void RealPanWalletClient::StartTokenFetch(bool invalidate_old) {
   IdentityProvider* identity = delegate_->GetIdentityProvider();
   if (invalidate_old) {
     DCHECK(!access_token_.empty());
-    identity->GetTokenService()->InvalidateToken(
+    identity->GetTokenService()->InvalidateAccessToken(
         identity->GetActiveAccountId(), wallet_scopes, access_token_);
   }
   access_token_.clear();

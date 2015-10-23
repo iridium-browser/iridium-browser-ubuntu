@@ -20,7 +20,7 @@ static SkShader* make_heatGradient(const SkPoint pts[2]) {
 }
 
 static bool setFont(SkPaint* paint, const char name[]) {
-    SkTypeface* tf = sk_tool_utils::create_portable_typeface(name, SkTypeface::kNormal);
+    SkTypeface* tf = SkTypeface::CreateFromName(name, SkTypeface::kNormal);
     if (tf) {
         paint->setTypeface(tf)->unref();
         return true;
@@ -40,7 +40,9 @@ static bool setFont(SkPaint* paint, const char name[]) {
 class GammaTextGM : public skiagm::GM {
 protected:
     SkString onShortName() override {
-        return SkString("gammatext");
+        SkString name("gammatext");
+        name.append(sk_tool_utils::major_platform_os_name());
+        return name;
     }
 
     SkISize onISize() override {
@@ -72,7 +74,7 @@ protected:
         size_t len = strlen(text);
 
         SkPaint paint;
-        setFont(&paint, "Times");
+        setFont(&paint, sk_tool_utils::platform_font_name("serif"));
         paint.setTextSize(SkIntToScalar(16));
         paint.setAntiAlias(true);
         paint.setLCDRenderText(true);

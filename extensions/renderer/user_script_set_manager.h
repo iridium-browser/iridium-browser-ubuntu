@@ -17,17 +17,16 @@
 #include "extensions/common/user_script.h"
 #include "extensions/renderer/user_script_set.h"
 
+namespace content {
+class RenderFrame;
+}
+
 namespace IPC {
 class Message;
 }
 
-namespace blink {
-class WebFrame;
-}
-
 namespace extensions {
 
-class ExtensionSet;
 class ScriptInjection;
 
 // Manager for separate UserScriptSets, one for each shared memory region.
@@ -49,7 +48,7 @@ class UserScriptSetManager : public content::RenderProcessObserver {
         const std::vector<UserScript*>& scripts) = 0;
   };
 
-  UserScriptSetManager(const ExtensionSet* extensions);
+  UserScriptSetManager();
 
   ~UserScriptSetManager() override;
 
@@ -61,7 +60,7 @@ class UserScriptSetManager : public content::RenderProcessObserver {
   // and |url|.
   scoped_ptr<ScriptInjection> GetInjectionForDeclarativeScript(
       int script_id,
-      blink::WebFrame* web_frame,
+      content::RenderFrame* render_frame,
       int tab_id,
       const GURL& url,
       const std::string& extension_id);
@@ -69,7 +68,7 @@ class UserScriptSetManager : public content::RenderProcessObserver {
   // Append all injections from |static_scripts| and each of
   // |programmatic_scripts_| to |injections|.
   void GetAllInjections(ScopedVector<ScriptInjection>* injections,
-                        blink::WebFrame* web_frame,
+                        content::RenderFrame* render_frame,
                         int tab_id,
                         UserScript::RunLocation run_location);
 
@@ -101,11 +100,8 @@ class UserScriptSetManager : public content::RenderProcessObserver {
   // per-extension).
   UserScriptSetMap programmatic_scripts_;
 
-  // The set of all known extensions. Owned by the Dispatcher.
-  const ExtensionSet* extensions_;
-
   // The associated observers.
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(UserScriptSetManager);
 };

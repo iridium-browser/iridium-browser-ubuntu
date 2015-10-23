@@ -11,7 +11,7 @@
 #include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
-#include "third_party/WebKit/public/platform/WebServiceWorkerResponseType.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerResponseType.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -37,6 +37,7 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler
       base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
       FetchRequestMode request_mode,
       FetchCredentialsMode credentials_mode,
+      FetchRedirectMode redirect_mode,
       ResourceType resource_type,
       RequestContextType request_context_type,
       RequestContextFrameType frame_type,
@@ -49,14 +50,7 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler
       net::NetworkDelegate* network_delegate,
       ResourceContext* resource_context) override;
 
-  void GetExtraResponseInfo(
-      bool* was_fetched_via_service_worker,
-      bool* was_fallback_required_by_service_worker,
-      GURL* original_url_via_service_worker,
-      blink::WebServiceWorkerResponseType* response_type_via_service_worker,
-      base::TimeTicks* fetch_start_time,
-      base::TimeTicks* fetch_ready_time,
-      base::TimeTicks* fetch_end_time) const override;
+  void GetExtraResponseInfo(ResourceResponseInfo* response_info) const override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerControlleeRequestHandlerTest,
@@ -75,15 +69,21 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler
   // For sub resource case.
   void PrepareForSubResource();
 
+  void FallbackToNetwork();
+
   bool is_main_resource_load_;
   scoped_refptr<ServiceWorkerURLRequestJob> job_;
   FetchRequestMode request_mode_;
   FetchCredentialsMode credentials_mode_;
+  FetchRedirectMode redirect_mode_;
   RequestContextType request_context_type_;
   RequestContextFrameType frame_type_;
   scoped_refptr<ResourceRequestBody> body_;
   ResourceContext* resource_context_;
   GURL stripped_url_;
+  base::TimeTicks worker_start_time_;
+  base::TimeTicks worker_ready_time_;
+  bool skip_service_worker_;
   base::WeakPtrFactory<ServiceWorkerControlleeRequestHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerControlleeRequestHandler);

@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
+#include "net/base/port_util.h"
 #include "net/ftp/ftp_auth_cache.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_error_job.h"
@@ -27,9 +27,10 @@ FtpProtocolHandler::~FtpProtocolHandler() {
 
 URLRequestJob* FtpProtocolHandler::MaybeCreateJob(
     URLRequest* request, NetworkDelegate* network_delegate) const {
-  int port = request->url().IntPort();
-  if (request->url().has_port() &&
-      !IsPortAllowedByFtp(port) && !IsPortAllowedByOverride(port)) {
+  DCHECK_EQ("ftp", request->url().scheme());
+
+  if (!IsPortAllowedForScheme(request->url().EffectiveIntPort(),
+                              request->url().scheme())) {
     return new URLRequestErrorJob(request, network_delegate, ERR_UNSAFE_PORT);
   }
 

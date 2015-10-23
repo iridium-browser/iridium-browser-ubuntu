@@ -6,6 +6,7 @@
 
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/permissions/api_permission_set.h"
 #include "extensions/common/permissions/coalesced_permission_message.h"
@@ -26,7 +27,7 @@ class DefaultPermissionMessageFormatter
   ~DefaultPermissionMessageFormatter() override {}
 
   CoalescedPermissionMessage GetPermissionMessage(
-      PermissionIDSet permissions) const override {
+      const PermissionIDSet& permissions) const override {
     return CoalescedPermissionMessage(l10n_util::GetStringUTF16(message_id_),
                                       permissions);
   }
@@ -34,7 +35,7 @@ class DefaultPermissionMessageFormatter
  private:
   int message_id_;
 
-  // DISALLOW_COPY_AND_ASSIGN(DefaultPermissionMessageFormatter);
+  DISALLOW_COPY_AND_ASSIGN(DefaultPermissionMessageFormatter);
 };
 
 // A formatter that substitutes the parameter into the message using string
@@ -46,7 +47,7 @@ class SingleParameterFormatter : public ChromePermissionMessageFormatter {
   ~SingleParameterFormatter() override {}
 
   CoalescedPermissionMessage GetPermissionMessage(
-      PermissionIDSet permissions) const override {
+      const PermissionIDSet& permissions) const override {
     DCHECK(permissions.size() > 0);
     std::vector<base::string16> parameters =
         permissions.GetAllPermissionParameters();
@@ -58,6 +59,8 @@ class SingleParameterFormatter : public ChromePermissionMessageFormatter {
 
  private:
   int message_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(SingleParameterFormatter);
 };
 
 // Adds each parameter to a growing list, with the given |root_message_id| as
@@ -69,7 +72,7 @@ class SimpleListFormatter : public ChromePermissionMessageFormatter {
   ~SimpleListFormatter() override {}
 
   CoalescedPermissionMessage GetPermissionMessage(
-      PermissionIDSet permissions) const override {
+      const PermissionIDSet& permissions) const override {
     DCHECK(permissions.size() > 0);
     return CoalescedPermissionMessage(
         l10n_util::GetStringUTF16(root_message_id_), permissions,
@@ -78,6 +81,8 @@ class SimpleListFormatter : public ChromePermissionMessageFormatter {
 
  private:
   int root_message_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(SimpleListFormatter);
 };
 
 // Creates a space-separated list of permissions with the given PermissionID.
@@ -94,12 +99,12 @@ class SpaceSeparatedListFormatter : public ChromePermissionMessageFormatter {
   ~SpaceSeparatedListFormatter() override {}
 
   CoalescedPermissionMessage GetPermissionMessage(
-      PermissionIDSet permissions) const override {
+      const PermissionIDSet& permissions) const override {
     DCHECK(permissions.size() > 0);
     std::vector<base::string16> hostnames =
         permissions.GetAllPermissionParameters();
-    base::string16 hosts_string = JoinString(
-        std::vector<base::string16>(hostnames.begin(), hostnames.end()), ' ');
+    base::string16 hosts_string =
+        base::JoinString(hostnames, base::ASCIIToUTF16(" "));
     return CoalescedPermissionMessage(
         l10n_util::GetStringFUTF16(hostnames.size() == 1
                                        ? message_id_for_one_host_
@@ -111,6 +116,8 @@ class SpaceSeparatedListFormatter : public ChromePermissionMessageFormatter {
  private:
   int message_id_for_one_host_;
   int message_id_for_multiple_hosts_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpaceSeparatedListFormatter);
 };
 
 // Creates a comma-separated list of permissions with the given PermissionID.
@@ -132,7 +139,7 @@ class CommaSeparatedListFormatter : public ChromePermissionMessageFormatter {
   ~CommaSeparatedListFormatter() override {}
 
   CoalescedPermissionMessage GetPermissionMessage(
-      PermissionIDSet permissions) const override {
+      const PermissionIDSet& permissions) const override {
     DCHECK(permissions.size() > 0);
     std::vector<base::string16> hostnames =
         permissions.GetAllPermissionParameters();
@@ -167,6 +174,80 @@ class CommaSeparatedListFormatter : public ChromePermissionMessageFormatter {
   int message_id_for_two_hosts_;
   int message_id_for_three_hosts_;
   int message_id_for_many_hosts_;
+
+  DISALLOW_COPY_AND_ASSIGN(CommaSeparatedListFormatter);
+};
+
+class USBDevicesFormatter : public ChromePermissionMessageFormatter {
+ public:
+  USBDevicesFormatter() {}
+  ~USBDevicesFormatter() override {}
+
+  CoalescedPermissionMessage GetPermissionMessage(
+      const PermissionIDSet& permissions) const override {
+    DCHECK(permissions.size() > 0);
+    return permissions.size() == 1 ? GetItemMessage(permissions)
+                                   : GetMultiItemMessage(permissions);
+  }
+
+ private:
+  CoalescedPermissionMessage GetItemMessage(
+      const PermissionIDSet& permissions) const {
+    DCHECK(permissions.size() == 1);
+    const PermissionID& permission = *permissions.begin();
+    base::string16 msg;
+    switch (permission.id()) {
+      case APIPermission::kUsbDevice:
+        msg = l10n_util::GetStringFUTF16(
+            IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE, permission.parameter());
+        break;
+      case APIPermission::kUsbDeviceUnknownProduct:
+        msg = l10n_util::GetStringFUTF16(
+            IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_PRODUCT,
+            permission.parameter());
+        break;
+      case APIPermission::kUsbDeviceUnknownVendor:
+        msg = l10n_util::GetStringUTF16(
+            IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_VENDOR);
+        break;
+      default:
+        NOTREACHED();
+    }
+    return CoalescedPermissionMessage(msg, permissions);
+  }
+
+  CoalescedPermissionMessage GetMultiItemMessage(
+      const PermissionIDSet& permissions) const {
+    DCHECK(permissions.size() > 1);
+    // Put all the individual items into submessages.
+    std::vector<base::string16> submessages;
+    std::vector<base::string16> devices =
+        permissions.GetAllPermissionsWithID(APIPermission::kUsbDevice)
+            .GetAllPermissionParameters();
+    for (const base::string16& device : devices) {
+      submessages.push_back(l10n_util::GetStringFUTF16(
+          IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST_ITEM, device));
+    }
+    std::vector<base::string16> vendors =
+        permissions.GetAllPermissionsWithID(
+                       APIPermission::kUsbDeviceUnknownProduct)
+            .GetAllPermissionParameters();
+    for (const base::string16& vendor : vendors) {
+      submessages.push_back(l10n_util::GetStringFUTF16(
+          IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST_ITEM_UNKNOWN_PRODUCT,
+          vendor));
+    }
+    if (permissions.ContainsID(APIPermission::kUsbDeviceUnknownVendor)) {
+      submessages.push_back(l10n_util::GetStringUTF16(
+          IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST_ITEM_UNKNOWN_VENDOR));
+    }
+
+    return CoalescedPermissionMessage(
+        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST),
+        permissions, submessages);
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(USBDevicesFormatter);
 };
 
 }  // namespace
@@ -200,15 +281,16 @@ std::set<APIPermission::ID> ChromePermissionMessageRule::optional_permissions()
     const {
   return optional_permissions_;
 }
-ChromePermissionMessageFormatter* ChromePermissionMessageRule::formatter()
-    const {
-  return formatter_.get();
-}
 
 std::set<APIPermission::ID> ChromePermissionMessageRule::all_permissions()
     const {
   return base::STLSetUnion<std::set<APIPermission::ID>>(required_permissions(),
                                                         optional_permissions());
+}
+
+CoalescedPermissionMessage ChromePermissionMessageRule::GetPermissionMessage(
+    const PermissionIDSet& permissions) const {
+  return formatter_->GetPermissionMessage(permissions);
 }
 
 // static
@@ -248,18 +330,13 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_DEBUGGER, {APIPermission::kDebugger}, {}},
       {IDS_EXTENSION_PROMPT_WARNING_FULL_ACCESS,
        {APIPermission::kPlugin},
-       {APIPermission::kFullAccess,
-        APIPermission::kHostsAll,
-        APIPermission::kHostsAllReadOnly,
-        APIPermission::kDeclarativeWebRequest,
-        APIPermission::kTopSites,
-        APIPermission::kTab}},
+       {APIPermission::kFullAccess, APIPermission::kHostsAll,
+        APIPermission::kHostsAllReadOnly, APIPermission::kDeclarativeWebRequest,
+        APIPermission::kTopSites, APIPermission::kTab}},
       {IDS_EXTENSION_PROMPT_WARNING_FULL_ACCESS,
        {APIPermission::kFullAccess},
-       {APIPermission::kHostsAll,
-        APIPermission::kHostsAllReadOnly,
-        APIPermission::kDeclarativeWebRequest,
-        APIPermission::kTopSites,
+       {APIPermission::kHostsAll, APIPermission::kHostsAllReadOnly,
+        APIPermission::kDeclarativeWebRequest, APIPermission::kTopSites,
         APIPermission::kTab}},
 
       // Parameterized permission messages:
@@ -291,23 +368,10 @@ ChromePermissionMessageRule::GetAllRules() {
        {}},
 
       // USB Device Permission rules:
-      // TODO(sashab, reillyg): Rework the permission message logic for USB
-      // devices to generate more meaningful messages and better fit the current
-      // rules system. Maybe model it similarly to host or socket permissions
-      // above.
-      {new SingleParameterFormatter(IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE),
-       {APIPermission::kUsbDevice},
-       {}},
-      {new SingleParameterFormatter(
-           IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_PRODUCT),
-       {APIPermission::kUsbDeviceUnknownProduct},
-       {}},
-      {IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_VENDOR,
-       {APIPermission::kUsbDeviceUnknownVendor},
-       {}},
-      {new SimpleListFormatter(IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST),
-       {APIPermission::kUsbDeviceList},
-       {}},
+      {new USBDevicesFormatter,
+       {},
+       {APIPermission::kUsbDevice, APIPermission::kUsbDeviceUnknownProduct,
+        APIPermission::kUsbDeviceUnknownVendor}},
 
       // Coalesced message rules taken from
       // ChromePermissionMessageProvider::GetWarningMessages():
@@ -344,17 +408,12 @@ ChromePermissionMessageRule::GetAllRules() {
 
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE_AND_SESSIONS,
        {APIPermission::kSessions, APIPermission::kHistory},
-       {APIPermission::kFavicon,
-        APIPermission::kProcesses,
-        APIPermission::kTab,
-        APIPermission::kTopSites,
-        APIPermission::kWebNavigation}},
+       {APIPermission::kFavicon, APIPermission::kProcesses, APIPermission::kTab,
+        APIPermission::kTopSites, APIPermission::kWebNavigation}},
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ_AND_SESSIONS,
        {APIPermission::kSessions, APIPermission::kTab},
-       {APIPermission::kFavicon,
-        APIPermission::kProcesses,
-        APIPermission::kTopSites,
-        APIPermission::kWebNavigation}},
+       {APIPermission::kFavicon, APIPermission::kProcesses,
+        APIPermission::kTopSites, APIPermission::kWebNavigation}},
 
       // Suppression list taken from
       // ChromePermissionMessageProvider::GetPermissionMessages():
@@ -370,11 +429,8 @@ ChromePermissionMessageRule::GetAllRules() {
       // list of most frequently visited sites.
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE,
        {APIPermission::kHistory},
-       {APIPermission::kFavicon,
-        APIPermission::kProcesses,
-        APIPermission::kTab,
-        APIPermission::kTopSites,
-        APIPermission::kWebNavigation}},
+       {APIPermission::kFavicon, APIPermission::kProcesses, APIPermission::kTab,
+        APIPermission::kTopSites, APIPermission::kWebNavigation}},
       // A special hack: If kFileSystemWriteDirectory would be displayed, hide
       // kFileSystemDirectory as the write directory message implies it.
       // TODO(sashab): Remove kFileSystemWriteDirectory; it's no longer needed
@@ -391,24 +447,19 @@ ChromePermissionMessageRule::GetAllRules() {
       // are required.
       {IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS,
        {APIPermission::kHostsAll},
-       {APIPermission::kDeclarativeWebRequest,
-        APIPermission::kTopSites,
-        APIPermission::kTab,
-        APIPermission::kFavicon,
-        APIPermission::kTopSites,
+       {APIPermission::kDeclarativeWebRequest, APIPermission::kTopSites,
+        APIPermission::kTab, APIPermission::kFavicon, APIPermission::kTopSites,
         APIPermission::kHostsAllReadOnly}},
       // AutomationManifestPermission:
       {IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS_READ_ONLY,
        {APIPermission::kHostsAllReadOnly},
-       {}},
+       {}},  // TODO(treib): This should probably include kTab?
       // Tabs already allows reading favicons and reading the list of most
       // frequently visited sites.
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ,
        {APIPermission::kTab},
-       {APIPermission::kFavicon,
-        APIPermission::kProcesses,
-        APIPermission::kTopSites,
-        APIPermission::kWebNavigation}},
+       {APIPermission::kFavicon, APIPermission::kProcesses,
+        APIPermission::kTopSites, APIPermission::kWebNavigation}},
 
       // Individual message rules taken from
       // ChromeAPIPermissions::GetAllPermissions():
@@ -472,7 +523,6 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_SYNCFILESYSTEM,
        {APIPermission::kSyncFileSystem},
        {}},
-      {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ, {APIPermission::kTab}, {}},
       {IDS_EXTENSION_PROMPT_WARNING_TOPSITES, {APIPermission::kTopSites}, {}},
       {IDS_EXTENSION_PROMPT_WARNING_TTS_ENGINE,
        {APIPermission::kTtsEngine},
@@ -480,6 +530,9 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_WALLPAPER, {APIPermission::kWallpaper}, {}},
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ,
        {APIPermission::kWebNavigation},
+       {}},
+      {IDS_EXTENSION_PROMPT_WARNING_PLATFORMKEYS,
+       {APIPermission::kPlatformKeys},
        {}},
 
       // Permission messages for private permissions:
@@ -509,6 +562,9 @@ ChromePermissionMessageRule::GetAllRules() {
        {}},
       {IDS_EXTENSION_PROMPT_WARNING_PASSWORDS_PRIVATE,
        {APIPermission::kPasswordsPrivate},
+       {}},
+      {IDS_EXTENSION_PROMPT_WARNING_USERS_PRIVATE,
+       {APIPermission::kUsersPrivate},
        {}},
 
       // Platform-app permission messages.
@@ -551,6 +607,9 @@ ChromePermissionMessageRule::GetAllRules() {
        {APIPermission::kDeclarativeWebRequest},
        {}},
       {IDS_EXTENSION_PROMPT_WARNING_SERIAL, {APIPermission::kSerial}, {}},
+      {IDS_EXTENSION_PROMPT_WARNING_NETWORKING_CONFIG,
+       {APIPermission::kNetworkingConfig},
+       {}},
 
       // Because warning messages for the "socket" permission vary based
       // on the permissions parameters, no message ID or message text is
@@ -602,11 +661,8 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_FAVICON, {APIPermission::kFavicon}, {}},
   };
 
-  std::vector<ChromePermissionMessageRule> rules;
-  for (size_t i = 0; i < arraysize(rules_arr); i++) {
-    rules.push_back(rules_arr[i]);
-  }
-  return rules;
+  return std::vector<ChromePermissionMessageRule>(
+      rules_arr, rules_arr + arraysize(rules_arr));
 }
 
 ChromePermissionMessageRule::PermissionIDSetInitializer::

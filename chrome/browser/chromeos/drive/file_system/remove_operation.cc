@@ -5,16 +5,13 @@
 #include "chrome/browser/chromeos/drive/file_system/remove_operation.h"
 
 #include "base/sequenced_task_runner.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
-#include "chrome/browser/chromeos/drive/file_change.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "content/public/browser/browser_thread.h"
-
-using content::BrowserThread;
+#include "components/drive/drive.pb.h"
+#include "components/drive/file_cache.h"
+#include "components/drive/file_change.h"
+#include "components/drive/file_system_core_util.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/resource_metadata.h"
 
 namespace drive {
 namespace file_system {
@@ -70,17 +67,16 @@ RemoveOperation::RemoveOperation(
       metadata_(metadata),
       cache_(cache),
       weak_ptr_factory_(this) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 RemoveOperation::~RemoveOperation() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 void RemoveOperation::Remove(const base::FilePath& path,
                              bool is_recursive,
                              const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   std::string* local_id = new std::string;
@@ -111,12 +107,12 @@ void RemoveOperation::RemoveAfterUpdateLocalState(
     const ResourceEntry* entry,
     const base::FilePath* changed_path,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (!changed_path->empty()) {
     FileChange changed_file;
-    changed_file.Update(*changed_path, *entry, FileChange::DELETE);
+    changed_file.Update(*changed_path, *entry, FileChange::CHANGE_TYPE_DELETE);
     if (error == FILE_ERROR_OK) {
       delegate_->OnFileChangedByOperation(changed_file);
       delegate_->OnEntryUpdatedByOperation(ClientContext(USER_INITIATED),

@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "base/i18n/string_compare.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "components/translate/core/browser/language_state.h"
@@ -357,16 +357,6 @@ TranslateInfoBarDelegate::GetInfoBarType() const {
 
 int TranslateInfoBarDelegate::GetIconID() const {
   return translate_manager_->translate_client()->GetInfobarIconID();
-}
-
-bool TranslateInfoBarDelegate::ShouldExpire(
-    const NavigationDetails& details) const {
-  // Note: we allow closing this infobar even if the main frame navigation
-  // was programmatic and not initiated by the user - crbug.com/70261 .
-  if (!details.is_navigation_to_different_page && !details.is_main_frame)
-    return false;
-
-  return infobars::InfoBarDelegate::ShouldExpireInternal(details);
 }
 
 void TranslateInfoBarDelegate::InfoBarDismissed() {

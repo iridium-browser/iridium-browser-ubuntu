@@ -5,6 +5,7 @@
 #ifndef InspectorHighlight_h
 #define InspectorHighlight_h
 
+#include "core/CoreExport.h"
 #include "core/InspectorTypeBuilder.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/LayoutRect.h"
@@ -16,9 +17,11 @@ namespace blink {
 class Color;
 class JSONValue;
 
-struct InspectorHighlightConfig {
+struct CORE_EXPORT InspectorHighlightConfig {
     WTF_MAKE_FAST_ALLOCATED(InspectorHighlightConfig);
 public:
+    InspectorHighlightConfig();
+
     Color content;
     Color contentOutline;
     Color padding;
@@ -31,9 +34,11 @@ public:
     bool showInfo;
     bool showRulers;
     bool showExtensionLines;
+    bool showLayoutEditor;
+    bool displayAsMaterial;
 };
 
-class InspectorHighlight {
+class CORE_EXPORT InspectorHighlight {
     STACK_ALLOCATED();
 public:
     InspectorHighlight(Node*, const InspectorHighlightConfig&, bool appendElementInfo);
@@ -42,9 +47,10 @@ public:
 
     static bool getBoxModel(Node*, RefPtr<TypeBuilder::DOM::BoxModel>&);
     static InspectorHighlightConfig defaultConfig();
+    static bool buildNodeQuads(Node*, FloatQuad* content, FloatQuad* padding, FloatQuad* border, FloatQuad* margin);
 
-    void appendPath(PassRefPtr<JSONArrayBase> path, const Color& fillColor, const Color& outlineColor);
-    void appendQuad(const FloatQuad&, const Color& fillColor, const Color& outlineColor = Color::transparent);
+    void appendPath(PassRefPtr<JSONArrayBase> path, const Color& fillColor, const Color& outlineColor, const String& name = String());
+    void appendQuad(const FloatQuad&, const Color& fillColor, const Color& outlineColor = Color::transparent, const String& name = String());
     void appendEventTargetQuads(Node* eventTargetNode, const InspectorHighlightConfig&);
     PassRefPtr<JSONObject> asJSONObject() const;
 
@@ -56,6 +62,7 @@ private:
     RefPtr<JSONArray> m_highlightPaths;
     bool m_showRulers;
     bool m_showExtensionLines;
+    bool m_displayAsMaterial;
 };
 
 } // namespace blink

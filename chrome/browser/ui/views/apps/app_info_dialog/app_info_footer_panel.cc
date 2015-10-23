@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_footer_panel.h"
 
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -123,20 +122,15 @@ void AppInfoFooterPanel::ButtonPressed(views::Button* sender,
   }
 }
 
-void AppInfoFooterPanel::ExtensionUninstallAccepted() {
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile_)->extension_service();
-  service->UninstallExtension(app_->id(),
-                              extensions::UNINSTALL_REASON_USER_INITIATED,
-                              base::Bind(&base::DoNothing),
-                              NULL);
-
-  // Close the App Info dialog as well (which will free the dialog too).
-  Close();
-}
-
-void AppInfoFooterPanel::ExtensionUninstallCanceled() {
-  extension_uninstall_dialog_.reset();
+void AppInfoFooterPanel::OnExtensionUninstallDialogClosed(
+    bool did_start_uninstall,
+    const base::string16& error) {
+  if (did_start_uninstall) {
+    // Close the App Info dialog as well (which will free the dialog too).
+    Close();
+  } else {
+    extension_uninstall_dialog_.reset();
+  }
 }
 
 void AppInfoFooterPanel::CreateShortcuts() {
@@ -176,8 +170,9 @@ void AppInfoFooterPanel::SetPinnedToShelf(bool value) {
 bool AppInfoFooterPanel::CanSetPinnedToShelf() const {
 #if defined(USE_ASH)
   // Non-Ash platforms don't have a shelf.
-  if (chrome::GetHostDesktopTypeForNativeWindow(parent_window_) !=
-      chrome::HOST_DESKTOP_TYPE_ASH) {
+  if (!ash::Shell::HasInstance() ||
+      chrome::GetHostDesktopTypeForNativeWindow(parent_window_) !=
+          chrome::HOST_DESKTOP_TYPE_ASH) {
     return false;
   }
 
@@ -194,7 +189,9 @@ void AppInfoFooterPanel::UninstallApp() {
   extension_uninstall_dialog_.reset(
       extensions::ExtensionUninstallDialog::Create(
           profile_, GetWidget()->GetNativeWindow(), this));
-  extension_uninstall_dialog_->ConfirmUninstall(app_);
+  extension_uninstall_dialog_->ConfirmUninstall(
+      app_, extensions::UNINSTALL_REASON_USER_INITIATED,
+      extensions::UNINSTALL_SOURCE_APP_INFO_DIALOG);
 }
 
 bool AppInfoFooterPanel::CanUninstallApp() const {

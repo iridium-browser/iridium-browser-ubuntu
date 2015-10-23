@@ -148,16 +148,25 @@ if (current_toolchain == host_toolchain) {
       "source/patched-yasm/tools/re2c/translate.c",
     ]
 
+    config("re2c_warnings") {
+      # re2c is missing CLOSEVOP from one switch.
+      if (is_clang) {
+        cflags = [
+          # re2c is missing CLOSEVOP from one switch.
+          "-Wno-switch",
+
+          # re2c contains many static functions in headers (because it's
+          # a C library predating C99.)
+          "-Wno-unused-function",
+        ]
+      }
+    }
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_chromium_code",
+      ":re2c_warnings",
     ]
-
-    # re2c is missing CLOSEVOP from one switch.
-    if (is_posix) {
-      cflags = [ "-Wno-switch" ]
-    }
     deps = [
       "//build/config/sanitizers:deps",
     ]
@@ -250,7 +259,18 @@ if (current_toolchain == host_toolchain) {
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_chromium_code",
+      "//build/config/compiler:no_incompatible_pointer_warnings",
     ]
+
+    config("yasm_warnings") {
+      if (is_clang) {
+        cflags = [
+          # reg3264type in x86expr.c is unused.
+          "-Wno-unused-local-typedef",
+        ]
+      }
+    }
+    configs += [ ":yasm_warnings" ]
 
     # Yasm generates a bunch of .c files which its source file #include.
     # Add the |target_gen_dir| into the include path so it can find them.
@@ -263,9 +283,6 @@ if (current_toolchain == host_toolchain) {
         "-ansi",
         "-pedantic",
       ]
-      if (is_clang) {
-        cflags += [ "-Wno-incompatible-pointer-types" ]
-      }
     }
 
     # TODO(ajwong): This should take most of the generated output as

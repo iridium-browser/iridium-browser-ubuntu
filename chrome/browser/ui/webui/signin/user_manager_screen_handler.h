@@ -19,7 +19,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "google_apis/gaia/gaia_auth_consumer.h"
+#include "google_apis/gaia/gaia_oauth_client.h"
 
 class GaiaAuthFetcher;
 
@@ -32,7 +32,7 @@ class ListValue;
 class UserManagerScreenHandler
     : public content::WebUIMessageHandler,
       public proximity_auth::ScreenlockBridge::LockHandler,
-      public GaiaAuthConsumer,
+      public gaia::GaiaOAuthClient::Delegate,
       public content::NotificationObserver {
  public:
   UserManagerScreenHandler();
@@ -82,8 +82,10 @@ class UserManagerScreenHandler
   void HandleHardlockUserPod(const base::ListValue* args);
 
   // Handle GAIA auth results.
-  void OnClientLoginSuccess(const ClientLoginResult& result) override;
-  void OnClientLoginFailure(const GoogleServiceAuthError& error) override;
+  void OnGetTokenInfoResponse(
+      scoped_ptr<base::DictionaryValue> token_info) override;
+  void OnOAuthError() override;
+  void OnNetworkError(int response_code) override;
 
   // Handle when Notified of a NOTIFICATION_BROWSER_WINDOW_READY event.
   void OnBrowserWindowReady(Browser* browser);
@@ -107,13 +109,13 @@ class UserManagerScreenHandler
   chrome::HostDesktopType desktop_type_;
 
   // Authenticator used when local-auth fails.
-  scoped_ptr<GaiaAuthFetcher> client_login_;
+  scoped_ptr<gaia::GaiaOAuthClient> oauth_client_;
 
-  // The index of the profile currently being authenticated.
-  size_t authenticating_profile_index_;
+  // The path of the profile currently being authenticated.
+  base::FilePath authenticating_profile_path_;
 
-  // Login password, held during on-line auth for saving later if correct.
-  std::string password_attempt_;
+  // Login email held during on-line auth for later use.
+  std::string email_address_;
 
   // URL hash, used to key post-profile actions if present.
   std::string url_hash_;

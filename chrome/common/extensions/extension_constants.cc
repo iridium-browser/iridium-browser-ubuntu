@@ -31,6 +31,8 @@ const char kBookmarkManagerId[] = "eemcgdkfndhakfknompkggombfjjjeno";
 const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
 const char kCloudPrintAppId[] = "mfehgcgbbipciphmccgaenjidiccnmng";
 const char kDataSaverExtensionId[] = "pfmgfdlgomnbgkofeojodiodmgpgmkac";
+const char kDriveExtensionId[] = "ghbmnnjooekpmoecnnnilnnbdlolhkhi";
+const char kDriveHostedAppId[] = "apdfllckaahabafndbhieahigkjlhalf";
 const char kEasyUnlockAppId[] = "mkaemigholebcgchlkbankmihknojeak";
 const char kEnterpriseWebStoreAppId[] = "afchcafgojfnemjkcbhfekplkmjaldaa";
 const char kGmailAppId[] = "pjkljhegncpnkpknbcohdijeoejaedia";
@@ -59,8 +61,7 @@ const char kMediaRouterStableExtensionId[] = "fjhoaacokmgbjemoflkofnenfaiekifl";
 const char kChromeVoxExtensionId[] =
     "mndnfokpggljbaajbnioimlmbfngpief";
 const char kChromeVoxExtensionPath[] = "chromeos/chromevox";
-const char kChromeVoxManifestFilename[] = "manifest.json";
-const char kChromeVoxGuestManifestFilename[] = "manifest_guest.json";
+const char kGuestManifestFilename[] = "manifest_guest.json";
 const char kBrailleImeExtensionId[] =
     "jddehjeebkoimngcbdkaahpobgicbffp";
 const char kBrailleImeExtensionPath[] =

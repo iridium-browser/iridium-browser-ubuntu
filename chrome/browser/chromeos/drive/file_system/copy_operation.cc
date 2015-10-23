@@ -7,20 +7,17 @@
 #include <string>
 
 #include "base/task_runner_util.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
-#include "chrome/browser/chromeos/drive/file_change.h"
 #include "chrome/browser/chromeos/drive/file_system/create_file_operation.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "chrome/browser/drive/drive_api_util.h"
-#include "content/public/browser/browser_thread.h"
+#include "components/drive/drive.pb.h"
+#include "components/drive/drive_api_util.h"
+#include "components/drive/file_cache.h"
+#include "components/drive/file_change.h"
+#include "components/drive/file_system_core_util.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/resource_entry_conversion.h"
+#include "components/drive/resource_metadata.h"
 #include "google_apis/drive/drive_api_parser.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace file_system {
@@ -288,18 +285,17 @@ CopyOperation::CopyOperation(base::SequencedTaskRunner* blocking_task_runner,
                                                    delegate,
                                                    metadata)),
     weak_ptr_factory_(this) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 CopyOperation::~CopyOperation() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 void CopyOperation::Copy(const base::FilePath& src_file_path,
                          const base::FilePath& dest_file_path,
                          bool preserve_last_modified,
                          const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   CopyParams* params = new CopyParams;
@@ -328,7 +324,7 @@ void CopyOperation::CopyAfterTryToCopyLocally(
     const bool* directory_changed,
     const bool* should_copy_on_server,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!params->callback.is_null());
 
   for (const auto& id : *updated_local_ids) {
@@ -340,9 +336,8 @@ void CopyOperation::CopyAfterTryToCopyLocally(
   if (*directory_changed) {
     FileChange changed_file;
     DCHECK(!params->src_entry.file_info().is_directory());
-    changed_file.Update(params->dest_file_path,
-                        FileChange::FILE_TYPE_FILE,
-                        FileChange::ADD_OR_UPDATE);
+    changed_file.Update(params->dest_file_path, FileChange::FILE_TYPE_FILE,
+                        FileChange::CHANGE_TYPE_ADD_OR_UPDATE);
     delegate_->OnFileChangedByOperation(changed_file);
   }
 
@@ -366,7 +361,7 @@ void CopyOperation::CopyAfterTryToCopyLocally(
 
 void CopyOperation::CopyAfterParentSync(const CopyParams& params,
                                         FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!params.callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -391,7 +386,7 @@ void CopyOperation::CopyAfterParentSync(const CopyParams& params,
 void CopyOperation::CopyAfterGetParentResourceId(const CopyParams& params,
                                                  const ResourceEntry* parent,
                                                  FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!params.callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -420,7 +415,7 @@ void CopyOperation::TransferFileFromLocalToRemote(
     const base::FilePath& local_src_path,
     const base::FilePath& remote_dest_path,
     const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   std::string* gdoc_resource_id = new std::string;
@@ -446,7 +441,7 @@ void CopyOperation::TransferFileFromLocalToRemoteAfterPrepare(
     std::string* gdoc_resource_id,
     ResourceEntry* parent_entry,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -483,7 +478,7 @@ void CopyOperation::TransferFileFromLocalToRemoteAfterPrepare(
 void CopyOperation::TransferJsonGdocFileAfterLocalWork(
     TransferJsonGdocParams* params,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   if (error != FILE_ERROR_OK) {
     params->callback.Run(error);
@@ -515,7 +510,7 @@ void CopyOperation::TransferJsonGdocFileAfterLocalWork(
       changed_file.Update(
           params->changed_path,
           FileChange::FILE_TYPE_FILE,  // This must be a hosted document.
-          FileChange::ADD_OR_UPDATE);
+          FileChange::CHANGE_TYPE_ADD_OR_UPDATE);
       delegate_->OnFileChangedByOperation(changed_file);
       params->callback.Run(error);
       break;
@@ -541,7 +536,7 @@ void CopyOperation::CopyResourceOnServer(
     const std::string& new_title,
     const base::Time& last_modified,
     const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   scheduler_->CopyResource(
@@ -555,7 +550,7 @@ void CopyOperation::UpdateAfterServerSideOperation(
     const FileOperationCallback& callback,
     google_apis::DriveApiErrorCode status,
     scoped_ptr<google_apis::FileResource> entry) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   FileError error = GDataToFileError(status);
@@ -589,12 +584,13 @@ void CopyOperation::UpdateAfterLocalStateUpdate(
     base::FilePath* file_path,
     const ResourceEntry* entry,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error == FILE_ERROR_OK) {
     FileChange changed_file;
-    changed_file.Update(*file_path, *entry, FileChange::ADD_OR_UPDATE);
+    changed_file.Update(*file_path, *entry,
+                        FileChange::CHANGE_TYPE_ADD_OR_UPDATE);
     delegate_->OnFileChangedByOperation(changed_file);
   }
   callback.Run(error);
@@ -604,7 +600,7 @@ void CopyOperation::ScheduleTransferRegularFile(
     const base::FilePath& local_src_path,
     const base::FilePath& remote_dest_path,
     const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   create_file_operation_->CreateFile(
@@ -621,7 +617,7 @@ void CopyOperation::ScheduleTransferRegularFileAfterCreate(
     const base::FilePath& remote_dest_path,
     const FileOperationCallback& callback,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -656,12 +652,13 @@ void CopyOperation::ScheduleTransferRegularFileAfterUpdateLocalState(
     const ResourceEntry* entry,
     std::string* local_id,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error == FILE_ERROR_OK) {
     FileChange changed_file;
-    changed_file.Update(remote_dest_path, *entry, FileChange::ADD_OR_UPDATE);
+    changed_file.Update(remote_dest_path, *entry,
+                        FileChange::CHANGE_TYPE_ADD_OR_UPDATE);
     delegate_->OnFileChangedByOperation(changed_file);
     // Syncing for copy should be done in background, so pass the BACKGROUND
     // context. See: crbug.com/420278.

@@ -13,11 +13,11 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/affiliated_cloud_policy_invalidator.h"
@@ -71,7 +71,6 @@ scoped_ptr<CloudPolicyClient> CreateClient(
   scoped_ptr<CloudPolicyClient> client(
       new CloudPolicyClient(std::string(), std::string(),
                             kPolicyVerificationKeyHash,
-                            USER_AFFILIATION_MANAGED,
                             device_management_service, request_context));
   client->SetupRegistration(policy_data->request_token(),
                             policy_data->device_id());

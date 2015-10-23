@@ -31,8 +31,10 @@
 #include "ServiceWorkerGlobalScope.h"
 
 #include "bindings/core/v8/ScriptPromise.h"
+#include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8ThrowException.h"
+#include "core/dom/ExceptionCode.h"
 #include "core/events/Event.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceLoaderOptions.h"
@@ -56,8 +58,8 @@
 #include "platform/weborigin/DatabaseIdentifier.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebServiceWorkerSkipWaitingCallbacks.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerSkipWaitingCallbacks.h"
 #include "wtf/CurrentTime.h"
 
 namespace blink {
@@ -65,7 +67,7 @@ namespace blink {
 class ServiceWorkerGlobalScope::SkipWaitingCallback final : public WebServiceWorkerSkipWaitingCallbacks {
     WTF_MAKE_NONCOPYABLE(SkipWaitingCallback);
 public:
-    explicit SkipWaitingCallback(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
+    explicit SkipWaitingCallback(ScriptPromiseResolver* resolver)
         : m_resolver(resolver) { }
     ~SkipWaitingCallback() { }
 
@@ -75,7 +77,7 @@ public:
     }
 
 private:
-    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
+    Persistent<ScriptPromiseResolver> m_resolver;
 };
 
 PassRefPtrWillBeRawPtr<ServiceWorkerGlobalScope> ServiceWorkerGlobalScope::create(ServiceWorkerThread* thread, PassOwnPtr<WorkerThreadStartupData> startupData)
@@ -85,7 +87,7 @@ PassRefPtrWillBeRawPtr<ServiceWorkerGlobalScope> ServiceWorkerGlobalScope::creat
     RefPtrWillBeRawPtr<ServiceWorkerGlobalScope> context = adoptRefWillBeNoop(new ServiceWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, monotonicallyIncreasingTime(), startupData->m_starterOrigin, startupData->m_workerClients.release()));
 
     context->setV8CacheOptions(startupData->m_v8CacheOptions);
-    context->applyContentSecurityPolicyFromString(startupData->m_contentSecurityPolicy, startupData->m_contentSecurityPolicyType);
+    context->applyContentSecurityPolicyFromVector(*startupData->m_contentSecurityPolicyHeaders);
 
     return context.release();
 }
@@ -145,7 +147,7 @@ ScriptPromise ServiceWorkerGlobalScope::skipWaiting(ScriptState* scriptState)
     if (!executionContext)
         return ScriptPromise();
 
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     ServiceWorkerGlobalScopeClient::from(executionContext)->skipWaiting(new SkipWaitingCallback(resolver));
@@ -161,7 +163,7 @@ void ServiceWorkerGlobalScope::setRegistration(WebServiceWorkerRegistration* reg
     m_registration = ServiceWorkerRegistration::from(executionContext(), registration);
 }
 
-bool ServiceWorkerGlobalScope::addEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
+bool ServiceWorkerGlobalScope::addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener, bool useCapture)
 {
     if (m_didEvaluateScript) {
         if (eventType == EventTypeNames::install) {
@@ -180,10 +182,10 @@ const AtomicString& ServiceWorkerGlobalScope::interfaceName() const
     return EventTargetNames::ServiceWorkerGlobalScope;
 }
 
-bool ServiceWorkerGlobalScope::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
+bool ServiceWorkerGlobalScope::dispatchEventInternal(PassRefPtrWillBeRawPtr<Event> event)
 {
     m_eventNestingLevel++;
-    bool result = WorkerGlobalScope::dispatchEvent(event.get());
+    bool result = WorkerGlobalScope::dispatchEventInternal(event.get());
     if (event->interfaceName() == EventNames::ErrorEvent && m_eventNestingLevel == 2 && !event->defaultPrevented())
         m_hadErrorInTopLevelEventHandler = true;
     m_eventNestingLevel--;
@@ -219,7 +221,7 @@ void ServiceWorkerGlobalScope::importScripts(const Vector<String>& urls, Excepti
     WorkerGlobalScope::importScripts(urls, exceptionState);
 }
 
-PassOwnPtr<CachedMetadataHandler> ServiceWorkerGlobalScope::createWorkerScriptCachedMetadataHandler(const KURL& scriptURL, const Vector<char>* metaData)
+PassOwnPtrWillBeRawPtr<CachedMetadataHandler> ServiceWorkerGlobalScope::createWorkerScriptCachedMetadataHandler(const KURL& scriptURL, const Vector<char>* metaData)
 {
     return ServiceWorkerScriptCachedMetadataHandler::create(this, scriptURL, metaData);
 }

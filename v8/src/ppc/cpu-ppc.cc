@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 // CPU specific code for ppc independent of OS goes here.
-#include "src/v8.h"
 
 #if V8_TARGET_ARCH_PPC
 
@@ -57,7 +56,7 @@ void CpuFeatures::FlushICache(void* buffer, size_t size) {
 
 #endif  // USE_SIMULATOR
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 #endif  // V8_TARGET_ARCH_PPC

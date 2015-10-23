@@ -46,7 +46,7 @@ class ExtraDataContainer : public ResourceRequest::ExtraData {
 public:
     static PassRefPtr<ExtraDataContainer> create(WebURLRequest::ExtraData* extraData) { return adoptRef(new ExtraDataContainer(extraData)); }
 
-    virtual ~ExtraDataContainer() { }
+    ~ExtraDataContainer() override {}
 
     WebURLRequest::ExtraData* extraData() const { return m_extraData.get(); }
 
@@ -358,6 +358,16 @@ WebURLRequest::FetchCredentialsMode WebURLRequest::fetchCredentialsMode() const
 void WebURLRequest::setFetchCredentialsMode(WebURLRequest::FetchCredentialsMode mode)
 {
     return m_private->m_resourceRequest->setFetchCredentialsMode(mode);
+}
+
+WebURLRequest::FetchRedirectMode WebURLRequest::fetchRedirectMode() const
+{
+    return m_private->m_resourceRequest->fetchRedirectMode();
+}
+
+void WebURLRequest::setFetchRedirectMode(WebURLRequest::FetchRedirectMode redirect)
+{
+    return m_private->m_resourceRequest->setFetchRedirectMode(redirect);
 }
 
 WebURLRequest::ExtraData* WebURLRequest::extraData() const

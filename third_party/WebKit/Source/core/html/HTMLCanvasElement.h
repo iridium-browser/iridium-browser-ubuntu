@@ -32,6 +32,7 @@
 #include "bindings/core/v8/UnionTypesCore.h"
 #include "core/CoreExport.h"
 #include "core/dom/Document.h"
+#include "core/dom/DocumentVisibilityObserver.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/canvas/CanvasImageSource.h"
 #include "platform/geometry/FloatRect.h"
@@ -48,12 +49,13 @@ namespace blink {
 class AffineTransform;
 class CanvasContextCreationAttributes;
 class CanvasRenderingContext;
+class CanvasRenderingContextFactory;
 class GraphicsContext;
-class GraphicsContextStateSaver;
 class HTMLCanvasElement;
 class Image;
 class ImageBuffer;
 class ImageBufferSurface;
+class ImageData;
 class IntSize;
 
 class CORE_EXPORT CanvasObserver : public WillBeGarbageCollectedMixin {
@@ -73,7 +75,7 @@ class CORE_EXPORT HTMLCanvasElement final : public HTMLElement, public DocumentV
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLCanvasElement);
 public:
     DECLARE_NODE_FACTORY(HTMLCanvasElement);
-    virtual ~HTMLCanvasElement();
+    ~HTMLCanvasElement() override;
 
     void addObserver(CanvasObserver*);
     void removeObserver(CanvasObserver*);
@@ -102,8 +104,9 @@ public:
 
     // Called by HTMLCanvasElement's V8 bindings.
     ScriptValue getContext(ScriptState*, const String&, const CanvasContextCreationAttributes&);
-    // Called by Document::getCSSCanvasContext as well as above getContext() variant.
-    void getContext(const String&, const CanvasContextCreationAttributes&, CanvasRenderingContext2DOrWebGLRenderingContext&);
+    // Called by Document::getCSSCanvasContext as well as above getContext().
+    CanvasRenderingContext* getCanvasRenderingContext(const String&, const CanvasContextCreationAttributes&);
+
     bool isPaintable() const;
 
     static String toEncodingMimeType(const String& mimeType);
@@ -116,10 +119,11 @@ public:
 
     void paint(GraphicsContext*, const LayoutRect&);
 
-    GraphicsContext* drawingContext() const; // Deprecated: use drawingCanvas
     SkCanvas* drawingCanvas() const;
+    void disableDeferral() const;
     SkCanvas* existingDrawingCanvas() const;
 
+    void setRenderingContext(PassOwnPtrWillBeRawPtr<CanvasRenderingContext>);
     CanvasRenderingContext* renderingContext() const { return m_context.get(); }
 
     void ensureUnacceleratedImageBuffer();
@@ -134,6 +138,7 @@ public:
     AffineTransform baseTransform() const;
 
     bool is3D() const;
+    bool isAnimated2D() const;
 
     bool hasImageBuffer() const { return m_imageBuffer; }
     void discardImageBuffer();
@@ -142,25 +147,25 @@ public:
 
     bool shouldBeDirectComposited() const;
 
-    virtual const AtomicString imageSourceURL() const override;
+    const AtomicString imageSourceURL() const override;
 
-    virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
+    InsertionNotificationRequest insertedInto(ContainerNode*) override;
 
     // DocumentVisibilityObserver implementation
-    virtual void didChangeVisibilityState(PageVisibilityState) override;
+    void didChangeVisibilityState(PageVisibilityState) override;
 
     // CanvasImageSource implementation
-    virtual PassRefPtr<Image> getSourceImageForCanvas(SourceImageMode, SourceImageStatus*) const override;
-    virtual bool wouldTaintOrigin(SecurityOrigin*) const override;
-    virtual FloatSize elementSize() const override;
-    virtual bool isCanvasElement() const override { return true; }
-    virtual bool isOpaque() const override;
+    PassRefPtr<Image> getSourceImageForCanvas(SourceImageStatus*) const override;
+    bool wouldTaintOrigin(SecurityOrigin*) const override;
+    FloatSize elementSize() const override;
+    bool isCanvasElement() const override { return true; }
+    bool isOpaque() const override;
 
     // ImageBufferClient implementation
-    virtual void notifySurfaceInvalid() override;
-    virtual bool isDirty() override { return !m_dirtyRect.isEmpty(); }
-    virtual void didFinalizeFrame() override;
-    virtual void restoreCanvasMatrixClipStack() override;
+    void notifySurfaceInvalid() override;
+    bool isDirty() override { return !m_dirtyRect.isEmpty(); }
+    void didFinalizeFrame() override;
+    void restoreCanvasMatrixClipStack(SkCanvas*) const override;
 
     void doDeferredPaintInvalidation();
 
@@ -168,16 +173,25 @@ public:
 
     void createImageBufferUsingSurfaceForTesting(PassOwnPtr<ImageBufferSurface>);
 
+    static void registerRenderingContextFactory(PassOwnPtr<CanvasRenderingContextFactory>);
+    void updateExternallyAllocatedMemory() const;
+
+    void styleDidChange(const ComputedStyle* oldStyle, const ComputedStyle& newStyle);
+
 protected:
-    virtual void didMoveToNewDocument(Document& oldDocument) override;
+    void didMoveToNewDocument(Document& oldDocument) override;
 
 private:
     explicit HTMLCanvasElement(Document&);
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
-    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
-    virtual void didRecalcStyle(StyleRecalcChange) override;
-    virtual bool areAuthorShadowsAllowed() const override { return false; }
+    using ContextFactoryVector = Vector<OwnPtr<CanvasRenderingContextFactory>>;
+    static ContextFactoryVector& renderingContextFactories();
+    static CanvasRenderingContextFactory* getRenderingContextFactory(int);
+
+    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    LayoutObject* createLayoutObject(const ComputedStyle&) override;
+    void didRecalcStyle(StyleRecalcChange) override;
+    bool areAuthorShadowsAllowed() const override { return false; }
 
     void reset();
 
@@ -190,8 +204,7 @@ private:
 
     bool paintsIntoCanvasBuffer() const;
 
-    void updateExternallyAllocatedMemory() const;
-
+    ImageData* toImageData(SourceDrawingBuffer) const;
     String toDataURLInternal(const String& mimeType, const double* quality, SourceDrawingBuffer) const;
 
     WillBeHeapHashSet<RawPtrWillBeWeakMember<CanvasObserver>> m_observers;
@@ -213,7 +226,6 @@ private:
     mutable bool m_didFailToCreateImageBuffer;
     bool m_imageBufferIsClear;
     OwnPtr<ImageBuffer> m_imageBuffer;
-    mutable OwnPtr<GraphicsContextStateSaver> m_contextStateSaver;
 
     mutable RefPtr<Image> m_copiedImage; // FIXME: This is temporary for platforms that have to copy the image buffer to render (and for CSSCanvasValue).
 };

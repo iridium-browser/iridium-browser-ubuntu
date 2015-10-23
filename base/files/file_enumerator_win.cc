@@ -30,7 +30,8 @@ int64 FileEnumerator::FileInfo::GetSize() const {
   ULARGE_INTEGER size;
   size.HighPart = find_data_.nFileSizeHigh;
   size.LowPart = find_data_.nFileSizeLow;
-  DCHECK_LE(size.QuadPart, std::numeric_limits<int64>::max());
+  DCHECK_LE(size.QuadPart,
+            static_cast<ULONGLONG>(std::numeric_limits<int64>::max()));
   return static_cast<int64>(size.QuadPart);
 }
 
@@ -43,10 +44,10 @@ base::Time FileEnumerator::FileInfo::GetLastModifiedTime() const {
 FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                int file_type)
-    : recursive_(recursive),
-      file_type_(file_type),
-      has_find_data_(false),
-      find_handle_(INVALID_HANDLE_VALUE) {
+    : has_find_data_(false),
+      find_handle_(INVALID_HANDLE_VALUE),
+      recursive_(recursive),
+      file_type_(file_type) {
   // INCLUDE_DOT_DOT must not be specified if recursive.
   DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   memset(&find_data_, 0, sizeof(find_data_));
@@ -57,11 +58,11 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                int file_type,
                                const FilePath::StringType& pattern)
-    : recursive_(recursive),
+    : has_find_data_(false),
+      find_handle_(INVALID_HANDLE_VALUE),
+      recursive_(recursive),
       file_type_(file_type),
-      has_find_data_(false),
-      pattern_(pattern),
-      find_handle_(INVALID_HANDLE_VALUE) {
+      pattern_(pattern) {
   // INCLUDE_DOT_DOT must not be specified if recursive.
   DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   memset(&find_data_, 0, sizeof(find_data_));

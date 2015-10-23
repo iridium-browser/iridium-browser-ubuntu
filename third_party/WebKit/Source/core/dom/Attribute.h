@@ -26,13 +26,15 @@
 #define Attribute_h
 
 #include "core/dom/QualifiedName.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
-// This has no counterpart in DOM.
-// It is an internal representation of the node value of an Attr.
-// The actual Attr with its value as a Text child is allocated only if needed.
+// This is the internal representation of an attribute, consisting of a name and
+// value. It is distinct from the web-exposed Attr, which also knows of the
+// element to which it attached, if any.
 class Attribute {
+    ALLOW_ONLY_INLINE_ALLOCATION();
 public:
     Attribute(const QualifiedName& name, const AtomicString& value)
         : m_name(name)

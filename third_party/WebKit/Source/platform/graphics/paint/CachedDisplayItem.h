@@ -10,27 +10,21 @@
 
 namespace blink {
 
-// A placeholder of DisplayItem in the new paint list of DisplayItemList, to indicate that
-// the DisplayItem has not been changed and should be replaced with the cached DisplayItem
-// when merging new paint list to cached paint list.
-class PLATFORM_EXPORT CachedDisplayItem : public DisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(CachedDisplayItem);
+// A placeholder of a DrawingDisplayItem or a subtree in the new paint list of DisplayItemList,
+// to indicate that the DrawingDisplayItem/subtree has not been changed and should be replaced with
+// the cached DrawingDisplayItem/subtree when merging new paint list to cached paint list.
+class CachedDisplayItem final : public DisplayItem {
 public:
-    static PassOwnPtr<CachedDisplayItem> create(const DisplayItemClientWrapper& client, Type type)
-    {
-        return adoptPtr(new CachedDisplayItem(client, type));
-    }
-
-private:
     CachedDisplayItem(const DisplayItemClientWrapper& client, Type type)
-        : DisplayItem(client, type)
+        : DisplayItem(client, type, sizeof(*this))
     {
         ASSERT(isCachedType(type));
     }
 
+private:
     // CachedDisplayItem is never replayed or appended to WebDisplayItemList.
-    virtual void replay(GraphicsContext&) override final { ASSERT_NOT_REACHED(); }
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override final { ASSERT_NOT_REACHED(); }
+    void replay(GraphicsContext&) final { ASSERT_NOT_REACHED(); }
+    void appendToWebDisplayItemList(WebDisplayItemList*) const final { ASSERT_NOT_REACHED(); }
 };
 
 } // namespace blink

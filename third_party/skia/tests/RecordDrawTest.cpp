@@ -126,17 +126,17 @@ struct TestBBH : public SkBBoxHierarchy {
     void insert(const SkRect boundsArray[], int N) override {
         fEntries.setCount(N);
         for (int i = 0; i < N; i++) {
-            Entry e = { (unsigned)i, boundsArray[i] };
+            Entry e = { i, boundsArray[i] };
             fEntries[i] = e;
         }
     }
 
-    void search(const SkRect& query, SkTDArray<unsigned>* results) const override {}
+    void search(const SkRect& query, SkTDArray<int>* results) const override {}
     size_t bytesUsed() const override { return 0; }
     SkRect getRootBound() const override { return SkRect::MakeEmpty(); }
 
     struct Entry {
-        unsigned opIndex;
+        int opIndex;
         SkRect bounds;
     };
     SkTDArray<Entry> fEntries;
@@ -166,7 +166,7 @@ DEF_TEST(RecordDraw_BBH, r) {
 
     REPORTER_ASSERT(r, bbh.fEntries.count() == 5);
     for (int i = 0; i < bbh.fEntries.count(); i++) {
-        REPORTER_ASSERT(r, bbh.fEntries[i].opIndex == (unsigned)i);
+        REPORTER_ASSERT(r, bbh.fEntries[i].opIndex == i);
 
         REPORTER_ASSERT(r, sloppy_rect_eq(SkRect::MakeWH(400, 480), bbh.fEntries[i].bounds));
     }
@@ -295,7 +295,7 @@ DEF_TEST(RecordDraw_drawImage, r){
         }
 
         void onDrawImageRect(const SkImage* image, const SkRect* src, const SkRect& dst,
-                             const SkPaint* paint) override {
+                             const SkPaint* paint, SrcRectConstraint) override {
             fDrawImageRectCalled = true;
         }
 
@@ -325,7 +325,7 @@ DEF_TEST(RecordDraw_drawImage, r){
     {
         SkRecord record;
         SkRecorder recorder(&record, 10, 10);
-        recorder.drawImageRect(image, 0, SkRect::MakeWH(10, 10));
+        recorder.drawImageRect(image, SkRect::MakeWH(10, 10), nullptr);
         SkRecordDraw(record, &canvas, NULL, NULL, 0, NULL, 0);
     }
     REPORTER_ASSERT(r, canvas.fDrawImageRectCalled);

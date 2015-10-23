@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_WEBUI_PRINT_PREVIEW_EXTENSION_PRINTER_HANDLER_H_
 
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
@@ -27,6 +28,10 @@ class BrowserContext;
 
 namespace cloud_devices {
 class CloudDeviceDescription;
+}
+
+namespace device {
+class UsbDevice;
 }
 
 namespace gfx {
@@ -65,6 +70,9 @@ class ExtensionPrinterHandler : public PrinterHandler {
                   const gfx::Size& page_size,
                   const scoped_refptr<base::RefCountedMemory>& print_data,
                   const PrinterHandler::PrintCallback& callback) override;
+  void StartGrantPrinterAccess(
+      const std::string& printer_id,
+      const PrinterHandler::GetPrinterInfoCallback& callback) override;
 
  private:
   friend class ExtensionPrinterHandlerTest;
@@ -93,7 +101,7 @@ class ExtensionPrinterHandler : public PrinterHandler {
   // They just propagate results to callbacks passed to them.
   void WrapGetPrintersCallback(
       const PrinterHandler::GetPrintersCallback& callback,
-      const base::ListValue& pritners,
+      const base::ListValue& printers,
       bool done);
   void WrapGetCapabilityCallback(
       const PrinterHandler::GetCapabilityCallback& callback,
@@ -102,10 +110,17 @@ class ExtensionPrinterHandler : public PrinterHandler {
   void WrapPrintCallback(const PrinterHandler::PrintCallback& callback,
                          bool success,
                          const std::string& status);
+  void WrapGetPrinterInfoCallback(const GetPrinterInfoCallback& callback,
+                                  const base::DictionaryValue& printer_info);
+
+  void OnUsbDevicesEnumerated(
+      const PrinterHandler::GetPrintersCallback& callback,
+      const std::vector<scoped_refptr<device::UsbDevice>>& devices);
 
   content::BrowserContext* browser_context_;
 
   scoped_ptr<local_discovery::PWGRasterConverter> pwg_raster_converter_;
+  int pending_enumeration_count_ = 0;
 
   scoped_refptr<base::TaskRunner> slow_task_runner_;
 

@@ -28,13 +28,16 @@ namespace blink {
 
 UIEvent::UIEvent()
     : m_detail(0)
+    , m_sourceCapabilities(nullptr)
 {
 }
 
-UIEvent::UIEvent(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, PassRefPtrWillBeRawPtr<AbstractView> viewArg, int detailArg)
+// TODO(lanwei): Will add sourceCapabilities to all the subclass of UIEvent later, see https://crbug.com/476530.
+UIEvent::UIEvent(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, PassRefPtrWillBeRawPtr<AbstractView> viewArg, int detailArg, InputDeviceCapabilities* sourceCapabilitiesArg)
     : Event(eventType, canBubbleArg, cancelableArg)
     , m_view(viewArg)
     , m_detail(detailArg)
+    , m_sourceCapabilities(sourceCapabilitiesArg)
 {
 }
 
@@ -42,6 +45,7 @@ UIEvent::UIEvent(const AtomicString& eventType, const UIEventInit& initializer)
     : Event(eventType, initializer)
     , m_view(initializer.view())
     , m_detail(initializer.detail())
+    , m_sourceCapabilities(initializer.sourceCapabilities())
 {
 }
 
@@ -51,6 +55,11 @@ UIEvent::~UIEvent()
 
 void UIEvent::initUIEvent(const AtomicString& typeArg, bool canBubbleArg, bool cancelableArg, PassRefPtrWillBeRawPtr<AbstractView> viewArg, int detailArg)
 {
+    initUIEventInternal(typeArg, canBubbleArg, cancelableArg, viewArg, detailArg, nullptr);
+}
+
+void UIEvent::initUIEventInternal(const AtomicString& typeArg, bool canBubbleArg, bool cancelableArg, PassRefPtrWillBeRawPtr<AbstractView> viewArg, int detailArg, InputDeviceCapabilities* sourceCapabilitiesArg)
+{
     if (dispatched())
         return;
 
@@ -58,6 +67,7 @@ void UIEvent::initUIEvent(const AtomicString& typeArg, bool canBubbleArg, bool c
 
     m_view = viewArg;
     m_detail = detailArg;
+    m_sourceCapabilities = sourceCapabilitiesArg;
 }
 
 bool UIEvent::isUIEvent() const
@@ -70,36 +80,6 @@ const AtomicString& UIEvent::interfaceName() const
     return EventNames::UIEvent;
 }
 
-int UIEvent::keyCode() const
-{
-    return 0;
-}
-
-int UIEvent::charCode() const
-{
-    return 0;
-}
-
-int UIEvent::layerX()
-{
-    return 0;
-}
-
-int UIEvent::layerY()
-{
-    return 0;
-}
-
-int UIEvent::pageX() const
-{
-    return 0;
-}
-
-int UIEvent::pageY() const
-{
-    return 0;
-}
-
 int UIEvent::which() const
 {
     return 0;
@@ -108,6 +88,7 @@ int UIEvent::which() const
 DEFINE_TRACE(UIEvent)
 {
     visitor->trace(m_view);
+    visitor->trace(m_sourceCapabilities);
     Event::trace(visitor);
 }
 

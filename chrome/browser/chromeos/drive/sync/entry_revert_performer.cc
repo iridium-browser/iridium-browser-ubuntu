@@ -5,17 +5,14 @@
 #include "chrome/browser/chromeos/drive/sync/entry_revert_performer.h"
 
 #include "chrome/browser/chromeos/drive/change_list_processor.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_change.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "chrome/browser/drive/drive_api_util.h"
-#include "content/public/browser/browser_thread.h"
+#include "components/drive/drive.pb.h"
+#include "components/drive/drive_api_util.h"
+#include "components/drive/file_change.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/resource_entry_conversion.h"
+#include "components/drive/resource_metadata.h"
 #include "google_apis/drive/drive_api_parser.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace internal {
@@ -56,10 +53,10 @@ FileError FinishRevert(ResourceMetadata* metadata,
 
     changed_files->Update(
         original_path,
-        FileChange::FILE_TYPE_UNKNOWN,  // Undetermined type for deleted file.
-        FileChange::DELETE);
+        FileChange::FILE_TYPE_NO_INFO,  // Undetermined type for deleted file.
+        FileChange::CHANGE_TYPE_DELETE);
   } else {
-    changed_files->Update(original_path, entry, FileChange::DELETE);
+    changed_files->Update(original_path, entry, FileChange::CHANGE_TYPE_DELETE);
 
     error = ChangeListProcessor::SetParentLocalIdOfEntry(metadata, &entry,
                                                          parent_resource_id);
@@ -76,7 +73,8 @@ FileError FinishRevert(ResourceMetadata* metadata,
     if (error != FILE_ERROR_OK)
       return error;
 
-    changed_files->Update(new_path, entry, FileChange::ADD_OR_UPDATE);
+    changed_files->Update(new_path, entry,
+                          FileChange::CHANGE_TYPE_ADD_OR_UPDATE);
   }
   return FILE_ERROR_OK;
 }
@@ -93,17 +91,16 @@ EntryRevertPerformer::EntryRevertPerformer(
       scheduler_(scheduler),
       metadata_(metadata),
       weak_ptr_factory_(this) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 EntryRevertPerformer::~EntryRevertPerformer() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 void EntryRevertPerformer::RevertEntry(const std::string& local_id,
                                        const ClientContext& context,
                                        const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   scoped_ptr<ResourceEntry> entry(new ResourceEntry);
@@ -123,7 +120,7 @@ void EntryRevertPerformer::RevertEntryAfterPrepare(
     const FileOperationCallback& callback,
     scoped_ptr<ResourceEntry> entry,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error == FILE_ERROR_OK && entry->resource_id().empty())
@@ -146,7 +143,7 @@ void EntryRevertPerformer::RevertEntryAfterGetFileResource(
     const std::string& local_id,
     google_apis::DriveApiErrorCode status,
     scoped_ptr<google_apis::FileResource> entry) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   FileChange* changed_files = new FileChange;
@@ -169,7 +166,7 @@ void EntryRevertPerformer::RevertEntryAfterFinishRevert(
     const FileOperationCallback& callback,
     const FileChange* changed_files,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   delegate_->OnFileChangedByOperation(*changed_files);

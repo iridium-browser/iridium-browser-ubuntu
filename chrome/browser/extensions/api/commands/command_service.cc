@@ -54,7 +54,7 @@ const char kSuggestedKeyWasAssigned[] = "was_assigned";
 const char kInitialBindingsHaveBeenAssigned[] = "initial_keybindings_set";
 
 std::string GetPlatformKeybindingKeyForAccelerator(
-    const ui::Accelerator& accelerator, const std::string extension_id) {
+    const ui::Accelerator& accelerator, const std::string& extension_id) {
   std::string key = Command::CommandPlatform() + ":" +
                     Command::AcceleratorToString(accelerator);
 
@@ -69,14 +69,15 @@ std::string GetPlatformKeybindingKeyForAccelerator(
 }
 
 bool IsForCurrentPlatform(const std::string& key) {
-  return StartsWithASCII(key, Command::CommandPlatform() + ":", true);
+  return base::StartsWith(key, Command::CommandPlatform() + ":",
+                          base::CompareCase::SENSITIVE);
 }
 
 std::string StripCurrentPlatform(const std::string& key) {
   DCHECK(IsForCurrentPlatform(key));
   std::string result = key;
-  ReplaceFirstSubstringAfterOffset(&result, 0, Command::CommandPlatform() + ":",
-                                   "");
+  base::ReplaceFirstSubstringAfterOffset(
+      &result, 0, Command::CommandPlatform() + ":", base::StringPiece());
   return result;
 }
 
@@ -226,8 +227,8 @@ bool CommandService::GetNamedCommands(const std::string& extension_id,
 
 bool CommandService::AddKeybindingPref(
     const ui::Accelerator& accelerator,
-    std::string extension_id,
-    std::string command_name,
+    const std::string& extension_id,
+    const std::string& command_name,
     bool allow_overrides,
     bool global) {
   if (accelerator.key_code() == ui::VKEY_UNKNOWN)
@@ -291,6 +292,14 @@ bool CommandService::AddKeybindingPref(
                          ExtensionPrefs::Get(profile_),
                          suggested_key_prefs.Pass());
 
+  // Fetch the newly-updated command, and notify the observers.
+  FOR_EACH_OBSERVER(
+      Observer,
+      observers_,
+      OnExtensionCommandAdded(extension_id,
+                              FindCommandByName(extension_id, command_name)));
+
+  // TODO(devlin): Deprecate this notification in favor of the observers.
   std::pair<const std::string, const std::string> details =
       std::make_pair(extension_id, command_name);
   content::NotificationService::current()->Notify(
@@ -380,12 +389,12 @@ Command CommandService::FindCommandByName(const std::string& extension_id,
     bool global = false;
     item->GetBoolean(kGlobal, &global);
 
-    std::vector<std::string> tokens;
-    base::SplitString(shortcut, ':', &tokens);
+    std::vector<base::StringPiece> tokens = base::SplitStringPiece(
+        shortcut, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     CHECK(tokens.size() >= 2);
-    shortcut = tokens[1];
 
-    return Command(command_name, base::string16(), shortcut, global);
+    return Command(command_name, base::string16(), tokens[1].as_string(),
+           global);
   }
 
   return Command();
@@ -450,6 +459,14 @@ bool CommandService::RequestsBookmarkShortcutOverride(
           chrome::GetPrimaryChromeAcceleratorForCommandId(IDC_BOOKMARK_PAGE),
           NULL,
           NULL);
+}
+
+void CommandService::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void CommandService::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void CommandService::UpdateKeybindings(const Extension* extension) {
@@ -789,6 +806,7 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
 
   typedef std::vector<std::string> KeysToRemove;
   KeysToRemove keys_to_remove;
+  std::vector<Command> removed_commands;
   for (base::DictionaryValue::Iterator it(*bindings); !it.IsAtEnd();
        it.Advance()) {
     // Removal of keybinding preference should be limited to current platform.
@@ -804,13 +822,12 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
     if (extension == extension_id) {
       // If |command_name| is specified, delete only that command. Otherwise,
       // delete all commands.
-      if (!command_name.empty()) {
-        std::string command;
-        item->GetString(kCommandName, &command);
-        if (command_name != command)
-          continue;
-      }
+      std::string command;
+      item->GetString(kCommandName, &command);
+      if (!command_name.empty() && command_name != command)
+        continue;
 
+      removed_commands.push_back(FindCommandByName(extension_id, command));
       keys_to_remove.push_back(it.key());
     }
   }
@@ -820,12 +837,20 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
     std::string key = *it;
     bindings->Remove(key, NULL);
 
+    // TODO(devlin): Deprecate this notification in favor of the observers.
     ExtensionCommandRemovedDetails details(extension_id, command_name,
                                            StripCurrentPlatform(key));
     content::NotificationService::current()->Notify(
         extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED,
         content::Source<Profile>(profile_),
         content::Details<ExtensionCommandRemovedDetails>(&details));
+  }
+
+  for (const Command& removed_command : removed_commands) {
+    FOR_EACH_OBSERVER(
+        Observer,
+        observers_,
+        OnExtensionCommandRemoved(extension_id, removed_command));
   }
 }
 

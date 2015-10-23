@@ -76,13 +76,24 @@ void BookmarkChangeProcessor::StartImpl() {
 void BookmarkChangeProcessor::UpdateSyncNodeProperties(
     const BookmarkNode* src,
     BookmarkModel* model,
-    syncer::WriteNode* dst) {
+    syncer::WriteNode* dst,
+    sync_driver::DataTypeErrorHandler* error_handler) {
   // Set the properties of the item.
   dst->SetIsFolder(src->is_folder());
   dst->SetTitle(base::UTF16ToUTF8(src->GetTitle()));
   sync_pb::BookmarkSpecifics bookmark_specifics(dst->GetBookmarkSpecifics());
-  if (!src->is_folder())
+  if (!src->is_folder()) {
+    if (!src->url().is_valid()) {
+      // Report the invalid URL and continue.
+      // TODO(stanisc): crbug/482155: Revisit this once the root cause for
+      // invalid URLs is understood.
+      error_handler->CreateAndUploadError(
+          FROM_HERE, "Creating sync bookmark with invalid url " +
+                         src->url().possibly_invalid_spec(),
+          syncer::BOOKMARKS);
+    }
     bookmark_specifics.set_url(src->url().spec());
+  }
   bookmark_specifics.set_creation_time_us(src->date_added().ToInternalValue());
   dst->SetBookmarkSpecifics(bookmark_specifics);
   SetSyncNodeFavicon(src, model, dst);
@@ -106,18 +117,21 @@ void BookmarkChangeProcessor::EncodeFavicon(
   *dst = favicon.As1xPNGBytes();
 }
 
-void BookmarkChangeProcessor::RemoveOneSyncNode(syncer::WriteNode* sync_node) {
-  // This node should have no children.
-  DCHECK(!sync_node->HasChildren());
-  // Remove association and delete the sync node.
-  model_associator_->Disassociate(sync_node->GetId());
-  sync_node->Tombstone();
+// static
+int BookmarkChangeProcessor::RemoveSyncNodeHierarchy(
+    syncer::WriteTransaction* trans,
+    syncer::WriteNode* sync_node,
+    BookmarkModelAssociator* associator) {
+  // Remove children.
+  int num_removed = RemoveAllChildNodes(trans, sync_node->GetId(), associator);
+  // Remove the node itself.
+  RemoveOneSyncNode(sync_node, associator);
+  return num_removed + 1;
 }
 
 void BookmarkChangeProcessor::RemoveSyncNodeHierarchy(
     const BookmarkNode* topmost) {
-  int64 new_version =
-      syncer::syncable::kInvalidTransactionVersion;
+  int64 new_version = syncer::syncable::kInvalidTransactionVersion;
   {
     syncer::WriteTransaction trans(FROM_HERE, share_handle(), &new_version);
     syncer::WriteNode topmost_sync_node(&trans);
@@ -130,11 +144,7 @@ void BookmarkChangeProcessor::RemoveSyncNodeHierarchy(
       error_handler()->OnSingleDataTypeUnrecoverableError(error);
       return;
     }
-    // Check that |topmost| has been unlinked.
-    DCHECK(topmost->is_root());
-    RemoveAllChildNodes(&trans, topmost->id());
-    // Remove the node itself.
-    RemoveOneSyncNode(&topmost_sync_node);
+    RemoveSyncNodeHierarchy(&trans, &topmost_sync_node, model_associator_);
   }
 
   // Don't need to update versions of deleted nodes.
@@ -147,14 +157,23 @@ void BookmarkChangeProcessor::RemoveAllSyncNodes() {
   {
     syncer::WriteTransaction trans(FROM_HERE, share_handle(), &new_version);
 
-    RemoveAllChildNodes(&trans, bookmark_model_->bookmark_bar_node()->id());
-    RemoveAllChildNodes(&trans, bookmark_model_->other_node()->id());
+    int64 bookmark_bar_node_sync_id = model_associator_->GetSyncIdFromChromeId(
+        bookmark_model_->bookmark_bar_node()->id());
+    DCHECK_NE(syncer::kInvalidId, bookmark_bar_node_sync_id);
+    RemoveAllChildNodes(&trans, bookmark_bar_node_sync_id, model_associator_);
+
+    int64 other_node_sync_id = model_associator_->GetSyncIdFromChromeId(
+        bookmark_model_->other_node()->id());
+    DCHECK_NE(syncer::kInvalidId, other_node_sync_id);
+    RemoveAllChildNodes(&trans, other_node_sync_id, model_associator_);
+
     // Remove mobile bookmarks node only if it is present.
-    const int64 mobile_bookmark_id = bookmark_model_->mobile_node()->id();
-    if (model_associator_->GetSyncIdFromChromeId(mobile_bookmark_id) !=
-            syncer::kInvalidId) {
-      RemoveAllChildNodes(&trans, bookmark_model_->mobile_node()->id());
+    int64 mobile_node_sync_id = model_associator_->GetSyncIdFromChromeId(
+        bookmark_model_->mobile_node()->id());
+    if (mobile_node_sync_id != syncer::kInvalidId) {
+      RemoveAllChildNodes(&trans, mobile_node_sync_id, model_associator_);
     }
+
     // Note: the root node may have additional extra nodes. Currently none of
     // them are meant to sync.
   }
@@ -164,20 +183,11 @@ void BookmarkChangeProcessor::RemoveAllSyncNodes() {
                            std::vector<const BookmarkNode*>());
 }
 
-void BookmarkChangeProcessor::RemoveAllChildNodes(
-    syncer::WriteTransaction* trans, const int64& topmost_node_id) {
-  syncer::WriteNode topmost_node(trans);
-  if (!model_associator_->InitSyncNodeFromChromeId(topmost_node_id,
-                                                   &topmost_node)) {
-    syncer::SyncError error(FROM_HERE,
-                            syncer::SyncError::DATATYPE_ERROR,
-                            "Failed to init sync node from chrome node",
-                            syncer::BOOKMARKS);
-    error_handler()->OnSingleDataTypeUnrecoverableError(error);
-    return;
-  }
-  const int64 topmost_sync_id = topmost_node.GetId();
-
+// static
+int BookmarkChangeProcessor::RemoveAllChildNodes(
+    syncer::WriteTransaction* trans,
+    int64 topmost_sync_id,
+    BookmarkModelAssociator* associator) {
   // Do a DFS and delete all the child sync nodes, use sync id instead of
   // bookmark node ids since the bookmark nodes may already be deleted.
   // The equivalent recursive version of this iterative DFS:
@@ -188,6 +198,7 @@ void BookmarkChangeProcessor::RemoveAllChildNodes(
   //    if(node_id != topmost_node_id)
   //      delete node
 
+  int num_removed = 0;
   std::stack<int64> dfs_sync_id_stack;
   // Push the topmost node.
   dfs_sync_id_stack.push(topmost_sync_id);
@@ -201,7 +212,8 @@ void BookmarkChangeProcessor::RemoveAllChildNodes(
       dfs_sync_id_stack.pop();
       // Do not delete the topmost node.
       if (sync_node_id != topmost_sync_id) {
-        RemoveOneSyncNode(&node);
+        RemoveOneSyncNode(&node, associator);
+        num_removed++;
       } else {
         // if we are processing topmost node, all other nodes must be processed
         // the stack should be empty.
@@ -214,6 +226,18 @@ void BookmarkChangeProcessor::RemoveAllChildNodes(
       }
     }
   }
+  return num_removed;
+}
+
+// static
+void BookmarkChangeProcessor::RemoveOneSyncNode(
+    syncer::WriteNode* sync_node,
+    BookmarkModelAssociator* associator) {
+  // This node should have no children.
+  DCHECK(!sync_node->HasChildren());
+  // Remove association and delete the sync node.
+  associator->Disassociate(sync_node->GetId());
+  sync_node->Tombstone();
 }
 
 void BookmarkChangeProcessor::CreateOrUpdateSyncNode(const BookmarkNode* node) {
@@ -288,15 +312,13 @@ int64 BookmarkChangeProcessor::CreateSyncNode(const BookmarkNode* parent,
 
   // Actually create the node with the appropriate initial position.
   if (!PlaceSyncNode(CREATE, parent, index, trans, &sync_child, associator)) {
-    syncer::SyncError error(FROM_HERE,
-                            syncer::SyncError::DATATYPE_ERROR,
-                            "Failed ot creat sync node.",
-                            syncer::BOOKMARKS);
+    syncer::SyncError error(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
+                            "Failed to create sync node.", syncer::BOOKMARKS);
     error_handler->OnSingleDataTypeUnrecoverableError(error);
     return syncer::kInvalidId;
   }
 
-  UpdateSyncNodeProperties(child, model, &sync_child);
+  UpdateSyncNodeProperties(child, model, &sync_child, error_handler);
 
   // Associate the ID from the sync domain with the bookmark node, so that we
   // can refer back to this item later.
@@ -305,14 +327,23 @@ int64 BookmarkChangeProcessor::CreateSyncNode(const BookmarkNode* parent,
   return sync_child.GetId();
 }
 
+void BookmarkChangeProcessor::OnWillRemoveBookmarks(BookmarkModel* model,
+                                                    const BookmarkNode* parent,
+                                                    int old_index,
+                                                    const BookmarkNode* node) {
+  if (CanSyncNode(node))
+    RemoveSyncNodeHierarchy(node);
+}
+
 void BookmarkChangeProcessor::BookmarkNodeRemoved(
     BookmarkModel* model,
     const BookmarkNode* parent,
-    int index,
+    int old_index,
     const BookmarkNode* node,
-    const std::set<GURL>& removed_urls) {
-  if (CanSyncNode(node))
-    RemoveSyncNodeHierarchy(node);
+    const std::set<GURL>& no_longer_bookmarked) {
+  // All the work should have already been done in OnWillRemoveBookmarks.
+  DCHECK_EQ(syncer::kInvalidId,
+            model_associator_->GetSyncIdFromChromeId(node->id()));
 }
 
 void BookmarkChangeProcessor::BookmarkAllUserNodesRemoved(
@@ -350,7 +381,7 @@ int64 BookmarkChangeProcessor::UpdateSyncNode(
     error_handler->OnSingleDataTypeUnrecoverableError(error);
     return syncer::kInvalidId;
   }
-  UpdateSyncNodeProperties(node, model, &sync_node);
+  UpdateSyncNodeProperties(node, model, &sync_node, error_handler);
   DCHECK_EQ(sync_node.GetIsFolder(), node->is_folder());
   DCHECK_EQ(associator->GetChromeNodeFromSyncId(sync_node.GetParentId()),
             node->parent());
@@ -769,7 +800,7 @@ void BookmarkChangeProcessor::UpdateTransactionVersion(
 // Creates a bookmark node under the given parent node from the given sync
 // node. Returns the newly created node.
 const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
-    syncer::BaseNode* sync_node,
+    const syncer::BaseNode* sync_node,
     const BookmarkNode* parent,
     BookmarkModel* model,
     Profile* profile,
@@ -785,7 +816,7 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
 const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
     const base::string16& title,
     const GURL& url,
-    syncer::BaseNode* sync_node,
+    const syncer::BaseNode* sync_node,
     const BookmarkNode* parent,
     BookmarkModel* model,
     Profile* profile,

@@ -14,22 +14,10 @@
   ],
   'targets': [
     {
-      # GN version: //components/scheduler:common
-      'target_name': 'scheduler_common',
-      'type': 'static_library',
-      'include_dirs': [
-        '../..',
-      ],
-      'sources': [
-        '<@(scheduler_common_sources)',
-      ],
-    },
-    {
       # GN version: //components/scheduler:scheduler
       'target_name': 'scheduler',
       'type': '<(component)',
       'dependencies': [
-        'scheduler_common',
         '../../base/base.gyp:base',
         '../../cc/cc.gyp:cc',
         '../../third_party/WebKit/public/blink.gyp:blink',
@@ -48,6 +36,17 @@
       ],
       'export_dependent_settings': [
         '../../third_party/WebKit/public/blink.gyp:blink',
+      ],
+    },
+    {
+      # GN version: //components/scheduler:test_support
+      'target_name': 'scheduler_test_support',
+      'type': 'static_library',
+      'include_dirs': [
+        '../..',
+      ],
+      'sources': [
+        '<@(scheduler_test_support_sources)',
       ],
     },
   ],

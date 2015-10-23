@@ -15,6 +15,7 @@ import string
 import tempfile
 import time
 
+from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import debug_link
@@ -45,14 +46,15 @@ KNOWN_HOSTS_PATH = os.path.expanduser('~/.ssh/known_hosts')
 # Dev/test packages are installed in these paths.
 DEV_BIN_PATHS = '/usr/local/bin:/usr/local/sbin'
 
-# Path to the lsb-release file on the device.
-LSB_RELEASE_PATH = '/etc/lsb-release'
-
 # Brillo device.
 BRILLO_DEBUG_LINK_SERVICE_NAME = '_brdebug._tcp.local'
 BRILLO_DEVICE_PROPERTY_DIR = '/var/lib/brillo-device'
 BRILLO_DEVICE_PROPERTY_MAX_LEN = 128
 BRILLO_DEVICE_PROPERTY_ALIAS = 'alias'
+
+# Remote device connection types.
+CONNECTION_TYPE_ETHERNET = 'ethernet'
+CONNECTION_TYPE_USB = 'usb'
 
 
 class RemoteAccessException(Exception):
@@ -641,9 +643,9 @@ class RemoteDevice(object):
       return None
 
     if self._work_dir is None:
-      self.BaseRunCommand(['mkdir', '-p', self._base_dir])
       self._work_dir = self.BaseRunCommand(
-          ['mktemp', '-d', '--tmpdir=%s' % self._base_dir],
+          ['mkdir', '-p', self._base_dir, '&&',
+           'mktemp', '-d', '--tmpdir=%s' % self._base_dir],
           capture_output=True).output.strip()
       logging.debug('The temporary working directory on the device is %s',
                     self._work_dir)
@@ -720,23 +722,17 @@ class RemoteDevice(object):
     """Copy path to working directory on the device."""
     return self.CopyToDevice(src, os.path.join(self.work_dir, dest), **kwargs)
 
-  def IsPathWritable(self, path):
-    """Checks if the given path is writable on the device.
+  def IsDirWritable(self, path):
+    """Checks if the given directory is writable on the device.
 
     Args:
-      path: path on the device to check.
+      path: Directory on the device to check.
     """
-    tmp_file = os.path.join(path, 'tmp.remote_access')
-    result = self.GetAgent().RemoteSh(['touch', tmp_file], remote_sudo=True,
-                                      error_code_ok=True, capture_output=True)
-
-    if result.returncode != 0:
-      return False
-
-    self.GetAgent().RemoteSh(['rm', tmp_file], error_code_ok=True,
-                             remote_sudo=True)
-
-    return True
+    tmp_file = os.path.join(path, '.tmp.remote_access.is.writable')
+    result = self.GetAgent().RemoteSh(
+        ['touch', tmp_file, '&&', 'rm', tmp_file],
+        error_code_ok=True, remote_sudo=True, capture_output=True)
+    return result.returncode == 0
 
   def IsFileExecutable(self, path):
     """Check if the given file is executable on the device.
@@ -777,7 +773,7 @@ class RemoteDevice(object):
     Args:
       path: The full path to the file on the device to read.
       max_size: Read the file only if its size is less than |max_size| in bytes.
-        The default is 1,000,000(~1MB).
+        If None, do not check its size and always cat the path.
 
     Returns:
       A string of the file content.
@@ -786,12 +782,14 @@ class RemoteDevice(object):
       CatFileError if failed to read the remote file or the file size is larger
       than |max_size|.
     """
-    try:
-      file_size = self.GetSize(path)
-    except (ValueError, cros_build_lib.RunCommandError) as e:
-      raise CatFileError('Failed to get size of file "%s": %s' % (path, e))
-    if file_size > max_size:
-      raise CatFileError('File "%s" is larger than %d bytes' % (path, max_size))
+    if max_size is not None:
+      try:
+        file_size = self.GetSize(path)
+      except (ValueError, cros_build_lib.RunCommandError) as e:
+        raise CatFileError('Failed to get size of file "%s": %s' % (path, e))
+      if file_size > max_size:
+        raise CatFileError('File "%s" is larger than %d bytes' %
+                           (path, max_size))
 
     result = self.BaseRunCommand(['cat', path], remote_sudo=True,
                                  error_code_ok=True, capture_output=True)
@@ -908,19 +906,24 @@ class ChromiumOSDevice(RemoteDevice):
   MOUNT_ROOTFS_RW_CMD = ['mount', '-o', 'remount,rw', '/']
   LIST_MOUNTS_CMD = ['cat', '/proc/mounts']
 
-  def __init__(self, hostname, alias=None, **kwargs):
+  def __init__(self, hostname, alias=None, connection_type=None, **kwargs):
     """Initializes this object.
 
     Args:
       hostname: A network hostname or a user-friendly USB device name (alias);
         None to find the default ChromiumOSDevice.
       alias: A user-friendly USB device name.
+      connection_type: A CONNECTION_TYPE_xxx value, or None if unknown.
+        Overwritten with the discovered value if |hostname| is None.
     """
     if hostname:
       self._alias = alias
+      self.connection_type = connection_type
+      # _ResolveHostname() may update |self.connection_type| and/or
+      # |self._alias| so they need to be initialized beforehand.
       hostname = self._ResolveHostname(hostname)
     else:
-      service = _GetDefaultService()
+      service, self.connection_type = _GetDefaultService()
       self._alias = service.text[BRILLO_DEVICE_PROPERTY_ALIAS]
       hostname = service.ip
       # We know this exists because it responded to the mDNS, no need to ping.
@@ -970,17 +973,19 @@ class ChromiumOSDevice(RemoteDevice):
     """
     if not self._lsb_release:
       try:
-        content = self.CatFile(LSB_RELEASE_PATH)
+        content = self.CatFile(constants.LSB_RELEASE_PATH, max_size=None)
       except CatFileError as e:
         logging.debug(
-            'Failed to read "%s" on the device: %s', LSB_RELEASE_PATH, e)
+            'Failed to read "%s" on the device: %s',
+            constants.LSB_RELEASE_PATH, e)
       else:
         try:
           self._lsb_release = dict(e.split('=', 1)
                                    for e in reversed(content.splitlines()))
         except ValueError:
           logging.error('File "%s" on the device is mal-formatted.',
-                        LSB_RELEASE_PATH)
+                        constants.LSB_RELEASE_PATH)
+
     return self._lsb_release
 
   @property
@@ -1044,6 +1049,8 @@ class ChromiumOSDevice(RemoteDevice):
     """Resolve |hostname| into a network hostname.
 
     If |hostname| is an alias, |self._alias| is updated to be |hostname|.
+    If the connection type can be determined during hostname resolution,
+    |self.connection_type| is updated to the proper value.
 
     Args:
       hostname: Can either be a network hostname or user-friendly USB device
@@ -1061,6 +1068,7 @@ class ChromiumOSDevice(RemoteDevice):
       ip = GetUSBDeviceIP(hostname)
       if ip:
         self._alias = hostname
+        self.connection_type = CONNECTION_TYPE_USB
         return ip
       # |hostname| is not resolvable but may still be valid (eg. ssh hostname).
       # Leave the hostname be.
@@ -1143,8 +1151,8 @@ class ChromiumOSDevice(RemoteDevice):
     return super(ChromiumOSDevice, self).RunCommand(cmd, **kwargs)
 
 
-def _DiscoverServices():
-  """Performs service discovery.
+def _DiscoverUSBServices():
+  """Performs service discovery over the USB link.
 
   Initializes the USB link and sends the mDNS query to find all
   available Brillo services.
@@ -1174,12 +1182,12 @@ def _GetDefaultService():
   returned. Otherwise DefaultDeviceError will be raised.
 
   Returns:
-    The mdns.Service object for the default device.
+    A (mdns.Service, CONNECTION_TYPE_xxx value) tuple.
 
   Raises:
     DefaultDeviceError: no default device was found.
   """
-  services = _DiscoverServices()
+  services = _DiscoverUSBServices()
   if not services:
     raise DefaultDeviceError('No default device could be found.')
   elif len(services) > 1:
@@ -1187,16 +1195,17 @@ def _GetDefaultService():
         'More than one device was found, please specify a device from: %s.' %
         ', '.join(service.text[BRILLO_DEVICE_PROPERTY_ALIAS]
                   for service in services))
-  return services[0]
+  return (services[0], CONNECTION_TYPE_USB)
 
 
 def GetUSBConnectedDevices():
   """Returns a list of all USB-connected devices."""
   # Use connect=False so that we don't try to set up the device connections
   # until the device is used.
-  return [ChromiumOSDevice(
-      service.ip, alias=service.text[BRILLO_DEVICE_PROPERTY_ALIAS],
-      ping=False, connect=False) for service in _DiscoverServices()]
+  return [ChromiumOSDevice(service.ip, connection_type=CONNECTION_TYPE_USB,
+                           alias=service.text[BRILLO_DEVICE_PROPERTY_ALIAS],
+                           ping=False, connect=False)
+          for service in _DiscoverUSBServices()]
 
 
 def GetUSBDeviceIP(alias):

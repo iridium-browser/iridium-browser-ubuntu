@@ -12,8 +12,8 @@
 #include "content/public/common/resource_type.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
+#include "url/third_party/mozilla/url_parse.h"
 #include "url/url_canon.h"
-#include "url/url_parse.h"
 #include "url/url_util.h"
 
 using content::ResourceType;
@@ -72,16 +72,18 @@ bool MaybeGetQueryStringBasedAliasURL(
 }
 
 bool IsGoogleDomain(const GURL& url) {
-  return StartsWithASCII(url.host(), std::string("www.google."), true);
+  return base::StartsWith(url.host(), "www.google.",
+                          base::CompareCase::SENSITIVE);
 }
 
 bool IsGoogleSearchResultURL(const GURL& url) {
   if (!IsGoogleDomain(url))
     return false;
   return (url.path().empty() ||
-          StartsWithASCII(url.path(), std::string("/search"), true) ||
+          base::StartsWith(url.path(), "/search",
+                           base::CompareCase::SENSITIVE) ||
           (url.path() == "/") ||
-          StartsWithASCII(url.path(), std::string("/webhp"), true));
+          base::StartsWith(url.path(), "/webhp", base::CompareCase::SENSITIVE));
 }
 
 void ReportPrerenderExternalURL() {

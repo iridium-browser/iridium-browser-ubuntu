@@ -8,6 +8,7 @@
 #include "base/android/jni_registrar.h"
 #include "content/browser/accessibility/browser_accessibility_android.h"
 #include "content/browser/accessibility/browser_accessibility_manager_android.h"
+#include "content/browser/android/background_sync_launcher_android.h"
 #include "content/browser/android/browser_startup_controller.h"
 #include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/android/composited_touch_handle_drawable.h"
@@ -29,6 +30,7 @@
 #include "content/browser/geolocation/location_api_adapter_android.h"
 #include "content/browser/media/android/media_drm_credential_manager.h"
 #include "content/browser/media/android/media_resource_getter_impl.h"
+#include "content/browser/media/android/media_session.h"
 #include "content/browser/mojo/service_registrar_android.h"
 #include "content/browser/mojo/service_registry_android.h"
 #include "content/browser/power_save_blocker_android.h"
@@ -45,6 +47,8 @@ namespace {
 base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"AndroidLocationApiAdapter",
      content::AndroidLocationApiAdapter::RegisterGeolocationService},
+    {"BackgroundSyncLauncherAndroid",
+     content::BackgroundSyncLauncherAndroid::RegisterLauncher},
     {"BrowserAccessibilityManager",
      content::RegisterBrowserAccessibilityManager},
     {"BrowserStartupController", content::RegisterBrowserStartupController},
@@ -72,8 +76,11 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
      content::MediaDrmCredentialManager::RegisterMediaDrmCredentialManager},
     {"MediaResourceGetterImpl",
      content::MediaResourceGetterImpl::RegisterMediaResourceGetter},
+    {"MediaSession", content::MediaSession::RegisterMediaSession},
     {"MotionEventAndroid",
      content::MotionEventAndroid::RegisterMotionEventAndroid},
+    {"MotionEventSynthesizer",
+     content::SyntheticGestureTargetAndroid::RegisterMotionEventSynthesizer},
     {"NavigationControllerAndroid",
      content::NavigationControllerAndroid::Register},
     {"PopupTouchHandleDrawable",
@@ -88,8 +95,6 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"SpeechRecognizerImplAndroid",
      content::SpeechRecognizerImplAndroid::RegisterSpeechRecognizer},
     {"TimeZoneMonitorAndroid", content::TimeZoneMonitorAndroid::Register},
-    {"TouchEventSynthesizer",
-     content::SyntheticGestureTargetAndroid::RegisterTouchEventSynthesizer},
     {"TracingControllerAndroid", content::RegisterTracingControllerAndroid},
     {"WebContentsAndroid", content::WebContentsAndroid::Register},
     {"WebContentsObserver", content::RegisterWebContentsObserverProxy},

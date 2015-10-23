@@ -5,11 +5,13 @@
 #import "ios/web/test/wk_web_view_crash_utils.h"
 
 #import <Foundation/Foundation.h>
+#import <WebKit/WebKit.h>
 
+#include "base/ios/ios_util.h"
 #include "base/logging.h"
 #import "base/mac/scoped_nsobject.h"
 #include "ios/web/public/test/test_browser_state.h"
-#import "ios/web/web_state/web_view_creation_utils.h"
+#import "ios/web/public/web_view_creation_util.h"
 #import "third_party/ocmock/OCMock/NSInvocation+OCMAdditions.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 
@@ -35,6 +37,12 @@ WKWebView* CreateMockWKWebViewWithStubbedJSEvalFunction(
 namespace web {
 
 void SimulateWKWebViewCrash(WKWebView* webView) {
+  if (base::ios::IsRunningOnIOS9OrLater()) {
+    SEL selector = @selector(webViewWebContentProcessDidTerminate:);
+    if ([webView.navigationDelegate respondsToSelector:selector]) {
+      [webView.navigationDelegate performSelector:selector withObject:webView];
+    }
+  }
   [webView performSelector:@selector(_processDidExit)];
 }
 

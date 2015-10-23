@@ -12,6 +12,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/disks/suspend_unmount_manager.h"
 
 namespace chromeos {
 namespace disks {
@@ -29,9 +30,11 @@ class DiskMountManagerImpl : public DiskMountManager {
     already_refreshed_(false),
     weak_ptr_factory_(this) {
     DBusThreadManager* dbus_thread_manager = DBusThreadManager::Get();
-    DCHECK(dbus_thread_manager);
     cros_disks_client_ = dbus_thread_manager->GetCrosDisksClient();
-    DCHECK(cros_disks_client_);
+    PowerManagerClient* power_manager_client =
+        dbus_thread_manager->GetPowerManagerClient();
+    suspend_unmount_manager_.reset(
+        new SuspendUnmountManager(this, power_manager_client));
     cros_disks_client_->SetMountEventHandler(
         base::Bind(&DiskMountManagerImpl::OnMountEvent,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -191,8 +194,9 @@ class DiskMountManagerImpl : public DiskMountManager {
 
   // DiskMountManager override.
   void EnsureMountInfoRefreshed(
-      const EnsureMountInfoRefreshedCallback& callback) override {
-    if (already_refreshed_) {
+      const EnsureMountInfoRefreshedCallback& callback,
+      bool force) override {
+    if (!force && already_refreshed_) {
       callback.Run(true);
       return;
     }
@@ -273,8 +277,8 @@ class DiskMountManagerImpl : public DiskMountManager {
     for (MountPointMap::iterator it = mount_points_.begin();
          it != mount_points_.end();
          ++it) {
-      if (StartsWithASCII(it->second.source_path, mount_path,
-                          true /*case sensitive*/)) {
+      if (base::StartsWith(it->second.source_path, mount_path,
+                           base::CompareCase::SENSITIVE)) {
         // TODO(tbarzic): Handle the case where this fails.
         UnmountPath(it->second.mount_path,
                     UNMOUNT_OPTIONS_NONE,
@@ -496,8 +500,8 @@ class DiskMountManagerImpl : public DiskMountManager {
         devices[index],
         base::Bind(&DiskMountManagerImpl::RefreshAfterGetDeviceProperties,
                    weak_ptr_factory_.GetWeakPtr(), devices, index + 1),
-        base::Bind(&DiskMountManagerImpl::RefreshCompleted,
-                   weak_ptr_factory_.GetWeakPtr(), false));
+        base::Bind(&DiskMountManagerImpl::RefreshDeviceAtIndex,
+                   weak_ptr_factory_.GetWeakPtr(), devices, index + 1));
   }
 
   // Part of EnsureMountInfoRefreshed().
@@ -603,14 +607,14 @@ class DiskMountManagerImpl : public DiskMountManager {
          it != system_path_prefixes_.end();
          ++it) {
       const std::string& prefix = *it;
-      if (StartsWithASCII(system_path, prefix, true))
+      if (base::StartsWith(system_path, prefix, base::CompareCase::SENSITIVE))
         return prefix;
     }
     return base::EmptyString();
   }
 
   // Mount event change observers.
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
 
   CrosDisksClient* cros_disks_client_;
 
@@ -624,6 +628,8 @@ class DiskMountManagerImpl : public DiskMountManager {
 
   bool already_refreshed_;
   std::vector<EnsureMountInfoRefreshedCallback> refresh_callbacks_;
+
+  scoped_ptr<SuspendUnmountManager> suspend_unmount_manager_;
 
   base::WeakPtrFactory<DiskMountManagerImpl> weak_ptr_factory_;
 

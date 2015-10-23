@@ -44,12 +44,16 @@ class CONTENT_EXPORT ServiceRegistryImpl
   void ConnectToRemoteService(const base::StringPiece& service_name,
                               mojo::ScopedMessagePipeHandle handle) override;
 
+  bool IsBound() const;
+
   base::WeakPtr<ServiceRegistry> GetWeakPtr();
 
  private:
   // mojo::ServiceProvider overrides.
   void ConnectToService(const mojo::String& name,
                         mojo::ScopedMessagePipeHandle client_handle) override;
+
+  void OnConnectionError();
 
   mojo::Binding<mojo::ServiceProvider> binding_;
   mojo::ServiceProviderPtr remote_provider_;

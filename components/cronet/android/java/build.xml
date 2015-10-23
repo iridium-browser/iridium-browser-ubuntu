@@ -1,0 +1,21 @@
+<project>
+  <target name="doc" description="generate documentation">
+      <javadoc destdir="${doc.dir}"
+               overview="${overview}"
+               windowtitle="Cronet API"
+               nohelp="yes"
+               notree="yes"
+               nodeprecated="yes"
+               linkoffline="https://developer.android.com/reference ."
+               bootclasspath="../../../../third_party/android_tools/sdk/platforms/android-22/android.jar"
+               >
+        <fileset dir="${source.dir}" defaultexcludes="yes">
+          <include name="**/*.java"/>
+          <!-- exclude legacy API -->
+          <exclude name="**/Chromium*.java"/>
+          <exclude name="**/ChunkedWritableByteChannel*.java"/>
+          <exclude name="**/HttpUrl*.java"/>
+        </fileset>
+      </javadoc>
+  </target>
+</project>

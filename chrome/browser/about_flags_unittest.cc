@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/about_flags.h"
+
 #include <stdint.h>
 #include <utility>
 
 #include "base/files/file_path.h"
-#include "base/memory/scoped_vector.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/testing_pref_service.h"
@@ -14,13 +15,14 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/about_flags.h"
 #include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libxml/chromium/libxml_utils.h"
+
+namespace about_flags {
 
 namespace {
 
@@ -29,10 +31,12 @@ const char kFlags2[] = "flag2";
 const char kFlags3[] = "flag3";
 const char kFlags4[] = "flag4";
 const char kFlags5[] = "flag5";
+const char kFlags6[] = "flag6";
 
 const char kSwitch1[] = "switch";
 const char kSwitch2[] = "switch2";
 const char kSwitch3[] = "switch3";
+const char kSwitch6[] = "switch6";
 const char kValueForSwitch2[] = "value_for_switch2";
 
 const char kMultiSwitch1[] = "multi_switch1";
@@ -186,19 +190,20 @@ std::set<std::string> GetAllSwitchesForTesting() {
   std::set<std::string> result;
 
   size_t num_experiments = 0;
-  const about_flags::Experiment* experiments =
-      about_flags::testing::GetExperiments(&num_experiments);
+  const Experiment* experiments =
+      testing::GetExperiments(&num_experiments);
 
   for (size_t i = 0; i < num_experiments; ++i) {
-    const about_flags::Experiment& experiment = experiments[i];
-    if (experiment.type == about_flags::Experiment::SINGLE_VALUE) {
+    const Experiment& experiment = experiments[i];
+    if (experiment.type == Experiment::SINGLE_VALUE ||
+        experiment.type == Experiment::SINGLE_DISABLE_VALUE) {
       result.insert(experiment.command_line_switch);
-    } else if (experiment.type == about_flags::Experiment::MULTI_VALUE) {
+    } else if (experiment.type == Experiment::MULTI_VALUE) {
       for (int j = 0; j < experiment.num_choices; ++j) {
         result.insert(experiment.choices[j].command_line_switch);
       }
     } else {
-      DCHECK_EQ(experiment.type, about_flags::Experiment::ENABLE_DISABLE_VALUE);
+      DCHECK_EQ(experiment.type, Experiment::ENABLE_DISABLE_VALUE);
       result.insert(experiment.command_line_switch);
       result.insert(experiment.disable_command_line_switch);
     }
@@ -207,8 +212,6 @@ std::set<std::string> GetAllSwitchesForTesting() {
 }
 
 }  // anonymous namespace
-
-namespace about_flags {
 
 const Experiment::Choice kMultiChoices[] = {
   { IDS_PRODUCT_NAME, "", "" },
@@ -284,6 +287,19 @@ static Experiment kExperiments[] = {
     NULL,
     3
   },
+  {
+    kFlags6,
+    IDS_PRODUCT_NAME,
+    IDS_PRODUCT_NAME,
+    0,
+    Experiment::SINGLE_DISABLE_VALUE,
+    kSwitch6,
+    "",
+    NULL,
+    NULL,
+    NULL,
+    0
+  },
 };
 
 class AboutFlagsTest : public ::testing::Test {
@@ -316,11 +332,22 @@ TEST_F(AboutFlagsTest, NoChangeNoRestart) {
   EXPECT_FALSE(IsRestartNeededToCommitChanges());
   SetExperimentEnabled(&flags_storage_, kFlags1, false);
   EXPECT_FALSE(IsRestartNeededToCommitChanges());
+
+  // kFlags6 is enabled by default, so enabling should not require a restart.
+  SetExperimentEnabled(&flags_storage_, kFlags6, true);
+  EXPECT_FALSE(IsRestartNeededToCommitChanges());
 }
 
 TEST_F(AboutFlagsTest, ChangeNeedsRestart) {
   EXPECT_FALSE(IsRestartNeededToCommitChanges());
   SetExperimentEnabled(&flags_storage_, kFlags1, true);
+  EXPECT_TRUE(IsRestartNeededToCommitChanges());
+}
+
+// Tests that disabling a default enabled experiment requires a restart.
+TEST_F(AboutFlagsTest, DisableChangeNeedsRestart) {
+  EXPECT_FALSE(IsRestartNeededToCommitChanges());
+  SetExperimentEnabled(&flags_storage_, kFlags6, false);
   EXPECT_TRUE(IsRestartNeededToCommitChanges());
 }
 
@@ -615,6 +642,32 @@ TEST_F(AboutFlagsTest, MultiValues) {
     ConvertFlagsToSwitches(&flags_storage_, &command_line, kAddSentinels);
     EXPECT_FALSE(command_line.HasSwitch(kMultiSwitch1));
     EXPECT_FALSE(command_line.HasSwitch(kMultiSwitch2));
+  }
+}
+
+// Tests that disable flags are added when an experiment is disabled.
+TEST_F(AboutFlagsTest, DisableFlagCommandLine) {
+  // Nothing selected.
+  {
+    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+    ConvertFlagsToSwitches(&flags_storage_, &command_line, kAddSentinels);
+    EXPECT_FALSE(command_line.HasSwitch(kSwitch6));
+  }
+
+  // Disable the experiment 6.
+  SetExperimentEnabled(&flags_storage_, kFlags6, false);
+  {
+    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+    ConvertFlagsToSwitches(&flags_storage_, &command_line, kAddSentinels);
+    EXPECT_TRUE(command_line.HasSwitch(kSwitch6));
+  }
+
+  // Enable experiment 6.
+  SetExperimentEnabled(&flags_storage_, kFlags6, true);
+  {
+    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+    ConvertFlagsToSwitches(&flags_storage_, &command_line, kAddSentinels);
+    EXPECT_FALSE(command_line.HasSwitch(kSwitch6));
   }
 }
 

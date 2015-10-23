@@ -184,11 +184,10 @@ class PDFEngine {
   static PDFEngine* Create(Client* client);
 
   virtual ~PDFEngine() {}
+
   // Most of these functions are similar to the Pepper functions of the same
   // name, so not repeating the description here unless it's different.
-  virtual bool New(const char* url) = 0;
-  virtual bool New(const char* url,
-                   const char* headers) = 0;
+  virtual bool New(const char* url, const char* headers) = 0;
   virtual void PageOffsetUpdated(const pp::Point& page_offset) = 0;
   virtual void PluginSizeUpdated(const pp::Size& size) = 0;
   virtual void ScrolledToXPosition(int position) = 0;
@@ -234,6 +233,9 @@ class PDFEngine {
   virtual pp::Rect GetPageRect(int index) = 0;
   // Gets the rectangle of the page excluding any additional areas.
   virtual pp::Rect GetPageContentsRect(int index) = 0;
+  // Returns a page's rect in screen coordinates, as well as its surrounding
+  // border areas and bottom separator.
+  virtual pp::Rect GetPageScreenRect(int page_index) const = 0;
   // Gets the offset of the vertical scrollbar from the top in document
   // coordinates.
   virtual int GetVerticalScrollbarYPosition() = 0;

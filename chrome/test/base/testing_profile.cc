@@ -7,31 +7,28 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/location.h"
 #include "base/path_service.h"
 #include "base/prefs/testing_pref_store.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/autocomplete/in_memory_url_index.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/autocomplete/in_memory_url_index_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
+#include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/chrome_fallback_icon_client_factory.h"
-#include "chrome/browser/favicon/chrome_favicon_client_factory.h"
 #include "chrome/browser/favicon/fallback_icon_service_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
-#include "chrome/browser/history/chrome_history_client_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -43,7 +40,7 @@
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -65,6 +62,8 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/in_memory_url_index.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/ui/zoom/zoom_event_manager.h"
 #include "components/user_prefs/user_prefs.h"
@@ -100,11 +99,17 @@
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "components/guest_view/browser/guest_view_manager.h"
+#include "extensions/browser/event_router_factory.h"
+#include "extensions/browser/extension_pref_value_map.h"
+#include "extensions/browser/extension_pref_value_map_factory.h"
+#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_prefs_factory.h"
+#include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extension_system.h"
 #endif
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/signin/android_profile_oauth2_token_service.h"
+#include "chrome/browser/signin/oauth2_token_service_delegate_android.h"
 #endif
 
 #if defined(ENABLE_SUPERVISED_USERS)
@@ -176,66 +181,41 @@ class TestExtensionURLRequestContextGetter
   scoped_ptr<net::URLRequestContext> context_;
 };
 
-#if defined(ENABLE_NOTIFICATIONS)
-KeyedService* CreateTestDesktopNotificationService(
-    content::BrowserContext* profile) {
-  return new DesktopNotificationService(static_cast<Profile*>(profile));
-}
-#endif
-
-KeyedService* BuildFaviconService(content::BrowserContext* context) {
+scoped_ptr<KeyedService> BuildHistoryService(content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
-  return new favicon::FaviconService(
-      ChromeFaviconClientFactory::GetForProfile(profile),
-      HistoryServiceFactory::GetForProfile(profile,
-                                           ServiceAccessType::EXPLICIT_ACCESS));
+  return make_scoped_ptr(new history::HistoryService(
+      make_scoped_ptr(new ChromeHistoryClient(
+          BookmarkModelFactory::GetForProfile(profile))),
+      make_scoped_ptr(new history::ContentVisitDelegate(profile))));
 }
 
-KeyedService* BuildHistoryService(content::BrowserContext* context) {
+scoped_ptr<KeyedService> BuildInMemoryURLIndex(
+    content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
-  history::HistoryService* history_service = new history::HistoryService(
-      ChromeHistoryClientFactory::GetForProfile(profile),
-      scoped_ptr<history::VisitDelegate>(
-          new history::ContentVisitDelegate(profile)));
-  return history_service;
-}
-
-KeyedService* BuildInMemoryURLIndex(content::BrowserContext* context) {
-  Profile* profile = Profile::FromBrowserContext(context);
-  InMemoryURLIndex* in_memory_url_index = new InMemoryURLIndex(
+  scoped_ptr<InMemoryURLIndex> in_memory_url_index(new InMemoryURLIndex(
       BookmarkModelFactory::GetForProfile(profile),
       HistoryServiceFactory::GetForProfile(profile,
                                            ServiceAccessType::IMPLICIT_ACCESS),
-      profile->GetPath(),
-      profile->GetPrefs()->GetString(prefs::kAcceptLanguages));
+      content::BrowserThread::GetBlockingPool(), profile->GetPath(),
+      profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
+      SchemeSet()));
   in_memory_url_index->Init();
-  return in_memory_url_index;
+  return in_memory_url_index.Pass();
 }
 
-KeyedService* BuildBookmarkModel(content::BrowserContext* context) {
-  Profile* profile = static_cast<Profile*>(context);
+scoped_ptr<KeyedService> BuildBookmarkModel(content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
   ChromeBookmarkClient* bookmark_client =
       ChromeBookmarkClientFactory::GetForProfile(profile);
-  BookmarkModel* bookmark_model = new BookmarkModel(bookmark_client);
-  bookmark_client->Init(bookmark_model);
+  scoped_ptr<BookmarkModel> bookmark_model(new BookmarkModel(bookmark_client));
+  bookmark_client->Init(bookmark_model.get());
   bookmark_model->Load(profile->GetPrefs(),
                        profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
                        profile->GetPath(),
                        profile->GetIOTaskRunner(),
                        content::BrowserThread::GetMessageLoopProxyForThread(
                            content::BrowserThread::UI));
-  return bookmark_model;
-}
-
-KeyedService* BuildChromeBookmarkClient(
-    content::BrowserContext* context) {
-  return new ChromeBookmarkClient(static_cast<Profile*>(context));
-}
-
-KeyedService* BuildChromeHistoryClient(
-    content::BrowserContext* context) {
-  Profile* profile = static_cast<Profile*>(context);
-  return new ChromeHistoryClient(BookmarkModelFactory::GetForProfile(profile));
+  return bookmark_model.Pass();
 }
 
 void TestProfileErrorCallback(WebDataServiceWrapper::ErrorType error_type,
@@ -243,14 +223,14 @@ void TestProfileErrorCallback(WebDataServiceWrapper::ErrorType error_type,
   NOTREACHED();
 }
 
-KeyedService* BuildWebDataService(content::BrowserContext* context) {
+scoped_ptr<KeyedService> BuildWebDataService(content::BrowserContext* context) {
   const base::FilePath& context_path = context->GetPath();
-  return new WebDataServiceWrapper(
+  return make_scoped_ptr(new WebDataServiceWrapper(
       context_path, g_browser_process->GetApplicationLocale(),
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
       sync_start_util::GetFlareForSyncableService(context_path),
-      &TestProfileErrorCallback);
+      &TestProfileErrorCallback));
 }
 
 }  // namespace
@@ -313,7 +293,7 @@ TestingProfile::TestingProfile(const base::FilePath& path,
       delegate_(delegate) {
   Init();
   if (delegate_) {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&TestingProfile::FinishInit, base::Unretained(this)));
   } else {
@@ -370,7 +350,7 @@ TestingProfile::TestingProfile(
   // TODO(atwilson): See if this is still required once we convert the current
   // users of the constructor that takes a Delegate* param.
   if (delegate_) {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&TestingProfile::FinishInit, base::Unretained(this)));
   } else {
@@ -417,7 +397,7 @@ void TestingProfile::Init() {
 
 #if defined(OS_ANDROID)
   // Make sure token service knows its running in tests.
-  AndroidProfileOAuth2TokenService::set_is_testing_profile();
+  OAuth2TokenServiceDelegateAndroid::set_is_testing_profile();
 #endif
 
   // Normally this would happen during browser startup, but for tests
@@ -441,9 +421,29 @@ void TestingProfile::Init() {
   if (!IsOffTheRecord())
     CreateProfilePolicyConnector();
 
+  extensions_path_ = profile_path_.AppendASCII("Extensions");
+
 #if defined(ENABLE_EXTENSIONS)
+  // Note that the GetPrefs() creates a TestingPrefService, therefore
+  // the extension controlled pref values set in ExtensionPrefs
+  // are not reflected in the pref service. One would need to
+  // inject a new ExtensionPrefStore(extension_pref_value_map, false).
+  bool extensions_disabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableExtensions);
+  scoped_ptr<extensions::ExtensionPrefs> extension_prefs(
+      extensions::ExtensionPrefs::Create(
+          this, GetPrefs(), extensions_path_,
+          ExtensionPrefValueMapFactory::GetForBrowserContext(this),
+          extensions_disabled,
+          std::vector<extensions::ExtensionPrefsObserver*>()));
+  extensions::ExtensionPrefsFactory::GetInstance()->SetInstanceForTesting(
+      this, extension_prefs.Pass());
+
   extensions::ExtensionSystemFactory::GetInstance()->SetTestingFactory(
       this, extensions::TestExtensionSystem::Build);
+
+  extensions::EventRouterFactory::GetInstance()->SetTestingFactory(this,
+                                                                   nullptr);
 #endif
 
   // Prefs for incognito profiles are set in CreateIncognitoPrefService() by
@@ -459,12 +459,6 @@ void TestingProfile::Init() {
 
   browser_context_dependency_manager_->CreateBrowserContextServicesForTest(
       this);
-
-#if defined(ENABLE_NOTIFICATIONS)
-  // Install profile keyed service factory hooks for dummy/test services
-  DesktopNotificationServiceFactory::GetInstance()->SetTestingFactory(
-      this, CreateTestDesktopNotificationService);
-#endif
 
 #if defined(ENABLE_SUPERVISED_USERS)
   if (!IsOffTheRecord()) {
@@ -526,7 +520,7 @@ TestingProfile::~TestingProfile() {
 void TestingProfile::CreateFaviconService() {
   // It is up to the caller to create the history service if one is needed.
   FaviconServiceFactory::GetInstance()->SetTestingFactory(
-      this, BuildFaviconService);
+      this, FaviconServiceFactory::GetDefaultFactory());
 }
 
 bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
@@ -576,8 +570,8 @@ void TestingProfile::DestroyHistoryService() {
 
   // Make sure we don't have any event pending that could disrupt the next
   // test.
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::MessageLoop::QuitClosure());
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitClosure());
   base::MessageLoop::current()->Run();
 }
 
@@ -586,10 +580,10 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
     base::FilePath path = GetPath().Append(bookmarks::kBookmarksFileName);
     base::DeleteFile(path, false);
   }
-  ChromeHistoryClientFactory::GetInstance()->SetTestingFactory(
-      this, BuildChromeHistoryClient);
+  ManagedBookmarkServiceFactory::GetInstance()->SetTestingFactory(
+      this, ManagedBookmarkServiceFactory::GetDefaultFactory());
   ChromeBookmarkClientFactory::GetInstance()->SetTestingFactory(
-      this, BuildChromeBookmarkClient);
+      this, ChromeBookmarkClientFactory::GetDefaultFactory());
   // This creates the BookmarkModel.
   ignore_result(BookmarkModelFactory::GetInstance()->SetTestingFactoryAndUse(
       this, BuildBookmarkModel));
@@ -634,7 +628,7 @@ scoped_ptr<content::ZoomLevelDelegate> TestingProfile::CreateZoomLevelDelegate(
 }
 
 scoped_refptr<base::SequencedTaskRunner> TestingProfile::GetIOTaskRunner() {
-  return base::MessageLoop::current()->message_loop_proxy();
+  return base::MessageLoop::current()->task_runner();
 }
 
 TestingPrefServiceSyncable* TestingProfile::GetTestingPrefService() {
@@ -695,11 +689,11 @@ void TestingProfile::SetSupervisedUserId(const std::string& id) {
     GetPrefs()->ClearPref(prefs::kSupervisedUserId);
 }
 
-bool TestingProfile::IsSupervised() {
+bool TestingProfile::IsSupervised() const {
   return !supervised_user_id_.empty();
 }
 
-bool TestingProfile::IsChild() {
+bool TestingProfile::IsChild() const {
 #if defined(ENABLE_SUPERVISED_USERS)
   return supervised_user_id_ == supervised_users::kChildAccountSUID;
 #else
@@ -707,7 +701,7 @@ bool TestingProfile::IsChild() {
 #endif
 }
 
-bool TestingProfile::IsLegacySupervised() {
+bool TestingProfile::IsLegacySupervised() const {
   return IsSupervised() && !IsChild();
 }
 
@@ -934,7 +928,8 @@ chrome_browser_net::Predictor* TestingProfile::GetNetworkPredictor() {
   return NULL;
 }
 
-DevToolsNetworkController* TestingProfile::GetDevToolsNetworkController() {
+DevToolsNetworkControllerHandle*
+TestingProfile::GetDevToolsNetworkControllerHandle() {
   return NULL;
 }
 

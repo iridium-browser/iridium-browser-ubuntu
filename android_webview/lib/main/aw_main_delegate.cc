@@ -7,15 +7,17 @@
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
+#include "android_webview/common/aw_switches.h"
 #include "android_webview/crash_reporter/aw_microdump_crash_reporter.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
+#include "android_webview/native/aw_locale_manager_impl.h"
 #include "android_webview/native/aw_media_url_interceptor.h"
 #include "android_webview/native/aw_message_port_service_impl.h"
 #include "android_webview/native/aw_quota_manager_bridge_impl.h"
 #include "android_webview/native/aw_web_contents_view_delegate.h"
 #include "android_webview/native/aw_web_preferences_populater_impl.h"
-#include "android_webview/native/public/aw_assets.h"
 #include "android_webview/renderer/aw_content_renderer_client.h"
+#include "base/android/apk_assets.h"
 #include "base/command_line.h"
 #include "base/cpu.h"
 #include "base/i18n/icu_util.h"
@@ -25,7 +27,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
 #include "components/external_video_surface/browser/android/external_video_surface_container_impl.h"
-#include "content/public/browser/android/browser_media_player_manager.h"
+#include "content/public/browser/android/browser_media_player_manager_register.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_descriptors.h"
@@ -34,6 +36,7 @@
 #include "gpu/command_buffer/client/gl_in_process_context.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/base/media_switches.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 
 namespace android_webview {
 
@@ -59,8 +62,14 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
 
   BrowserViewRenderer::CalculateTileMemoryPolicy();
 
+  // WebView apps can override WebView#computeScroll to achieve custom
+  // scroll/fling. As a result, fling animations may not be ticked, potentially
+  // confusing the tap suppression controller. Simply disable it for WebView.
+  ui::GestureConfiguration::GetInstance()
+      ->set_fling_touchscreen_tap_suppression_enabled(false);
+
   base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
-  cl->AppendSwitch(switches::kEnableBeginFrameScheduling);
+  cl->AppendSwitch(cc::switches::kEnableBeginFrameScheduling);
 
   // WebView uses the Android system's scrollbars and overscroll glow.
   cl->AppendSwitch(switches::kDisableOverscrollEdgeEffect);
@@ -98,30 +107,32 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // http://crbug.com/479767
   cl->AppendSwitch(switches::kEnableAggressiveDOMStorageFlushing);
 
+  // Webview does not currently support the Presentation API, see
+  // https://crbug.com/521319
+  cl->AppendSwitch(switches::kDisablePresentationAPI);
+
   // This is needed to be able to mmap the V8 snapshot and ICU data file
   // directly from the WebView .apk.
   // This needs to be here so that it gets to run before the code in
   // content_main_runner that reads these values tries to do so.
   // In multi-process mode this code would live in
   // AwContentBrowserClient::GetAdditionalMappedFilesForChildProcess.
-#ifdef V8_USE_EXTERNAL_STARTUP_DATA
 #ifdef __LP64__
-  const char kNativesFileName[] = "natives_blob_64.bin";
-  const char kSnapshotFileName[] = "snapshot_blob_64.bin";
+  const char kNativesFileName[] = "assets/natives_blob_64.bin";
+  const char kSnapshotFileName[] = "assets/snapshot_blob_64.bin";
 #else
-  const char kNativesFileName[] = "natives_blob_32.bin";
-  const char kSnapshotFileName[] = "snapshot_blob_32.bin";
+  const char kNativesFileName[] = "assets/natives_blob_32.bin";
+  const char kSnapshotFileName[] = "assets/snapshot_blob_32.bin";
 #endif // __LP64__
   // TODO(gsennton) we should use
   // gin::IsolateHolder::kNativesFileName/kSnapshotFileName
   // here when those files have arch specific names http://crbug.com/455699
-  CHECK(AwAssets::RegisterAssetWithGlobalDescriptors(
+  CHECK(base::android::RegisterApkAssetWithGlobalDescriptors(
       kV8NativesDataDescriptor, kNativesFileName));
-  CHECK(AwAssets::RegisterAssetWithGlobalDescriptors(
+  CHECK(base::android::RegisterApkAssetWithGlobalDescriptors(
       kV8SnapshotDataDescriptor, kSnapshotFileName));
-#endif
-  CHECK(AwAssets::RegisterAssetWithGlobalDescriptors(
-      kAndroidICUDataDescriptor, base::i18n::kIcuDataFileName));
+  CHECK(base::android::RegisterApkAssetWithGlobalDescriptors(
+      kAndroidICUDataDescriptor, "assets/icudtl.dat"));
 
   return false;
 }
@@ -197,6 +208,10 @@ AwWebPreferencesPopulater* AwMainDelegate::CreateWebPreferencesPopulater() {
 
 AwMessagePortService* AwMainDelegate::CreateAwMessagePortService() {
   return new AwMessagePortServiceImpl();
+}
+
+AwLocaleManager* AwMainDelegate::CreateAwLocaleManager() {
+  return new AwLocaleManagerImpl();
 }
 
 #if defined(VIDEO_HOLE)

@@ -48,9 +48,10 @@ const char kSuggestionsProviderFieldTrialEnabledPrefix[] = "Enabled";
 // Returns whether the user is part of a group where the Suggestions provider is
 // enabled.
 bool IsSuggestionsSearchProviderEnabled() {
-  return StartsWithASCII(
+  return base::StartsWith(
       base::FieldTrialList::FindFullName(kSuggestionsProviderFieldTrialName),
-      kSuggestionsProviderFieldTrialEnabledPrefix, true);
+      kSuggestionsProviderFieldTrialEnabledPrefix,
+      base::CompareCase::SENSITIVE);
 }
 
 }  // namespace
@@ -102,10 +103,11 @@ scoped_ptr<SearchController> CreateSearchController(
             new SuggestionsSearchProvider(profile, list_controller)));
   }
 
-  // LauncherSearchProvider is added only when flag is enabled and running on
-  // Chrome OS.
+  // LauncherSearchProvider is added only when flag is enabled, not in guest
+  // session and running on Chrome OS.
 #if defined(OS_CHROMEOS)
-  if (app_list::switches::IsLauncherSearchProviderApiEnabled()) {
+  if (app_list::switches::IsDriveSearchInChromeLauncherEnabled() &&
+      !profile->IsGuestSession()) {
     size_t search_api_group_id =
         controller->AddGroup(kMaxLauncherSearchResults, 0.0, 1.0);
     controller->AddProvider(

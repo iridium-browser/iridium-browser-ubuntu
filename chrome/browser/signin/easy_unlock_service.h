@@ -13,11 +13,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/browser/signin/chrome_proximity_auth_client.h"
 #include "chrome/browser/signin/easy_unlock_auth_attempt.h"
 #include "chrome/browser/signin/easy_unlock_metrics.h"
 #include "chrome/browser/signin/easy_unlock_screenlock_state_handler.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/proximity_auth/screenlock_state.h"
+#include "components/proximity_auth/webui/proximity_auth_ui_delegate.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_types.h"
@@ -45,7 +47,8 @@ class EasyUnlockServiceObserver;
 class Profile;
 class PrefRegistrySimple;
 
-class EasyUnlockService : public KeyedService {
+class EasyUnlockService : public KeyedService,
+                          public proximity_auth::ProximityAuthUIDelegate {
  public:
   enum TurnOffFlowStatus {
     IDLE,
@@ -218,6 +221,20 @@ class EasyUnlockService : public KeyedService {
   void AddObserver(EasyUnlockServiceObserver* observer);
   void RemoveObserver(EasyUnlockServiceObserver* observer);
 
+  // ProximityAuthUIDelegate:
+  PrefService* GetPrefService() override;
+  scoped_ptr<proximity_auth::SecureMessageDelegate>
+  CreateSecureMessageDelegate() override;
+  scoped_ptr<proximity_auth::CryptAuthClientFactory>
+  CreateCryptAuthClientFactory() override;
+  cryptauth::DeviceClassifier GetDeviceClassifier() override;
+  std::string GetAccountId() override;
+  gcm::GCMDriver* GetGCMDriver() override;
+
+  ChromeProximityAuthClient* proximity_auth_client() {
+    return &proximity_auth_client_;
+  }
+
  protected:
   explicit EasyUnlockService(Profile* profile);
   ~EasyUnlockService() override;
@@ -321,7 +338,9 @@ class EasyUnlockService : public KeyedService {
 
   void EnsureTpmKeyPresentIfNeeded();
 
-  Profile* profile_;
+  Profile* const profile_;
+
+  ChromeProximityAuthClient proximity_auth_client_;
 
   scoped_ptr<EasyUnlockAppManager> app_manager_;
 
@@ -350,7 +369,7 @@ class EasyUnlockService : public KeyedService {
 
   bool tpm_key_checked_;
 
-  ObserverList<EasyUnlockServiceObserver> observers_;
+  base::ObserverList<EasyUnlockServiceObserver> observers_;
 
   base::WeakPtrFactory<EasyUnlockService> weak_ptr_factory_;
 

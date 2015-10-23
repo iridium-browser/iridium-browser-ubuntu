@@ -18,6 +18,8 @@ source_set("variations") {
     "caching_permuted_entropy_provider.h",
     "entropy_provider.cc",
     "entropy_provider.h",
+    "experiment_labels.cc",
+    "experiment_labels.h",
     "metrics_util.cc",
     "metrics_util.h",
     "pref_names.cc",
@@ -32,11 +34,25 @@ source_set("variations") {
     "study_filtering.h",
     "variations_associated_data.cc",
     "variations_associated_data.h",
+    "variations_experiment_util.cc",
+    "variations_experiment_util.h",
+    "variations_request_scheduler.cc",
+    "variations_request_scheduler.h",
     "variations_seed_processor.cc",
     "variations_seed_processor.h",
     "variations_seed_simulator.cc",
     "variations_seed_simulator.h",
+    "variations_service_client.h",
+    "variations_url_constants.cc",
+    "variations_url_constants.h",
   ]
+
+  if (is_android || is_ios) {
+    sources += [
+      "variations_request_scheduler_mobile.cc",
+      "variations_request_scheduler_mobile.h",
+    ]
+  }
 
   deps = [
     "proto",
@@ -66,13 +82,19 @@ source_set("unit_tests") {
     "active_field_trials_unittest.cc",
     "caching_permuted_entropy_provider_unittest.cc",
     "entropy_provider_unittest.cc",
+    "experiment_labels_unittest.cc",
     "metrics_util_unittest.cc",
     "net/variations_http_header_provider_unittest.cc",
     "study_filtering_unittest.cc",
     "variations_associated_data_unittest.cc",
+    "variations_request_scheduler_unittest.cc",
     "variations_seed_processor_unittest.cc",
     "variations_seed_simulator_unittest.cc",
   ]
+
+  if (is_android || is_ios) {
+    sources += [ "variations_request_scheduler_mobile_unittest.cc" ]
+  }
 
   deps = [
     ":variations",

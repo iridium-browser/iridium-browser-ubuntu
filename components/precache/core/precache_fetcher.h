@@ -6,28 +6,37 @@
 #define COMPONENTS_PRECACHE_CORE_PRECACHE_FETCHER_H_
 
 #include <list>
+#include <string>
+#include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time/time.h"
+#include "net/url_request/url_fetcher.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
 namespace net {
-class URLFetcher;
 class URLRequestContextGetter;
 }
 
 namespace precache {
+
+// Visible for testing.
+extern const int kNoCookies;
 
 // Public interface to code that fetches resources that the user is likely to
 // want to fetch in the future, putting them in the network stack disk cache.
 // Precaching is intended to be done when Chrome is not actively in use, likely
 // hours ahead of the time when the resources are actually needed.
 //
-// This class takes as input a prioritized list of page URLs that the user
-// commonly visits, referred to as starting URLs. This class interacts with a
-// server, sending it the list of starting URLs sequentially. For each starting
-// URL, the server returns a manifest of resource URLs that are good candidates
+// This class takes as input a prioritized list of URL domains that the user
+// commonly visits, referred to as starting hosts. This class interacts with a
+// server, sending it the list of starting hosts sequentially. For each starting
+// host, the server returns a manifest of resource URLs that are good candidates
 // for precaching. Every resource returned is fetched, and responses are cached
 // as they are received. Destroying the PrecacheFetcher while it is precaching
 // will cancel any fetch in progress and cancel precaching.
@@ -66,12 +75,17 @@ class PrecacheFetcher {
     virtual void OnDone() = 0;
   };
 
-  // Constructs a new PrecacheFetcher. The |starting_urls| parameter is a
-  // prioritized list of page URLs that the user commonly visits. These URLs are
+  // Visible for testing.
+  class Fetcher;
+
+  // Constructs a new PrecacheFetcher. The |starting_hosts| parameter is a
+  // prioritized list of hosts that the user commonly visits. These hosts are
   // used by a server side component to construct a list of resource URLs that
   // the user is likely to fetch.
-  PrecacheFetcher(const std::list<GURL>& starting_urls,
+  PrecacheFetcher(const std::vector<std::string>& starting_hosts,
                   net::URLRequestContextGetter* request_context,
+                  const GURL& config_url,
+                  const std::string& manifest_url_prefix,
                   PrecacheDelegate* precache_delegate);
 
   virtual ~PrecacheFetcher();
@@ -82,8 +96,6 @@ class PrecacheFetcher {
   void Start();
 
  private:
-  class Fetcher;
-
   // Fetches the next resource or manifest URL, if any remain. Fetching is done
   // sequentially and depth-first: all resources are fetched for a manifest
   // before the next manifest is fetched. This is done to limit the length of
@@ -92,7 +104,7 @@ class PrecacheFetcher {
 
   // Called when the precache configuration settings have been fetched.
   // Determines the list of manifest URLs to fetch according to the list of
-  // |starting_urls_| and information from the precache configuration settings.
+  // |starting_hosts_| and information from the precache configuration settings.
   // If the fetch of the configuration settings fails, then precaching ends.
   void OnConfigFetchComplete(const net::URLFetcher& source);
 
@@ -104,22 +116,83 @@ class PrecacheFetcher {
   // Called when a resource has been fetched.
   void OnResourceFetchComplete(const net::URLFetcher& source);
 
-  // The prioritized list of starting URLs that the server will pick resource
+  // The prioritized list of starting hosts that the server will pick resource
   // URLs to be precached for.
-  const std::list<GURL> starting_urls_;
+  const std::vector<std::string> starting_hosts_;
 
   // The request context used when fetching URLs.
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
+  const scoped_refptr<net::URLRequestContextGetter> request_context_;
+
+  // The custom URL to use when fetching the config. If not provided, the
+  // default flag-specified URL will be used.
+  const GURL config_url_;
+
+  // The custom URL prefix to use when fetching manifests. If not provided, the
+  // default flag-specified prefix will be used.
+  const std::string manifest_url_prefix_;
 
   // Non-owning pointer. Should not be NULL.
   PrecacheDelegate* precache_delegate_;
 
+  // Tally of the total number of bytes contained in URL fetches, including
+  // config, manifests, and resources. This the number of bytes as they would be
+  // compressed over the network.
+  int total_response_bytes_;
+
+  // Tally of the total number of bytes received over the network from URL
+  // fetches (the same ones as in total_response_bytes_). This includes response
+  // headers and intermediate responses such as 30xs.
+  int network_response_bytes_;
+
   scoped_ptr<Fetcher> fetcher_;
 
+  // Time when the prefetch was started.
+  base::TimeTicks start_time_;
+
+  int num_manifest_urls_to_fetch_;
   std::list<GURL> manifest_urls_to_fetch_;
   std::list<GURL> resource_urls_to_fetch_;
 
   DISALLOW_COPY_AND_ASSIGN(PrecacheFetcher);
+};
+
+// Class that fetches a URL, and runs the specified callback when the fetch is
+// complete. This class exists so that a different method can be run in
+// response to different kinds of fetches, e.g. OnConfigFetchComplete when
+// configuration settings are fetched, OnManifestFetchComplete when a manifest
+// is fetched, etc.
+class PrecacheFetcher::Fetcher : public net::URLFetcherDelegate {
+ public:
+  // Construct a new Fetcher. This will create and start a new URLFetcher for
+  // the specified URL using the specified request context.
+  Fetcher(net::URLRequestContextGetter* request_context,
+          const GURL& url,
+          const base::Callback<void(const net::URLFetcher&)>& callback,
+          bool is_resource_request);
+  ~Fetcher() override;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
+  int64 response_bytes() const { return response_bytes_; }
+  int64 network_response_bytes() const { return network_response_bytes_; }
+
+ private:
+  enum class FetchStage { CACHE, NETWORK };
+
+  void LoadFromCache();
+  void LoadFromNetwork();
+
+  net::URLRequestContextGetter* const request_context_;
+  const GURL url_;
+  const base::Callback<void(const net::URLFetcher&)> callback_;
+  const bool is_resource_request_;
+
+  FetchStage fetch_stage_;
+  // The url_fetcher_cache_ is kept alive until Fetcher destruction for testing.
+  scoped_ptr<net::URLFetcher> url_fetcher_cache_;
+  scoped_ptr<net::URLFetcher> url_fetcher_network_;
+  int64 response_bytes_;
+  int64 network_response_bytes_;
+
+  DISALLOW_COPY_AND_ASSIGN(Fetcher);
 };
 
 }  // namespace precache

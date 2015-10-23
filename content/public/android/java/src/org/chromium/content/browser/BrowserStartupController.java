@@ -6,13 +6,13 @@ package org.chromium.content.browser;
 
 import android.content.Context;
 import android.os.Handler;
-import android.util.Log;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
 import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.LoaderErrors;
@@ -46,7 +46,7 @@ public class BrowserStartupController {
         void onFailure();
     }
 
-    private static final String TAG = "BrowserStartupController";
+    private static final String TAG = "cr.BrowserStartup";
 
     // Helper constants for {@link StartupCallback#onSuccess}.
     private static final boolean ALREADY_STARTED = true;
@@ -272,7 +272,7 @@ public class BrowserStartupController {
     void prepareToStartBrowserProcess(
             final boolean singleProcess, final Runnable completionCallback)
                     throws ProcessInitException {
-        Log.i(TAG, "Initializing chromium process, singleProcess=" + singleProcess);
+        Log.i(TAG, "Initializing chromium process, singleProcess=%b", singleProcess);
 
         // Normally Main.java will have kicked this off asynchronously for Chrome. But other
         // ContentView apps like tests also need them so we make sure we've extracted resources
@@ -282,7 +282,7 @@ public class BrowserStartupController {
 
         // Normally Main.java will have already loaded the library asynchronously, we only need
         // to load it here if we arrived via another flow, e.g. bookmark access & sync setup.
-        LibraryLoader.get(mLibraryProcessType).ensureInitialized(mContext, true);
+        LibraryLoader.get(mLibraryProcessType).ensureInitialized(mContext);
 
         Runnable postResourceExtraction = new Runnable() {
             @Override

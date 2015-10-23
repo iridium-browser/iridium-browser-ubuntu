@@ -74,8 +74,8 @@ ui::Accelerator ParseImpl(const std::string& accelerator,
     return ui::Accelerator();
   }
 
-  std::vector<std::string> tokens;
-  base::SplitString(accelerator, '+', &tokens);
+  std::vector<std::string> tokens = base::SplitString(
+      accelerator, "+", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (tokens.size() == 0 ||
       (tokens.size() == 1 && DoesRequireModifier(accelerator)) ||
       tokens.size() > kMaxTokenSize) {
@@ -264,15 +264,15 @@ std::string NormalizeShortcutSuggestion(const std::string& suggestion,
   if (!normalize)
     return suggestion;
 
-  std::vector<std::string> tokens;
-  base::SplitString(suggestion, '+', &tokens);
+  std::vector<std::string> tokens = base::SplitString(
+      suggestion, "+", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   for (size_t i = 0; i < tokens.size(); i++) {
     if (tokens[i] == values::kKeyCtrl)
       tokens[i] = values::kKeyCommand;
     else if (tokens[i] == values::kKeyMacCtrl)
       tokens[i] = values::kKeyCtrl;
   }
-  return JoinString(tokens, '+');
+  return base::JoinString(tokens, "+");
 }
 
 }  // namespace
@@ -550,30 +550,6 @@ bool Command::Parse(const base::DictionaryValue* command,
     }
   }
   return true;
-}
-
-base::DictionaryValue* Command::ToValue(const Extension* extension,
-                                        bool active) const {
-  base::DictionaryValue* extension_data = new base::DictionaryValue();
-
-  base::string16 command_description;
-  bool extension_action = false;
-  if (command_name() == values::kBrowserActionCommandEvent ||
-      command_name() == values::kPageActionCommandEvent) {
-    command_description =
-        l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_GENERIC_ACTIVATE);
-    extension_action = true;
-  } else {
-    command_description = description();
-  }
-  extension_data->SetString("description", command_description);
-  extension_data->SetBoolean("active", active);
-  extension_data->SetString("keybinding", accelerator().GetShortcutText());
-  extension_data->SetString("command_name", command_name());
-  extension_data->SetString("extension_id", extension->id());
-  extension_data->SetBoolean("global", global());
-  extension_data->SetBoolean("extension_action", extension_action);
-  return extension_data;
 }
 
 }  // namespace extensions

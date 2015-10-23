@@ -12,7 +12,9 @@
 #include "extensions/common/api/virtual_keyboard_private.h"
 #include "ui/events/event.h"
 
-namespace SetMode = extensions::core_api::virtual_keyboard_private::SetMode;
+namespace SetMode = extensions::api::virtual_keyboard_private::SetMode;
+namespace SetRequestedKeyboardState =
+    extensions::api::virtual_keyboard_private::SetKeyboardState;
 
 namespace extensions {
 
@@ -39,19 +41,6 @@ bool VirtualKeyboardPrivateInsertTextFunction::RunSync() {
     base::string16 text;
     EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &text));
     return delegate->InsertText(text);
-  }
-  error_ = kNotYetImplementedError;
-  return false;
-}
-
-bool VirtualKeyboardPrivateMoveCursorFunction::RunSync() {
-  VirtualKeyboardDelegate* delegate = GetDelegate(this);
-  if (delegate) {
-    int swipe_direction;
-    int modifier_flags;
-    EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &swipe_direction));
-    EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(1, &modifier_flags));
-    return delegate->MoveCursor(swipe_direction, modifier_flags);
   }
   error_ = kNotYetImplementedError;
   return false;
@@ -86,6 +75,18 @@ bool VirtualKeyboardPrivateHideKeyboardFunction::RunSync() {
   VirtualKeyboardDelegate* delegate = GetDelegate(this);
   if (delegate)
     return delegate->HideKeyboard();
+  error_ = kNotYetImplementedError;
+  return false;
+}
+
+bool VirtualKeyboardPrivateSetHotrodKeyboardFunction::RunSync() {
+  VirtualKeyboardDelegate* delegate = GetDelegate(this);
+  if (delegate) {
+    bool enable;
+    EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &enable));
+    delegate->SetHotrodKeyboard(enable);
+    return true;
+  }
   error_ = kNotYetImplementedError;
   return false;
 }
@@ -138,6 +139,23 @@ bool VirtualKeyboardPrivateSetModeFunction::RunSync() {
     scoped_ptr<SetMode::Params> params = SetMode::Params::Create(*args_);
     EXTENSION_FUNCTION_VALIDATE(params);
     if (!delegate->SetVirtualKeyboardMode(params->mode)) {
+      error_ = kVirtualKeyboardNotEnabled;
+      return false;
+    } else {
+      return true;
+    }
+  }
+  error_ = kNotYetImplementedError;
+  return false;
+}
+
+bool VirtualKeyboardPrivateSetKeyboardStateFunction::RunSync() {
+  VirtualKeyboardDelegate* delegate = GetDelegate(this);
+  if (delegate) {
+    scoped_ptr<SetRequestedKeyboardState::Params> params =
+        SetRequestedKeyboardState::Params::Create(*args_);
+    EXTENSION_FUNCTION_VALIDATE(params);
+    if (!delegate->SetRequestedKeyboardState(params->state)) {
       error_ = kVirtualKeyboardNotEnabled;
       return false;
     } else {

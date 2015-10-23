@@ -27,7 +27,7 @@
 #define HostWindow_h
 
 #include "platform/PlatformExport.h"
-#include "platform/graphics/paint/DisplayItemClient.h"
+#include "platform/heap/Handle.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/Noncopyable.h"
 
@@ -35,20 +35,16 @@ namespace blink {
 class IntRect;
 struct WebScreenInfo;
 
-class PLATFORM_EXPORT HostWindow {
-    WTF_MAKE_NONCOPYABLE(HostWindow); WTF_MAKE_FAST_ALLOCATED(HostWindow);
+class PLATFORM_EXPORT HostWindow : public NoBaseWillBeGarbageCollectedFinalized<HostWindow> {
+    WTF_MAKE_NONCOPYABLE(HostWindow);
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(HostWindow);
 public:
     HostWindow() { }
     virtual ~HostWindow() { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
     // Requests the host invalidate the contents.
     virtual void invalidateRect(const IntRect& updateRect) = 0;
-
-    // Requests the host to invalidate display items, if owned by the host
-    // window. At present Chrome does not (display items are owned by the
-    // GraphicsLayer instead), but PopupContainerClient does.
-    virtual void invalidateDisplayItemClient(DisplayItemClient) { }
-    virtual void invalidateAllDisplayItems() { }
 
     // Converts from the window coordinates to screen coordinates.
     virtual IntRect viewportToScreen(const IntRect&) const = 0;

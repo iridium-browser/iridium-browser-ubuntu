@@ -40,7 +40,7 @@
 #include "platform/scroll/ScrollbarThemeMacCommon.h"
 #include "platform/scroll/ScrollbarThemeMacOverlayAPI.h"
 #include "wtf/MainThread.h"
-#include "wtf/PassRefPtr.h"
+#include "wtf/PassOwnPtr.h"
 
 using namespace blink;
 
@@ -462,6 +462,7 @@ private:
     RetainPtr<WebScrollbarPartAnimation> _expansionTransitionAnimation;
 }
 - (id)initWithScrollbar:(blink::Scrollbar*)scrollbar;
+- (void)updateVisibilityImmediately:(bool)show;
 - (void)cancelAnimations;
 @end
 
@@ -475,6 +476,12 @@ private:
 
     _scrollbar = scrollbar;
     return self;
+}
+
+- (void)updateVisibilityImmediately:(bool)show
+{
+    [self cancelAnimations];
+    [scrollbarPainterForScrollbar(_scrollbar) setKnobAlpha:(show ? 1.0 : 0.0)];
 }
 
 - (void)cancelAnimations
@@ -652,9 +659,9 @@ private:
 
 namespace blink {
 
-PassRefPtr<ScrollAnimator> ScrollAnimator::create(ScrollableArea* scrollableArea)
+PassOwnPtr<ScrollAnimator> ScrollAnimator::create(ScrollableArea* scrollableArea)
 {
-    return adoptRef(new ScrollAnimatorMac(scrollableArea));
+    return adoptPtr(new ScrollAnimatorMac(scrollableArea));
 }
 
 ScrollAnimatorMac::ScrollAnimatorMac(ScrollableArea* scrollableArea)
@@ -688,32 +695,18 @@ ScrollAnimatorMac::~ScrollAnimatorMac()
     }
 }
 
-static bool scrollAnimationEnabledForSystem()
+ScrollResultOneDimensional ScrollAnimatorMac::userScroll(ScrollbarOrientation orientation, ScrollGranularity granularity, float step, float delta)
 {
-    static bool initialized = false;
-    static bool enabled = true;
-    if (!initialized) {
-        // Check setting for OS X 10.8+.
-        id value = [[NSUserDefaults standardUserDefaults] objectForKey:@"NSScrollAnimationEnabled"];
-        // Check setting for OS X < 10.8.
-        if (!value)
-            value = [[NSUserDefaults standardUserDefaults] objectForKey:@"AppleScrollAnimationEnabled"];
-        if (value)
-            enabled = [value boolValue];
-        initialized = true;
-    }
-    return enabled;
-}
-
-ScrollResultOneDimensional ScrollAnimatorMac::scroll(ScrollbarOrientation orientation, ScrollGranularity granularity, float step, float delta)
-{
+    bool scrollAnimationEnabledForSystem = static_cast<ScrollbarThemeMacCommon*>(
+                                               ScrollbarTheme::theme())
+                                               ->scrollAnimationEnabledForSystem();
     m_haveScrolledSincePageLoad = true;
 
-    if (!scrollAnimationEnabledForSystem() || !m_scrollableArea->scrollAnimatorEnabled())
-        return ScrollAnimator::scroll(orientation, granularity, step, delta);
+    if (!scrollAnimationEnabledForSystem || !m_scrollableArea->scrollAnimatorEnabled())
+        return ScrollAnimator::userScroll(orientation, granularity, step, delta);
 
     if (granularity == ScrollByPixel || granularity == ScrollByPrecisePixel)
-        return ScrollAnimator::scroll(orientation, granularity, step, delta);
+        return ScrollAnimator::userScroll(orientation, granularity, step, delta);
 
     float currentPos = orientation == HorizontalScrollbar ? m_currentPosX : m_currentPosY;
     float newPos = std::max<float>(std::min<float>(currentPos + (step * delta), m_scrollableArea->maximumScrollPosition(orientation)), m_scrollableArea->minimumScrollPosition(orientation));
@@ -741,9 +734,6 @@ void ScrollAnimatorMac::scrollToOffsetWithoutAnimation(const FloatPoint& offset)
 
 FloatPoint ScrollAnimatorMac::adjustScrollPositionIfNecessary(const FloatPoint& position) const
 {
-    if (!m_scrollableArea->constrainsScrollingToContentEdge())
-        return position;
-
     IntPoint minPos = m_scrollableArea->minimumScrollPosition();
     IntPoint maxPos = m_scrollableArea->maximumScrollPosition();
 
@@ -1014,6 +1004,21 @@ void ScrollAnimatorMac::notifyContentAreaScrolled(const FloatSize& delta)
     // ScrollbarPainterController when we're really scrolling on an active page.
     if (scrollableArea()->scrollbarsCanBeActive())
         sendContentAreaScrolledSoon(delta);
+}
+
+bool ScrollAnimatorMac::setScrollbarsVisibleForTesting(bool show)
+{
+    if (ScrollbarThemeMacCommon::isOverlayAPIAvailable()) {
+        if (show)
+            [m_scrollbarPainterController.get() flashScrollers];
+        else
+            [m_scrollbarPainterController.get() hideOverlayScrollers];
+
+        [m_verticalScrollbarPainterDelegate.get() updateVisibilityImmediately:show];
+        [m_verticalScrollbarPainterDelegate.get() updateVisibilityImmediately:show];
+        return true;
+    }
+    return false;
 }
 
 void ScrollAnimatorMac::cancelAnimations()

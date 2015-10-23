@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_type.h"
@@ -45,7 +46,7 @@ bool ContainsString(const char* const set[],
   base::TrimString(element, base::ASCIIToUTF16("."), &trimmed_element);
 
   for (size_t i = 0; i < set_size; ++i) {
-    if (LowerCaseEqualsASCII(trimmed_element, set[i]))
+    if (base::LowerCaseEqualsASCII(trimmed_element, set[i]))
       return true;
   }
 
@@ -86,9 +87,9 @@ struct NameParts {
 // TODO(estade): This does Western name splitting. It should do different
 // splitting based on the app locale.
 NameParts SplitName(const base::string16& name) {
-  std::vector<base::string16> name_tokens;
-  Tokenize(name, base::ASCIIToUTF16(" ,"), &name_tokens);
-
+  std::vector<base::string16> name_tokens = base::SplitString(
+      name, base::ASCIIToUTF16(" ,"), base::KEEP_WHITESPACE,
+      base::SPLIT_WANT_NONEMPTY);
   StripPrefixes(&name_tokens);
 
   // Don't assume "Ma" is a suffix in John Ma.
@@ -124,7 +125,7 @@ NameParts SplitName(const base::string16& name) {
 
   std::vector<base::string16> family_tokens(reverse_family_tokens.rbegin(),
                                             reverse_family_tokens.rend());
-  parts.family = JoinString(family_tokens, base::char16(' '));
+  parts.family = base::JoinString(family_tokens, base::ASCIIToUTF16(" "));
 
   // Take the last remaining token as the middle name (if there are at least 2
   // tokens).
@@ -134,7 +135,7 @@ NameParts SplitName(const base::string16& name) {
   }
 
   // Remainder is given name.
-  parts.given = JoinString(name_tokens, base::char16(' '));
+  parts.given = base::JoinString(name_tokens, base::ASCIIToUTF16(" "));
 
   return parts;
 }
@@ -160,7 +161,7 @@ NameInfo& NameInfo::operator=(const NameInfo& info) {
   return *this;
 }
 
-bool NameInfo::ParsedNamesAreEqual(const NameInfo& info) {
+bool NameInfo::ParsedNamesAreEqual(const NameInfo& info) const {
   l10n::CaseInsensitiveCompare compare;
   return compare.StringsEqual(given_, info.given_) &&
          compare.StringsEqual(middle_, info.middle_) &&
@@ -261,7 +262,7 @@ base::string16 NameInfo::FullName() const {
   if (!family_.empty())
     full_name.push_back(family_);
 
-  return JoinString(full_name, ' ');
+  return base::JoinString(full_name, base::ASCIIToUTF16(" "));
 }
 
 base::string16 NameInfo::MiddleInitial() const {

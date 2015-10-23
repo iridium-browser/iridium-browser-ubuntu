@@ -12,20 +12,23 @@
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/views/app_list_page.h"
+#include "ui/app_list/views/search_result_container_view.h"
 
 namespace app_list {
 
 class AppListMainView;
 class AppListViewDelegate;
-class SearchResultContainerView;
 
 // The start page for the experimental app list.
-class APP_LIST_EXPORT SearchResultPageView : public AppListPage {
+class APP_LIST_EXPORT SearchResultPageView
+    : public AppListPage,
+      public SearchResultContainerView::Delegate {
  public:
   SearchResultPageView();
   ~SearchResultPageView() override;
 
   int selected_index() { return selected_index_; }
+  bool HasSelection() { return selected_index_ > -1; }
   void SetSelection(bool select);  // Set or unset result selection.
 
   void AddSearchResultContainerView(
@@ -38,7 +41,6 @@ class APP_LIST_EXPORT SearchResultPageView : public AppListPage {
 
   // Overridden from views::View:
   bool OnKeyPressed(const ui::KeyEvent& event) override;
-  void ChildPreferredSizeChanged(views::View* child) override;
 
   // AppListPage overrides:
   gfx::Rect GetPageBoundsForState(AppListModel::State state) const override;
@@ -46,6 +48,12 @@ class APP_LIST_EXPORT SearchResultPageView : public AppListPage {
                           AppListModel::State from_state,
                           AppListModel::State to_state) override;
   int GetSearchBoxZHeight() const override;
+  void OnHidden() override;
+
+  void ClearSelectedIndex();
+
+  // Overridden from SearchResultContainerView::Delegate :
+  void OnSearchResultContainerResultsChanged() override;
 
  private:
   // |directional_movement| is true if the navigation was caused by directional
@@ -57,6 +65,7 @@ class APP_LIST_EXPORT SearchResultPageView : public AppListPage {
   // the views hierarchy.
   std::vector<SearchResultContainerView*> result_container_views_;
 
+  // -1 indicates no selection.
   int selected_index_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchResultPageView);

@@ -17,10 +17,9 @@ using content::BrowserThread;
 
 BrowsingDataAppCacheHelper::BrowsingDataAppCacheHelper(
     BrowserContext* browser_context)
-    : is_fetching_(false),
-      appcache_service_(BrowserContext::GetDefaultStoragePartition(
-                            browser_context)->GetAppCacheService()) {
-}
+    : appcache_service_(
+          BrowserContext::GetDefaultStoragePartition(browser_context)
+              ->GetAppCacheService()) {}
 
 void BrowsingDataAppCacheHelper::StartFetching(const base::Closure& callback) {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
@@ -95,19 +94,17 @@ void CannedBrowsingDataAppCacheHelper::AddAppCache(const GURL& manifest_url) {
     return;  // Ignore non-websafe schemes.
 
   OriginAppCacheInfoMap& origin_map = info_collection_->infos_by_origin;
-  content::AppCacheInfoVector& appcache_infos_ =
+  content::AppCacheInfoVector& appcache_infos =
       origin_map[manifest_url.GetOrigin()];
 
-  for (content::AppCacheInfoVector::iterator
-       appcache = appcache_infos_.begin(); appcache != appcache_infos_.end();
-       ++appcache) {
-    if (appcache->manifest_url == manifest_url)
+  for (const auto& appcache : appcache_infos) {
+    if (appcache.manifest_url == manifest_url)
       return;
   }
 
   content::AppCacheInfo info;
   info.manifest_url = manifest_url;
-  appcache_infos_.push_back(info);
+  appcache_infos.push_back(info);
 }
 
 void CannedBrowsingDataAppCacheHelper::Reset() {
@@ -121,11 +118,8 @@ bool CannedBrowsingDataAppCacheHelper::empty() const {
 size_t CannedBrowsingDataAppCacheHelper::GetAppCacheCount() const {
   size_t count = 0;
   const OriginAppCacheInfoMap& map = info_collection_->infos_by_origin;
-  for (OriginAppCacheInfoMap::const_iterator it = map.begin();
-       it != map.end();
-       ++it) {
-    count += it->second.size();
-  }
+  for (const auto& pair : map)
+    count += pair.second.size();
   return count;
 }
 

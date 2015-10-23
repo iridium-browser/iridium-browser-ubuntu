@@ -30,53 +30,120 @@
 #include "config.h"
 #include "modules/serviceworkers/ServiceWorkerContainer.h"
 
-#include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "bindings/core/v8/SerializedScriptValueFactory.h"
+#include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MessagePort.h"
-#include "core/events/MessageEvent.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "modules/EventTargetModules.h"
 #include "modules/serviceworkers/ServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerContainerClient.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
+#include "modules/serviceworkers/ServiceWorkerMessageEvent.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "public/platform/WebServiceWorker.h"
-#include "public/platform/WebServiceWorkerProvider.h"
-#include "public/platform/WebServiceWorkerRegistration.h"
+#include "platform/weborigin/SchemeRegistry.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/modules/serviceworker/WebServiceWorker.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerRegistration.h"
 
 namespace blink {
 
-// This wraps CallbackPromiseAdapter and resolves the promise with undefined
-// when nullptr is given to onSuccess.
+class RegistrationCallback : public WebServiceWorkerProvider::WebServiceWorkerRegistrationCallbacks {
+public:
+    explicit RegistrationCallback(ScriptPromiseResolver* resolver)
+        : m_resolver(resolver) { }
+    ~RegistrationCallback() override { }
+
+    void onSuccess(WebServiceWorkerRegistration* registration) override
+    {
+        if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
+            return;
+        m_resolver->resolve(ServiceWorkerRegistration::take(m_resolver.get(), registration));
+    }
+
+    // Takes ownership of |errorRaw|.
+    void onError(WebServiceWorkerError* errorRaw) override
+    {
+        OwnPtr<WebServiceWorkerError> error = adoptPtr(errorRaw);
+        if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
+            return;
+        m_resolver->reject(ServiceWorkerError::take(m_resolver.get(), *error));
+    }
+
+private:
+    Persistent<ScriptPromiseResolver> m_resolver;
+    WTF_MAKE_NONCOPYABLE(RegistrationCallback);
+};
+
 class GetRegistrationCallback : public WebServiceWorkerProvider::WebServiceWorkerGetRegistrationCallbacks {
 public:
-    explicit GetRegistrationCallback(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
-        : m_resolver(resolver)
-        , m_adapter(m_resolver) { }
-    virtual ~GetRegistrationCallback() { }
-    virtual void onSuccess(WebServiceWorkerRegistration* registration) override
+    explicit GetRegistrationCallback(ScriptPromiseResolver* resolver)
+        : m_resolver(resolver) { }
+    ~GetRegistrationCallback() override { }
+
+    void onSuccess(WebServiceWorkerRegistration* registration) override
     {
-        if (registration)
-            m_adapter.onSuccess(registration);
-        else if (m_resolver->executionContext() && !m_resolver->executionContext()->activeDOMObjectsAreStopped())
+        if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
+            return;
+        if (!registration) {
+            // Resolve the promise with undefined.
             m_resolver->resolve();
+            return;
+        }
+        m_resolver->resolve(ServiceWorkerRegistration::take(m_resolver.get(), registration));
     }
-    virtual void onError(WebServiceWorkerError* error) override { m_adapter.onError(error); }
+
+    // Takes ownership of |errorRaw|.
+    void onError(WebServiceWorkerError* errorRaw) override
+    {
+        OwnPtr<WebServiceWorkerError> error = adoptPtr(errorRaw);
+        if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
+            return;
+        m_resolver->reject(ServiceWorkerError::take(m_resolver.get(), *error));
+    }
+
 private:
-    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
-    CallbackPromiseAdapter<ServiceWorkerRegistration, ServiceWorkerError> m_adapter;
+    Persistent<ScriptPromiseResolver> m_resolver;
     WTF_MAKE_NONCOPYABLE(GetRegistrationCallback);
+};
+
+class GetRegistrationsCallback : public WebServiceWorkerProvider::WebServiceWorkerGetRegistrationsCallbacks {
+public:
+    explicit GetRegistrationsCallback(ScriptPromiseResolver* resolver)
+        : m_resolver(resolver) { }
+    ~GetRegistrationsCallback() override { }
+
+    // Takes ownership of |registrationsRaw|.
+    void onSuccess(WebVector<WebServiceWorkerRegistration*>* registrationsRaw) override
+    {
+        OwnPtr<WebVector<WebServiceWorkerRegistration*>> registrations = adoptPtr(registrationsRaw);
+        if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
+            return;
+        m_resolver->resolve(ServiceWorkerRegistrationArray::take(m_resolver.get(), registrations.release()));
+    }
+
+    // Takes ownership of |errorRaw|.
+    void onError(WebServiceWorkerError* errorRaw) override
+    {
+        OwnPtr<WebServiceWorkerError> error = adoptPtr(errorRaw);
+        if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
+            return;
+        m_resolver->reject(ServiceWorkerError::take(m_resolver.get(), *error));
+    }
+
+private:
+    Persistent<ScriptPromiseResolver> m_resolver;
+    WTF_MAKE_NONCOPYABLE(GetRegistrationsCallback);
 };
 
 class ServiceWorkerContainer::GetRegistrationForReadyCallback : public WebServiceWorkerProvider::WebServiceWorkerGetRegistrationForReadyCallbacks {
@@ -124,8 +191,7 @@ DEFINE_TRACE(ServiceWorkerContainer)
 
 ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptState, const String& url, const RegistrationOptions& options)
 {
-    ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     if (!m_provider) {
@@ -134,15 +200,20 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
     }
 
     ExecutionContext* executionContext = scriptState->executionContext();
+    // FIXME: May be null due to worker termination: http://crbug.com/413518.
+    if (!executionContext)
+        return ScriptPromise();
+
     RefPtr<SecurityOrigin> documentOrigin = executionContext->securityOrigin();
     String errorMessage;
+    // Restrict to secure origins: https://w3c.github.io/webappsec/specs/powerfulfeatures/#settings-privileged
     if (!executionContext->isPrivilegedContext(errorMessage)) {
         resolver->reject(DOMException::create(NotSupportedError, errorMessage));
         return promise;
     }
 
     KURL pageURL = KURL(KURL(), documentOrigin->toString());
-    if (!pageURL.protocolIsInHTTPFamily()) {
+    if (!SchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkers(pageURL.protocol())) {
         resolver->reject(DOMException::create(SecurityError, "Failed to register a ServiceWorker: The URL protocol of the current origin ('" + documentOrigin->toString() + "') is not supported."));
         return promise;
     }
@@ -154,7 +225,7 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
         resolver->reject(DOMException::create(SecurityError, "Failed to register a ServiceWorker: The origin of the provided scriptURL ('" + scriptOrigin->toString() + "') does not match the current origin ('" + documentOrigin->toString() + "')."));
         return promise;
     }
-    if (!scriptURL.protocolIsInHTTPFamily()) {
+    if (!SchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkers(scriptURL.protocol())) {
         resolver->reject(DOMException::create(SecurityError, "Failed to register a ServiceWorker: The URL protocol of the script ('" + scriptURL.string() + "') is not supported."));
         return promise;
     }
@@ -171,20 +242,25 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
         resolver->reject(DOMException::create(SecurityError, "Failed to register a ServiceWorker: The origin of the provided scope ('" + patternOrigin->toString() + "') does not match the current origin ('" + documentOrigin->toString() + "')."));
         return promise;
     }
-    if (!patternURL.protocolIsInHTTPFamily()) {
+    if (!SchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkers(patternURL.protocol())) {
         resolver->reject(DOMException::create(SecurityError, "Failed to register a ServiceWorker: The URL protocol of the scope ('" + patternURL.string() + "') is not supported."));
         return promise;
     }
 
-    m_provider->registerServiceWorker(patternURL, scriptURL, new CallbackPromiseAdapter<ServiceWorkerRegistration, ServiceWorkerError>(resolver));
+    WebString webErrorMessage;
+    if (!m_provider->validateScopeAndScriptURL(patternURL, scriptURL, &webErrorMessage)) {
+        resolver->reject(V8ThrowException::createTypeError(scriptState->isolate(), WebString::fromUTF8("Failed to register a ServiceWorker: " + webErrorMessage.utf8())));
+        return promise;
+    }
+
+    m_provider->registerServiceWorker(patternURL, scriptURL, new RegistrationCallback(resolver));
 
     return promise;
 }
 
 ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, const String& documentURL)
 {
-    ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     if (!m_provider) {
@@ -193,6 +269,10 @@ ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, 
     }
 
     ExecutionContext* executionContext = scriptState->executionContext();
+    // FIXME: May be null due to worker termination: http://crbug.com/413518.
+    if (!executionContext)
+        return ScriptPromise();
+
     RefPtr<SecurityOrigin> documentOrigin = executionContext->securityOrigin();
     String errorMessage;
     if (!executionContext->isPrivilegedContext(errorMessage)) {
@@ -201,7 +281,7 @@ ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, 
     }
 
     KURL pageURL = KURL(KURL(), documentOrigin->toString());
-    if (!pageURL.protocolIsInHTTPFamily()) {
+    if (!SchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkers(pageURL.protocol())) {
         resolver->reject(DOMException::create(SecurityError, "Failed to get a ServiceWorkerRegistration: The URL protocol of the current origin ('" + documentOrigin->toString() + "') is not supported."));
         return promise;
     }
@@ -214,6 +294,35 @@ ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, 
         return promise;
     }
     m_provider->getRegistration(completedURL, new GetRegistrationCallback(resolver));
+
+    return promise;
+}
+
+ScriptPromise ServiceWorkerContainer::getRegistrations(ScriptState* scriptState)
+{
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromise promise = resolver->promise();
+
+    if (!m_provider) {
+        resolver->reject(DOMException::create(InvalidStateError, "Failed to get ServiceWorkerRegistration objects: The document is in an invalid state."));
+        return promise;
+    }
+
+    ExecutionContext* executionContext = scriptState->executionContext();
+    RefPtr<SecurityOrigin> documentOrigin = executionContext->securityOrigin();
+    String errorMessage;
+    if (!executionContext->isPrivilegedContext(errorMessage)) {
+        resolver->reject(DOMException::create(NotSupportedError, errorMessage));
+        return promise;
+    }
+
+    KURL pageURL = KURL(KURL(), documentOrigin->toString());
+    if (!SchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkers(pageURL.protocol())) {
+        resolver->reject(DOMException::create(SecurityError, "Failed to get ServiceWorkerRegistration objects: The URL protocol of the current origin ('" + documentOrigin->toString() + "') is not supported."));
+        return promise;
+    }
+
+    m_provider->getRegistrations(new GetRegistrationsCallback(resolver));
 
     return promise;
 }
@@ -263,14 +372,15 @@ void ServiceWorkerContainer::setController(WebServiceWorker* serviceWorker, bool
         dispatchEvent(Event::create(EventTypeNames::controllerchange));
 }
 
-void ServiceWorkerContainer::dispatchMessageEvent(const WebString& message, const WebMessagePortChannelArray& webChannels)
+void ServiceWorkerContainer::dispatchMessageEvent(WebServiceWorker* serviceWorker, const WebString& message, const WebMessagePortChannelArray& webChannels)
 {
     if (!executionContext() || !executionContext()->executingWindow())
         return;
 
-    OwnPtrWillBeRawPtr<MessagePortArray> ports = MessagePort::toMessagePortArray(executionContext(), webChannels);
+    MessagePortArray* ports = MessagePort::toMessagePortArray(executionContext(), webChannels);
     RefPtr<SerializedScriptValue> value = SerializedScriptValueFactory::instance().createFromWire(message);
-    executionContext()->executingWindow()->dispatchEvent(MessageEvent::create(ports.release(), value));
+    ServiceWorker* source = ServiceWorker::from(executionContext(), serviceWorker);
+    dispatchEvent(ServiceWorkerMessageEvent::create(ports, value, source, executionContext()->securityOrigin()->toString()));
 }
 
 const AtomicString& ServiceWorkerContainer::interfaceName() const

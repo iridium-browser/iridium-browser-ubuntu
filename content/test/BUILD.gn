@@ -22,12 +22,14 @@ content_tests_gypi_values =
 # GYP version //content/content_tests.gypi:test_support_content
 source_set("test_support") {
   testonly = true
-  public_deps = []
-  deps = [
-    "//cc/blink",
+  configs += [ "//build/config:precompiled_headers" ]
+  public_deps = [
     "//content/public/app:both",
     "//content/public/browser",
     "//content/public/common",
+  ]
+  deps = [
+    "//cc/blink",
     "//net:test_support",
     "//skia",
     "//storage/common",
@@ -43,6 +45,7 @@ source_set("test_support") {
     "//ui/events:gesture_detection",
     "//ui/gfx:test_support",
     "//ui/gl",
+    "//ui/gl:test_support",
     "//ui/resources",
     "//url",
   ]
@@ -55,7 +58,9 @@ source_set("test_support") {
 
     public_deps += [ "//third_party/WebKit/public:blink" ]
     deps += [
+      ":content_test_mojo_bindings",
       "//components/scheduler:scheduler",
+      "//components/scheduler:test_support",
       "//content/browser/speech/proto",
       "//content/public/child",
       "//content/gpu",
@@ -67,6 +72,8 @@ source_set("test_support") {
       "//cc:test_support",
       "//ipc/mojo",
       "//media",
+      "//mojo/application/public/cpp:cpp_for_chromium",
+      "//mojo/environment:chromium",
       "//ppapi/host",
       "//ppapi/proxy",
       "//ppapi/proxy:test_support",
@@ -146,6 +153,7 @@ source_set("test_support") {
 
     if (is_android) {
       deps += [
+        "//content/shell/android:copy_content_shell_assets",
         "//ui/android",
         "//ui/shell_dialogs",
       ]
@@ -183,6 +191,8 @@ source_set("browsertest_support") {
     "../public/test/content_browser_test_utils.cc",
     "../public/test/content_browser_test_utils.h",
     "../public/test/content_browser_test_utils_mac.mm",
+    "content_browser_test_utils_internal.cc",
+    "content_browser_test_utils_internal.h",
     "content_test_launcher.cc",
   ]
 
@@ -198,6 +208,12 @@ source_set("browsertest_support") {
   } else {
     deps += [ "//content/public/browser" ]
   }
+}
+
+mojom("content_test_mojo_bindings") {
+  sources = [
+    "../public/test/test_mojo_service.mojom",
+  ]
 }
 
 mojom("web_ui_test_mojo_bindings") {
@@ -219,6 +235,7 @@ if (!is_ios) {
       ":test_support",
       "//cc",
       "//cc/blink",
+      "//components/test_runner:test_runner",
       "//content/public/common",
       "//skia",
       "//v8",
@@ -227,13 +244,6 @@ if (!is_ios) {
 
     if (is_android) {
       deps += [ ":jni" ]
-    }
-
-    if (!enable_webrtc) {
-      sources -= [
-        "test_media_stream_renderer_factory.cc",
-        "test_media_stream_renderer_factory.h",
-      ]
     }
   }
 
@@ -251,21 +261,66 @@ if (!is_ios) {
 
 # TODO(GYP) enable content_browsertests on Mac when it links.
 if (!is_mac) {
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("content_browsertests_run") {
+    testonly = true
+    deps = [
+      ":content_browsertests",
+    ]
+  }
+
   test("content_browsertests") {
     sources =
         rebase_path(content_tests_gypi_values.content_browsertests_sources,
                     ".",
                     "//content")
 
+    if (is_android || is_linux || is_mac || is_win) {
+      data = [
+        "data/",
+        "//net/data/",
+        "//media/test/data/",
+      ]
+
+      if (is_android) {
+        data += [ "$root_out_dir/content_shell_assets/content_shell.pak" ]
+      } else {
+        data += [
+          "$root_out_dir/content_shell.pak",
+          "//net/tools/testserver/",
+          "//ppapi/tests/test_case.html",
+          "//ppapi/tests/test_page.css",
+          "//third_party/pyftpdlib/",
+          "//third_party/pywebsocket/",
+          "//third_party/tlslite/",
+        ]
+
+        if (is_mac) {
+          data += [
+            "$root_out_dir/Content Shell.app/",
+            "$root_out_dir/plugins/test_netscape_plugin.plugin/",
+          ]
+        }
+        if (is_win) {
+          data += [ "$root_out_dir/plugins/np_test_netscape_plugin.dll" ]
+        }
+      }
+    }
+
     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
 
-    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+    configs += [
+      "//build/config:precompiled_headers",
+      "//build/config/compiler:no_size_t_to_int_warning",
+    ]
 
     deps = [
       ":browsertest_support",
       ":web_ui_test_mojo_bindings",
       "//base/allocator",
       "//base/test:test_support",
+      "//content/browser/background_sync:background_sync_proto",
       "//content/common:mojo_bindings",
       "//content/gpu",
       "//content/public/common",
@@ -284,7 +339,9 @@ if (!is_mac) {
       "//media/audio:test_support",
       "//media/base:test_support",
       "//media:shared_memory_support",
+      "//mojo/application/public/cpp:cpp_for_chromium",
       "//mojo/environment:chromium",
+      "//mojo/test:test_support",
       "//net:test_support",
       "//ppapi/host",
       "//ppapi/proxy",
@@ -299,6 +356,7 @@ if (!is_mac) {
       "//third_party/WebKit/public:blink",
       "//third_party/leveldatabase",
       "//third_party/mesa:osmesa",
+      "//third_party/zlib",
       "//ui/accessibility",
       "//ui/accessibility:ax_gen",
       "//ui/base",
@@ -306,17 +364,16 @@ if (!is_mac) {
       "//ui/gfx",
       "//ui/gfx/geometry",
       "//ui/gl",
+      "//ui/gl:test_support",
       "//ui/resources",
       "//ui/shell_dialogs",
       "//ui/snapshot",
     ]
 
-    data_deps = [ "//ppapi:ppapi_tests" ]  # Loaded at runtime.
-
-    if (!is_chromeos) {
-      sources -=
-          [ "../browser/web_contents/touch_editable_impl_aura_browsertest.cc" ]
-    }
+    data_deps = [
+      "//ppapi:ppapi_tests",
+      "//third_party/mesa:osmesa",
+    ]
 
     if (is_win) {
       sources += rebase_path(
@@ -350,7 +407,7 @@ if (!is_mac) {
       deps += [
         "//content/shell/android:content_shell_jni_headers",
         "//content/shell:content_shell_lib",
-        "//testing/android/native_test:native_test_util",
+        "//testing/android/native_test:native_test_support",
       ]
 
       use_launcher = false
@@ -371,15 +428,6 @@ if (!is_mac) {
     if (!use_aura && !is_mac) {
       sources -=
           [ "../browser/compositor/image_transport_factory_browsertest.cc" ]
-    }
-
-    if (use_aura && !is_win) {
-      sources -= [ "../browser/plugin_browsertest.cc" ]
-    }
-
-    if (!is_android && !is_ios && !is_linux) {
-      # Npapi test plugin doesn't build on Android or iOS.
-      #data_deps += [ 'copy_npapi_test_plugin' ]  TODO(GYP)
     }
 
     if (enable_webrtc) {
@@ -412,17 +460,50 @@ if (!is_mac) {
               "//content")
     }
 
-    if (!use_aura) {
-      sources -=
-          [ "../browser/web_contents/web_contents_view_aura_browsertest.cc" ]
+    if (use_aura) {
+      deps += [
+        "//ui/touch_selection:test_support",
+        "//ui/touch_selection:touch_selection",
+      ]
+    } else {
+      sources -= [
+        "../browser/renderer_host/input/touch_selection_controller_client_aura_browsertest.cc",
+        "../browser/web_contents/web_contents_view_aura_browsertest.cc",
+      ]
     }
   }
+}
+
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("content_unittests_run") {
+  testonly = true
+  deps = [
+    ":content_unittests",
+  ]
 }
 
 test("content_unittests") {
   sources = rebase_path(content_tests_gypi_values.content_unittests_sources,
                         ".",
                         "//content")
+
+  if (is_android || is_linux || is_mac || is_win) {
+    data = [
+      "data/",
+      "//net/data/ssl/certificates/",
+      "//media/test/data/",
+    ]
+
+    if (is_android) {
+      data += [ "$root_out_dir/content_shell_assets/content_shell.pak" ]
+    } else {
+      data += [ "$root_out_dir/content_shell.pak" ]
+    }
+  }
+
+  configs += [ "//build/config:precompiled_headers" ]
+
   deps = [
     ":test_support",
     "//base/allocator",
@@ -439,6 +520,7 @@ test("content_unittests") {
     "//device/battery",
     "//device/battery:mojo_bindings",
     "//mojo/environment:chromium",
+    "//net:extras",
     "//net:test_support",
     "//skia",
     "//sql",
@@ -483,9 +565,13 @@ test("content_unittests") {
       "//third_party/icu",
       "//third_party/leveldatabase",
       "//third_party/libjingle",
+      "//ui/compositor:test_support",
       "//ui/gl",
+      "//ui/gl:test_support",
     ]
   }
+
+  data_deps = [ "//third_party/mesa:osmesa" ]
 
   if (!is_win) {
     sources += [ "../browser/file_descriptor_info_impl_unittest.cc" ]
@@ -587,6 +673,7 @@ test("content_unittests") {
       "../browser/web_contents/aura/overscroll_navigation_overlay_unittest.cc",
       "../browser/web_contents/aura/overscroll_window_animation_unittest.cc",
       "../browser/web_contents/aura/overscroll_window_delegate_unittest.cc",
+      "../browser/web_contents/web_contents_view_aura_unittest.cc",
     ]
   }
   if (use_aura || toolkit_views) {
@@ -622,7 +709,6 @@ test("content_unittests") {
 if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
   test("content_perftests") {
     sources = [
-      "../browser/net/sqlite_persistent_cookie_store_perftest.cc",
       "../browser/renderer_host/input/input_router_impl_perftest.cc",
       "../common/cc_messages_perftest.cc",
       "../test/run_all_perftests.cc",
@@ -646,6 +732,15 @@ if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
     }
   }
 
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("content_gl_tests_run") {
+    testonly = true
+    deps = [
+      ":content_gl_tests",
+    ]
+  }
+
   test("content_gl_tests") {
     sources = [
       "../common/gpu/client/gl_helper_unittest.cc",
@@ -666,6 +761,7 @@ if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
       "//ui/gfx:test_support",
       "//ui/gfx/geometry",
       "//ui/gl",
+      "//ui/gl:test_support",
       "//v8",
     ]
 
@@ -696,6 +792,7 @@ if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
       "//ui/gfx",
       "//ui/gfx/geometry",
       "//ui/gl",
+      "//ui/gl:test_support",
     ]
   }
 }

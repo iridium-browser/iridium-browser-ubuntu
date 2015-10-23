@@ -14,8 +14,9 @@ var MOUNTED_SINGLE_PROVIDING_EXTENSION = {
   extensionId: 'mounted-single-extension-id',
   name: 'mounted-single-extension-name',
   configurable: false,
+  watchable: true,
   multipleMounts: false,
-  source: 'device'
+  source: 'network'
 };
 
 // A providing extension which has not mounted a file system, and doesn't
@@ -24,8 +25,19 @@ var NOT_MOUNTED_SINGLE_PROVIDING_EXTENSION = {
   extensionId: 'not-mounted-single-extension-id',
   name: 'not-mounted-single-extension-name',
   configurable: false,
+  watchable: true,
   multipleMounts: false,
-  source: 'device'
+  source: 'network'
+};
+// A providing extension which has not mounted a file system, and doesn't
+// support  multiple mounts.
+var NOT_MOUNTED_SINGLE_PROVIDING_EXTENSION = {
+  extensionId: 'not-mounted-single-extension-id',
+  name: 'not-mounted-single-extension-name',
+  configurable: false,
+  watchable: true,
+  multipleMounts: false,
+  source: 'network'
 };
 
 // A providing extension which has mounted a file system and supports mounting
@@ -34,6 +46,7 @@ var MOUNTED_MULTIPLE_PROVIDING_EXTENSION = {
   extensionId: 'mounted-multiple-extension-id',
   name: 'mounted-multiple-extension-name',
   configurable: true,
+  watchable: false,
   multipleMounts: true,
   source: 'network'
 };
@@ -44,8 +57,21 @@ var NOT_MOUNTED_FILE_PROVIDING_EXTENSION = {
   extensionId: 'file-extension-id',
   name: 'file-extension-name',
   configurable: false,
+  watchable: true,
   multipleMounts: true,
   source: 'file'
+};
+
+// A providing extension which has not mounted a file system but it's of
+// "device" source. Such extensions are not mounted by user, but automatically
+// when the device is attached.
+var NOT_MOUNTED_DEVICE_PROVIDING_EXTENSION = {
+  extensionId: 'device-extension-id',
+  name: 'device-extension-name',
+  configurable: false,
+  watchable: true,
+  multipleMounts: true,
+  source: 'device'
 };
 
 var volumeManager = null;
@@ -77,7 +103,8 @@ function setUp() {
       callback([MOUNTED_SINGLE_PROVIDING_EXTENSION,
                 NOT_MOUNTED_SINGLE_PROVIDING_EXTENSION,
                 MOUNTED_MULTIPLE_PROVIDING_EXTENSION,
-                NOT_MOUNTED_FILE_PROVIDING_EXTENSION]);
+                NOT_MOUNTED_FILE_PROVIDING_EXTENSION,
+                NOT_MOUNTED_DEVICE_PROVIDING_EXTENSION]);
     }
   };
   chrome.runtime = {};
@@ -94,13 +121,15 @@ function testGetInstalledProviders(callback) {
   var model = new ProvidersModel(volumeManager);
   reportPromise(model.getInstalledProviders().then(
       function(extensions) {
-        assertEquals(4, extensions.length);
+        assertEquals(5, extensions.length);
         assertEquals(MOUNTED_SINGLE_PROVIDING_EXTENSION.extensionId,
             extensions[0].extensionId);
         assertEquals(MOUNTED_SINGLE_PROVIDING_EXTENSION.name,
             extensions[0].extensionName);
         assertEquals(MOUNTED_SINGLE_PROVIDING_EXTENSION.configurable,
             extensions[0].configurable);
+        assertEquals(MOUNTED_SINGLE_PROVIDING_EXTENSION.watchable,
+            extensions[0].watchable);
         assertEquals(MOUNTED_SINGLE_PROVIDING_EXTENSION.multipleMounts,
             extensions[0].multipleMounts);
         assertEquals(MOUNTED_SINGLE_PROVIDING_EXTENSION.source,
@@ -112,7 +141,9 @@ function testGetInstalledProviders(callback) {
             extensions[2].extensionId);
         assertEquals(NOT_MOUNTED_FILE_PROVIDING_EXTENSION.extensionId,
             extensions[3].extensionId);
-  }), callback);
+        assertEquals(NOT_MOUNTED_DEVICE_PROVIDING_EXTENSION.extensionId,
+            extensions[4].extensionId);
+ }), callback);
 }
 
 function testGetMountableProviders(callback) {

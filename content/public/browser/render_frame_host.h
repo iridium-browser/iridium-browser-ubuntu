@@ -9,6 +9,7 @@
 
 #include "base/callback_forward.h"
 #include "content/common/content_export.h"
+#include "content/public/common/console_message_level.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
@@ -34,10 +35,21 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Returns nullptr if the IDs do not correspond to a live RenderFrameHost.
   static RenderFrameHost* FromID(int render_process_id, int render_frame_id);
 
+  // Globally allows for injecting JavaScript into the main world. This feature
+  // is present only to support Android WebView and must not be used in other
+  // configurations.
+  static void AllowInjectingJavaScriptForAndroidWebView();
+
+  // Returns a RenderFrameHost given its accessibility tree ID.
+  static RenderFrameHost* FromAXTreeID(int ax_tree_id);
+
   ~RenderFrameHost() override {}
 
   // Returns the route id for this frame.
   virtual int GetRoutingID() = 0;
+
+  // Returns the accessibility tree ID for this RenderFrameHost.
+  virtual int GetAXTreeID() = 0;
 
   // Returns the SiteInstance grouping all RenderFrameHosts that have script
   // access to this RenderFrameHost, and must therefore live in the same
@@ -67,19 +79,30 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Returns the associated widget's native view.
   virtual gfx::NativeView GetNativeView() = 0;
 
+  // Adds |message| to the DevTools console.
+  virtual void AddMessageToConsole(ConsoleMessageLevel level,
+                                   const std::string& message) = 0;
+
   // Runs some JavaScript in this frame's context. If a callback is provided, it
   // will be used to return the result, when the result is available.
+  // This API can only be called on chrome:// or chrome-devtools:// URLs.
   typedef base::Callback<void(const base::Value*)> JavaScriptResultCallback;
   virtual void ExecuteJavaScript(const base::string16& javascript) = 0;
   virtual void ExecuteJavaScript(const base::string16& javascript,
                                  const JavaScriptResultCallback& callback) = 0;
+
+  // Runs some JavaScript in an isolated world of top of this frame's context.
   virtual void ExecuteJavaScriptInIsolatedWorld(
       const base::string16& javascript,
       const JavaScriptResultCallback& callback,
       int world_id) = 0;
 
-  // ONLY FOR TESTS: Same as above but adds a fake UserGestureIndicator around
-  // execution. (crbug.com/408426)
+  // ONLY FOR TESTS: Same as above but without restrictions. Optionally, adds a
+  // fake UserGestureIndicator around execution. (crbug.com/408426)
+  virtual void ExecuteJavaScriptForTests(const base::string16& javascript) = 0;
+  virtual void ExecuteJavaScriptForTests(
+      const base::string16& javascript,
+      const JavaScriptResultCallback& callback) = 0;
   virtual void ExecuteJavaScriptWithUserGestureForTests(
       const base::string16& javascript) = 0;
 
@@ -89,6 +112,7 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   virtual void AccessibilityDoDefaultAction(int acc_obj_id) = 0;
   virtual void AccessibilityScrollToMakeVisible(
       int acc_obj_id, const gfx::Rect& subfocus) = 0;
+  virtual void AccessibilityShowContextMenu(int acc_obj_id) = 0;
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) = 0;
 
@@ -117,6 +141,10 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Returns the visibility state of the frame. The different visibility states
   // of a frame are defined in Blink.
   virtual blink::WebPageVisibilityState GetVisibilityState() = 0;
+
+  // Returns whether the RenderFrame in the renderer process has been created
+  // and still has a connection.  This is valid for all frames.
+  virtual bool IsRenderFrameLive() = 0;
 
  private:
   // This interface should only be implemented inside content.

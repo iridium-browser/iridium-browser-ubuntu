@@ -67,9 +67,22 @@ class XmppSignalStrategy::Core : public XmppLoginHandler::Delegate {
   void SetAuthInfo(const std::string& username,
                    const std::string& auth_token);
 
-  void VerifyNoListeners();
-
  private:
+  enum class TlsState {
+    // StartTls() hasn't been called. |socket_| is not encrypted.
+    NOT_REQUESTED,
+
+    // StartTls() has been called. Waiting for |writer_| to finish writing
+    // data before starting TLS.
+    WAITING_FOR_FLUSH,
+
+    // TLS has been started, waiting for TLS handshake to finish.
+    CONNECTING,
+
+    // TLS is connected.
+    CONNECTED,
+  };
+
   void OnSocketConnected(int result);
   void OnTlsConnected(int result);
 
@@ -83,6 +96,9 @@ class XmppSignalStrategy::Core : public XmppLoginHandler::Delegate {
   void OnHandshakeDone(const std::string& jid,
                        scoped_ptr<XmppStreamParser> parser) override;
   void OnLoginHandlerError(SignalStrategy::Error error) override;
+
+  // Callback for BufferedSocketWriter.
+  void OnMessageSent();
 
   // Event handlers for XmppStreamParser.
   void OnStanza(const scoped_ptr<buzz::XmlElement> stanza);
@@ -102,17 +118,19 @@ class XmppSignalStrategy::Core : public XmppLoginHandler::Delegate {
 
   scoped_ptr<net::StreamSocket> socket_;
   scoped_ptr<BufferedSocketWriter> writer_;
+  int pending_writes_ = 0;
   scoped_refptr<net::IOBuffer> read_buffer_;
-  bool read_pending_;
-  bool tls_pending_;
+  bool read_pending_ = false;
+
+  TlsState tls_state_ = TlsState::NOT_REQUESTED;
 
   scoped_ptr<XmppLoginHandler> login_handler_;
   scoped_ptr<XmppStreamParser> stream_parser_;
   std::string jid_;
 
-  Error error_;
+  Error error_ = OK;
 
-  ObserverList<Listener, true> listeners_;
+  base::ObserverList<Listener, true> listeners_;
 
   base::Timer keep_alive_timer_;
 
@@ -128,9 +146,6 @@ XmppSignalStrategy::Core::Core(
     : socket_factory_(socket_factory),
       request_context_getter_(request_context_getter),
       xmpp_server_config_(xmpp_server_config),
-      read_pending_(false),
-      tls_pending_(false),
-      error_(OK),
       keep_alive_timer_(
           FROM_HERE,
           base::TimeDelta::FromSeconds(kKeepAliveIntervalSeconds),
@@ -175,6 +190,8 @@ void XmppSignalStrategy::Core::Disconnect() {
     stream_parser_.reset();
     writer_.reset();
     socket_.reset();
+    tls_state_ = TlsState::NOT_REQUESTED;
+    read_pending_ = false;
 
     FOR_EACH_OBSERVER(Listener, listeners_,
                       OnSignalStrategyStateChange(DISCONNECTED));
@@ -218,13 +235,15 @@ bool XmppSignalStrategy::Core::SendStanza(scoped_ptr<buzz::XmlElement> stanza) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!stream_parser_) {
-    VLOG(0) << "Dropping signalling message because XMPP "
-               "connection has been terminated.";
+    VLOG(0) << "Dropping signalling message because XMPP is not connected.";
     return false;
   }
 
   SendMessage(stanza->Str());
-  return true;
+
+  // Return false if the SendMessage() call above resulted in the SignalStrategy
+  // being disconnected.
+  return stream_parser_ != nullptr;
 }
 
 void XmppSignalStrategy::Core::SetAuthInfo(const std::string& username,
@@ -236,18 +255,30 @@ void XmppSignalStrategy::Core::SetAuthInfo(const std::string& username,
 
 void XmppSignalStrategy::Core::SendMessage(const std::string& message) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(tls_state_ == TlsState::NOT_REQUESTED ||
+         tls_state_ == TlsState::CONNECTED);
+
   scoped_refptr<net::IOBufferWithSize> buffer =
       new net::IOBufferWithSize(message.size());
   memcpy(buffer->data(), message.data(), message.size());
-  writer_->Write(buffer, base::Closure());
+  writer_->Write(buffer,
+                 base::Bind(&Core::OnMessageSent, base::Unretained(this)));
 }
 
 void XmppSignalStrategy::Core::StartTls() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(login_handler_);
+  DCHECK(tls_state_ == TlsState::NOT_REQUESTED ||
+         tls_state_ == TlsState::WAITING_FOR_FLUSH);
+
+  if (writer_->has_data_pending()) {
+    tls_state_ = TlsState::WAITING_FOR_FLUSH;
+    return;
+  }
+
+  tls_state_ = TlsState::CONNECTING;
 
   // Reset the writer so we don't try to write to the raw socket anymore.
-  DCHECK_EQ(writer_->GetBufferSize(), 0);
   writer_.reset();
 
   DCHECK(!read_pending_);
@@ -267,7 +298,6 @@ void XmppSignalStrategy::Core::StartTls() {
       net::HostPortPair(xmpp_server_config_.host, kDefaultHttpsPort),
       net::SSLConfig(), context);
 
-  tls_pending_ = true;
   int result = socket_->Connect(
       base::Bind(&Core::OnTlsConnected, base::Unretained(this)));
   if (result != net::ERR_IO_PENDING)
@@ -300,11 +330,20 @@ void XmppSignalStrategy::Core::OnLoginHandlerError(
   Disconnect();
 }
 
+void XmppSignalStrategy::Core::OnMessageSent() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (tls_state_ == TlsState::WAITING_FOR_FLUSH &&
+      !writer_->has_data_pending()) {
+    StartTls();
+  }
+}
+
 void XmppSignalStrategy::Core::OnStanza(
     const scoped_ptr<buzz::XmlElement> stanza) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  ObserverListBase<Listener>::Iterator it(&listeners_);
+  base::ObserverListBase<Listener>::Iterator it(&listeners_);
   for (Listener* listener = it.GetNext(); listener; listener = it.GetNext()) {
     if (listener->OnSignalStrategyIncomingStanza(stanza.get()))
       return;
@@ -326,9 +365,8 @@ void XmppSignalStrategy::Core::OnSocketConnected(int result) {
     return;
   }
 
-  writer_.reset(new BufferedSocketWriter());
-  writer_->Init(socket_.get(), base::Bind(&Core::OnNetworkError,
-                                          base::Unretained(this)));
+  writer_ = BufferedSocketWriter::CreateForSocket(
+      socket_.get(), base::Bind(&Core::OnNetworkError, base::Unretained(this)));
 
   XmppLoginHandler::TlsMode tls_mode;
   if (xmpp_server_config_.use_tls) {
@@ -362,17 +400,16 @@ void XmppSignalStrategy::Core::OnSocketConnected(int result) {
 
 void XmppSignalStrategy::Core::OnTlsConnected(int result) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(tls_pending_);
-  tls_pending_ = false;
+  DCHECK(tls_state_ == TlsState::CONNECTING);
+  tls_state_ = TlsState::CONNECTED;
 
   if (result != net::OK) {
     OnNetworkError(result);
     return;
   }
 
-  writer_.reset(new BufferedSocketWriter());
-  writer_->Init(socket_.get(), base::Bind(&Core::OnNetworkError,
-                                          base::Unretained(this)));
+  writer_ = BufferedSocketWriter::CreateForSocket(
+      socket_.get(), base::Bind(&Core::OnNetworkError, base::Unretained(this)));
 
   login_handler_->OnTlsStarted();
 
@@ -382,7 +419,8 @@ void XmppSignalStrategy::Core::OnTlsConnected(int result) {
 void XmppSignalStrategy::Core::ReadSocket() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  while (socket_ && !read_pending_ && !tls_pending_) {
+  while (socket_ && !read_pending_ && (tls_state_ == TlsState::NOT_REQUESTED ||
+                                       tls_state_ == TlsState::CONNECTED)) {
     read_buffer_ = new net::IOBuffer(kReadBufferSize);
     int result = socket_->Read(
         read_buffer_.get(), kReadBufferSize,

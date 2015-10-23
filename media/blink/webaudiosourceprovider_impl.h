@@ -5,6 +5,8 @@
 #ifndef MEDIA_BLINK_WEBAUDIOSOURCEPROVIDER_IMPL_H_
 #define MEDIA_BLINK_WEBAUDIOSOURCEPROVIDER_IMPL_H_
 
+#include <string>
+
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
@@ -46,6 +48,7 @@ class MEDIA_EXPORT WebAudioSourceProviderImpl
   void Play() override;
   void Pause() override;
   bool SetVolume(double volume) override;
+  OutputDevice* GetOutputDevice() override;
   void Initialize(const AudioParameters& params,
                   RenderCallback* renderer) override;
 

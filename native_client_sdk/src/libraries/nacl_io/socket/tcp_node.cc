@@ -355,44 +355,42 @@ Error TcpNode::SetNoDelay_Locked() {
                                 PP_TCPSOCKET_OPTION_NO_DELAY,
                                 PP_MakeBool(tcp_nodelay_ ? PP_TRUE : PP_FALSE),
                                 PP_BlockUntilComplete());
-  return PPErrorToErrno(error);
+  return PPERROR_TO_ERRNO(error);
 }
 
-Error TcpNode::SetSockOpt(int lvl,
-                          int optname,
-                          const void* optval,
-                          socklen_t len) {
-  if (lvl == IPPROTO_TCP && optname == TCP_NODELAY) {
-    if (static_cast<size_t>(len) < sizeof(int))
-      return EINVAL;
-    AUTO_LOCK(node_lock_);
-    tcp_nodelay_ = *static_cast<const int*>(optval) != 0;
-    return SetNoDelay_Locked();
-  } else if (lvl == SOL_SOCKET && optname == SO_RCVBUF) {
-    if (static_cast<size_t>(len) < sizeof(int))
-      return EINVAL;
-    AUTO_LOCK(node_lock_);
-    int bufsize = *static_cast<const int*>(optval);
+Error TcpNode::SetSockOptSocket(int optname,
+                                const void* optval,
+                                socklen_t len) {
+  if (static_cast<size_t>(len) < sizeof(int))
+    return EINVAL;
+  int bufsize = *static_cast<const int*>(optval);
+
+  if (optname == SO_RCVBUF) {
     int32_t error =
         TCPInterface()->SetOption(socket_resource_,
                                   PP_TCPSOCKET_OPTION_RECV_BUFFER_SIZE,
                                   PP_MakeInt32(bufsize),
                                   PP_BlockUntilComplete());
-    return PPErrorToErrno(error);
-  } else if (lvl == SOL_SOCKET && optname == SO_SNDBUF) {
-    if (static_cast<size_t>(len) < sizeof(int))
-      return EINVAL;
-    AUTO_LOCK(node_lock_);
-    int bufsize = *static_cast<const int*>(optval);
-    int32_t error =
-        TCPInterface()->SetOption(socket_resource_,
-                PP_TCPSOCKET_OPTION_SEND_BUFFER_SIZE,
-                PP_MakeInt32(bufsize),
-                PP_BlockUntilComplete());
-    return PPErrorToErrno(error);
+    return PPERROR_TO_ERRNO(error);
+  } else if (optname == SO_SNDBUF) {
+    int32_t error = TCPInterface()->SetOption(
+        socket_resource_, PP_TCPSOCKET_OPTION_SEND_BUFFER_SIZE,
+        PP_MakeInt32(bufsize), PP_BlockUntilComplete());
+    return PPERROR_TO_ERRNO(error);
   }
 
-  return SocketNode::SetSockOpt(lvl, optname, optval, len);
+  return SocketNode::SetSockOptSocket(optname, optval, len);
+}
+
+Error TcpNode::SetSockOptTCP(int optname, const void* optval, socklen_t len) {
+  if (optname == TCP_NODELAY) {
+    if (static_cast<size_t>(len) < sizeof(int))
+      return EINVAL;
+    tcp_nodelay_ = *static_cast<const int*>(optval) != 0;
+    return SetNoDelay_Locked();
+  }
+
+  return SocketNode::SetSockOptTCP(optname, optval, len);
 }
 
 void TcpNode::QueueAccept() {
@@ -482,7 +480,7 @@ Error TcpNode::Bind(const struct sockaddr* addr, socklen_t len) {
   if (err != PP_OK) {
     filesystem_->ppapi()->ReleaseResource(local_addr_);
     local_addr_ = 0;
-    return PPErrorToErrno(err);
+    return PPERROR_TO_ERRNO(err);
   }
 
   local_addr_ = TCPInterface()->GetLocalAddress(socket_resource_);
@@ -571,7 +569,7 @@ Error TcpNode::Listen(int backlog) {
   int err = TCPInterface()->Listen(
       socket_resource_, backlog, PP_BlockUntilComplete());
   if (err != PP_OK)
-    return PPErrorToErrno(err);
+    return PPERROR_TO_ERRNO(err);
 
   ClearStreamFlags(SSF_CAN_CONNECT);
   SetStreamFlags(SSF_LISTENING);

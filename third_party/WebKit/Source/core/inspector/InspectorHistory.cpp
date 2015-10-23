@@ -43,13 +43,13 @@ class UndoableStateMark final : public InspectorHistory::Action {
 public:
     UndoableStateMark() : InspectorHistory::Action("[UndoableState]") { }
 
-    virtual bool perform(ExceptionState&) override { return true; }
+    bool perform(ExceptionState&) override { return true; }
 
-    virtual bool undo(ExceptionState&) override { return true; }
+    bool undo(ExceptionState&) override { return true; }
 
-    virtual bool redo(ExceptionState&) override { return true; }
+    bool redo(ExceptionState&) override { return true; }
 
-    virtual bool isUndoableStateMark() override { return true; }
+    bool isUndoableStateMark() override { return true; }
 };
 
 }
@@ -92,9 +92,12 @@ bool InspectorHistory::perform(PassRefPtrWillBeRawPtr<Action> action, ExceptionS
     if (!action->perform(exceptionState))
         return false;
 
-    if (!action->mergeId().isEmpty() && m_afterLastActionIndex > 0 && action->mergeId() == m_history[m_afterLastActionIndex - 1]->mergeId())
+    if (!action->mergeId().isEmpty() && m_afterLastActionIndex > 0 && action->mergeId() == m_history[m_afterLastActionIndex - 1]->mergeId()) {
         m_history[m_afterLastActionIndex - 1]->merge(action);
-    else {
+        if (m_history[m_afterLastActionIndex - 1]->isNoop())
+            --m_afterLastActionIndex;
+        m_history.resize(m_afterLastActionIndex);
+    } else {
         m_history.resize(m_afterLastActionIndex);
         m_history.append(action);
         ++m_afterLastActionIndex;

@@ -7,32 +7,37 @@
 
 #include <string>
 
-#include "chrome/browser/media/router/media_route_id.h"
-
 namespace media_router {
-
-using MediaSinkId = std::string;
 
 // Represents a sink to which media can be routed.
 class MediaSink {
  public:
-  MediaSink(const MediaSinkId& sink_id,
+  using Id = std::string;
+
+  MediaSink(const MediaSink::Id& sink_id,
             const std::string& name);
+
+  MediaSink(const MediaSink::Id& sink_id,
+            const std::string& name,
+            bool is_launching);
 
   ~MediaSink();
 
-  const MediaSinkId& id() const { return sink_id_; }
+  const MediaSink::Id& id() const { return sink_id_; }
   const std::string& name() const { return name_; }
+  bool is_launching() const { return is_launching_; }
 
   bool Equals(const MediaSink& other) const;
   bool Empty() const;
 
  private:
   // Unique identifier for the MediaSink.
-  MediaSinkId sink_id_;
+  MediaSink::Id sink_id_;
   // Descriptive name of the MediaSink.
   // Optional, can use an empty string if no sink name is available.
   std::string name_;
+  // True when the media router is creating a route to this sink.
+  bool is_launching_;
 };
 
 }  // namespace media_router

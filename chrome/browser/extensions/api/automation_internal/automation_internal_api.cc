@@ -9,24 +9,28 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/accessibility/ax_tree_id_registry.h"
 #include "chrome/browser/extensions/api/automation_internal/automation_action_adapter.h"
-#include "chrome/browser/extensions/api/automation_internal/automation_util.h"
+#include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/api/automation_internal.h"
+#include "chrome/common/extensions/chrome_extension_messages.h"
 #include "chrome/common/extensions/manifest_handlers/automation.h"
 #include "content/public/browser/ax_event_notification_details.h"
 #include "content/public/browser/browser_accessibility_state.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/permissions/permissions_data.h"
 
@@ -43,6 +47,7 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(extensions::AutomationWebContentsObserver);
 namespace extensions {
 
 namespace {
+
 const int kDesktopTreeID = 0;
 const char kCannotRequestAutomationOnPage[] =
     "Cannot request automation tree on url \"*\". "
@@ -82,7 +87,7 @@ class QuerySelectorHandler : public content::WebContentsObserver {
 
     // There may be several requests in flight; check this response matches.
     int message_request_id = 0;
-    PickleIterator iter(message);
+    base::PickleIterator iter(message);
     if (!iter.ReadInt(&message_request_id))
       return false;
 
@@ -144,7 +149,7 @@ bool CanRequestAutomation(const Extension* extension,
   int process_id = process ? process->GetID() : -1;
   std::string unused_error;
   return extension->permissions_data()->CanAccessPage(
-      extension, url, url, tab_id, process_id, &unused_error);
+      extension, url, tab_id, process_id, &unused_error);
 }
 
 // Helper class that implements an action adapter for a |RenderFrameHost|.
@@ -168,6 +173,10 @@ class RenderFrameHostActionAdapter : public AutomationActionAdapter {
     rfh_->AccessibilitySetTextSelection(id, start, end);
   }
 
+  void ShowContextMenu(int32 id) override {
+    rfh_->AccessibilityShowContextMenu(id);
+  }
+
  private:
   content::RenderFrameHost* rfh_;
 
@@ -187,24 +196,35 @@ class AutomationWebContentsObserver
   void AccessibilityEventReceived(
       const std::vector<content::AXEventNotificationDetails>& details)
       override {
-    automation_util::DispatchAccessibilityEventsToAutomation(
-        details, browser_context_,
-        web_contents()->GetContainerBounds().OffsetFromOrigin());
+    std::vector<content::AXEventNotificationDetails>::const_iterator iter =
+        details.begin();
+    for (; iter != details.end(); ++iter) {
+      const content::AXEventNotificationDetails& event = *iter;
+      ExtensionMsg_AccessibilityEventParams params;
+      params.tree_id = event.ax_tree_id;
+      params.id = event.id;
+      params.event_type = event.event_type;
+      params.update = event.update;
+      params.location_offset =
+          web_contents()->GetContainerBounds().OffsetFromOrigin();
+
+      AutomationEventRouter* router = AutomationEventRouter::GetInstance();
+      router->DispatchAccessibilityEvent(params);
+    }
   }
 
   void RenderFrameDeleted(
       content::RenderFrameHost* render_frame_host) override {
-    automation_util::DispatchTreeDestroyedEventToAutomation(
-        render_frame_host->GetProcess()->GetID(),
-        render_frame_host->GetRoutingID(),
+    int tree_id = render_frame_host->GetAXTreeID();
+    AutomationEventRouter::GetInstance()->DispatchTreeDestroyedEvent(
+        tree_id,
         browser_context_);
   }
 
  private:
   friend class content::WebContentsUserData<AutomationWebContentsObserver>;
 
-  AutomationWebContentsObserver(
-      content::WebContents* web_contents)
+  explicit AutomationWebContentsObserver(content::WebContents* web_contents)
       : content::WebContentsObserver(web_contents),
         browser_context_(web_contents->GetBrowserContext()) {}
 
@@ -222,8 +242,8 @@ AutomationInternalEnableTabFunction::Run() {
   scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   content::WebContents* contents = NULL;
-  if (params->tab_id.get()) {
-    int tab_id = *params->tab_id;
+  if (params->args.tab_id.get()) {
+    int tab_id = *params->args.tab_id;
     if (!ExtensionTabUtil::GetTabById(tab_id,
                                       GetProfile(),
                                       include_incognito(),
@@ -239,6 +259,7 @@ AutomationInternalEnableTabFunction::Run() {
     if (!contents)
       return RespondNow(Error("No active tab"));
   }
+
   content::RenderFrameHost* rfh = contents->GetMainFrame();
   if (!rfh)
     return RespondNow(Error("Could not enable accessibility for active tab"));
@@ -247,24 +268,32 @@ AutomationInternalEnableTabFunction::Run() {
     return RespondNow(
         Error(kCannotRequestAutomationOnPage, contents->GetURL().spec()));
   }
+
   AutomationWebContentsObserver::CreateForWebContents(contents);
   contents->EnableTreeOnlyAccessibilityMode();
-  int ax_tree_id = AXTreeIDRegistry::GetInstance()->GetOrCreateAXTreeID(
-      rfh->GetProcess()->GetID(), rfh->GetRoutingID());
+
+  int ax_tree_id = rfh->GetAXTreeID();
+
+  // This gets removed when the extension process dies.
+  AutomationEventRouter::GetInstance()->RegisterListenerForOneTree(
+      extension_id(),
+      source_process_id(),
+      params->args.routing_id,
+      ax_tree_id);
+
   return RespondNow(ArgumentList(
       api::automation_internal::EnableTab::Results::Create(ax_tree_id)));
 }
 
 ExtensionFunction::ResponseAction AutomationInternalEnableFrameFunction::Run() {
-// TODO(dtseng): Limited to desktop tree for now pending out of proc iframes.
+  // TODO(dtseng): Limited to desktop tree for now pending out of proc iframes.
   using api::automation_internal::EnableFrame::Params;
 
   scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  AXTreeIDRegistry::FrameID frame_id =
-      AXTreeIDRegistry::GetInstance()->GetFrameID(params->tree_id);
+
   content::RenderFrameHost* rfh =
-      content::RenderFrameHost::FromID(frame_id.first, frame_id.second);
+      content::RenderFrameHost::FromAXTreeID(params->tree_id);
   if (!rfh)
     return RespondNow(Error("unable to load tab"));
 
@@ -295,10 +324,8 @@ AutomationInternalPerformActionFunction::Run() {
                             " platform does not support desktop automation"));
 #endif  // defined(USE_AURA)
   }
-  AXTreeIDRegistry::FrameID frame_id =
-      AXTreeIDRegistry::GetInstance()->GetFrameID(params->args.tree_id);
   content::RenderFrameHost* rfh =
-      content::RenderFrameHost::FromID(frame_id.first, frame_id.second);
+      content::RenderFrameHost::FromAXTreeID(params->args.tree_id);
   if (!rfh)
     return RespondNow(Error("Ignoring action on destroyed node"));
 
@@ -338,6 +365,10 @@ AutomationInternalPerformActionFunction::RouteActionToAdapter(
                            selection_params.end_index);
       break;
     }
+    case api::automation_internal::ACTION_TYPE_SHOWCONTEXTMENU: {
+      adapter->ShowContextMenu(automation_id);
+      break;
+    }
     default:
       NOTREACHED();
   }
@@ -350,6 +381,16 @@ AutomationInternalEnableDesktopFunction::Run() {
   const AutomationInfo* automation_info = AutomationInfo::Get(extension());
   if (!automation_info || !automation_info->desktop)
     return RespondNow(Error("desktop permission must be requested"));
+
+  using api::automation_internal::EnableDesktop::Params;
+  scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  // This gets removed when the extension process dies.
+  AutomationEventRouter::GetInstance()->RegisterListenerWithDesktopPermission(
+      extension_id(),
+      source_process_id(),
+      params->routing_id);
 
   AutomationManagerAura::GetInstance()->Enable(browser_context());
   return RespondNow(NoArguments());
@@ -374,10 +415,8 @@ AutomationInternalQuerySelectorFunction::Run() {
     return RespondNow(
         Error("domQuerySelector queries may not be used on the desktop."));
   }
-  AXTreeIDRegistry::FrameID frame_id =
-      AXTreeIDRegistry::GetInstance()->GetFrameID(params->args.tree_id);
   content::RenderFrameHost* rfh =
-      content::RenderFrameHost::FromID(frame_id.first, frame_id.second);
+      content::RenderFrameHost::FromAXTreeID(params->args.tree_id);
   if (!rfh)
     return RespondNow(Error("domQuerySelector query sent on destroyed tree."));
 

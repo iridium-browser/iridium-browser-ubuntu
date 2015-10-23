@@ -82,14 +82,6 @@ MimeHandlerViewGuest::MimeHandlerViewGuest(
 MimeHandlerViewGuest::~MimeHandlerViewGuest() {
 }
 
-WindowController* MimeHandlerViewGuest::GetExtensionWindowController() const {
-  return nullptr;
-}
-
-WebContents* MimeHandlerViewGuest::GetAssociatedWebContents() const {
-  return web_contents();
-}
-
 const char* MimeHandlerViewGuest::GetAPINamespace() const {
   return "mimeHandlerViewGuestInternal";
 }
@@ -155,31 +147,14 @@ void MimeHandlerViewGuest::DidAttachToEmbedder() {
 
 void MimeHandlerViewGuest::DidInitialize(
     const base::DictionaryValue& create_params) {
-  extension_function_dispatcher_.reset(
-      new ExtensionFunctionDispatcher(browser_context(), this));
-  if (delegate_)
-    delegate_->AttachHelpers();
+  ExtensionsAPIClient::Get()->AttachWebContentsHelpers(web_contents());
+}
+
+bool MimeHandlerViewGuest::ShouldHandleFindRequestsForEmbedder() const {
+  return is_full_page_plugin();
 }
 
 bool MimeHandlerViewGuest::ZoomPropagatesFromEmbedderToGuest() const {
-  return false;
-}
-
-bool MimeHandlerViewGuest::Find(int request_id,
-                                const base::string16& search_text,
-                                const blink::WebFindOptions& options) {
-  if (is_full_page_plugin()) {
-    web_contents()->Find(request_id, search_text, options);
-    return true;
-  }
-  return false;
-}
-
-bool MimeHandlerViewGuest::StopFinding(content::StopFindAction action) {
-  if (is_full_page_plugin()) {
-    web_contents()->StopFinding(action);
-    return true;
-  }
   return false;
 }
 
@@ -218,23 +193,6 @@ MimeHandlerViewGuest::GetJavaScriptDialogManager(
       web_contents());
 }
 
-void MimeHandlerViewGuest::FindReply(content::WebContents* web_contents,
-                                     int request_id,
-                                     int number_of_matches,
-                                     const gfx::Rect& selection_rect,
-                                     int active_match_ordinal,
-                                     bool final_update) {
-  if (!attached() || !embedder_web_contents()->GetDelegate())
-    return;
-
-  embedder_web_contents()->GetDelegate()->FindReply(embedder_web_contents(),
-                                                    request_id,
-                                                    number_of_matches,
-                                                    selection_rect,
-                                                    active_match_ordinal,
-                                                    final_update);
-}
-
 bool MimeHandlerViewGuest::SaveFrame(const GURL& url,
                                      const content::Referrer& referrer) {
   if (!attached())
@@ -251,27 +209,10 @@ void MimeHandlerViewGuest::DocumentOnLoadCompletedInMainFrame() {
           element_instance_id()));
 }
 
-bool MimeHandlerViewGuest::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(MimeHandlerViewGuest, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
 base::WeakPtr<StreamContainer> MimeHandlerViewGuest::GetStream() const {
   if (!stream_)
     return base::WeakPtr<StreamContainer>();
   return stream_->GetWeakPtr();
-}
-
-void MimeHandlerViewGuest::OnRequest(
-    const ExtensionHostMsg_Request_Params& params) {
-  if (extension_function_dispatcher_) {
-    extension_function_dispatcher_->Dispatch(
-        params, web_contents()->GetRenderViewHost());
-  }
 }
 
 }  // namespace extensions

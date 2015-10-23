@@ -13,8 +13,10 @@
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -22,7 +24,6 @@
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -30,8 +31,6 @@
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/typed_url_change_processor.h"
 #include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
-#include "chrome/browser/sync/glue/typed_url_model_associator.h"
-#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -41,16 +40,20 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_backend_client.h"
 #include "components/history/core/browser/history_backend_notifier.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
-#include "components/invalidation/invalidation_service.h"
-#include "components/invalidation/profile_invalidation_provider.h"
+#include "components/invalidation/impl/profile_invalidation_provider.h"
+#include "components/invalidation/public/invalidation_service.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_error_handler_mock.h"
+#include "components/sync_driver/glue/typed_url_model_associator.h"
+#include "components/sync_driver/profile_sync_components_factory.h"
 #include "content/public/browser/notification_service.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "sync/internal_api/public/read_node.h"
@@ -89,7 +92,8 @@ static const int EXPIRED_VISIT = -1;
 
 class HistoryBackendMock : public HistoryBackend {
  public:
-  HistoryBackendMock() : HistoryBackend(nullptr, nullptr) {}
+  HistoryBackendMock()
+      : HistoryBackend(nullptr, nullptr, base::ThreadTaskRunnerHandle::Get()) {}
   bool IsExpiredVisitTime(const base::Time& time) override {
     return time.ToInternalValue() == EXPIRED_VISIT;
   }
@@ -155,15 +159,15 @@ class HistoryServiceMock : public history::HistoryService {
   scoped_refptr<history::HistoryBackend> backend_;
 };
 
-KeyedService* BuildFakeProfileInvalidationProvider(
+scoped_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
     content::BrowserContext* context) {
-  return new invalidation::ProfileInvalidationProvider(
+  return make_scoped_ptr(new invalidation::ProfileInvalidationProvider(
       scoped_ptr<invalidation::InvalidationService>(
-          new invalidation::FakeInvalidationService));
+          new invalidation::FakeInvalidationService)));
 }
 
-KeyedService* BuildHistoryService(content::BrowserContext* profile) {
-  return new HistoryServiceMock;
+scoped_ptr<KeyedService> BuildHistoryService(content::BrowserContext* profile) {
+  return scoped_ptr<KeyedService>(new HistoryServiceMock);
 }
 
 class TestTypedUrlModelAssociator : public TypedUrlModelAssociator {
@@ -205,14 +209,11 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
   void AddTypedUrlSyncNode(const history::URLRow& url,
                            const history::VisitVector& visits) {
     syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    syncer::ReadNode typed_url_root(&trans);
-    ASSERT_EQ(syncer::BaseNode::INIT_OK,
-              typed_url_root.InitTypeRoot(syncer::TYPED_URLS));
 
     syncer::WriteNode node(&trans);
     std::string tag = url.url().spec();
     syncer::WriteNode::InitUniqueByCreationResult result =
-        node.InitUniqueByCreation(syncer::TYPED_URLS, typed_url_root, tag);
+        node.InitUniqueByCreation(syncer::TYPED_URLS, tag);
     ASSERT_EQ(syncer::WriteNode::INIT_SUCCESS, result);
     TypedUrlModelAssociator::WriteToSyncNode(url, visits, &node);
   }

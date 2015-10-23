@@ -276,6 +276,10 @@ namespace WTF {
         typedef T Type;
     };
 
+    template <typename T> struct RemoveReference<T&&> {
+        typedef T Type;
+    };
+
     template <typename T> struct RemoveExtent {
         typedef T Type;
     };
@@ -336,6 +340,22 @@ public:
 template<typename T, typename U>
 struct NeedsTracing<std::pair<T, U>> {
     static const bool value = NeedsTracing<T>::value || NeedsTracing<U>::value || IsWeak<T>::value || IsWeak<U>::value;
+};
+
+// This is used to check that ALLOW_ONLY_INLINE_ALLOCATION objects are not
+// stored in off-heap Vectors, HashTables etc.
+template <typename T>
+struct IsAllowOnlyInlineAllocation {
+private:
+    using YesType = char;
+    struct NoType {
+        char padding[8];
+    };
+
+    template <typename U> static YesType checkMarker(typename U::IsAllowOnlyInlineAllocation*);
+    template <typename U> static NoType checkMarker(...);
+public:
+    static const bool value = sizeof(checkMarker<T>(nullptr)) == sizeof(YesType);
 };
 
 } // namespace WTF

@@ -29,7 +29,7 @@ const char kTestSmaps1[] =
     "Referenced:          296 kB\n"
     "Anonymous:            68 kB\n"
     "AnonHugePages:         0 kB\n"
-    "Swap:                  0 kB\n"
+    "Swap:                  4 kB\n"
     "KernelPageSize:        4 kB\n"
     "MMUPageSize:           4 kB\n"
     "Locked:                0 kB\n"
@@ -110,6 +110,7 @@ TEST(ProcessMemoryMapsDumpProviderTest, ParseProcSmaps) {
   const uint32 kProtR = ProcessMemoryMaps::VMRegion::kProtectionFlagsRead;
   const uint32 kProtW = ProcessMemoryMaps::VMRegion::kProtectionFlagsWrite;
   const uint32 kProtX = ProcessMemoryMaps::VMRegion::kProtectionFlagsExec;
+  const MemoryDumpArgs dump_args = {MemoryDumpArgs::LevelOfDetail::HIGH};
 
   auto pmmdp = ProcessMemoryMapsDumpProvider::GetInstance();
 
@@ -118,21 +119,21 @@ TEST(ProcessMemoryMapsDumpProviderTest, ParseProcSmaps) {
   std::ifstream non_existent_file("/tmp/does-not-exist");
   ProcessMemoryMapsDumpProvider::proc_smaps_for_testing = &non_existent_file;
   CHECK_EQ(false, non_existent_file.good());
-  pmmdp->OnMemoryDump(&pmd_invalid);
+  pmmdp->OnMemoryDump(dump_args, &pmd_invalid);
   ASSERT_FALSE(pmd_invalid.has_process_mmaps());
 
   // Emulate an empty /proc/self/smaps.
   std::ifstream empty_file("/dev/null");
   ProcessMemoryMapsDumpProvider::proc_smaps_for_testing = &empty_file;
   CHECK_EQ(true, empty_file.good());
-  pmmdp->OnMemoryDump(&pmd_invalid);
+  pmmdp->OnMemoryDump(dump_args, &pmd_invalid);
   ASSERT_FALSE(pmd_invalid.has_process_mmaps());
 
   // Parse the 1st smaps file.
   ProcessMemoryDump pmd_1(nullptr /* session_state */);
   std::istringstream test_smaps_1(kTestSmaps1);
   ProcessMemoryMapsDumpProvider::proc_smaps_for_testing = &test_smaps_1;
-  pmmdp->OnMemoryDump(&pmd_1);
+  pmmdp->OnMemoryDump(dump_args, &pmd_1);
   ASSERT_TRUE(pmd_1.has_process_mmaps());
   const auto& regions_1 = pmd_1.process_mmaps()->vm_regions();
   ASSERT_EQ(2UL, regions_1.size());
@@ -142,22 +143,28 @@ TEST(ProcessMemoryMapsDumpProviderTest, ParseProcSmaps) {
   EXPECT_EQ(kProtR | kProtX, regions_1[0].protection_flags);
   EXPECT_EQ("/file/1", regions_1[0].mapped_file);
   EXPECT_EQ(162 * 1024UL, regions_1[0].byte_stats_proportional_resident);
-  EXPECT_EQ((228 + 0) * 1024UL, regions_1[0].byte_stats_shared_resident);
-  EXPECT_EQ((0 + 68) * 1024UL, regions_1[0].byte_stats_private_resident);
+  EXPECT_EQ(228 * 1024UL, regions_1[0].byte_stats_shared_clean_resident);
+  EXPECT_EQ(0UL, regions_1[0].byte_stats_shared_dirty_resident);
+  EXPECT_EQ(0UL, regions_1[0].byte_stats_private_clean_resident);
+  EXPECT_EQ(68 * 1024UL, regions_1[0].byte_stats_private_dirty_resident);
+  EXPECT_EQ(4 * 1024UL, regions_1[0].byte_stats_swapped);
 
   EXPECT_EQ(0xff000000UL, regions_1[1].start_address);
   EXPECT_EQ(0xff800000UL - 0xff000000UL, regions_1[1].size_in_bytes);
   EXPECT_EQ(kProtW, regions_1[1].protection_flags);
   EXPECT_EQ("/file/name with space", regions_1[1].mapped_file);
   EXPECT_EQ(128 * 1024UL, regions_1[1].byte_stats_proportional_resident);
-  EXPECT_EQ((120 + 4) * 1024UL, regions_1[1].byte_stats_shared_resident);
-  EXPECT_EQ((60 + 8) * 1024UL, regions_1[1].byte_stats_private_resident);
+  EXPECT_EQ(120 * 1024UL, regions_1[1].byte_stats_shared_clean_resident);
+  EXPECT_EQ(4 * 1024UL, regions_1[1].byte_stats_shared_dirty_resident);
+  EXPECT_EQ(60 * 1024UL, regions_1[1].byte_stats_private_clean_resident);
+  EXPECT_EQ(8 * 1024UL, regions_1[1].byte_stats_private_dirty_resident);
+  EXPECT_EQ(0 * 1024UL, regions_1[1].byte_stats_swapped);
 
   // Parse the 2nd smaps file.
   ProcessMemoryDump pmd_2(nullptr /* session_state */);
   std::istringstream test_smaps_2(kTestSmaps2);
   ProcessMemoryMapsDumpProvider::proc_smaps_for_testing = &test_smaps_2;
-  pmmdp->OnMemoryDump(&pmd_2);
+  pmmdp->OnMemoryDump(dump_args, &pmd_2);
   ASSERT_TRUE(pmd_2.has_process_mmaps());
   const auto& regions_2 = pmd_2.process_mmaps()->vm_regions();
   ASSERT_EQ(1UL, regions_2.size());
@@ -166,8 +173,11 @@ TEST(ProcessMemoryMapsDumpProviderTest, ParseProcSmaps) {
   EXPECT_EQ(0U, regions_2[0].protection_flags);
   EXPECT_EQ("", regions_2[0].mapped_file);
   EXPECT_EQ(32 * 1024UL, regions_2[0].byte_stats_proportional_resident);
-  EXPECT_EQ((16 + 12) * 1024UL, regions_2[0].byte_stats_shared_resident);
-  EXPECT_EQ((8 + 4) * 1024UL, regions_2[0].byte_stats_private_resident);
+  EXPECT_EQ(16 * 1024UL, regions_2[0].byte_stats_shared_clean_resident);
+  EXPECT_EQ(12 * 1024UL, regions_2[0].byte_stats_shared_dirty_resident);
+  EXPECT_EQ(8 * 1024UL, regions_2[0].byte_stats_private_clean_resident);
+  EXPECT_EQ(4 * 1024UL, regions_2[0].byte_stats_private_dirty_resident);
+  EXPECT_EQ(0 * 1024UL, regions_2[0].byte_stats_swapped);
 }
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 

@@ -6,28 +6,26 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_offset_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/texture_layer.h"
-#include "cc/output/latency_info_swap_promise.h"
-#include "cc/trees/layer_tree_host.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/frame_messages.h"
-#include "content/common/input/web_input_event_traits.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_constants.h"
-#include "content/public/common/page_zoom.h"
 #include "content/public/renderer/content_renderer_client.h"
-#include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/pepper/content_decryptor_delegate.h"
 #include "content/renderer/pepper/event_conversion.h"
 #include "content/renderer/pepper/fullscreen_container.h"
@@ -60,10 +58,7 @@
 #include "content/renderer/render_widget_fullscreen_pepper.h"
 #include "content/renderer/sad_plugin.h"
 #include "media/base/audio_hardware_config.h"
-#include "ppapi/c/dev/ppb_zoom_dev.h"
-#include "ppapi/c/dev/ppp_selection_dev.h"
 #include "ppapi/c/dev/ppp_text_input_dev.h"
-#include "ppapi/c/dev/ppp_zoom_dev.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/c/ppb_core.h"
@@ -112,6 +107,7 @@
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
+#include "third_party/WebKit/public/web/WebPluginScriptForbiddenScope.h"
 #include "third_party/WebKit/public/web/WebPrintParams.h"
 #include "third_party/WebKit/public/web/WebPrintPresetOptions.h"
 #include "third_party/WebKit/public/web/WebPrintScalingOption.h"
@@ -363,23 +359,6 @@ class PluginInstanceLockTarget : public MouseLockDispatcher::LockTarget {
   PepperPluginInstanceImpl* plugin_;
 };
 
-void InitLatencyInfo(ui::LatencyInfo* new_latency,
-                     const ui::LatencyInfo* old_latency,
-                     blink::WebInputEvent::Type type,
-                     int64 input_sequence) {
-  new_latency->AddLatencyNumberWithTraceName(
-      ui::INPUT_EVENT_LATENCY_BEGIN_PLUGIN_COMPONENT,
-      0,
-      input_sequence,
-      WebInputEventTraits::GetName(type));
-  if (old_latency) {
-    new_latency->CopyLatencyFrom(*old_latency,
-                                 ui::INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT);
-    new_latency->CopyLatencyFrom(*old_latency,
-                                 ui::INPUT_EVENT_LATENCY_UI_COMPONENT);
-  }
-}
-
 }  // namespace
 
 // static
@@ -419,8 +398,8 @@ void PepperPluginInstanceImpl::ExternalDocumentLoader::ReplayReceivedData(
         NULL,
         0 /* finish_time */,
         blink::WebURLLoaderClient::kUnknownEncodedDataLength);
-  }
-  if (error_.get()) {
+  } else if (error_.get()) {
+    DCHECK(!finished_loading_);
     document_loader->didFail(NULL, *error_);
   }
 }
@@ -438,6 +417,10 @@ void PepperPluginInstanceImpl::ExternalDocumentLoader::didFinishLoading(
     double finish_time,
     int64_t total_encoded_data_length) {
   DCHECK(!finished_loading_);
+
+  if (error_.get())
+    return;
+
   finished_loading_ = true;
 }
 
@@ -445,6 +428,10 @@ void PepperPluginInstanceImpl::ExternalDocumentLoader::didFail(
     WebURLLoader* loader,
     const WebURLError& error) {
   DCHECK(!error_.get());
+
+  if (finished_loading_)
+    return;
+
   error_.reset(new WebURLError(error));
 }
 
@@ -498,7 +485,6 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       plugin_pdf_interface_(NULL),
       plugin_private_interface_(NULL),
       plugin_textinput_interface_(NULL),
-      plugin_zoom_interface_(NULL),
       checked_for_plugin_input_event_interface_(false),
       checked_for_plugin_pdf_interface_(false),
       gamepad_impl_(new GamepadImpl()),
@@ -524,8 +510,6 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       external_document_load_(false),
       isolate_(v8::Isolate::GetCurrent()),
       is_deleted_(false),
-      last_input_number_(0),
-      is_tracking_latency_(false),
       initialized_(false),
       view_change_weak_ptr_factory_(this),
       weak_factory_(this) {
@@ -663,7 +647,7 @@ v8::Local<v8::Context> PepperPluginInstanceImpl::GetMainWorldContext() {
 void PepperPluginInstanceImpl::Delete() {
   is_deleted_ = true;
 
-  if (render_frame_ &&
+  if (render_frame_ && render_frame_->render_view() &&
       render_frame_->render_view()->plugin_find_handler() == this) {
     render_frame_->render_view()->set_plugin_find_handler(NULL);
   }
@@ -1143,20 +1127,8 @@ bool PepperPluginInstanceImpl::HandleInputEvent(
         pending_user_gesture_token_.setOutOfProcess();
       }
 
-      const ui::LatencyInfo* current_event_latency_info = NULL;
-      if (render_frame_->GetRenderWidget()) {
-        current_event_latency_info =
-            render_frame_->GetRenderWidget()->current_event_latency_info();
-      }
-
       // Each input event may generate more than one PP_InputEvent.
       for (size_t i = 0; i < events.size(); i++) {
-        if (is_tracking_latency_) {
-          InitLatencyInfo(&events[i].latency_info,
-                          current_event_latency_info,
-                          event.type,
-                          last_input_number_++);
-        }
         if (filtered_input_event_mask_ & event_class)
           events[i].is_filtered = true;
         else
@@ -1425,14 +1397,6 @@ void PepperPluginInstanceImpl::RequestSurroundingText(
       pp_instance(), desired_number_of_characters);
 }
 
-void PepperPluginInstanceImpl::Zoom(double factor, bool text_only) {
-  // Keep a reference on the stack. See NOTE above.
-  scoped_refptr<PepperPluginInstanceImpl> ref(this);
-  if (!LoadZoomInterface())
-    return;
-  plugin_zoom_interface_->Zoom(pp_instance(), factor, PP_FromBool(text_only));
-}
-
 bool PepperPluginInstanceImpl::StartFind(const base::string16& search_text,
                                          bool case_sensitive,
                                          int identifier) {
@@ -1545,15 +1509,6 @@ bool PepperPluginInstanceImpl::LoadTextInputInterface() {
   return !!plugin_textinput_interface_;
 }
 
-bool PepperPluginInstanceImpl::LoadZoomInterface() {
-  if (!plugin_zoom_interface_) {
-    plugin_zoom_interface_ = static_cast<const PPP_Zoom_Dev*>(
-        module_->GetPluginInterface(PPP_ZOOM_DEV_INTERFACE));
-  }
-
-  return !!plugin_zoom_interface_;
-}
-
 void PepperPluginInstanceImpl::UpdateLayerTransform() {
   if (!bound_graphics_2d_platform_ || !texture_layer_.get()) {
     // Currently the transform is only applied for Graphics2D.
@@ -1620,10 +1575,9 @@ bool PepperPluginInstanceImpl::IsAcceptingWheelEvents() const {
 void PepperPluginInstanceImpl::ScheduleAsyncDidChangeView() {
   if (view_change_weak_ptr_factory_.HasWeakPtrs())
     return;  // Already scheduled.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PepperPluginInstanceImpl::SendAsyncDidChangeView,
-                 view_change_weak_ptr_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PepperPluginInstanceImpl::SendAsyncDidChangeView,
+                            view_change_weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PepperPluginInstanceImpl::SendAsyncDidChangeView() {
@@ -1763,7 +1717,7 @@ int PepperPluginInstanceImpl::PrintBegin(const WebPrintParams& print_params) {
   return num_pages;
 }
 
-bool PepperPluginInstanceImpl::PrintPage(int page_number,
+void PepperPluginInstanceImpl::PrintPage(int page_number,
                                          blink::WebCanvas* canvas) {
 #if defined(ENABLE_PRINTING)
   DCHECK(plugin_print_interface_);
@@ -1778,16 +1732,13 @@ bool PepperPluginInstanceImpl::PrintPage(int page_number,
   if (save_for_later) {
     ranges_.push_back(page_range);
     canvas_ = skia::SharePtr(canvas);
-    return true;
   } else {
-    return PrintPageHelper(&page_range, 1, canvas);
+    PrintPageHelper(&page_range, 1, canvas);
   }
-#else  // ENABLE_PRINTING
-  return false;
 #endif
 }
 
-bool PepperPluginInstanceImpl::PrintPageHelper(
+void PepperPluginInstanceImpl::PrintPageHelper(
     PP_PrintPageNumberRange_Dev* page_ranges,
     int num_ranges,
     blink::WebCanvas* canvas) {
@@ -1795,21 +1746,17 @@ bool PepperPluginInstanceImpl::PrintPageHelper(
   scoped_refptr<PepperPluginInstanceImpl> ref(this);
   DCHECK(plugin_print_interface_);
   if (!plugin_print_interface_)
-    return false;
+    return;
   PP_Resource print_output = plugin_print_interface_->PrintPages(
       pp_instance(), page_ranges, num_ranges);
   if (!print_output)
-    return false;
-
-  bool ret = false;
+    return;
 
   if (current_print_settings_.format == PP_PRINTOUTPUTFORMAT_PDF)
-    ret = PrintPDFOutput(print_output, canvas);
+    PrintPDFOutput(print_output, canvas);
 
   // Now we need to release the print output resource.
   PluginModule::GetCore()->ReleaseResource(print_output);
-
-  return ret;
 }
 
 void PepperPluginInstanceImpl::PrintEnd() {
@@ -2010,8 +1957,6 @@ bool PepperPluginInstanceImpl::PrintPDFOutput(PP_Resource print_output,
 void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
   if (!container_)
     return;
-  if (throttler_ && throttler_->IsHiddenForPlaceholder())
-    return;
 
   gpu::Mailbox mailbox;
   uint32 sync_point = 0;
@@ -2023,6 +1968,13 @@ void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
   bool want_2d_layer = !!bound_graphics_2d_platform_;
   bool want_texture_layer = want_3d_layer || want_2d_layer;
   bool want_compositor_layer = !!bound_compositor_;
+
+  if (throttler_ && throttler_->IsHiddenForPlaceholder()) {
+    want_3d_layer = false;
+    want_2d_layer = false;
+    want_texture_layer = false;
+    want_compositor_layer = false;
+  }
 
   if (!device_changed && (want_texture_layer == !!texture_layer_.get()) &&
       (want_3d_layer == layer_is_hardware_) &&
@@ -2049,13 +2001,15 @@ void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
     bool opaque = false;
     if (want_3d_layer) {
       DCHECK(bound_graphics_3d_.get());
-      texture_layer_ = cc::TextureLayer::CreateForMailbox(NULL);
+      texture_layer_ = cc::TextureLayer::CreateForMailbox(
+          cc_blink::WebLayerImpl::LayerSettings(), NULL);
       opaque = bound_graphics_3d_->IsOpaque();
       texture_layer_->SetTextureMailboxWithoutReleaseCallback(
           cc::TextureMailbox(mailbox, GL_TEXTURE_2D, sync_point));
     } else {
       DCHECK(bound_graphics_2d_platform_);
-      texture_layer_ = cc::TextureLayer::CreateForMailbox(this);
+      texture_layer_ = cc::TextureLayer::CreateForMailbox(
+          cc_blink::WebLayerImpl::LayerSettings(), this);
       bound_graphics_2d_platform_->AttachedToNewLayer();
       opaque = bound_graphics_2d_platform_->IsAlwaysOpaque();
       texture_layer_->SetFlipped(false);
@@ -2106,26 +2060,7 @@ void PepperPluginInstanceImpl::OnThrottleStateChange() {
 }
 
 void PepperPluginInstanceImpl::OnHiddenForPlaceholder(bool hidden) {
-  if (hidden) {
-    container_->setWebLayer(nullptr);
-  } else {
-    UpdateLayer(true /* device_changed */);
-  }
-}
-
-void PepperPluginInstanceImpl::AddLatencyInfo(
-    const std::vector<ui::LatencyInfo>& latency_info) {
-  if (render_frame_ && render_frame_->GetRenderWidget()) {
-    RenderWidgetCompositor* compositor =
-        render_frame_->GetRenderWidget()->compositor();
-    if (compositor) {
-      for (size_t i = 0; i < latency_info.size(); i++) {
-        scoped_ptr<cc::SwapPromise> swap_promise(
-            new cc::LatencyInfoSwapPromise(latency_info[i]));
-        compositor->QueueSwapPromise(swap_promise.Pass());
-      }
-    }
-  }
+  UpdateLayer(false /* device_changed */);
 }
 
 void PepperPluginInstanceImpl::AddPluginObject(PluginObject* plugin_object) {
@@ -2389,6 +2324,8 @@ PP_Var PepperPluginInstanceImpl::ExecuteScript(PP_Instance instance,
                                                PP_Var script_var,
                                                PP_Var* exception) {
   if (!container_)
+    return PP_MakeUndefined();
+  if (is_deleted_ && blink::WebPluginScriptForbiddenScope::isForbidden())
     return PP_MakeUndefined();
   RecordFlashJavaScriptUse();
 
@@ -2703,35 +2640,6 @@ void PepperPluginInstanceImpl::ClearInputEventRequest(PP_Instance instance,
   RequestInputEventsHelper(event_classes);
 }
 
-void PepperPluginInstanceImpl::StartTrackingLatency(PP_Instance instance) {
-  if (module_->permissions().HasPermission(ppapi::PERMISSION_PRIVATE))
-    is_tracking_latency_ = true;
-}
-
-void PepperPluginInstanceImpl::ZoomChanged(PP_Instance instance,
-                                           double factor) {
-  // We only want to tell the page to change its zoom if the whole page is the
-  // plugin.  If we're in an iframe, then don't do anything.
-  if (!IsFullPagePlugin())
-    return;
-  container()->zoomLevelChanged(content::ZoomFactorToZoomLevel(factor));
-}
-
-void PepperPluginInstanceImpl::ZoomLimitsChanged(PP_Instance instance,
-                                                 double minimum_factor,
-                                                 double maximum_factor) {
-  if (!render_frame_)
-    return;
-  if (minimum_factor > maximum_factor) {
-    NOTREACHED();
-    return;
-  }
-  double minimum_level = ZoomFactorToZoomLevel(minimum_factor);
-  double maximum_level = ZoomFactorToZoomLevel(maximum_factor);
-  render_frame_->render_view()->webview()->zoomLimitsChanged(minimum_level,
-                                                             maximum_level);
-}
-
 void PepperPluginInstanceImpl::PostMessage(PP_Instance instance,
                                            PP_Var message) {
   PostMessageToJavaScript(message);
@@ -2845,11 +2753,10 @@ void PepperPluginInstanceImpl::SelectionChanged(PP_Instance instance) {
   // uses a weak pointer rather than exploiting the fact that this class is
   // refcounted because we don't actually want this operation to affect the
   // lifetime of the instance.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PepperPluginInstanceImpl::RequestSurroundingText,
-                 weak_factory_.GetWeakPtr(),
-                 static_cast<size_t>(kExtraCharsForTextInput)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PepperPluginInstanceImpl::RequestSurroundingText,
+                            weak_factory_.GetWeakPtr(),
+                            static_cast<size_t>(kExtraCharsForTextInput)));
 }
 
 void PepperPluginInstanceImpl::UpdateSurroundingText(PP_Instance instance,
@@ -2974,7 +2881,6 @@ PP_ExternalPluginResult PepperPluginInstanceImpl::ResetAsProxied(
   checked_for_plugin_pdf_interface_ = false;
   plugin_private_interface_ = NULL;
   plugin_textinput_interface_ = NULL;
-  plugin_zoom_interface_ = NULL;
 
   // Re-send the DidCreate event via the proxy.
   scoped_ptr<const char * []> argn_array(StringVectorToArgArray(argn_));
@@ -3131,6 +3037,9 @@ bool PepperPluginInstanceImpl::FlashSetFullscreen(bool fullscreen,
                          .plugin_fullscreen_allowed)
     return false;
 
+  if (fullscreen && !IsProcessingUserGesture())
+    return false;
+
   // Unbind current 2D or 3D graphics context.
   DVLOG(1) << "Setting fullscreen to " << (fullscreen ? "on" : "off");
   if (fullscreen) {
@@ -3146,7 +3055,7 @@ bool PepperPluginInstanceImpl::FlashSetFullscreen(bool fullscreen,
     if (!delay_report) {
       ReportGeometry();
     } else {
-      base::MessageLoop::current()->PostTask(
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::Bind(&PepperPluginInstanceImpl::ReportGeometry, this));
     }
@@ -3261,8 +3170,8 @@ void PepperPluginInstanceImpl::SetSizeAttributesForFullscreen() {
 
   blink::WebScreenInfo info = render_frame_->GetRenderWidget()->screenInfo();
   screen_size_for_fullscreen_ = gfx::Size(info.rect.width, info.rect.height);
-  std::string width = StringPrintf("%d", screen_size_for_fullscreen_.width());
-  std::string height = StringPrintf("%d", screen_size_for_fullscreen_.height());
+  std::string width = base::IntToString(screen_size_for_fullscreen_.width());
+  std::string height = base::IntToString(screen_size_for_fullscreen_.height());
 
   WebElement element = container_->element();
   element.setAttribute(WebString::fromUTF8(kWidth), WebString::fromUTF8(width));

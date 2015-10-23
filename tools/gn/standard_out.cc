@@ -63,10 +63,12 @@ void EnsureInitialized() {
 #endif
 }
 
+#if !defined(OS_WIN)
 void WriteToStdOut(const std::string& output) {
   size_t written_bytes = fwrite(output.data(), 1, output.size(), stdout);
   DCHECK_EQ(output.size(), written_bytes);
 }
+#endif  // !defined(OS_WIN)
 
 void OutputMarkdownDec(TextDecoration dec) {
   // The markdown rendering turns "dim" text to italics and any
@@ -202,12 +204,10 @@ void PrintShortHelp(const std::string& line) {
 void PrintLongHelp(const std::string& text) {
   EnsureInitialized();
 
-  std::vector<std::string> lines;
-  base::SplitStringDontTrim(text, '\n', &lines);
-
   bool first_header = true;
   bool in_body = false;
-  for (const auto& line : lines) {
+  for (const std::string& line : base::SplitString(
+           text, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
     // Check for a heading line.
     if (!line.empty() && line[0] != ' ') {
       if (is_markdown) {

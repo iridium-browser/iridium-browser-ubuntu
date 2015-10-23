@@ -8,6 +8,7 @@
 
 #include "content/common/gpu/gpu_channel.h"
 
+#include <algorithm>
 #include <queue>
 #include <vector>
 
@@ -19,16 +20,19 @@
 #include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_memory_buffer_factory.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/gpu/media/gpu_jpeg_decode_accelerator.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/value_state.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "gpu/command_buffer/service/image_factory.h"
-#include "gpu/command_buffer/service/mailbox_manager_impl.h"
+#include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
 #include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "ipc/ipc_channel.h"
@@ -78,7 +82,7 @@ class GpuChannelMessageFilter : public IPC::MessageFilter {
  public:
   GpuChannelMessageFilter(
       base::WeakPtr<GpuChannel> gpu_channel,
-      scoped_refptr<gpu::SyncPointManager> sync_point_manager,
+      gpu::SyncPointManager* sync_point_manager,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       bool future_sync_points)
       : preemption_state_(IDLE),
@@ -112,7 +116,7 @@ class GpuChannelMessageFilter : public IPC::MessageFilter {
     }
 
     if (message.type() == GpuCommandBufferMsg_InsertSyncPoint::ID) {
-      Tuple<bool> retire;
+      base::Tuple<bool> retire;
       IPC::Message* reply = IPC::SyncMessage::GenerateReply(&message);
       if (!GpuCommandBufferMsg_InsertSyncPoint::ReadSendParam(&message,
                                                               &retire)) {
@@ -120,7 +124,7 @@ class GpuChannelMessageFilter : public IPC::MessageFilter {
         Send(reply);
         return true;
       }
-      if (!future_sync_points_ && !get<0>(retire)) {
+      if (!future_sync_points_ && !base::get<0>(retire)) {
         LOG(ERROR) << "Untrusted contexts can't create future sync points";
         reply->set_reply_error();
         Send(reply);
@@ -133,8 +137,19 @@ class GpuChannelMessageFilter : public IPC::MessageFilter {
           FROM_HERE,
           base::Bind(&GpuChannelMessageFilter::InsertSyncPointOnMainThread,
                      gpu_channel_, sync_point_manager_, message.routing_id(),
-                     get<0>(retire), sync_point));
+                     base::get<0>(retire), sync_point));
       handled = true;
+    }
+
+    // These are handled by GpuJpegDecodeAccelerator and
+    // GpuVideoDecodeAccelerator.
+    // TODO(kcwu) Modify GpuChannel::AddFilter to handle additional filters by
+    // GpuChannelMessageFilter instead of by IPC::SyncChannel directly. Then we
+    // don't need to exclude them one by one here.
+    if (message.type() == AcceleratedJpegDecoderMsg_Decode::ID ||
+        message.type() == AcceleratedJpegDecoderMsg_Destroy::ID ||
+        message.type() == AcceleratedVideoDecoderMsg_Decode::ID) {
+      return false;
     }
 
     // All other messages get processed by the GpuChannel.
@@ -352,7 +367,7 @@ class GpuChannelMessageFilter : public IPC::MessageFilter {
 
   static void InsertSyncPointOnMainThread(
       base::WeakPtr<GpuChannel> gpu_channel,
-      scoped_refptr<gpu::SyncPointManager> manager,
+      gpu::SyncPointManager* manager,
       int32 routing_id,
       bool retire,
       uint32 sync_point) {
@@ -381,7 +396,7 @@ class GpuChannelMessageFilter : public IPC::MessageFilter {
   // passed through - therefore the WeakPtr assumptions are respected.
   base::WeakPtr<GpuChannel> gpu_channel_;
   IPC::Sender* sender_;
-  scoped_refptr<gpu::SyncPointManager> sync_point_manager_;
+  gpu::SyncPointManager* sync_point_manager_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<gpu::PreemptionFlag> preempting_flag_;
 
@@ -403,13 +418,17 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
                        gfx::GLShareGroup* share_group,
                        gpu::gles2::MailboxManager* mailbox,
                        int client_id,
+                       uint64_t client_tracing_id,
                        bool software,
                        bool allow_future_sync_points)
     : gpu_channel_manager_(gpu_channel_manager),
       messages_processed_(0),
       client_id_(client_id),
+      client_tracing_id_(client_tracing_id),
       share_group_(share_group ? share_group : new gfx::GLShareGroup),
-      mailbox_manager_(mailbox ? mailbox : new gpu::gles2::MailboxManagerImpl),
+      mailbox_manager_(mailbox
+                           ? scoped_refptr<gpu::gles2::MailboxManager>(mailbox)
+                           : gpu::gles2::MailboxManager::Create()),
       watchdog_(watchdog),
       software_(software),
       handle_messages_scheduled_(false),
@@ -434,16 +453,20 @@ GpuChannel::~GpuChannel() {
   subscription_ref_set_->RemoveObserver(this);
   if (preempting_flag_.get())
     preempting_flag_->Reset();
+
+  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+      this);
 }
 
 void GpuChannel::Init(base::SingleThreadTaskRunner* io_task_runner,
-                      base::WaitableEvent* shutdown_event) {
+                      base::WaitableEvent* shutdown_event,
+                      IPC::AttachmentBroker* broker) {
   DCHECK(!channel_.get());
 
   // Map renderer ID to a (single) channel to that process.
   channel_ =
       IPC::SyncChannel::Create(channel_id_, IPC::Channel::MODE_SERVER, this,
-                               io_task_runner, false, shutdown_event);
+                               io_task_runner, false, shutdown_event, broker);
 
   filter_ = new GpuChannelMessageFilter(
       weak_factory_.GetWeakPtr(), gpu_channel_manager_->sync_point_manager(),
@@ -451,6 +474,9 @@ void GpuChannel::Init(base::SingleThreadTaskRunner* io_task_runner,
   io_task_runner_ = io_task_runner;
   channel_->AddFilter(filter_.get());
   pending_valuebuffer_state_ = new gpu::ValueStateMap();
+
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      this, base::ThreadTaskRunnerHandle::Get());
 }
 
 std::string GpuChannel::GetChannelName() {
@@ -666,6 +692,8 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
                         OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_DestroyCommandBuffer,
                         OnDestroyCommandBuffer)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuMsg_CreateJpegDecoder,
+                                    OnCreateJpegDecoder)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   DCHECK(handled) << msg.type();
@@ -787,6 +815,13 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id) {
   }
 }
 
+void GpuChannel::OnCreateJpegDecoder(int32 route_id, IPC::Message* reply_msg) {
+  if (!jpeg_decoder_) {
+    jpeg_decoder_.reset(new GpuJpegDecodeAccelerator(this, io_task_runner_));
+  }
+  jpeg_decoder_->AddClient(route_id, reply_msg);
+}
+
 void GpuChannel::MessageProcessed() {
   messages_processed_++;
   if (preempting_flag_.get()) {
@@ -811,18 +846,27 @@ void GpuChannel::RemoveFilter(IPC::MessageFilter* filter) {
 }
 
 uint64 GpuChannel::GetMemoryUsage() {
-  uint64 size = 0;
+  // Collect the unique memory trackers in use by the |stubs_|.
+  std::set<gpu::gles2::MemoryTracker*> unique_memory_trackers;
   for (StubMap::Iterator<GpuCommandBufferStub> it(&stubs_);
        !it.IsAtEnd(); it.Advance()) {
-    size += it.GetCurrentValue()->GetMemoryUsage();
+    unique_memory_trackers.insert(it.GetCurrentValue()->GetMemoryTracker());
   }
+
+  // Sum the memory usage for all unique memory trackers.
+  uint64 size = 0;
+  for (auto* tracker : unique_memory_trackers) {
+    size += gpu_channel_manager()->gpu_memory_manager()->GetTrackerMemoryUsage(
+        tracker);
+  }
+
   return size;
 }
 
 scoped_refptr<gfx::GLImage> GpuChannel::CreateImageForGpuMemoryBuffer(
     const gfx::GpuMemoryBufferHandle& handle,
     const gfx::Size& size,
-    gfx::GpuMemoryBuffer::Format format,
+    gfx::BufferFormat format,
     uint32 internalformat) {
   switch (handle.type) {
     case gfx::SHARED_MEMORY_BUFFER: {
@@ -852,6 +896,18 @@ scoped_refptr<gfx::GLImage> GpuChannel::CreateImageForGpuMemoryBuffer(
 void GpuChannel::HandleUpdateValueState(
     unsigned int target, const gpu::ValueState& state) {
   pending_valuebuffer_state_->UpdateState(target, state);
+}
+
+bool GpuChannel::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                              base::trace_event::ProcessMemoryDump* pmd) {
+  base::trace_event::MemoryAllocatorDump* dump =
+      pmd->CreateAllocatorDump(base::StringPrintf("gl/client_%d", client_id_));
+
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  GetMemoryUsage());
+
+  return true;
 }
 
 }  // namespace content

@@ -8,11 +8,11 @@
 #include <vector>
 
 #include "base/json/json_writer.h"
-#include "chrome/browser/prefs/tracked/pref_hash_store_transaction.h"
-#include "chrome/browser/prefs/tracked/tracked_preference_helper.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/incident_reporting/tracked_preference_incident.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
+#include "components/user_prefs/tracked/pref_hash_store_transaction.h"
+#include "components/user_prefs/tracked/tracked_preference_helper.h"
 
 namespace safe_browsing {
 
@@ -62,7 +62,7 @@ void PreferenceValidationDelegate::OnAtomicPreferenceValidation(
     incident->set_path(pref_path);
     if (!value ||
         (!value->GetAsString(incident->mutable_atomic_value()) &&
-         !base::JSONWriter::Write(value, incident->mutable_atomic_value()))) {
+         !base::JSONWriter::Write(*value, incident->mutable_atomic_value()))) {
       incident->clear_atomic_value();
     }
     incident->set_value_state(proto_value_state);

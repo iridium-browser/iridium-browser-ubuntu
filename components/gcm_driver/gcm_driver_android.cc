@@ -4,6 +4,8 @@
 
 #include "components/gcm_driver/gcm_driver_android.h"
 
+#include <stdint.h>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
@@ -15,11 +17,14 @@ using base::android::AppendJavaStringArrayToStringVector;
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
-using base::android::ToJavaArrayOfStrings;
+using base::android::JavaByteArrayToByteVector;
 
 namespace gcm {
 
- GCMDriverAndroid::GCMDriverAndroid() {
+ GCMDriverAndroid::GCMDriverAndroid(
+     const base::FilePath& store_path,
+     const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner)
+     : GCMDriver(store_path, blocking_task_runner) {
   JNIEnv* env = AttachCurrentThread();
   java_ref_.Reset(
       Java_GCMDriver_create(env,
@@ -61,10 +66,11 @@ void GCMDriverAndroid::OnMessageReceived(JNIEnv* env,
                                          jstring j_app_id,
                                          jstring j_sender_id,
                                          jstring j_collapse_key,
+                                         jbyteArray j_raw_data,
                                          jobjectArray j_data_keys_and_values) {
   std::string app_id = ConvertJavaStringToUTF8(env, j_app_id);
 
-  GCMClient::IncomingMessage message;
+  IncomingMessage message;
   message.sender_id = ConvertJavaStringToUTF8(env, j_sender_id);
   message.collapse_key = ConvertJavaStringToUTF8(env, j_collapse_key);
   // Expand j_data_keys_and_values from array to map.
@@ -74,6 +80,12 @@ void GCMDriverAndroid::OnMessageReceived(JNIEnv* env,
                                       &data_keys_and_values);
   for (size_t i = 0; i + 1 < data_keys_and_values.size(); i += 2) {
     message.data[data_keys_and_values[i]] = data_keys_and_values[i+1];
+  }
+  // Convert j_raw_data from byte[] to binary std::string.
+  if (j_raw_data) {
+    std::vector<uint8_t> raw_data;
+    JavaByteArrayToByteVector(env, j_raw_data, &raw_data);
+    message.raw_data.assign(raw_data.begin(), raw_data.end());
   }
 
   GetAppHandler(app_id)->OnMessage(app_id, message);
@@ -162,7 +174,7 @@ void GCMDriverAndroid::SetLastTokenFetchTime(const base::Time& time) {
 void GCMDriverAndroid::WakeFromSuspendForHeartbeat(bool wake) {
 }
 
-InstanceIDStore* GCMDriverAndroid::GetInstanceIDStore() {
+InstanceIDHandler* GCMDriverAndroid::GetInstanceIDHandler() {
   // Not supported for Android.
   return NULL;
 }
@@ -205,7 +217,7 @@ void GCMDriverAndroid::UnregisterWithSenderIdImpl(
 
 void GCMDriverAndroid::SendImpl(const std::string& app_id,
                                 const std::string& receiver_id,
-                                const GCMClient::OutgoingMessage& message) {
+                                const OutgoingMessage& message) {
   NOTIMPLEMENTED();
 }
 

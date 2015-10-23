@@ -41,16 +41,16 @@ class ErrorEvent;
 
 class V8ErrorHandler final : public V8EventListener {
 public:
-    static PassRefPtr<V8ErrorHandler> create(v8::Local<v8::Object> listener, bool isInline, ScriptState* scriptState)
+    static PassRefPtrWillBeRawPtr<V8ErrorHandler> create(v8::Local<v8::Object> listener, bool isInline, ScriptState* scriptState)
     {
-        return adoptRef(new V8ErrorHandler(listener, isInline, scriptState));
+        return adoptRefWillBeNoop(new V8ErrorHandler(listener, isInline, scriptState));
     }
     static void storeExceptionOnErrorEventWrapper(v8::Isolate*, ErrorEvent*, v8::Local<v8::Value>, v8::Local<v8::Object> creationContext);
 
 private:
     V8ErrorHandler(v8::Local<v8::Object> listener, bool isInline, ScriptState*);
-    virtual v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*) override;
-    virtual bool shouldPreventDefault(v8::Local<v8::Value> returnValue) override;
+    v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*) override;
+    bool shouldPreventDefault(v8::Local<v8::Value> returnValue) override;
 };
 
 } // namespace blink

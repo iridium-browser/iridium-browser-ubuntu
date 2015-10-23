@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 from datetime import datetime
 import glob
+import json
 import optparse
 import os
 import re
@@ -11,10 +12,9 @@ import cloud_storage_test_base
 import page_sets
 import pixel_expectations
 
-from telemetry import benchmark
-from telemetry.image_processing import image_util
+from catapult_base import cloud_storage
 from telemetry.page import page_test
-from telemetry.util import cloud_storage
+from telemetry.util import image_util
 
 
 test_data_dir = os.path.abspath(os.path.join(
@@ -49,11 +49,11 @@ class PixelTestFailure(Exception):
 def _DidTestSucceed(tab):
   return tab.EvaluateJavaScript('domAutomationController._succeeded')
 
-class _PixelValidator(cloud_storage_test_base.ValidatorBase):
+class PixelValidator(cloud_storage_test_base.ValidatorBase):
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-gpu-benchmarking')
 
-  def ValidateAndMeasurePage(self, page, tab, results):
+  def ValidateAndMeasurePageInner(self, page, tab, results):
     if not _DidTestSucceed(tab):
       raise page_test.Failure('Page indicated a failure')
 
@@ -65,10 +65,21 @@ class _PixelValidator(cloud_storage_test_base.ValidatorBase):
     if screenshot is None:
       raise page_test.Failure('Could not capture screenshot')
 
+    dpr = tab.EvaluateJavaScript('window.devicePixelRatio')
+
     if hasattr(page, 'test_rect'):
       screenshot = image_util.Crop(
-          screenshot, page.test_rect[0], page.test_rect[1],
-          page.test_rect[2], page.test_rect[3])
+          screenshot, page.test_rect[0] * dpr, page.test_rect[1] * dpr,
+          page.test_rect[2] * dpr, page.test_rect[3] * dpr)
+
+    if hasattr(page, 'expected_colors'):
+      # Use expected pixels instead of ref images for validation.
+      expected_colors_file = os.path.abspath(os.path.join(
+          os.path.dirname(__file__), page.expected_colors))
+      expected_colors = self._ReadPixelExpectations(expected_colors_file)
+      self._ValidateScreenshotSamples(
+          page.display_name, screenshot, expected_colors, dpr)
+      return
 
     image_name = self._UrlToImageName(page.display_name)
 
@@ -135,7 +146,7 @@ class _PixelValidator(cloud_storage_test_base.ValidatorBase):
 
     try:
       ref_png = image_util.FromPngFile(image_path)
-    except IOError:
+    except:
       ref_png = None
 
     if ref_png is not None:
@@ -146,8 +157,13 @@ class _PixelValidator(cloud_storage_test_base.ValidatorBase):
     self._WriteImage(image_path, screenshot)
     return screenshot
 
+  def _ReadPixelExpectations(self, json_file_path):
+    with open(json_file_path, 'r') as f:
+      json_contents = json.load(f)
+    return json_contents
+
 class Pixel(cloud_storage_test_base.TestBase):
-  test = _PixelValidator
+  test = PixelValidator
 
   @classmethod
   def Name(cls):
@@ -161,11 +177,11 @@ class Pixel(cloud_storage_test_base.TestBase):
         '(only used for local testing without a cloud storage account)',
         default=default_reference_image_dir)
 
-  def CreatePageSet(self, options):
-    page_set = page_sets.PixelTestsPageSet()
-    for page in page_set.pages:
+  def CreateStorySet(self, options):
+    story_set = page_sets.PixelTestsStorySet(self.GetExpectations())
+    for page in story_set:
       page.script_to_evaluate_on_commit = test_harness_script
-    return page_set
+    return story_set
 
-  def CreateExpectations(self):
+  def _CreateExpectations(self):
     return pixel_expectations.PixelExpectations()

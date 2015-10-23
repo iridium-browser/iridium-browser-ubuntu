@@ -8,9 +8,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
-#include "chrome/browser/signin/fake_signin_manager.h"
+#include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/glue/sync_backend_host_mock.h"
@@ -23,6 +22,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_manager.h"
@@ -103,9 +103,8 @@ class ProfileSyncServiceStartupTest : public testing::Test {
     CHECK(profile_manager_.SetUp());
 
     TestingProfile::TestingFactories testing_facotries;
-    testing_facotries.push_back(
-        std::make_pair(SigninManagerFactory::GetInstance(),
-                       FakeSigninManagerBase::Build));
+    testing_facotries.push_back(std::make_pair(
+        SigninManagerFactory::GetInstance(), BuildFakeSigninManagerBase));
     testing_facotries.push_back(
             std::make_pair(ProfileOAuth2TokenServiceFactory::GetInstance(),
                            BuildAutoIssuingFakeProfileOAuth2TokenService));
@@ -121,16 +120,16 @@ class ProfileSyncServiceStartupTest : public testing::Test {
 
   void TearDown() override { sync_->RemoveObserver(&observer_); }
 
-  static KeyedService* BuildService(content::BrowserContext* browser_context) {
+  static scoped_ptr<KeyedService> BuildService(
+      content::BrowserContext* browser_context) {
     Profile* profile = static_cast<Profile*>(browser_context);
-    return new TestProfileSyncServiceNoBackup(
+    return make_scoped_ptr(new TestProfileSyncServiceNoBackup(
         scoped_ptr<ProfileSyncComponentsFactory>(
             new ProfileSyncComponentsFactoryMock()),
-        profile,
-        make_scoped_ptr(new SupervisedUserSigninManagerWrapper(
-            profile, SigninManagerFactory::GetForProfile(profile))),
+        profile, make_scoped_ptr(new SupervisedUserSigninManagerWrapper(
+                     profile, SigninManagerFactory::GetForProfile(profile))),
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
-        browser_sync::MANUAL_START);
+        browser_sync::MANUAL_START));
   }
 
   void CreateSyncService() {
@@ -217,7 +216,8 @@ class ProfileSyncServiceStartupCrosTest : public ProfileSyncServiceStartupTest {
     sync_->AddObserver(&observer_);
   }
 
-  static KeyedService* BuildCrosService(content::BrowserContext* context) {
+  static scoped_ptr<KeyedService> BuildCrosService(
+      content::BrowserContext* context) {
     Profile* profile = static_cast<Profile*>(context);
     FakeSigninManagerForTesting* signin =
         static_cast<FakeSigninManagerForTesting*>(
@@ -226,14 +226,12 @@ class ProfileSyncServiceStartupCrosTest : public ProfileSyncServiceStartupTest {
     ProfileOAuth2TokenService* oauth2_token_service =
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
     EXPECT_TRUE(signin->IsAuthenticated());
-    return new TestProfileSyncServiceNoBackup(
+    return make_scoped_ptr(new TestProfileSyncServiceNoBackup(
         scoped_ptr<ProfileSyncComponentsFactory>(
             new ProfileSyncComponentsFactoryMock()),
-        profile,
-        make_scoped_ptr(new SupervisedUserSigninManagerWrapper(profile,
-                                                               signin)),
-        oauth2_token_service,
-        browser_sync::AUTO_START);
+        profile, make_scoped_ptr(
+                     new SupervisedUserSigninManagerWrapper(profile, signin)),
+        oauth2_token_service, browser_sync::AUTO_START));
   }
 };
 
@@ -276,7 +274,7 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
 
   // Simulate the UI telling sync it has finished setting up.
   sync_->SetSetupInProgress(false);
-  EXPECT_TRUE(sync_->SyncActive());
+  EXPECT_TRUE(sync_->IsSyncActive());
 }
 
 // TODO(pavely): Reenable test once android is switched to oauth2.
@@ -313,7 +311,7 @@ TEST_F(ProfileSyncServiceStartupTest, DISABLED_StartNoCredentials) {
   sync_->SetSetupInProgress(false);
   // ProfileSyncService should try to start by requesting access token.
   // This request should fail as login token was not issued.
-  EXPECT_FALSE(sync_->SyncActive());
+  EXPECT_FALSE(sync_->IsSyncActive());
   EXPECT_EQ(GoogleServiceAuthError::USER_NOT_SIGNED_UP,
       sync_->GetAuthError().state());
 }
@@ -334,7 +332,7 @@ TEST_F(ProfileSyncServiceStartupTest, DISABLED_StartInvalidCredentials) {
 
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
   sync_->Initialize();
-  EXPECT_FALSE(sync_->SyncActive());
+  EXPECT_FALSE(sync_->IsSyncActive());
   Mock::VerifyAndClearExpectations(data_type_manager);
 
   // Update the credentials, unstalling the backend.
@@ -351,7 +349,7 @@ TEST_F(ProfileSyncServiceStartupTest, DISABLED_StartInvalidCredentials) {
   sync_->SetSetupInProgress(false);
 
   // Verify we successfully finish startup and configuration.
-  EXPECT_TRUE(sync_->SyncActive());
+  EXPECT_TRUE(sync_->IsSyncActive());
 }
 
 #if defined(OS_WIN)
@@ -370,11 +368,11 @@ TEST_F(ProfileSyncServiceStartupCrosTest, MAYBE_StartCrosNoCredentials) {
 
   sync_->Initialize();
   // Sync should not start because there are no tokens yet.
-  EXPECT_FALSE(sync_->SyncActive());
+  EXPECT_FALSE(sync_->IsSyncActive());
   sync_->SetSetupInProgress(false);
 
   // Sync should not start because there are still no tokens.
-  EXPECT_FALSE(sync_->SyncActive());
+  EXPECT_FALSE(sync_->IsSyncActive());
 }
 
 TEST_F(ProfileSyncServiceStartupCrosTest, StartFirstTime) {
@@ -391,7 +389,7 @@ TEST_F(ProfileSyncServiceStartupCrosTest, StartFirstTime) {
       AccountTrackerServiceFactory::GetForProfile(profile_)
           ->PickAccountIdForAccount("12345", kEmail));
   sync_->Initialize();
-  EXPECT_TRUE(sync_->SyncActive());
+  EXPECT_TRUE(sync_->IsSyncActive());
 }
 
 #if defined(OS_WIN)
@@ -578,5 +576,5 @@ TEST_F(ProfileSyncServiceStartupTest, StartDownloadFailed) {
   sync_->SetSetupInProgress(true);
   IssueTestTokens(account_id);
   sync_->SetSetupInProgress(false);
-  EXPECT_FALSE(sync_->SyncActive());
+  EXPECT_FALSE(sync_->IsSyncActive());
 }

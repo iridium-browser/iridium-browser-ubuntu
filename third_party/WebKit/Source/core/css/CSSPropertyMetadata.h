@@ -6,13 +6,15 @@
 #define CSSPropertyMetadata_h
 
 #include "core/CSSPropertyNames.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
 class CSSPropertyMetadata {
+    STATIC_ONLY(CSSPropertyMetadata);
 public:
     static bool isEnabledProperty(CSSPropertyID);
-    static bool isAnimatableProperty(CSSPropertyID);
+    static bool isInterpolableProperty(CSSPropertyID);
     static bool isInheritedProperty(CSSPropertyID);
 
     static void filterEnabledCSSPropertiesIntoVector(const CSSPropertyID*, size_t length, Vector<CSSPropertyID>&);

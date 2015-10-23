@@ -8,9 +8,11 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkSurface.h"
+#include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
 #include "ui/ozone/platform/drm/gpu/drm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
+#include "ui/ozone/platform/drm/gpu/scanout_buffer.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
 
 namespace ui {
@@ -25,6 +27,9 @@ namespace {
 #define DRM_CAP_CURSOR_HEIGHT 0x9
 #endif
 
+void EmptyFlipCallback(gfx::SwapResult) {
+}
+
 void UpdateCursorImage(DrmBuffer* cursor, const SkBitmap& image) {
   SkRect damage;
   image.getBounds(&damage);
@@ -37,7 +42,7 @@ void UpdateCursorImage(DrmBuffer* cursor, const SkBitmap& image) {
   clip.set(0, 0, canvas->getDeviceSize().width(),
            canvas->getDeviceSize().height());
   canvas->clipRect(clip, SkRegion::kReplace_Op);
-  canvas->drawBitmapRectToRect(image, &damage, damage);
+  canvas->drawBitmapRect(image, damage, NULL);
 }
 
 }  // namespace
@@ -47,12 +52,7 @@ DrmWindow::DrmWindow(gfx::AcceleratedWidget widget,
                      ScreenManager* screen_manager)
     : widget_(widget),
       device_manager_(device_manager),
-      screen_manager_(screen_manager),
-      controller_(NULL),
-      cursor_frontbuffer_(0),
-      cursor_frame_(0),
-      cursor_frame_delay_ms_(0),
-      last_swap_sync_(false) {
+      screen_manager_(screen_manager) {
 }
 
 DrmWindow::~DrmWindow() {
@@ -124,18 +124,58 @@ void DrmWindow::QueueOverlayPlane(const OverlayPlane& plane) {
   pending_planes_.push_back(plane);
 }
 
-bool DrmWindow::SchedulePageFlip(bool is_sync, const base::Closure& callback) {
+bool DrmWindow::SchedulePageFlip(bool is_sync,
+                                 const SwapCompletionCallback& callback) {
+  if (force_buffer_reallocation_) {
+    // Clear pending planes otherwise the next call to queue planes will just
+    // add on top.
+    pending_planes_.clear();
+    force_buffer_reallocation_ = false;
+    callback.Run(gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS);
+    return true;
+  }
+
   last_submitted_planes_.clear();
   last_submitted_planes_.swap(pending_planes_);
   last_swap_sync_ = is_sync;
 
   if (controller_) {
-    return controller_->SchedulePageFlip(last_submitted_planes_, is_sync,
+    return controller_->SchedulePageFlip(last_submitted_planes_, is_sync, false,
                                          callback);
   }
 
-  callback.Run();
+  callback.Run(gfx::SwapResult::SWAP_ACK);
   return true;
+}
+
+bool DrmWindow::TestPageFlip(const std::vector<OverlayCheck_Params>& overlays,
+                             ScanoutBufferGenerator* buffer_generator) {
+  if (!controller_)
+    return true;
+  for (const auto& overlay : overlays) {
+    // It is possible that the cc rect we get actually falls off the edge of
+    // the screen. Usually this is prevented via things like status bars
+    // blocking overlaying or cc clipping it, but in case it wasn't properly
+    // clipped (since GL will render this situation fine) just ignore it here.
+    // This should be an extremely rare occurrance.
+    if (overlay.plane_z_order != 0 && !bounds().Contains(overlay.display_rect))
+      return false;
+  }
+
+  scoped_refptr<DrmDevice> drm = controller_->GetAllocationDrmDevice();
+  OverlayPlaneList planes;
+  for (const auto& overlay : overlays) {
+    gfx::Size size =
+        (overlay.plane_z_order == 0) ? bounds().size() : overlay.buffer_size;
+    scoped_refptr<ScanoutBuffer> buffer = buffer_generator->Create(drm, size);
+    if (!buffer)
+      return false;
+    planes.push_back(OverlayPlane(buffer, overlay.plane_z_order,
+                                  overlay.transform, overlay.display_rect,
+                                  gfx::RectF(gfx::Size(1, 1))));
+  }
+  return controller_->SchedulePageFlip(planes, true, true,
+                                       base::Bind(&EmptyFlipCallback));
 }
 
 const OverlayPlane* DrmWindow::GetLastModesetBuffer() {
@@ -172,6 +212,12 @@ void DrmWindow::OnCursorAnimationTimeout() {
 void DrmWindow::SetController(HardwareDisplayController* controller) {
   if (controller_ == controller)
     return;
+
+  // Force buffer reallocation since the window moved to a different controller.
+  // This is required otherwise the GPU will eventually try to render into the
+  // buffer currently showing on the old controller (there is no guarantee that
+  // the old controller has been updated in the meantime).
+  force_buffer_reallocation_ = true;
 
   controller_ = controller;
   device_manager_->UpdateDrmDevice(

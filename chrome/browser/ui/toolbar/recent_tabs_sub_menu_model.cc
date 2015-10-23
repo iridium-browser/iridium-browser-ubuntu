@@ -17,8 +17,6 @@
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/sync/glue/synced_session.h"
-#include "chrome/browser/sync/open_tabs_ui_delegate.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -27,6 +25,8 @@
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/favicon_base/favicon_types.h"
+#include "components/sync_driver/glue/synced_session.h"
+#include "components/sync_driver/open_tabs_ui_delegate.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/browser_resources.h"
 #include "grit/theme_resources.h"
@@ -69,18 +69,15 @@ const int kMaxDeviceNameCommandId = 1110;
 // shown in the menu.
 const int kMaxLocalEntries = 8;
 
+// Index of the separator that follows the history menu item. Used as a
+// reference position for inserting local entries.
+const int kHistorySeparatorIndex = 1;
+
 // Comparator function for use with std::sort that will sort sessions by
 // descending modified_time (i.e., most recent first).
-bool SortSessionsByRecency(const browser_sync::SyncedSession* s1,
-                           const browser_sync::SyncedSession* s2) {
+bool SortSessionsByRecency(const sync_driver::SyncedSession* s1,
+                           const sync_driver::SyncedSession* s2) {
   return s1->modified_time > s2->modified_time;
-}
-
-// Comparator function for use with std::sort that will sort tabs by
-// descending timestamp (i.e., most recent first).
-bool SortTabsByRecency(const sessions::SessionTab* t1,
-                       const sessions::SessionTab* t2) {
-  return t1->timestamp > t2->timestamp;
 }
 
 // Returns true if the command id identifies a tab menu item.
@@ -167,11 +164,11 @@ const int RecentTabsSubMenuModel::kDisabledRecentlyClosedHeaderCommandId = 1121;
 RecentTabsSubMenuModel::RecentTabsSubMenuModel(
     ui::AcceleratorProvider* accelerator_provider,
     Browser* browser,
-    browser_sync::OpenTabsUIDelegate* open_tabs_delegate)
+    sync_driver::OpenTabsUIDelegate* open_tabs_delegate)
     : ui::SimpleMenuModel(this),
       browser_(browser),
       open_tabs_delegate_(open_tabs_delegate),
-      last_local_model_index_(-1),
+      last_local_model_index_(kHistorySeparatorIndex),
       default_favicon_(ui::ResourceBundle::GetSharedInstance().
                        GetNativeImageNamed(IDR_DEFAULT_FAVICON)),
       weak_ptr_factory_(this) {
@@ -210,6 +207,11 @@ RecentTabsSubMenuModel::RecentTabsSubMenuModel(
         IDC_RESTORE_TAB, &reopen_closed_tab_accelerator_);
   }
 #endif  // defined(USE_ASH)
+
+  if (accelerator_provider) {
+    accelerator_provider->GetAcceleratorForCommandId(
+        IDC_SHOW_HISTORY, &show_history_accelerator_);
+  }
 }
 
 RecentTabsSubMenuModel::~RecentTabsSubMenuModel() {
@@ -245,6 +247,12 @@ bool RecentTabsSubMenuModel::GetAcceleratorForCommandId(
     *accelerator = reopen_closed_tab_accelerator_;
     return true;
   }
+
+  if (command_id == IDC_SHOW_HISTORY) {
+    *accelerator = show_history_accelerator_;
+    return true;
+  }
+
   return false;
 }
 
@@ -287,7 +295,7 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
                                   browser_->host_desktop_type(), disposition);
       }
     } else {  // Restore tab of session from other devices.
-      browser_sync::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate();
+      sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate();
       if (!open_tabs)
         return;
       const sessions::SessionTab* tab;
@@ -366,30 +374,33 @@ bool RecentTabsSubMenuModel::GetURLAndTitleForItemAtIndex(
 
 void RecentTabsSubMenuModel::Build() {
   // The menu contains:
+  // - History to open the full history tab.
+  // - Separator
   // - Recently closed header, then list of local recently closed tabs/windows,
   //   then separator
   // - device 1 section header, then list of tabs from device, then separator
   // - device 2 section header, then list of tabs from device, then separator
   // - device 3 section header, then list of tabs from device, then separator
-  // - More... to open the history tab to get more other devices.
   // |local_tab_navigation_items_| and |other_devices_tab_navigation_items_|
   // only contain navigatable (and hence executable) tab items for local
   // recently closed tabs and tabs from other devices respectively.
   // |local_window_items_| contains the local recently closed windows.
+  InsertItemWithStringIdAt(0, IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
+  InsertSeparatorAt(1, ui::NORMAL_SEPARATOR);
   BuildLocalEntries();
   BuildTabsFromOtherDevices();
 }
 
 void RecentTabsSubMenuModel::BuildLocalEntries() {
+  last_local_model_index_ = kHistorySeparatorIndex;
+
   // All local items use InsertItem*At() to append or insert a menu item.
   // We're appending if building the entries for the first time i.e. invoked
   // from Constructor(), inserting when local entries change subsequently i.e.
   // invoked from TabRestoreServiceChanged().
-
-  DCHECK_EQ(last_local_model_index_, -1);
-
   TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser_->profile());
+
   if (!service || service->entries().size() == 0) {
     // This is to show a disabled restore tab entry with the accelerator to
     // teach users about this command.
@@ -429,7 +440,6 @@ void RecentTabsSubMenuModel::BuildLocalEntries() {
       ++added_count;
     }
   }
-
   DCHECK_GE(last_local_model_index_, 0);
 }
 
@@ -438,8 +448,8 @@ void RecentTabsSubMenuModel::BuildTabsFromOtherDevices() {
   // a menu item, because they are always only built once (i.e. invoked from
   // Constructor()) and don't change after that.
 
-  browser_sync::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate();
-  std::vector<const browser_sync::SyncedSession*> sessions;
+  sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate();
+  std::vector<const sync_driver::SyncedSession*> sessions;
   if (!open_tabs || !open_tabs->GetAllForeignSessions(&sessions)) {
     AddSeparator(ui::NORMAL_SEPARATOR);
     AddItemWithStringId(IDC_RECENT_TABS_NO_DEVICE_TABS,
@@ -454,39 +464,14 @@ void RecentTabsSubMenuModel::BuildTabsFromOtherDevices() {
   size_t num_sessions_added = 0;
   for (size_t i = 0;
        i < sessions.size() && num_sessions_added < kMaxSessionsToShow; ++i) {
-    const browser_sync::SyncedSession* session = sessions[i];
+    const sync_driver::SyncedSession* session = sessions[i];
     const std::string& session_tag = session->session_tag;
 
-    // Get windows of session.
-    std::vector<const sessions::SessionWindow*> windows;
-    if (!open_tabs->GetForeignSession(session_tag, &windows) ||
-        windows.empty()) {
-      continue;
-    }
-
-    // Collect tabs from all windows of session, pruning those that are not
-    // syncable or are NewTabPage, then sort them from most recent to least
-    // recent, independent of which window the tabs were from.
+    // Collect tabs from all windows of the session, ordered by recency.
     std::vector<const sessions::SessionTab*> tabs_in_session;
-    for (size_t j = 0; j < windows.size(); ++j) {
-      const sessions::SessionWindow* window = windows[j];
-      for (size_t t = 0; t < window->tabs.size(); ++t) {
-        const sessions::SessionTab* tab = window->tabs[t];
-        if (tab->navigations.empty())
-          continue;
-        const sessions::SerializedNavigationEntry& current_navigation =
-            tab->navigations.at(tab->normalized_navigation_index());
-        if (chrome::IsNTPURL(current_navigation.virtual_url(),
-                             browser_->profile())) {
-          continue;
-        }
-        tabs_in_session.push_back(tab);
-      }
-    }
-    if (tabs_in_session.empty())
+    if (!open_tabs->GetForeignSessionTabs(session_tag, &tabs_in_session) ||
+        tabs_in_session.empty())
       continue;
-    std::sort(tabs_in_session.begin(), tabs_in_session.end(),
-              SortTabsByRecency);
 
     // Add the header for the device session.
     DCHECK(!session->session_name.empty());
@@ -509,8 +494,6 @@ void RecentTabsSubMenuModel::BuildTabsFromOtherDevices() {
 
   // We are not supposed to get here unless at least some items were added.
   DCHECK_GT(GetItemCount(), 0);
-  AddSeparator(ui::NORMAL_SEPARATOR);
-  AddItemWithStringId(IDC_SHOW_HISTORY, IDS_RECENT_TABS_MORE);
 }
 
 void RecentTabsSubMenuModel::BuildLocalTabItem(int session_id,
@@ -563,23 +546,23 @@ void RecentTabsSubMenuModel::BuildOtherDevicesTabItem(
 
 void RecentTabsSubMenuModel::AddDeviceFavicon(
     int index_in_menu,
-    browser_sync::SyncedSession::DeviceType device_type) {
+    sync_driver::SyncedSession::DeviceType device_type) {
   int favicon_id = -1;
   switch (device_type) {
-    case browser_sync::SyncedSession::TYPE_PHONE:
+    case sync_driver::SyncedSession::TYPE_PHONE:
       favicon_id = IDR_PHONE_FAVICON;
       break;
 
-    case browser_sync::SyncedSession::TYPE_TABLET:
+    case sync_driver::SyncedSession::TYPE_TABLET:
       favicon_id = IDR_TABLET_FAVICON;
       break;
 
-    case browser_sync::SyncedSession::TYPE_CHROMEOS:
-    case browser_sync::SyncedSession::TYPE_WIN:
-    case browser_sync::SyncedSession::TYPE_MACOSX:
-    case browser_sync::SyncedSession::TYPE_LINUX:
-    case browser_sync::SyncedSession::TYPE_OTHER:
-    case browser_sync::SyncedSession::TYPE_UNSET:
+    case sync_driver::SyncedSession::TYPE_CHROMEOS:
+    case sync_driver::SyncedSession::TYPE_WIN:
+    case sync_driver::SyncedSession::TYPE_MACOSX:
+    case sync_driver::SyncedSession::TYPE_LINUX:
+    case sync_driver::SyncedSession::TYPE_OTHER:
+    case sync_driver::SyncedSession::TYPE_UNSET:
       favicon_id = IDR_LAPTOP_FAVICON;
       break;
   }
@@ -598,7 +581,7 @@ void RecentTabsSubMenuModel::AddTabFavicon(int command_id, const GURL& url) {
     // --sync-tab-favicons switch is on; according to zea@, this flag is now
     // automatically enabled for iOS and android, and they're looking into
     // enabling it for other platforms.
-    browser_sync::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate();
+    sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate();
     scoped_refptr<base::RefCountedMemory> favicon_png;
     if (open_tabs &&
         open_tabs->GetSyncedFaviconForPageURL(url.spec(), &favicon_png)) {
@@ -654,12 +637,11 @@ int RecentTabsSubMenuModel::CommandIdToTabVectorIndex(
 
 void RecentTabsSubMenuModel::ClearLocalEntries() {
   // Remove local items (recently closed tabs and windows) from menumodel.
-  while (last_local_model_index_ >= 0)
+  while (last_local_model_index_ > kHistorySeparatorIndex)
     RemoveItemAt(last_local_model_index_--);
 
   // Cancel asynchronous FaviconService::GetFaviconImageForPageURL() tasks of
-  // all
-  // local tabs.
+  // all local tabs.
   local_tab_cancelable_task_tracker_.TryCancelAll();
 
   // Remove all local tab navigation items.
@@ -669,13 +651,13 @@ void RecentTabsSubMenuModel::ClearLocalEntries() {
   local_window_items_.clear();
 }
 
-browser_sync::OpenTabsUIDelegate*
-    RecentTabsSubMenuModel::GetOpenTabsUIDelegate() {
+sync_driver::OpenTabsUIDelegate*
+RecentTabsSubMenuModel::GetOpenTabsUIDelegate() {
   if (!open_tabs_delegate_) {
     ProfileSyncService* service = ProfileSyncServiceFactory::GetInstance()->
         GetForProfile(browser_->profile());
     // Only return the delegate if it exists and it is done syncing sessions.
-    if (service && service->SyncActive())
+    if (service && service->IsSyncActive())
       open_tabs_delegate_ = service->GetOpenTabsUIDelegate();
   }
   return open_tabs_delegate_;

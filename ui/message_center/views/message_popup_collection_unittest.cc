@@ -94,16 +94,11 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
 
   std::string AddNotification() {
     std::string id = base::IntToString(id_++);
-    scoped_ptr<Notification> notification(
-        new Notification(NOTIFICATION_TYPE_BASE_FORMAT,
-                         id,
-                         base::UTF8ToUTF16("test title"),
-                         base::UTF8ToUTF16("test message"),
-                         gfx::Image(),
-                         base::string16() /* display_source */,
-                         NotifierId(),
-                         message_center::RichNotificationData(),
-                         NULL /* delegate */));
+    scoped_ptr<Notification> notification(new Notification(
+        NOTIFICATION_TYPE_BASE_FORMAT, id, base::UTF8ToUTF16("test title"),
+        base::UTF8ToUTF16("test message"), gfx::Image(),
+        base::string16() /* display_source */, GURL(), NotifierId(),
+        message_center::RichNotificationData(), NULL /* delegate */));
     MessageCenter::Get()->AddNotification(notification.Pass());
     return id;
   }
@@ -168,6 +163,8 @@ TEST_F(MessagePopupCollectionTest, ShutdownDuringShowing) {
   // See crbug.com/236448
   GetWidget(id1)->CloseNow();
   collection()->OnMouseExited(GetToast(id2));
+
+  GetWidget(id2)->CloseNow();
 }
 
 TEST_F(MessagePopupCollectionTest, DefaultPositioning) {
@@ -206,6 +203,7 @@ TEST_F(MessagePopupCollectionTest, DefaultPositioning) {
 
   CloseAllToasts();
   EXPECT_EQ(0u, GetToastCounts());
+  WaitForTransitionsDone();
 }
 
 TEST_F(MessagePopupCollectionTest, DefaultPositioningWithRightTaskbar) {
@@ -236,6 +234,8 @@ TEST_F(MessagePopupCollectionTest, DefaultPositioningWithRightTaskbar) {
   // Restore simulated taskbar position to bottom.
   SetDisplayInfo(gfx::Rect(0, 0, 600, 390),  // Work-area.
                  gfx::Rect(0, 0, 600, 400)); // Display-bounds.
+
+  WaitForTransitionsDone();
 }
 
 TEST_F(MessagePopupCollectionTest, TopDownPositioningWithTopTaskbar) {
@@ -260,6 +260,7 @@ TEST_F(MessagePopupCollectionTest, TopDownPositioningWithTopTaskbar) {
 
   CloseAllToasts();
   EXPECT_EQ(0u, GetToastCounts());
+  WaitForTransitionsDone();
 
   // Restore simulated taskbar position to bottom.
   SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
@@ -291,6 +292,7 @@ TEST_F(MessagePopupCollectionTest, TopDownPositioningWithLeftAndTopTaskbar) {
 
   CloseAllToasts();
   EXPECT_EQ(0u, GetToastCounts());
+  WaitForTransitionsDone();
 
   // Restore simulated taskbar position to bottom.
   SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
@@ -322,6 +324,7 @@ TEST_F(MessagePopupCollectionTest, TopDownPositioningWithBottomAndTopTaskbar) {
 
   CloseAllToasts();
   EXPECT_EQ(0u, GetToastCounts());
+  WaitForTransitionsDone();
 
   // Restore simulated taskbar position to bottom.
   SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
@@ -353,6 +356,7 @@ TEST_F(MessagePopupCollectionTest, LeftPositioningWithLeftTaskbar) {
 
   CloseAllToasts();
   EXPECT_EQ(0u, GetToastCounts());
+  WaitForTransitionsDone();
 
   // Restore simulated taskbar position to bottom.
   SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
@@ -387,9 +391,9 @@ TEST_F(MessagePopupCollectionTest, DetectMouseHover) {
   EXPECT_TRUE(MouseInCollection());
   toast1->OnMouseEntered(event);
   EXPECT_TRUE(MouseInCollection());
-  toast0->WindowClosing();
+  toast0->GetWidget()->CloseNow();
   EXPECT_TRUE(MouseInCollection());
-  toast1->WindowClosing();
+  toast1->GetWidget()->CloseNow();
   EXPECT_FALSE(MouseInCollection());
 }
 
@@ -417,6 +421,9 @@ TEST_F(MessagePopupCollectionTest, DetectMouseHoverWithUserClose) {
   WaitForTransitionsDone();
   views::WidgetDelegateView* toast2 = GetToast(id2);
   EXPECT_TRUE(toast2 != NULL);
+
+  CloseAllToasts();
+  WaitForTransitionsDone();
 }
 
 

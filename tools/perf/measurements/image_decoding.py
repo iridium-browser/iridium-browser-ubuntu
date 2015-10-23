@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.page import page_test
 from telemetry.timeline import model
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 from telemetry.value import scalar
 
 from metrics import power
@@ -98,7 +98,6 @@ class ImageDecoding(page_test.PageTest):
         results.current_page, 'ImageLoading_avg', 'ms',
         tab.EvaluateJavaScript('averageLoadingTimeMs()')))
 
-  def CleanUpAfterPage(self, page, tab):
-    tracing_controller = tab.browser.platform.tracing_controller
-    if tracing_controller.is_tracing_running:
-      tracing_controller.Stop()
+  def DidRunPage(self, platform):
+    if platform.tracing_controller.is_tracing_running:
+      platform.tracing_controller.Stop()

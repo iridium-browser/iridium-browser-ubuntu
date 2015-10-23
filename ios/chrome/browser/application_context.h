@@ -9,8 +9,20 @@
 
 #include "base/macros.h"
 
+namespace ios {
+class ChromeBrowserStateManager;
+}
+
+namespace metrics {
+class MetricsService;
+}
+
 namespace net {
 class URLRequestContextGetter;
+}
+
+namespace rappor {
+class RapporService;
 }
 
 class ApplicationContext;
@@ -32,6 +44,15 @@ class ApplicationContext {
 
   // Gets the locale used by the application.
   virtual const std::string& GetApplicationLocale() = 0;
+
+  // Gets the ChromeBrowserStateManager used by this application.
+  virtual ios::ChromeBrowserStateManager* GetChromeBrowserStateManager() = 0;
+
+  // Gets the MetricsService used by this application.
+  virtual metrics::MetricsService* GetMetricsService() = 0;
+
+  // Gets the RapporService. May returns null.
+  virtual rappor::RapporService* GetRapporService() = 0;
 
  protected:
   // Sets the global ApplicationContext instance.

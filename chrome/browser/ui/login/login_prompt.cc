@@ -432,9 +432,9 @@ void MakeInputForPasswordManager(
     LoginHandler* handler,
     std::vector<PasswordForm>* password_manager_input) {
   PasswordForm dialog_form;
-  if (LowerCaseEqualsASCII(auth_info->scheme, "basic")) {
+  if (base::LowerCaseEqualsASCII(auth_info->scheme, "basic")) {
     dialog_form.scheme = PasswordForm::SCHEME_BASIC;
-  } else if (LowerCaseEqualsASCII(auth_info->scheme, "digest")) {
+  } else if (base::LowerCaseEqualsASCII(auth_info->scheme, "digest")) {
     dialog_form.scheme = PasswordForm::SCHEME_DIGEST;
   } else {
     dialog_form.scheme = PasswordForm::SCHEME_OTHER;
@@ -515,7 +515,7 @@ void ShowLoginPrompt(const GURL& request_url,
   // Tell the password manager to look for saved passwords.
   std::vector<PasswordForm> v;
   MakeInputForPasswordManager(request_url, auth_info, handler, &v);
-  driver->OnPasswordFormsParsed(v);
+  driver->OnPasswordFormsParsedNoRenderCheck(v);
   handler->SetPasswordManager(driver->GetPasswordManager());
 
   handler->BuildViewForPasswordManager(driver->GetPasswordManager(),

@@ -6,6 +6,7 @@
 
 #include "src/base/bits.h"
 #include "src/double.h"
+#include "src/elements.h"
 #include "src/factory.h"
 #include "src/hydrogen-infer-representation.h"
 
@@ -819,6 +820,7 @@ bool HInstruction::CanDeoptimize() {
     case HValue::kLeaveInlined:
     case HValue::kLoadFieldByIndex:
     case HValue::kLoadGlobalGeneric:
+    case HValue::kLoadGlobalViaContext:
     case HValue::kLoadNamedField:
     case HValue::kLoadNamedGeneric:
     case HValue::kLoadRoot:
@@ -832,12 +834,12 @@ bool HInstruction::CanDeoptimize() {
     case HValue::kSeqStringGetChar:
     case HValue::kStoreCodeEntry:
     case HValue::kStoreFrameContext:
+    case HValue::kStoreGlobalViaContext:
     case HValue::kStoreKeyed:
     case HValue::kStoreNamedField:
     case HValue::kStoreNamedGeneric:
     case HValue::kStringCharCodeAt:
     case HValue::kStringCharFromCode:
-    case HValue::kTailCallThroughMegamorphicCache:
     case HValue::kThisFunction:
     case HValue::kTypeofIsAndBranch:
     case HValue::kUnknownOSRValue:
@@ -874,6 +876,7 @@ bool HInstruction::CanDeoptimize() {
     case HValue::kLoadKeyed:
     case HValue::kLoadKeyedGeneric:
     case HValue::kMathFloorOfDiv:
+    case HValue::kMaybeGrowElements:
     case HValue::kMod:
     case HValue::kMul:
     case HValue::kOsrEntry:
@@ -1157,7 +1160,8 @@ Representation HBranch::observed_input_representation(int index) {
   if (expected_input_types_.Contains(ToBooleanStub::NULL_TYPE) ||
       expected_input_types_.Contains(ToBooleanStub::SPEC_OBJECT) ||
       expected_input_types_.Contains(ToBooleanStub::STRING) ||
-      expected_input_types_.Contains(ToBooleanStub::SYMBOL)) {
+      expected_input_types_.Contains(ToBooleanStub::SYMBOL) ||
+      expected_input_types_.Contains(ToBooleanStub::SIMD_VALUE)) {
     return Representation::Tagged();
   }
   if (expected_input_types_.Contains(ToBooleanStub::UNDEFINED)) {
@@ -1322,6 +1326,17 @@ static String* TypeOfString(HConstant* constant, Isolate* isolate) {
     }
     case SYMBOL_TYPE:
       return heap->symbol_string();
+    case SIMD128_VALUE_TYPE: {
+      Unique<Map> map = constant->ObjectMap();
+#define SIMD128_TYPE(TYPE, Type, type, lane_count, lane_type) \
+  if (map.IsKnownGlobal(heap->type##_map())) {                \
+    return heap->type##_string();                             \
+  }
+      SIMD128_TYPES(SIMD128_TYPE)
+#undef SIMD128_TYPE
+      UNREACHABLE();
+      return nullptr;
+    }
     case JS_FUNCTION_TYPE:
     case JS_FUNCTION_PROXY_TYPE:
       return heap->function_string();
@@ -1426,6 +1441,17 @@ HValue* HBitwise::Canonicalize() {
 }
 
 
+// static
+HInstruction* HAdd::New(Isolate* isolate, Zone* zone, HValue* context,
+                        HValue* left, HValue* right, Strength strength,
+                        ExternalAddType external_add_type) {
+  // For everything else, you should use the other factory method without
+  // ExternalAddType.
+  DCHECK_EQ(external_add_type, AddOfExternalAndTagged);
+  return new (zone) HAdd(context, left, right, strength, external_add_type);
+}
+
+
 Representation HAdd::RepresentationFromInputs() {
   Representation left_rep = left()->representation();
   if (left_rep.IsExternal()) {
@@ -1439,7 +1465,11 @@ Representation HAdd::RequiredInputRepresentation(int index) {
   if (index == 2) {
     Representation left_rep = left()->representation();
     if (left_rep.IsExternal()) {
-      return Representation::Integer32();
+      if (external_add_type_ == AddOfExternalAndTagged) {
+        return Representation::Tagged();
+      } else {
+        return Representation::Integer32();
+      }
     }
   }
   return HArithmeticBinaryOperation::RequiredInputRepresentation(index);
@@ -1626,6 +1656,9 @@ void HCheckInstanceType::GetCheckInterval(InstanceType* first,
     case IS_JS_ARRAY:
       *first = *last = JS_ARRAY_TYPE;
       return;
+    case IS_JS_DATE:
+      *first = *last = JS_DATE_TYPE;
+      return;
     default:
       UNREACHABLE();
   }
@@ -1695,6 +1728,8 @@ const char* HCheckInstanceType::GetCheckName() const {
   switch (check_) {
     case IS_SPEC_OBJECT: return "object";
     case IS_JS_ARRAY: return "array";
+    case IS_JS_DATE:
+      return "date";
     case IS_STRING: return "string";
     case IS_INTERNALIZED_STRING: return "internalized_string";
   }
@@ -1713,22 +1748,6 @@ std::ostream& HCheckInstanceType::PrintDataTo(
 std::ostream& HCallStub::PrintDataTo(std::ostream& os) const {  // NOLINT
   os << CodeStub::MajorName(major_key_, false) << " ";
   return HUnaryCall::PrintDataTo(os);
-}
-
-
-Code::Flags HTailCallThroughMegamorphicCache::flags() const {
-  Code::Flags code_flags = Code::RemoveTypeAndHolderFromFlags(
-      Code::ComputeHandlerFlags(Code::LOAD_IC));
-  return code_flags;
-}
-
-
-std::ostream& HTailCallThroughMegamorphicCache::PrintDataTo(
-    std::ostream& os) const {  // NOLINT
-  for (int i = 0; i < OperandCount(); i++) {
-    os << NameOf(OperandAt(i)) << " ";
-  }
-  return os << "flags: " << flags();
 }
 
 
@@ -2975,7 +2994,7 @@ std::ostream& HConstant::PrintDataTo(std::ostream& os) const {  // NOLINT
     os << reinterpret_cast<void*>(external_reference_value_.address()) << " ";
   } else {
     // The handle() method is silently and lazily mutating the object.
-    Handle<Object> h = const_cast<HConstant*>(this)->handle(Isolate::Current());
+    Handle<Object> h = const_cast<HConstant*>(this)->handle(isolate());
     os << Brief(*h) << " ";
     if (HasStableMapValue()) os << "[stable-map] ";
     if (HasObjectMap()) os << "[map " << *ObjectMap().handle() << "] ";
@@ -3197,18 +3216,13 @@ Range* HLoadNamedField::InferRange(Zone* zone) {
 
 Range* HLoadKeyed::InferRange(Zone* zone) {
   switch (elements_kind()) {
-    case EXTERNAL_INT8_ELEMENTS:
     case INT8_ELEMENTS:
       return new(zone) Range(kMinInt8, kMaxInt8);
-    case EXTERNAL_UINT8_ELEMENTS:
-    case EXTERNAL_UINT8_CLAMPED_ELEMENTS:
     case UINT8_ELEMENTS:
     case UINT8_CLAMPED_ELEMENTS:
       return new(zone) Range(kMinUInt8, kMaxUInt8);
-    case EXTERNAL_INT16_ELEMENTS:
     case INT16_ELEMENTS:
       return new(zone) Range(kMinInt16, kMaxInt16);
-    case EXTERNAL_UINT16_ELEMENTS:
     case UINT16_ELEMENTS:
       return new(zone) Range(kMinUInt16, kMaxUInt16);
     default:
@@ -3414,7 +3428,7 @@ void HCompareNumericAndBranch::InferRepresentation(
     // (false). Therefore, any comparisons other than ordered relational
     // comparisons must cause a deopt when one of their arguments is undefined.
     // See also v8:1434
-    if (Token::IsOrderedRelationalCompareOp(token_)) {
+    if (Token::IsOrderedRelationalCompareOp(token_) && !is_strong(strength())) {
       SetFlag(kAllowUndefinedAsNaN);
     }
   }
@@ -3451,11 +3465,11 @@ std::ostream& HLoadNamedGeneric::PrintDataTo(
 
 
 std::ostream& HLoadKeyed::PrintDataTo(std::ostream& os) const {  // NOLINT
-  if (!is_external()) {
+  if (!is_fixed_typed_array()) {
     os << NameOf(elements());
   } else {
-    DCHECK(elements_kind() >= FIRST_EXTERNAL_ARRAY_ELEMENTS_KIND &&
-           elements_kind() <= LAST_EXTERNAL_ARRAY_ELEMENTS_KIND);
+    DCHECK(elements_kind() >= FIRST_FIXED_TYPED_ARRAY_ELEMENTS_KIND &&
+           elements_kind() <= LAST_FIXED_TYPED_ARRAY_ELEMENTS_KIND);
     os << NameOf(elements()) << "." << ElementsKindToString(elements_kind());
   }
 
@@ -3490,7 +3504,7 @@ bool HLoadKeyed::UsesMustHandleHole() const {
     return false;
   }
 
-  if (IsExternalArrayElementsKind(elements_kind())) {
+  if (IsFixedTypedArrayElementsKind(elements_kind())) {
     return false;
   }
 
@@ -3530,7 +3544,7 @@ bool HLoadKeyed::RequiresHoleCheck() const {
     return false;
   }
 
-  if (IsExternalArrayElementsKind(elements_kind())) {
+  if (IsFixedTypedArrayElementsKind(elements_kind())) {
     return false;
   }
 
@@ -3589,6 +3603,13 @@ std::ostream& HStoreNamedGeneric::PrintDataTo(
 }
 
 
+std::ostream& HStoreGlobalViaContext::PrintDataTo(
+    std::ostream& os) const {  // NOLINT
+  return os << " depth:" << depth() << " slot:" << slot_index() << " = "
+            << NameOf(value());
+}
+
+
 std::ostream& HStoreNamedField::PrintDataTo(std::ostream& os) const {  // NOLINT
   os << NameOf(object()) << access_ << " = " << NameOf(value());
   if (NeedsWriteBarrier()) os << " (write-barrier)";
@@ -3598,11 +3619,11 @@ std::ostream& HStoreNamedField::PrintDataTo(std::ostream& os) const {  // NOLINT
 
 
 std::ostream& HStoreKeyed::PrintDataTo(std::ostream& os) const {  // NOLINT
-  if (!is_external()) {
+  if (!is_fixed_typed_array()) {
     os << NameOf(elements());
   } else {
-    DCHECK(elements_kind() >= FIRST_EXTERNAL_ARRAY_ELEMENTS_KIND &&
-           elements_kind() <= LAST_EXTERNAL_ARRAY_ELEMENTS_KIND);
+    DCHECK(elements_kind() >= FIRST_FIXED_TYPED_ARRAY_ELEMENTS_KIND &&
+           elements_kind() <= LAST_FIXED_TYPED_ARRAY_ELEMENTS_KIND);
     os << NameOf(elements()) << "." << ElementsKindToString(elements_kind());
   }
 
@@ -3636,6 +3657,12 @@ std::ostream& HTransitionElementsKind::PrintDataTo(
 std::ostream& HLoadGlobalGeneric::PrintDataTo(
     std::ostream& os) const {  // NOLINT
   return os << name()->ToCString().get() << " ";
+}
+
+
+std::ostream& HLoadGlobalViaContext::PrintDataTo(
+    std::ostream& os) const {  // NOLINT
+  return os << "depth:" << depth() << " slot:" << slot_index();
 }
 
 
@@ -3959,8 +3986,7 @@ bool HStoreKeyed::NeedsCanonicalization() {
   switch (value()->opcode()) {
     case kLoadKeyed: {
       ElementsKind load_kind = HLoadKeyed::cast(value())->elements_kind();
-      return IsExternalFloatOrDoubleElementsKind(load_kind) ||
-             IsFixedFloatElementsKind(load_kind);
+      return IsFixedFloatElementsKind(load_kind);
     }
     case kChange: {
       Representation from = HChange::cast(value())->from();
@@ -3982,22 +4008,21 @@ bool HStoreKeyed::NeedsCanonicalization() {
 #define H_CONSTANT_DOUBLE(val) \
   HConstant::New(isolate, zone, context, static_cast<double>(val))
 
-#define DEFINE_NEW_H_SIMPLE_ARITHMETIC_INSTR(HInstr, op)                     \
-  HInstruction* HInstr::New(Isolate* isolate, Zone* zone, HValue* context,   \
-                            HValue* left, HValue* right,                     \
-                            LanguageMode language_mode) {                    \
-    if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) {  \
-      HConstant* c_left = HConstant::cast(left);                             \
-      HConstant* c_right = HConstant::cast(right);                           \
-      if ((c_left->HasNumberValue() && c_right->HasNumberValue())) {         \
-        double double_res = c_left->DoubleValue() op c_right->DoubleValue(); \
-        if (IsInt32Double(double_res)) {                                     \
-          return H_CONSTANT_INT(double_res);                                 \
-        }                                                                    \
-        return H_CONSTANT_DOUBLE(double_res);                                \
-      }                                                                      \
-    }                                                                        \
-    return new (zone) HInstr(context, left, right, language_mode);           \
+#define DEFINE_NEW_H_SIMPLE_ARITHMETIC_INSTR(HInstr, op)                      \
+  HInstruction* HInstr::New(Isolate* isolate, Zone* zone, HValue* context,    \
+                            HValue* left, HValue* right, Strength strength) { \
+    if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) {   \
+      HConstant* c_left = HConstant::cast(left);                              \
+      HConstant* c_right = HConstant::cast(right);                            \
+      if ((c_left->HasNumberValue() && c_right->HasNumberValue())) {          \
+        double double_res = c_left->DoubleValue() op c_right->DoubleValue();  \
+        if (IsInt32Double(double_res)) {                                      \
+          return H_CONSTANT_INT(double_res);                                  \
+        }                                                                     \
+        return H_CONSTANT_DOUBLE(double_res);                                 \
+      }                                                                       \
+    }                                                                         \
+    return new (zone) HInstr(context, left, right, strength);                 \
   }
 
 
@@ -4009,8 +4034,7 @@ DEFINE_NEW_H_SIMPLE_ARITHMETIC_INSTR(HSub, -)
 
 
 HInstruction* HStringAdd::New(Isolate* isolate, Zone* zone, HValue* context,
-                              HValue* left, HValue* right,
-                              LanguageMode language_mode,
+                              HValue* left, HValue* right, Strength strength,
                               PretenureFlag pretenure_flag,
                               StringAddFlags flags,
                               Handle<AllocationSite> allocation_site) {
@@ -4028,9 +4052,8 @@ HInstruction* HStringAdd::New(Isolate* isolate, Zone* zone, HValue* context,
       }
     }
   }
-  return new(zone) HStringAdd(
-      context, left, right, language_mode, pretenure_flag, flags,
-      allocation_site);
+  return new (zone) HStringAdd(context, left, right, strength, pretenure_flag,
+                               flags, allocation_site);
 }
 
 
@@ -4228,8 +4251,7 @@ HInstruction* HMathMinMax::New(Isolate* isolate, Zone* zone, HValue* context,
 
 
 HInstruction* HMod::New(Isolate* isolate, Zone* zone, HValue* context,
-                        HValue* left, HValue* right,
-                        LanguageMode language_mode) {
+                        HValue* left, HValue* right, Strength strength) {
   if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) {
     HConstant* c_left = HConstant::cast(left);
     HConstant* c_right = HConstant::cast(right);
@@ -4248,13 +4270,12 @@ HInstruction* HMod::New(Isolate* isolate, Zone* zone, HValue* context,
       }
     }
   }
-  return new(zone) HMod(context, left, right, language_mode);
+  return new (zone) HMod(context, left, right, strength);
 }
 
 
 HInstruction* HDiv::New(Isolate* isolate, Zone* zone, HValue* context,
-                        HValue* left, HValue* right,
-                        LanguageMode language_mode) {
+                        HValue* left, HValue* right, Strength strength) {
   // If left and right are constant values, try to return a constant value.
   if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) {
     HConstant* c_left = HConstant::cast(left);
@@ -4273,13 +4294,13 @@ HInstruction* HDiv::New(Isolate* isolate, Zone* zone, HValue* context,
       }
     }
   }
-  return new(zone) HDiv(context, left, right, language_mode);
+  return new (zone) HDiv(context, left, right, strength);
 }
 
 
 HInstruction* HBitwise::New(Isolate* isolate, Zone* zone, HValue* context,
                             Token::Value op, HValue* left, HValue* right,
-                            LanguageMode language_mode) {
+                            Strength strength) {
   if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) {
     HConstant* c_left = HConstant::cast(left);
     HConstant* c_right = HConstant::cast(right);
@@ -4304,22 +4325,21 @@ HInstruction* HBitwise::New(Isolate* isolate, Zone* zone, HValue* context,
       return H_CONSTANT_INT(result);
     }
   }
-  return new(zone) HBitwise(context, op, left, right, language_mode);
+  return new (zone) HBitwise(context, op, left, right, strength);
 }
 
 
-#define DEFINE_NEW_H_BITWISE_INSTR(HInstr, result)                          \
-  HInstruction* HInstr::New(Isolate* isolate, Zone* zone, HValue* context,  \
-                            HValue* left, HValue* right,                    \
-                            LanguageMode language_mode) {                   \
-    if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) { \
-      HConstant* c_left = HConstant::cast(left);                            \
-      HConstant* c_right = HConstant::cast(right);                          \
-      if ((c_left->HasNumberValue() && c_right->HasNumberValue())) {        \
-        return H_CONSTANT_INT(result);                                      \
-      }                                                                     \
-    }                                                                       \
-    return new (zone) HInstr(context, left, right, language_mode);          \
+#define DEFINE_NEW_H_BITWISE_INSTR(HInstr, result)                            \
+  HInstruction* HInstr::New(Isolate* isolate, Zone* zone, HValue* context,    \
+                            HValue* left, HValue* right, Strength strength) { \
+    if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) {   \
+      HConstant* c_left = HConstant::cast(left);                              \
+      HConstant* c_right = HConstant::cast(right);                            \
+      if ((c_left->HasNumberValue() && c_right->HasNumberValue())) {          \
+        return H_CONSTANT_INT(result);                                        \
+      }                                                                       \
+    }                                                                         \
+    return new (zone) HInstr(context, left, right, strength);                 \
   }
 
 
@@ -4332,8 +4352,7 @@ c_left->NumberValueAsInteger32() << (c_right->NumberValueAsInteger32() & 0x1f))
 
 
 HInstruction* HShr::New(Isolate* isolate, Zone* zone, HValue* context,
-                        HValue* left, HValue* right,
-                        LanguageMode language_mode) {
+                        HValue* left, HValue* right, Strength strength) {
   if (FLAG_fold_constants && left->IsConstant() && right->IsConstant()) {
     HConstant* c_left = HConstant::cast(left);
     HConstant* c_right = HConstant::cast(right);
@@ -4346,7 +4365,7 @@ HInstruction* HShr::New(Isolate* isolate, Zone* zone, HValue* context,
       return H_CONSTANT_INT(static_cast<uint32_t>(left_val) >> right_val);
     }
   }
-  return new(zone) HShr(context, left, right, language_mode);
+  return new (zone) HShr(context, left, right, strength);
 }
 
 
@@ -4730,4 +4749,5 @@ std::ostream& operator<<(std::ostream& os, const HObjectAccess& access) {
   return os << "@" << access.offset();
 }
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

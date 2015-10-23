@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_DETAILS_H_
 
 #include "base/macros.h"
+#include "ui/gfx/native_widget_types.h"
 
 class Browser;
 class Profile;
@@ -29,11 +30,6 @@ class ChromeExtensionFunctionDetails {
   ~ChromeExtensionFunctionDetails();
 
   Profile* GetProfile() const;
-
-  // Returns true if this function (and the profile and extension that it was
-  // invoked from) can operate on the window wrapped by |window_controller|.
-  bool CanOperateOnWindow(
-      const extensions::WindowController* window_controller) const;
 
   // Gets the "current" browser, if any.
   //
@@ -61,6 +57,18 @@ class ChromeExtensionFunctionDetails {
   // Gets the "current" web contents if any. If there is no associated web
   // contents then defaults to the foremost one.
   content::WebContents* GetAssociatedWebContents();
+
+  // Gets the web contents where the function is originated. This will return
+  // the sender's web contents if it's not from a background page. Otherwise
+  // this method will try to find the web contents from source_tab_id if it's
+  // not TabStripModel::kNoTab, or find the app's web contents by the extension
+  // id. If the web contents still can't be found, NULL will be returned.
+  content::WebContents* GetOriginWebContents();
+
+  // Find a UI surface to display any UI (like a permission prompt) for the
+  // extension calling this function. If the origin's window can't be found,
+  // the browser's window will be returned.
+  gfx::NativeWindow GetNativeWindowForUI();
 
   // Returns a pointer to the associated UIThreadExtensionFunction
   UIThreadExtensionFunction* function() { return function_; }

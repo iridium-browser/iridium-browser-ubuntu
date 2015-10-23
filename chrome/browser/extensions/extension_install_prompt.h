@@ -15,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "extensions/common/permissions/permission_message_provider.h"
+#include "extensions/common/permissions/coalesced_permission_message.h"
 #include "extensions/common/url_pattern.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
@@ -52,15 +52,6 @@ class InfoBarDelegate;
 class ExtensionInstallPrompt
     : public base::SupportsWeakPtr<ExtensionInstallPrompt> {
  public:
-  // A setting to cause extension/app installs from the webstore skip the normal
-  // confirmation dialog. This should only be used in tests.
-  enum AutoConfirmForTests {
-    NONE,    // The prompt will show normally.
-    ACCEPT,  // The prompt will always accept.
-    CANCEL,  // The prompt will always cancel.
-  };
-  static AutoConfirmForTests g_auto_confirm_for_tests;
-
   // This enum is associated with Extensions.InstallPrompt_Type UMA histogram.
   // Do not modify existing values and add new values only to the end.
   enum PromptType {
@@ -76,6 +67,7 @@ class ExtensionInstallPrompt
     REMOTE_INSTALL_PROMPT,
     REPAIR_PROMPT,
     DELEGATED_PERMISSIONS_PROMPT,
+    DELEGATED_BUNDLE_PERMISSIONS_PROMPT,
     NUM_PROMPT_TYPES
   };
 
@@ -110,8 +102,9 @@ class ExtensionInstallPrompt
    public:
     explicit Prompt(PromptType type);
 
-    void SetPermissions(const extensions::PermissionMessageStrings& permissions,
-                        PermissionsType permissions_type);
+    void SetPermissions(
+        const extensions::CoalescedPermissionMessages& permissions,
+        PermissionsType permissions_type);
     void SetIsShowingDetails(DetailsType type,
                              size_t index,
                              bool is_showing_details);
@@ -125,11 +118,9 @@ class ExtensionInstallPrompt
 
     // Getters for UI element labels.
     base::string16 GetDialogTitle() const;
-    base::string16 GetHeading() const;
     int GetDialogButtons() const;
-    bool HasAcceptButtonLabel() const;
+    // Returns the empty string when there should be no "accept" button.
     base::string16 GetAcceptButtonLabel() const;
-    bool HasAbortButtonLabel() const;
     base::string16 GetAbortButtonLabel() const;
     base::string16 GetPermissionsHeading(
         PermissionsType permissions_type) const;
@@ -139,7 +130,7 @@ class ExtensionInstallPrompt
     bool ShouldShowPermissions() const;
 
     // Getters for webstore metadata. Only populated when the type is
-    // INLINE_INSTALL_PROMPT.
+    // INLINE_INSTALL_PROMPT, EXTERNAL_INSTALL_PROMPT, or REPAIR_PROMPT.
 
     // The star display logic replicates the one used by the webstore (from
     // components.ratingutils.setFractionalYellowStars). Callers pass in an
@@ -162,7 +153,8 @@ class ExtensionInstallPrompt
     size_t GetRetainedDeviceCount() const;
     base::string16 GetRetainedDeviceMessageString(size_t index) const;
 
-    // Populated for BUNDLE_INSTALL_PROMPT.
+    // Populated for BUNDLE_INSTALL_PROMPT and
+    // DELEGATED_BUNDLE_PERMISSIONS_PROMPT.
     const extensions::BundleInstaller* bundle() const { return bundle_; }
     void set_bundle(const extensions::BundleInstaller* bundle) {
       bundle_ = bundle;
@@ -314,9 +306,19 @@ class ExtensionInstallPrompt
   // This is called by the bundle installer to verify whether the bundle
   // should be installed.
   //
-  // We *MUST* eventually call either Proceed() or Abort() on |delegate|.
+  // We *MUST* eventually call either Proceed() or Abort() on |bundle|.
   virtual void ConfirmBundleInstall(
       extensions::BundleInstaller* bundle,
+      const SkBitmap* icon,
+      const extensions::PermissionSet* permissions);
+
+  // This is called by the bundle installer to verify the permissions for a
+  // delegated bundle install.
+  //
+  // We *MUST* eventually call either Proceed() or Abort() on |bundle|.
+  virtual void ConfirmPermissionsForDelegatedBundleInstall(
+      extensions::BundleInstaller* bundle,
+      const std::string& delegated_username,
       const SkBitmap* icon,
       const extensions::PermissionSet* permissions);
 
@@ -438,14 +440,15 @@ class ExtensionInstallPrompt
   SkBitmap icon_;
 
   // The extension we are showing the UI for, if type is not
-  // BUNDLE_INSTALL_PROMPT.
+  // BUNDLE_INSTALL_PROMPT or DELEGATED_BUNDLE_PERMISSIONS_PROMPT.
   const extensions::Extension* extension_;
 
-  // The bundle we are showing the UI for, if type BUNDLE_INSTALL_PROMPT.
+  // The bundle we are showing the UI for, if type BUNDLE_INSTALL_PROMPT or
+  // DELEGATED_BUNDLE_PERMISSIONS_PROMPT.
   const extensions::BundleInstaller* bundle_;
 
   // The name of the user we are asking about, if type
-  // DELEGATED_PERMISSIONS_PROMPT.
+  // DELEGATED_PERMISSIONS_PROMPT or DELEGATED_BUNDLE_PERMISSIONS_PROMPT.
   std::string delegated_username_;
 
   // A custom set of permissions to show in the install prompt instead of the

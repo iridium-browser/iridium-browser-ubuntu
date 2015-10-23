@@ -18,6 +18,7 @@
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
         '../components/components.gyp:keyed_service_content',
+        '../components/components.gyp:pref_registry_test_support',
         '../components/components.gyp:user_prefs',
         '../content/content_shell_and_tests.gyp:test_support_content',
         '../device/bluetooth/bluetooth.gyp:device_bluetooth_mocks',
@@ -72,7 +73,8 @@
         'shell/app_shell.gyp:app_shell_lib',
         # TODO(yoz): find the right deps
         '<(DEPTH)/base/base.gyp:test_support_base',
-        '<(DEPTH)/components/components.gyp:guest_view',
+        '<(DEPTH)/components/components.gyp:guest_view_browser',
+        '<(DEPTH)/components/components.gyp:guest_view_renderer',
         '<(DEPTH)/components/components.gyp:guest_view_test_support',
         '<(DEPTH)/content/content.gyp:content_app_both',
         '<(DEPTH)/content/content_shell_and_tests.gyp:content_browser_test_support',
@@ -125,6 +127,26 @@
             'extensions_browsertests.isolate',
           ],
         },
+        {
+          'target_name': 'extensions_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'extensions_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'extensions_unittests.isolate',
+          ],
+          'conditions': [
+            ['use_x11 == 1', {
+              'dependencies': [
+                '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
+          ],
+        }
       ],
     }],
   ],

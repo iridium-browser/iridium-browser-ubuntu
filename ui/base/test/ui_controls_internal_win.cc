@@ -148,19 +148,6 @@ bool FillKeyboardInput(ui::KeyboardCode key, INPUT* input, bool key_up) {
   return true;
 }
 
-// Send a key event (up/down)
-bool SendKeyEvent(ui::KeyboardCode key, bool up) {
-  INPUT input = { 0 };
-
-  if (!FillKeyboardInput(key, &input, up))
-    return false;
-
-  if (!::SendInput(1, &input, sizeof(INPUT)))
-    return false;
-
-  return true;
-}
-
 }  // namespace
 
 namespace ui_controls {
@@ -199,7 +186,7 @@ bool SendKeyPressImpl(HWND window,
     return true;
   }
 
-  INPUT input[8] = { 0 };  // 8, assuming all the modifiers are activated.
+  INPUT input[8] = {};  // 8, assuming all the modifiers are activated.
 
   UINT i = 0;
   if (control) {

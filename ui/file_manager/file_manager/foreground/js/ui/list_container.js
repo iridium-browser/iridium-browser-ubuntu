@@ -141,6 +141,7 @@ ListContainer.ListType = {
  */
 ListContainer.METADATA_PREFETCH_PROPERTY_NAMES = [
   'availableOffline',
+  'contentMimeType',
   'customIconUrl',
   'hosted',
   'modificationTime',
@@ -261,6 +262,23 @@ ListContainer.prototype.findListItemForNode = function(node) {
   // TODO(serya): list should check that.
   return item && this.currentList.isItem(item) ?
       assertInstanceof(item, cr.ui.ListItem) : null;
+};
+
+/**
+ * Focuses the active file list in the list container.
+ */
+ListContainer.prototype.focus = function() {
+  switch (this.currentListType) {
+    case ListContainer.ListType.DETAIL:
+      this.table.list.focus();
+      break;
+    case ListContainer.ListType.THUMBNAIL:
+      this.grid.focus();
+      break;
+    default:
+      assertNotReached();
+      break;
+  }
 };
 
 /**

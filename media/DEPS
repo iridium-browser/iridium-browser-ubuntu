@@ -1,5 +1,6 @@
 # Do NOT add net/ or ui/base without a great reason, they're huge!
 include_rules = [
+  "+chromeos/audio",
   "+crypto",
   "+device/udev_linux",
   "+device/usb",
@@ -7,6 +8,7 @@ include_rules = [
   "+jni",
   "+skia/ext",
   "+third_party/ffmpeg",
+  "+third_party/libwebm",
   "+third_party/libvpx",
   "+third_party/libyuv",
   "+third_party/opus",

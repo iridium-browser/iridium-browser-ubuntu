@@ -21,6 +21,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/startup_task_runner_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_service.h"
@@ -35,10 +36,11 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/profiles/startup_task_runner_service.h"
-#include "chrome/browser/profiles/startup_task_runner_service_factory.h"
+#include "chrome/browser/signin/account_fetcher_service_factory.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/signin/cross_device_promo.h"
+#include "chrome/browser/signin/cross_device_promo_factory.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -54,8 +56,10 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/browser/startup_task_runner_service.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/signin/core/browser/account_fetcher_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -1094,7 +1098,7 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
       MaybeActivateDataReductionProxy(true);
 
   GaiaCookieManagerServiceFactory::GetForProfile(profile)->Init();
-  AccountTrackerServiceFactory::GetForProfile(profile)->EnableNetworkFetches();
+  AccountFetcherServiceFactory::GetForProfile(profile)->EnableNetworkFetches();
   AccountReconcilorFactory::GetForProfile(profile);
 }
 
@@ -1238,7 +1242,7 @@ void ProfileManager::FinishDeletingProfile(
     if (ProfileSyncServiceFactory::GetInstance()->HasProfileSyncService(
         profile)) {
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(
-          profile)->DisableForUser();
+          profile)->RequestStop(ProfileSyncService::CLEAR_DATA);
     }
 
     ProfileMetrics::LogProfileDelete(cache.ProfileIsAuthenticatedAtIndex(
@@ -1248,20 +1252,21 @@ void ProfileManager::FinishDeletingProfile(
         PasswordStoreFactory::GetForProfile(
             profile, ServiceAccessType::EXPLICIT_ACCESS).get();
     if (password_store.get()) {
-      password_store->RemoveLoginsCreatedBetween(base::Time(),
-                                                 base::Time::Max());
+      password_store->RemoveLoginsCreatedBetween(
+          base::Time(), base::Time::Max(), base::Closure());
     }
 
     // The Profile Data doesn't get wiped until Chrome closes. Since we promised
     // that the user's data would be removed, do so immediately.
     profiles::RemoveBrowsingDataForProfile(profile_dir);
   } else {
+    // It is safe to delete a not yet loaded Profile from disk.
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
         base::Bind(&NukeProfileFromDisk, profile_dir));
   }
 
-  // Queue even a profile that was Nuked so it will be MarkedForDeletion and so
+  // Queue even a profile that was nuked so it will be MarkedForDeletion and so
   // CreateProfileAsync can't create it.
   QueueProfileDirectoryForDeletion(profile_dir);
   cache.DeleteProfileFromCache(profile_dir);
@@ -1384,8 +1389,17 @@ void ProfileManager::UpdateLastUser(Profile* last_active) {
     ProfileInfoCache& cache = GetProfileInfoCache();
     size_t profile_index =
         cache.GetIndexOfProfileWithPath(last_active->GetPath());
-    if (profile_index != std::string::npos)
+    if (profile_index != std::string::npos) {
+#if !defined(OS_CHROMEOS)
+      // Incognito Profiles don't have ProfileKeyedServices.
+      if (!last_active->IsOffTheRecord()) {
+        CrossDevicePromoFactory::GetForProfile(last_active)
+            ->MaybeBrowsingSessionStarted(
+                cache.GetProfileActiveTimeAtIndex(profile_index));
+      }
+#endif
       cache.SetProfileActiveTimeAtIndex(profile_index);
+    }
   }
 }
 

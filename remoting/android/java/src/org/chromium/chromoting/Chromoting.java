@@ -6,10 +6,6 @@ package org.chromium.chromoting;
 
 import android.accounts.Account;
 import android.accounts.AccountManager;
-import android.accounts.AccountManagerCallback;
-import android.accounts.AccountManagerFuture;
-import android.accounts.AuthenticatorException;
-import android.accounts.OperationCanceledException;
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
@@ -37,7 +33,6 @@ import android.widget.Toast;
 
 import org.chromium.chromoting.jni.JniInterface;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Locale;
 
@@ -46,22 +41,23 @@ import java.util.Locale;
  * also requests and renews authentication tokens using the system account manager.
  */
 public class Chromoting extends ActionBarActivity implements JniInterface.ConnectionListener,
-        AccountManagerCallback<Bundle>, AdapterView.OnItemSelectedListener, HostListLoader.Callback,
-        View.OnClickListener {
+        AdapterView.OnItemSelectedListener, HostListLoader.Callback, View.OnClickListener {
     /** Only accounts of this type will be selectable for authentication. */
     private static final String ACCOUNT_TYPE = "com.google";
 
-    /** Scopes at which the authentication token we request will be valid. */
-    private static final String TOKEN_SCOPE = "oauth2:https://www.googleapis.com/auth/chromoting "
-            + "https://www.googleapis.com/auth/googletalk";
-
     /** Web page to be displayed in the Help screen when launched from this activity. */
     private static final String HELP_URL =
-            "http://support.google.com/chrome/?p=mobile_crd_hostslist";
+            "https://support.google.com/chrome/?p=mobile_crd_hostslist";
 
     /** Web page to be displayed when user triggers the hyperlink for setting up hosts. */
     private static final String HOST_SETUP_URL =
             "https://support.google.com/chrome/answer/1649523";
+
+    /** Result code used for starting {@link DesktopActivity}. */
+    public static final int DESKTOP_ACTIVITY = 0;
+
+    /** Result code used for starting {@link CardboardDesktopActivity}. */
+    public static final int CARDBOARD_DESKTOP_ACTIVITY = 1;
 
     /** User's account details. */
     private Account mAccount;
@@ -282,6 +278,22 @@ public class Chromoting extends ActionBarActivity implements JniInterface.Connec
         JniInterface.disconnectFromHost();
     }
 
+    /** Called when a child Activity exits and sends a result back to this Activity. */
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == OAuthTokenFetcher.REQUEST_CODE_RECOVER_FROM_OAUTH_ERROR) {
+            if (resultCode == RESULT_OK) {
+                // User gave OAuth permission to this app (or recovered from any OAuth failure),
+                // so retry fetching the token.
+                requestAuthToken(false);
+            } else {
+                // User denied permission or cancelled the dialog, so cancel the request.
+                mWaitingForAuthToken = false;
+                setHostListProgressVisible(false);
+            }
+        }
+    }
+
     /** Called when the display is rotated (as registered in the manifest). */
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
@@ -377,44 +389,36 @@ public class Chromoting extends ActionBarActivity implements JniInterface.Connec
         setHostListProgressVisible(true);
 
         // The refresh button simply makes use of the currently-chosen account.
-        requestAuthToken();
+        requestAuthToken(false);
     }
 
-    private void requestAuthToken() {
-        AccountManager.get(this).getAuthToken(mAccount, TOKEN_SCOPE, null, this, this, null);
+    private void requestAuthToken(boolean expireCurrentToken) {
         mWaitingForAuthToken = true;
-    }
 
-    @Override
-    public void run(AccountManagerFuture<Bundle> future) {
-        Log.i("auth", "User finished with auth dialogs");
-        mWaitingForAuthToken = false;
+        OAuthTokenFetcher fetcher = new OAuthTokenFetcher(this, mAccount.name,
+                new OAuthTokenFetcher.Callback() {
+                    @Override
+                    public void onTokenFetched(String token) {
+                        mWaitingForAuthToken = false;
+                        mToken = token;
+                        mHostListLoader.retrieveHostList(mToken, Chromoting.this);
+                    }
 
-        Bundle result = null;
-        String explanation = null;
-        try {
-            // Here comes our auth token from the Android system.
-            result = future.getResult();
-        } catch (OperationCanceledException ex) {
-            // User canceled authentication. No need to report an error.
-        } catch (AuthenticatorException ex) {
-            explanation = getString(R.string.error_unexpected);
-        } catch (IOException ex) {
-            explanation = getString(R.string.error_network_error);
+                    @Override
+                    public void onError(int errorResource) {
+                        mWaitingForAuthToken = false;
+                        setHostListProgressVisible(false);
+                        String explanation = getString(errorResource);
+                        Toast.makeText(Chromoting.this, explanation, Toast.LENGTH_LONG).show();
+                    }
+                });
+
+        if (expireCurrentToken) {
+            fetcher.clearAndFetch(mToken);
+            mToken = null;
+        } else {
+            fetcher.fetch();
         }
-
-        if (result == null) {
-            setHostListProgressVisible(false);
-            if (explanation != null) {
-                Toast.makeText(this, explanation, Toast.LENGTH_LONG).show();
-            }
-            return;
-        }
-
-        mToken = result.getString(AccountManager.KEY_AUTHTOKEN);
-        Log.i("auth", "Received an auth token from system");
-
-        mHostListLoader.retrieveHostList(mToken, this);
     }
 
     @Override
@@ -472,14 +476,10 @@ public class Chromoting extends ActionBarActivity implements JniInterface.Connec
 
         if (!mTriedNewAuthToken) {
             // This was our first connection attempt.
-
-            AccountManager authenticator = AccountManager.get(this);
             mTriedNewAuthToken = true;
 
             Log.w("auth", "Requesting renewal of rejected auth token");
-            authenticator.invalidateAuthToken(mAccount.type, mToken);
-            mToken = null;
-            requestAuthToken();
+            requestAuthToken(true);
 
             // We're not in an error state *yet*.
             return;
@@ -518,14 +518,14 @@ public class Chromoting extends ActionBarActivity implements JniInterface.Connec
             case CONNECTED:
                 dismissProgress = true;
                 // Display the remote desktop.
-                startActivityForResult(new Intent(this, Desktop.class), 0);
+                startActivityForResult(new Intent(this, Desktop.class), DESKTOP_ACTIVITY);
                 break;
 
             case FAILED:
                 dismissProgress = true;
                 Toast.makeText(this, getString(error.message()), Toast.LENGTH_LONG).show();
                 // Close the Desktop view, if it is currently running.
-                finishActivity(0);
+                finishActivity(DESKTOP_ACTIVITY);
                 break;
 
             case CLOSED:
@@ -533,7 +533,7 @@ public class Chromoting extends ActionBarActivity implements JniInterface.Connec
                 // because of an error, which will trigger toast already. Or the disconnection will
                 // have been initiated by the user.
                 dismissProgress = true;
-                finishActivity(0);
+                finishActivity(DESKTOP_ACTIVITY);
                 break;
 
             default:

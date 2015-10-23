@@ -237,7 +237,7 @@ public:
     static void   GetGammaLUTData(SkScalar contrast, SkScalar paintGamma, SkScalar deviceGamma,
                                   void* data);
 
-    static void MakeRec(const SkPaint&, const SkDeviceProperties* deviceProperties,
+    static void MakeRec(const SkPaint&, const SkSurfaceProps* surfaceProps,
                         const SkMatrix*, Rec* rec);
     static inline void PostMakeRec(const SkPaint&, Rec*);
 
@@ -298,10 +298,11 @@ protected:
     virtual SkUnichar generateGlyphToChar(uint16_t glyphId);
 
     void forceGenerateImageFromPath() { fGenerateImageFromPath = true; }
-
     void forceOffGenerateImageFromPath() { fGenerateImageFromPath = false; }
 
 private:
+    friend class SkRandomScalerContext; // For debug purposes
+
     // never null
     SkAutoTUnref<SkTypeface> fTypeface;
 
@@ -330,8 +331,6 @@ private:
     // When there is a filter, previous steps must create a linear mask
     // and the pre-blend applied as a final step.
     const SkMaskGamma::PreBlend fPreBlendForFilter;
-
-    friend class SkRandomScalerContext; // For debugging
 };
 
 #define kRec_SkDescriptorTag            SkSetFourByteTag('s', 'r', 'e', 'c')

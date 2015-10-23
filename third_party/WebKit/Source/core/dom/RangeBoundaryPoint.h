@@ -28,7 +28,7 @@
 
 #include "core/dom/Node.h"
 #include "core/dom/NodeTraversal.h"
-#include "core/dom/Position.h"
+#include "core/editing/Position.h"
 
 namespace blink {
 
@@ -48,7 +48,7 @@ public:
     void clear();
 
     void set(PassRefPtrWillBeRawPtr<Node> container, int offset, Node* childBefore);
-    void setOffset(int offset);
+    void setOffset(int);
 
     void setToBeforeChild(Node&);
     void setToStartOfNode(Node&);
@@ -109,7 +109,7 @@ inline void RangeBoundaryPoint::ensureOffsetIsValid() const
 inline const Position RangeBoundaryPoint::toPosition() const
 {
     ensureOffsetIsValid();
-    return createLegacyEditingPosition(m_containerNode.get(), m_offsetInContainer);
+    return Position::editingPositionOf(m_containerNode.get(), m_offsetInContainer);
 }
 
 inline int RangeBoundaryPoint::offset() const

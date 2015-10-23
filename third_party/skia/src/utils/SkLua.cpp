@@ -534,7 +534,7 @@ static int lcanvas_drawImageRect(lua_State* L) {
     lua2rect(L, 4, &dstR);
 
     SkPaint paint;
-    canvas->drawImageRect(image, srcRPtr, dstR, lua2OptionalPaint(L, 5, &paint));
+    canvas->legacy_drawImageRect(image, srcRPtr, dstR, lua2OptionalPaint(L, 5, &paint));
     return 0;
 }
 
@@ -1200,23 +1200,20 @@ static int lshader_isOpaque(lua_State* L) {
     return shader && shader->isOpaque();
 }
 
-static int lshader_asABitmap(lua_State* L) {
+static int lshader_isABitmap(lua_State* L) {
     SkShader* shader = get_ref<SkShader>(L, 1);
     if (shader) {
         SkBitmap bm;
         SkMatrix matrix;
         SkShader::TileMode modes[2];
-        switch (shader->asABitmap(&bm, &matrix, modes)) {
-            case SkShader::kDefault_BitmapType:
-                lua_newtable(L);
-                setfield_number(L, "genID", bm.pixelRef() ? bm.pixelRef()->getGenerationID() : 0);
-                setfield_number(L, "width", bm.width());
-                setfield_number(L, "height", bm.height());
-                setfield_string(L, "tileX", mode2string(modes[0]));
-                setfield_string(L, "tileY", mode2string(modes[1]));
-                return 1;
-            default:
-                break;
+        if (shader->isABitmap(&bm, &matrix, modes)) {
+            lua_newtable(L);
+            setfield_number(L, "genID", bm.pixelRef() ? bm.pixelRef()->getGenerationID() : 0);
+            setfield_number(L, "width", bm.width());
+            setfield_number(L, "height", bm.height());
+            setfield_string(L, "tileX", mode2string(modes[0]));
+            setfield_string(L, "tileY", mode2string(modes[1]));
+            return 1;
         }
     }
     return 0;
@@ -1260,7 +1257,7 @@ static int lshader_gc(lua_State* L) {
 
 static const struct luaL_Reg gSkShader_Methods[] = {
     { "isOpaque",       lshader_isOpaque },
-    { "asABitmap",      lshader_asABitmap },
+    { "isABitmap",      lshader_isABitmap },
     { "asAGradient",    lshader_asAGradient },
     { "__gc",           lshader_gc },
     { NULL, NULL }
@@ -1993,7 +1990,8 @@ static int lsk_newRasterSurface(lua_State* L) {
     int width = lua2int_def(L, 1, 0);
     int height = lua2int_def(L, 2, 0);
     SkImageInfo info = SkImageInfo::MakeN32Premul(width, height);
-    SkSurface* surface = SkSurface::NewRaster(info);
+    SkSurfaceProps props(0, kUnknown_SkPixelGeometry);
+    SkSurface* surface = SkSurface::NewRaster(info, &props);
     if (NULL == surface) {
         lua_pushnil(L);
     } else {
@@ -2007,7 +2005,7 @@ static int lsk_loadImage(lua_State* L) {
         const char* name = lua_tolstring(L, 1, NULL);
         SkAutoDataUnref data(SkData::NewFromFileName(name));
         if (data.get()) {
-            SkImage* image = SkImage::NewFromData(data);
+            SkImage* image = SkImage::NewFromEncoded(data);
             if (image) {
                 push_ref(L, image)->unref();
                 return 1;

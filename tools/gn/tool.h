@@ -7,8 +7,8 @@
 
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "tools/gn/substitution_list.h"
 #include "tools/gn/substitution_pattern.h"
 
@@ -17,6 +17,11 @@ class Tool {
   enum DepsFormat {
     DEPS_GCC = 0,
     DEPS_MSVC = 1
+  };
+
+  enum PrecompiledHeaderType {
+    PCH_NONE = 0,
+    PCH_MSVC = 1
   };
 
   Tool();
@@ -61,6 +66,13 @@ class Tool {
   void set_depsformat(DepsFormat f) {
     DCHECK(!complete_);
     depsformat_ = f;
+  }
+
+  PrecompiledHeaderType precompiled_header_type() const {
+    return precompiled_header_type_;
+  }
+  void set_precompiled_header_type(PrecompiledHeaderType pch_type) {
+    precompiled_header_type_ = pch_type;
   }
 
   const SubstitutionPattern& description() const {
@@ -167,6 +179,7 @@ class Tool {
   std::string default_output_extension_;
   SubstitutionPattern depfile_;
   DepsFormat depsformat_;
+  PrecompiledHeaderType precompiled_header_type_;
   SubstitutionPattern description_;
   std::string lib_switch_;
   std::string lib_dir_switch_;

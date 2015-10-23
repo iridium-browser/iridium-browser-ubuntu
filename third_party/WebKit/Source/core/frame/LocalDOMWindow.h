@@ -73,19 +73,20 @@ public:
     {
         return adoptRefWillBeNoop(new LocalDOMWindow(frame));
     }
-    virtual ~LocalDOMWindow();
-    void dispose();
+
+    ~LocalDOMWindow() override;
+
+    DECLARE_VIRTUAL_TRACE();
 
     PassRefPtrWillBeRawPtr<Document> installNewDocument(const String& mimeType, const DocumentInit&, bool forceXHTML = false);
 
     // EventTarget overrides:
-    virtual ExecutionContext* executionContext() const override;
-    virtual LocalDOMWindow* toDOMWindow() override;
+    ExecutionContext* executionContext() const override;
+    LocalDOMWindow* toDOMWindow() override;
 
     // DOMWindow overrides:
-    DECLARE_VIRTUAL_TRACE();
     bool isLocalDOMWindow() const override { return true; }
-    virtual LocalFrame* frame() const override;
+    LocalFrame* frame() const override;
     Screen* screen() const override;
     History* history() const override;
     BarProp* locationbar() const override;
@@ -116,11 +117,9 @@ public:
     ApplicationCache* applicationCache() const override;
     int orientation() const override;
     Console* console() const override;
-    DOMWindowCSS* css() const override;
     DOMSelection* getSelection() override;
     void focus(ExecutionContext*) override;
     void blur() override;
-    void close(ExecutionContext*) override;
     void print() override;
     void stop() override;
     void alert(const String& message = String()) override;
@@ -128,23 +127,25 @@ public:
     String prompt(const String& message, const String& defaultValue) override;
     bool find(const String&, bool caseSensitive, bool backwards, bool wrap, bool wholeWord, bool searchInFrames, bool showDialog) const override;
 
-    // FIXME: ScrollBehaviorSmooth is currently unsupported in PinchViewport.
+    // FIXME: ScrollBehaviorSmooth is currently unsupported in VisualViewport.
     // crbug.com/434497
     void scrollBy(double x, double y, ScrollBehavior = ScrollBehaviorAuto) const override;
     void scrollBy(const ScrollToOptions&) const override;
     void scrollTo(double x, double y) const override;
     void scrollTo(const ScrollToOptions&) const override;
 
-    void moveBy(int x, int y, bool hasX, bool hasY) const override;
-    void moveTo(int x, int y, bool hasX, bool hasY) const override;
-    void resizeBy(int x, int y, bool hasX, bool hasY) const override;
-    void resizeTo(int width, int height, bool hasWidth, bool hasHeight) const override;
+    void moveBy(int x, int y) const override;
+    void moveTo(int x, int y) const override;
+    void resizeBy(int x, int y) const override;
+    void resizeTo(int width, int height) const override;
     PassRefPtrWillBeRawPtr<MediaQueryList> matchMedia(const String&) override;
     PassRefPtrWillBeRawPtr<CSSStyleDeclaration> getComputedStyle(Element*, const String& pseudoElt) const override;
     PassRefPtrWillBeRawPtr<CSSRuleList> getMatchedCSSRules(Element*, const String& pseudoElt) const override;
     int requestAnimationFrame(FrameRequestCallback*) override;
     int webkitRequestAnimationFrame(FrameRequestCallback*) override;
     void cancelAnimationFrame(int id) override;
+    int requestIdleCallback(IdleRequestCallback*, double timeoutMillis) override;
+    void cancelIdleCallback(int id) override;
     void schedulePostMessage(PassRefPtrWillBeRawPtr<MessageEvent>, LocalDOMWindow* source, SecurityOrigin* target, PassRefPtrWillBeRawPtr<ScriptCallStack> stackTrace);
 
     void registerProperty(DOMWindowProperty*);
@@ -167,13 +168,14 @@ public:
     void printErrorMessage(const String&);
 
     void postMessageTimerFired(PostMessageTimer*);
+    void removePostMessageTimer(PostMessageTimer*);
     void dispatchMessageEventWithOriginCheck(SecurityOrigin* intendedTargetOrigin, PassRefPtrWillBeRawPtr<Event>, PassRefPtrWillBeRawPtr<ScriptCallStack>);
 
     // Events
     // EventTarget API
-    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
-    virtual bool removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
-    virtual void removeAllEventListeners() override;
+    bool addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener>, bool useCapture = false) override;
+    bool removeEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener>, bool useCapture = false) override;
+    void removeAllEventListeners() override;
 
     using EventTarget::dispatchEvent;
     bool dispatchEvent(PassRefPtrWillBeRawPtr<Event> prpEvent, PassRefPtrWillBeRawPtr<EventTarget> prpTarget);
@@ -233,6 +235,7 @@ private:
     friend WTF::OwnedPtrDeleter<WindowFrameObserver>;
 
     explicit LocalDOMWindow(LocalFrame&);
+    void dispose();
 
     Page* page();
 
@@ -267,9 +270,7 @@ private:
     String m_status;
     String m_defaultStatus;
 
-    mutable RefPtrWillBeMember<ApplicationCache> m_applicationCache;
-
-    mutable RefPtrWillBeMember<DOMWindowCSS> m_css;
+    mutable PersistentWillBeMember<ApplicationCache> m_applicationCache;
 
     RefPtrWillBeMember<DOMWindowEventQueue> m_eventQueue;
     RefPtr<SerializedScriptValue> m_pendingStateObject;

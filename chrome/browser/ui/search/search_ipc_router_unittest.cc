@@ -21,11 +21,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
-#include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/omnibox/common/omnibox_focus_state.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -162,10 +162,11 @@ class SearchIPCRouterTest : public BrowserWithTestWindowTest {
     const IPC::Message* message = process()->sink().GetFirstMessageMatching(
         ChromeViewMsg_SearchBoxSetDisplayInstantResults::ID);
     EXPECT_NE(static_cast<const IPC::Message*>(NULL), message);
-    Tuple<bool> display_instant_results_param;
+    base::Tuple<bool> display_instant_results_param;
     ChromeViewMsg_SearchBoxSetDisplayInstantResults::Read(
         message, &display_instant_results_param);
-    EXPECT_EQ(expected_param_value, get<0>(display_instant_results_param));
+    EXPECT_EQ(expected_param_value,
+              base::get<0>(display_instant_results_param));
   }
 
   MockSearchIPCRouterDelegate* mock_delegate() { return &delegate_; }
@@ -189,7 +190,7 @@ class SearchIPCRouterTest : public BrowserWithTestWindowTest {
 
   void OnMessageReceived(const IPC::Message& message) {
     bool should_handle_message =
-        chrome::IsRenderedInInstantProcess(web_contents(), profile());
+        search::IsRenderedInInstantProcess(web_contents(), profile());
     bool handled = GetSearchIPCRouter().OnMessageReceived(message);
     ASSERT_EQ(should_handle_message, handled);
   }

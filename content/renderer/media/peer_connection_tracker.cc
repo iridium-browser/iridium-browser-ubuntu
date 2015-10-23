@@ -93,13 +93,13 @@ static string SerializeMediaConstraints(
 
 static string SerializeMediaStreamComponent(
     const blink::WebMediaStreamTrack component) {
-  string id = base::UTF16ToUTF8(component.source().id());
+  string id = base::UTF16ToUTF8(base::StringPiece16(component.source().id()));
   return id;
 }
 
 static string SerializeMediaDescriptor(
     const blink::WebMediaStream& stream) {
-  string label = base::UTF16ToUTF8(stream.id());
+  string label = base::UTF16ToUTF8(base::StringPiece16(stream.id()));
   string result = "label: " + label;
   blink::WebVector<blink::WebMediaStreamTrack> tracks;
   stream.audioTracks(tracks);
@@ -159,6 +159,22 @@ static std::string SerializeBundlePolicy(
     break;
   case webrtc::PeerConnectionInterface::kBundlePolicyMaxCompat:
     policy_str = "max-compat";
+    break;
+  default:
+    NOTREACHED();
+  };
+  return policy_str;
+}
+
+static std::string SerializeRtcpMuxPolicy(
+    webrtc::PeerConnectionInterface::RtcpMuxPolicy policy) {
+  string policy_str;
+  switch (policy) {
+  case webrtc::PeerConnectionInterface::kRtcpMuxPolicyNegotiate:
+    policy_str = "negotiate";
+    break;
+  case webrtc::PeerConnectionInterface::kRtcpMuxPolicyRequire:
+    policy_str = "require";
     break;
   default:
     NOTREACHED();
@@ -382,7 +398,8 @@ void PeerConnectionTracker::RegisterPeerConnection(
   info.rtc_configuration =
       "{ servers: " +  SerializeServers(config.servers) + ", " +
       "iceTransportType: " + SerializeIceTransportType(config.type) + ", " +
-      "bundlePolicy: " + SerializeBundlePolicy(config.bundle_policy) + " }";
+      "bundlePolicy: " + SerializeBundlePolicy(config.bundle_policy) + ", " +
+      "rtcpMuxPolicy: " + SerializeRtcpMuxPolicy(config.rtcp_mux_policy) + " }";
 
   info.constraints = SerializeMediaConstraints(constraints);
   info.url = frame->document().url().spec();
@@ -456,6 +473,9 @@ void PeerConnectionTracker::TrackUpdateIce(
   string bundle_policy =
       "bundlePolicy: " + SerializeBundlePolicy(config.bundle_policy);
 
+  string rtcp_mux_policy =
+      "rtcpMuxPolicy: " + SerializeRtcpMuxPolicy(config.rtcp_mux_policy);
+
   string constraints =
       "constraints: {" + SerializeMediaConstraints(options) + "}";
 
@@ -463,7 +483,8 @@ void PeerConnectionTracker::TrackUpdateIce(
       pc_handler,
       "updateIce",
       servers_string + ", " + transport_type + ", " +
-      bundle_policy + ", " + constraints);
+      bundle_policy + ", " + rtcp_mux_policy + ", " +
+      constraints);
 }
 
 void PeerConnectionTracker::TrackAddIceCandidate(
@@ -473,9 +494,11 @@ void PeerConnectionTracker::TrackAddIceCandidate(
       bool succeeded) {
   DCHECK(main_thread_.CalledOnValidThread());
   string value =
-      "sdpMid: " + base::UTF16ToUTF8(candidate.sdpMid()) + ", " +
-      "sdpMLineIndex: " + base::IntToString(candidate.sdpMLineIndex()) + ", " +
-      "candidate: " + base::UTF16ToUTF8(candidate.candidate());
+      "sdpMid: " +
+      base::UTF16ToUTF8(base::StringPiece16(candidate.sdpMid())) + ", " +
+      "sdpMLineIndex: " + base::IntToString(candidate.sdpMLineIndex()) +
+      ", " + "candidate: " +
+      base::UTF16ToUTF8(base::StringPiece16(candidate.candidate()));
 
   // OnIceCandidate always succeeds as it's a callback from the browser.
   DCHECK(source != SOURCE_LOCAL || succeeded);
@@ -590,7 +613,7 @@ void PeerConnectionTracker::TrackCreateDTMFSender(
     const blink::WebMediaStreamTrack& track) {
   DCHECK(main_thread_.CalledOnValidThread());
   SendPeerConnectionUpdate(pc_handler, "createDTMFSender",
-                           base::UTF16ToUTF8(track.id()));
+                           base::UTF16ToUTF8(base::StringPiece16(track.id())));
 }
 
 void PeerConnectionTracker::TrackGetUserMedia(

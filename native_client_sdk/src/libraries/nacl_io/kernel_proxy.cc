@@ -591,7 +591,7 @@ int KernelProxy::fstat(int fd, struct stat* buf) {
   return 0;
 }
 
-int KernelProxy::getdents(int fd, void* buf, unsigned int count) {
+int KernelProxy::getdents(int fd, struct dirent* buf, unsigned int count) {
   ScopedKernelHandle handle;
   Error error = AcquireHandle(fd, &handle);
   if (error) {
@@ -600,7 +600,7 @@ int KernelProxy::getdents(int fd, void* buf, unsigned int count) {
   }
 
   int cnt = 0;
-  error = handle->GetDents(static_cast<dirent*>(buf), count, &cnt);
+  error = handle->GetDents(buf, count, &cnt);
   if (error)
     errno = error;
 
@@ -1136,11 +1136,13 @@ int KernelProxy::kill(pid_t pid, int sig) {
 int KernelProxy::sigaction(int signum,
                            const struct sigaction* action,
                            struct sigaction* oaction) {
+#if defined(SA_SIGINFO)
   if (action && action->sa_flags & SA_SIGINFO) {
     // We don't support SA_SIGINFO (sa_sigaction field) yet
     errno = EINVAL;
     return -1;
   }
+#endif
 
   switch (signum) {
     // Handled signals.

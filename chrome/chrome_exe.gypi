@@ -466,6 +466,7 @@
             '../breakpad/breakpad.gyp:breakpad_sender',
             '../chrome_elf/chrome_elf.gyp:chrome_elf',
             '../components/components.gyp:crash_component',
+            '../components/components.gyp:crash_keys',
             '../sandbox/sandbox.gyp:sandbox',
             '../ui/gfx/gfx.gyp:gfx',
             '../win8/metro_driver/metro_driver.gyp:metro_driver',
@@ -533,12 +534,14 @@
               'message': 'Copy first run complete sentinel file',
             },
             {
+              # GN version: //chrome/app/version_assembly:chrome_exe_manifest
               'action_name': 'chrome_exe_manifest',
               'includes': [
                   'app/version_assembly/chrome_exe_manifest_action.gypi',
               ],
             },
             {
+              # GN version: //chrome/app/version_assembly:version_assembly_manifest
               'action_name': 'version_assembly_manifest',
               'includes': [
                   'app/version_assembly/version_assembly_manifest_action.gypi',
@@ -599,6 +602,7 @@
                 '../breakpad/breakpad.gyp:breakpad_handler_win64',
                 '../breakpad/breakpad.gyp:breakpad_sender_win64',
                 '../components/components.gyp:breakpad_win64',
+                '../components/components.gyp:crash_keys_win64',
                 '../chrome/common_constants.gyp:common_constants_win64',
                 '../components/nacl.gyp:nacl_win64',
                 '../crypto/crypto.gyp:crypto_nacl_win64',

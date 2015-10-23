@@ -34,6 +34,8 @@
 #include "../platform/WebCommon.h"
 #include "../platform/WebString.h"
 
+#include <string>
+
 namespace blink {
 
 // This class is used to enable runtime features of Blink.
@@ -41,10 +43,18 @@ namespace blink {
 class WebRuntimeFeatures {
 public:
     BLINK_EXPORT static void enableExperimentalFeatures(bool);
+
+    BLINK_EXPORT static void enableWebBluetooth(bool);
+
     BLINK_EXPORT static void enableTestOnlyFeatures(bool);
 
     // Enables a feature by its string identifier from
     // RuntimeEnabledFeatures.in.
+    // Note: We use std::string instead of WebString because this API can
+    // be called before blink::initalize(). We can't create WebString objects
+    // before blink::initialize().
+    BLINK_EXPORT static void enableFeatureFromString(const std::string& name, bool enable);
+    // TODO(bashi): Remove.
     BLINK_EXPORT static void enableFeatureFromString(const WebString& name, bool enable);
 
     BLINK_EXPORT static void enableApplicationCache(bool);
@@ -66,8 +76,6 @@ public:
     BLINK_EXPORT static bool isPrefixedEncryptedMediaEnabled();
 
     BLINK_EXPORT static void enableBleedingEdgeFastPaths(bool);
-
-    BLINK_EXPORT static void enableBlinkScheduler(bool);
 
     BLINK_EXPORT static void enableCompositorAnimationTimelines(bool);
 
@@ -93,8 +101,6 @@ public:
 
     BLINK_EXPORT static void enableNavigatorContentUtils(bool);
 
-    BLINK_EXPORT static void enableNavigationTransitions(bool);
-
     BLINK_EXPORT static void enableNetworkInformation(bool);
 
     BLINK_EXPORT static void enableOrientationEvent(bool);
@@ -109,9 +115,8 @@ public:
 
     BLINK_EXPORT static void enableScriptedSpeech(bool);
 
-    BLINK_EXPORT static void enableServiceWorker(bool);
-
     BLINK_EXPORT static void enableSlimmingPaint(bool);
+    BLINK_EXPORT static void enableSlimmingPaintV2(bool);
 
     BLINK_EXPORT static void enableTouch(bool);
 
@@ -131,6 +136,8 @@ public:
 
     BLINK_EXPORT static void enableOverlayFullscreenVideo(bool);
 
+    BLINK_EXPORT static void forceOverlayFullscreenVideo(bool);
+
     BLINK_EXPORT static void enableSharedWorker(bool);
 
     BLINK_EXPORT static void enablePreciseMemoryInfo(bool);
@@ -138,8 +145,6 @@ public:
     BLINK_EXPORT static void enableLayerSquashing(bool) { }
 
     BLINK_EXPORT static void enableCredentialManagerAPI(bool);
-
-    BLINK_EXPORT static void enableTextBlobs(bool);
 
     BLINK_EXPORT static void enableCSSViewport(bool);
 
@@ -160,6 +165,10 @@ public:
     BLINK_EXPORT static void enableUnsafeES3APIs(bool);
 
     BLINK_EXPORT static void enableWebVR(bool);
+
+    BLINK_EXPORT static void enableNewMediaPlaybackUi(bool);
+
+    BLINK_EXPORT static void enablePresentationAPI(bool);
 private:
     WebRuntimeFeatures();
 };

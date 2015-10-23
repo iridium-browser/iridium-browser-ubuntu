@@ -4,6 +4,7 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "mojo/runner/context.h"
+#include "mojo/runner/url_resolver.h"
 #include "mojo/shell/application_manager.h"
 #include "mojo/util/filename_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,9 +31,11 @@ class TestNativeRunner : public shell::NativeRunner {
   }
   ~TestNativeRunner() override {
     state_->runner_was_destroyed = true;
-    base::MessageLoop::current()->Quit();
+    if (base::MessageLoop::current()->is_running())
+      base::MessageLoop::current()->Quit();
   }
   void Start(const base::FilePath& app_path,
+             bool start_sandboxed,
              shell::NativeApplicationCleanup cleanup,
              InterfaceRequest<Application> application_request,
              const base::Closure& app_completed_callback) override {
@@ -78,8 +81,12 @@ class NativeApplicationLoaderTest : public testing::Test,
 
  private:
   // shell::ApplicationManager::Delegate
-  GURL ResolveMappings(const GURL& url) override { return url; }
-  GURL ResolveMojoURL(const GURL& url) override { return url; }
+  GURL ResolveMappings(const GURL& url) override {
+    return context_.url_resolver()->ApplyMappings(url);
+  }
+  GURL ResolveMojoURL(const GURL& url) override {
+    return context_.url_resolver()->ResolveMojoURL(url);
+  }
   bool CreateFetcher(
       const GURL& url,
       const shell::Fetcher::FetchCallback& loader_callback) override {
@@ -94,8 +101,12 @@ TEST_F(NativeApplicationLoaderTest, DoesNotExist) {
   GURL url(util::FilePathToFileURL(temp_dir.path().Append(nonexistent_file)));
   InterfaceRequest<ServiceProvider> services;
   ServiceProviderPtr service_provider;
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  request->url = mojo::String::From(url.spec());
   application_manager_.ConnectToApplication(
-      url, GURL(), services.Pass(), service_provider.Pass(), base::Closure());
+      nullptr, request.Pass(), std::string(), GURL(), services.Pass(),
+      service_provider.Pass(), shell::GetPermissiveCapabilityFilter(),
+      base::Closure());
   EXPECT_FALSE(state_.runner_was_created);
   EXPECT_FALSE(state_.runner_was_started);
   EXPECT_FALSE(state_.runner_was_destroyed);

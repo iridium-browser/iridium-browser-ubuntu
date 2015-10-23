@@ -14,6 +14,7 @@ from chromite.cli import command
 from chromite.cli import deploy
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
+from chromite.lib import portage_util
 from chromite.lib import remote_access
 try:
   import portage
@@ -35,7 +36,7 @@ class ChromiumOSDeviceFake(object):
     self.port = None
     self.lsb_release = None
 
-  def IsPathWritable(self, _):
+  def IsDirWritable(self, _):
     return True
 
 
@@ -53,6 +54,7 @@ class ChromiumOSDeviceHandlerFake(object):
 
   def __init__(self, *_args, **_kwargs):
     self._agent = self.RemoteAccessFake()
+    self.device = ChromiumOSDeviceFake()
 
   # TODO(dpursell): Mock remote access object in cros_test_lib (brbug.com/986).
   def GetAgent(self):
@@ -280,22 +282,38 @@ class TestInstallPackageScanner(cros_test_lib.MockOutputTestCase):
 class TestDeploy(cros_test_lib.ProgressBarTestCase):
   """Test deploy.Deploy."""
 
+  @staticmethod
+  def FakeGetPackagesByCPV(cpvs, _strip, _sysroot):
+    return ['/path/to/%s.tbz2' % cpv.pv for cpv in cpvs]
+
   def setUp(self):
     self.PatchObject(remote_access, 'ChromiumOSDeviceHandler',
                      side_effect=ChromiumOSDeviceHandlerFake)
     self.PatchObject(cros_build_lib, 'GetBoard', return_value=None)
     self.PatchObject(cros_build_lib, 'GetSysroot', return_value='sysroot')
     self.package_scanner = self.PatchObject(deploy, '_InstallPackageScanner')
+    self.get_packages_paths = self.PatchObject(
+        deploy, '_GetPackagesByCPV', side_effect=self.FakeGetPackagesByCPV)
     self.emerge = self.PatchObject(deploy, '_Emerge', return_value=None)
     self.unmerge = self.PatchObject(deploy, '_Unmerge', return_value=None)
 
   def testDeployEmerge(self):
     """Test that deploy._Emerge is called for each package."""
-    packages = ['foo', 'bar', 'foobar']
+
+    _BINPKG = '/path/to/bar-1.2.5.tbz2'
+    def FakeIsFile(fname):
+      return fname == _BINPKG
+
+    packages = ['some/foo-1.2.3', _BINPKG, 'some/foobar-2.0']
     self.package_scanner.return_value = PackageScannerFake(packages)
+    self.PatchObject(os.path, 'isfile', side_effect=FakeIsFile)
 
-    deploy.Deploy(None, 'package', force=True, clean_binpkg=False)
+    deploy.Deploy(None, ['package'], force=True, clean_binpkg=False)
 
+    # Check that package names were correctly resolved into binary packages.
+    self.get_packages_paths.assert_called_once_with(
+        [portage_util.SplitCPV(p) for p in packages if p != _BINPKG],
+        True, 'sysroot')
     # Check that deploy._Emerge is called the right number of times.
     self.assertEqual(self.emerge.call_count, len(packages))
     self.assertEqual(self.unmerge.call_count, 0)
@@ -305,7 +323,7 @@ class TestDeploy(cros_test_lib.ProgressBarTestCase):
     packages = ['foo', 'bar', 'foobar']
     self.package_scanner.return_value = PackageScannerFake(packages)
 
-    deploy.Deploy(None, 'package', force=True, clean_binpkg=False,
+    deploy.Deploy(None, ['package'], force=True, clean_binpkg=False,
                   emerge=False)
 
     # Check that deploy._Unmerge is called the right number of times.
@@ -321,7 +339,7 @@ class TestDeploy(cros_test_lib.ProgressBarTestCase):
                            return_value=None)
 
     self.PatchObject(command, 'UseProgressBar', return_value=True)
-    deploy.Deploy(None, 'package', force=True, clean_binpkg=False)
+    deploy.Deploy(None, ['package'], force=True, clean_binpkg=False)
 
     # Check that BrilloDeployOperation.Run was called.
     self.assertTrue(run.called)
@@ -335,7 +353,7 @@ class TestDeploy(cros_test_lib.ProgressBarTestCase):
                            return_value=None)
 
     self.PatchObject(command, 'UseProgressBar', return_value=True)
-    deploy.Deploy(None, 'package', force=True, clean_binpkg=False,
+    deploy.Deploy(None, ['package'], force=True, clean_binpkg=False,
                   emerge=False)
 
     # Check that BrilloDeployOperation.Run was called.
@@ -344,7 +362,7 @@ class TestDeploy(cros_test_lib.ProgressBarTestCase):
   def testBrilloDeployMergeOperation(self):
     """Test that BrilloDeployOperation works for merge."""
     def func(queue):
-      for event in op._merge_events:
+      for event in op.MERGE_EVENTS:
         queue.get()
         print(event)
 
@@ -356,12 +374,12 @@ class TestDeploy(cros_test_lib.ProgressBarTestCase):
       op.Run(func, queue)
 
     # Check that the progress bar prints correctly.
-    self.AssertProgressBarAllEvents(len(op._merge_events))
+    self.AssertProgressBarAllEvents(len(op.MERGE_EVENTS))
 
   def testBrilloDeployUnmergeOperation(self):
     """Test that BrilloDeployOperation works for unmerge."""
     def func(queue):
-      for event in op._unmerge_events:
+      for event in op.UNMERGE_EVENTS:
         queue.get()
         print(event)
 
@@ -373,4 +391,4 @@ class TestDeploy(cros_test_lib.ProgressBarTestCase):
       op.Run(func, queue)
 
     # Check that the progress bar prints correctly.
-    self.AssertProgressBarAllEvents(len(op._unmerge_events))
+    self.AssertProgressBarAllEvents(len(op.UNMERGE_EVENTS))

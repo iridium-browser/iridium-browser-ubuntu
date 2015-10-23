@@ -5,7 +5,6 @@
 #include "content/child/webmessageportchannel_impl.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/values.h"
 #include "content/child/child_process.h"
 #include "content/child/child_thread_impl.h"
@@ -85,13 +84,10 @@ void WebMessagePortChannelImpl::CreatePair(
 // static
 std::vector<TransferredMessagePort>
 WebMessagePortChannelImpl::ExtractMessagePortIDs(
-    WebMessagePortChannelArray* channels) {
+    scoped_ptr<WebMessagePortChannelArray> channels) {
   std::vector<TransferredMessagePort> message_ports;
-  if (channels) {
-    // Extract the port IDs from the source array, then free it.
+  if (channels)
     message_ports = ExtractMessagePortIDs(*channels);
-    delete channels;
-  }
   return message_ports;
 }
 
@@ -110,6 +106,32 @@ WebMessagePortChannelImpl::ExtractMessagePortIDs(
     message_ports[i].send_messages_as_values =
         webchannel->send_messages_as_values_;
     webchannel->QueueMessages();
+    DCHECK(message_ports[i].id != MSG_ROUTING_NONE);
+  }
+  return message_ports;
+}
+
+// static
+std::vector<TransferredMessagePort>
+WebMessagePortChannelImpl::ExtractMessagePortIDsWithoutQueueing(
+    scoped_ptr<WebMessagePortChannelArray> channels) {
+  if (!channels)
+    return std::vector<TransferredMessagePort>();
+
+  std::vector<TransferredMessagePort> message_ports(channels->size());
+  for (size_t i = 0; i < channels->size(); ++i) {
+    WebMessagePortChannelImpl* webchannel =
+        static_cast<WebMessagePortChannelImpl*>((*channels)[i]);
+    // The message port ids might not be set up yet if this channel
+    // wasn't created on the main thread.
+    DCHECK(webchannel->main_thread_task_runner_->BelongsToCurrentThread());
+    message_ports[i].id = webchannel->message_port_id();
+    message_ports[i].send_messages_as_values =
+        webchannel->send_messages_as_values_;
+    // Don't queue messages, but do increase the child processes ref-count to
+    // ensure this child process stays alive long enough to receive all
+    // in-flight messages.
+    ChildProcess::current()->AddRefProcess();
     DCHECK(message_ports[i].id != MSG_ROUTING_NONE);
   }
   return message_ports;
@@ -148,8 +170,9 @@ void WebMessagePortChannelImpl::destroy() {
 
 void WebMessagePortChannelImpl::postMessage(
     const WebString& message_as_string,
-    WebMessagePortChannelArray* channels) {
+    WebMessagePortChannelArray* channels_ptr) {
   MessagePortMessage message(message_as_string);
+  scoped_ptr<WebMessagePortChannelArray> channels(channels_ptr);
   if (send_messages_as_values_) {
     blink::WebSerializedScriptValue serialized_value =
         blink::WebSerializedScriptValue::fromString(message_as_string);
@@ -164,17 +187,17 @@ void WebMessagePortChannelImpl::postMessage(
   if (!main_thread_task_runner_->BelongsToCurrentThread()) {
     main_thread_task_runner_->PostTask(
         FROM_HERE, base::Bind(&WebMessagePortChannelImpl::PostMessage, this,
-                              message, channels));
+                              message, base::Passed(channels.Pass())));
   } else {
-    PostMessage(message, channels);
+    PostMessage(message, channels.Pass());
   }
 }
 
 void WebMessagePortChannelImpl::PostMessage(
     const MessagePortMessage& message,
-    WebMessagePortChannelArray* channels) {
+    scoped_ptr<WebMessagePortChannelArray> channels) {
   IPC::Message* msg = new MessagePortHostMsg_PostMessage(
-      message_port_id_, message, ExtractMessagePortIDs(channels));
+      message_port_id_, message, ExtractMessagePortIDs(channels.Pass()));
   Send(msg);
 }
 

@@ -35,7 +35,6 @@
 #include "talk/media/base/testutils.h"
 #include "webrtc/p2p/base/fakesession.h"
 #include "talk/session/media/channel.h"
-#include "talk/session/media/mediarecorder.h"
 #include "talk/session/media/typingmonitor.h"
 #include "webrtc/base/fileutils.h"
 #include "webrtc/base/gunit.h"
@@ -196,11 +195,13 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
     CopyContent(local_media_content2_, &remote_media_content2_);
 
     if (flags1 & DTLS) {
-      identity1_.reset(rtc::SSLIdentity::Generate("session1"));
+      // Confirmed to work with KT_RSA and KT_ECDSA.
+      identity1_.reset(rtc::SSLIdentity::Generate("session1", rtc::KT_DEFAULT));
       session1_.set_ssl_identity(identity1_.get());
     }
     if (flags2 & DTLS) {
-      identity2_.reset(rtc::SSLIdentity::Generate("session2"));
+      // Confirmed to work with KT_RSA and KT_ECDSA.
+      identity2_.reset(rtc::SSLIdentity::Generate("session2", rtc::KT_DEFAULT));
       session2_.set_ssl_identity(identity2_.get());
     }
 
@@ -617,30 +618,6 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
     EXPECT_TRUE(channel2_->SetRemoteContent(&content, CA_PRANSWER, NULL));
     EXPECT_TRUE(channel2_->SetRemoteContent(&content, CA_ANSWER, NULL));
     EXPECT_TRUE(channel2_->rtcp_transport_channel() != NULL);
-  }
-
-  // Test that SetLocalContent and SetRemoteContent properly set
-  // video options to the media channel.
-  void TestSetContentsVideoOptions() {
-    CreateChannels(0, 0);
-    typename T::Content content;
-    CreateContent(0, kPcmuCodec, kH264Codec, &content);
-    content.set_buffered_mode_latency(101);
-    EXPECT_TRUE(channel1_->SetLocalContent(&content, CA_OFFER, NULL));
-    EXPECT_EQ(0U, media_channel1_->codecs().size());
-    cricket::VideoOptions options;
-    ASSERT_TRUE(media_channel1_->GetOptions(&options));
-    int latency = 0;
-    EXPECT_TRUE(options.buffered_mode_latency.Get(&latency));
-    EXPECT_EQ(101, latency);
-    content.set_buffered_mode_latency(102);
-    EXPECT_TRUE(channel1_->SetRemoteContent(&content, CA_ANSWER, NULL));
-    ASSERT_EQ(1U, media_channel1_->codecs().size());
-    EXPECT_TRUE(CodecMatches(content.codecs()[0],
-                             media_channel1_->codecs()[0]));
-    ASSERT_TRUE(media_channel1_->GetOptions(&options));
-    EXPECT_TRUE(options.buffered_mode_latency.Get(&latency));
-    EXPECT_EQ(102, latency);
   }
 
   // Test that SetRemoteContent properly deals with a content update.
@@ -1140,6 +1117,89 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
     EXPECT_TRUE(CheckNoRtcp2());
   }
 
+  // Check that RTP and RTCP are transmitted ok when both sides
+  // support mux and one the offerer requires mux.
+  void SendRequireRtcpMuxToRtcpMux() {
+    CreateChannels(RTCP | RTCP_MUX, RTCP | RTCP_MUX);
+    channel1_->ActivateRtcpMux();
+    EXPECT_TRUE(SendInitiate());
+    EXPECT_EQ(1U, GetTransport1()->channels().size());
+    EXPECT_EQ(1U, GetTransport2()->channels().size());
+    EXPECT_TRUE(SendAccept());
+    EXPECT_TRUE(SendRtp1());
+    EXPECT_TRUE(SendRtp2());
+    EXPECT_TRUE(SendRtcp1());
+    EXPECT_TRUE(SendRtcp2());
+    EXPECT_TRUE(CheckRtp1());
+    EXPECT_TRUE(CheckRtp2());
+    EXPECT_TRUE(CheckNoRtp1());
+    EXPECT_TRUE(CheckNoRtp2());
+    EXPECT_TRUE(CheckRtcp1());
+    EXPECT_TRUE(CheckRtcp2());
+    EXPECT_TRUE(CheckNoRtcp1());
+    EXPECT_TRUE(CheckNoRtcp2());
+  }
+
+  // Check that RTP and RTCP are transmitted ok when both sides
+  // support mux and one the answerer requires rtcp mux.
+  void SendRtcpMuxToRequireRtcpMux() {
+    CreateChannels(RTCP | RTCP_MUX, RTCP | RTCP_MUX);
+    channel2_->ActivateRtcpMux();
+    EXPECT_TRUE(SendInitiate());
+    EXPECT_EQ(2U, GetTransport1()->channels().size());
+    EXPECT_EQ(1U, GetTransport2()->channels().size());
+    EXPECT_TRUE(SendAccept());
+    EXPECT_EQ(1U, GetTransport1()->channels().size());
+    EXPECT_TRUE(SendRtp1());
+    EXPECT_TRUE(SendRtp2());
+    EXPECT_TRUE(SendRtcp1());
+    EXPECT_TRUE(SendRtcp2());
+    EXPECT_TRUE(CheckRtp1());
+    EXPECT_TRUE(CheckRtp2());
+    EXPECT_TRUE(CheckNoRtp1());
+    EXPECT_TRUE(CheckNoRtp2());
+    EXPECT_TRUE(CheckRtcp1());
+    EXPECT_TRUE(CheckRtcp2());
+    EXPECT_TRUE(CheckNoRtcp1());
+    EXPECT_TRUE(CheckNoRtcp2());
+  }
+
+  // Check that RTP and RTCP are transmitted ok when both sides
+  // require mux.
+  void SendRequireRtcpMuxToRequireRtcpMux() {
+    CreateChannels(RTCP | RTCP_MUX, RTCP | RTCP_MUX);
+    channel1_->ActivateRtcpMux();
+    channel2_->ActivateRtcpMux();
+    EXPECT_TRUE(SendInitiate());
+    EXPECT_EQ(1U, GetTransport1()->channels().size());
+    EXPECT_EQ(1U, GetTransport2()->channels().size());
+    EXPECT_TRUE(SendAccept());
+    EXPECT_EQ(1U, GetTransport1()->channels().size());
+    EXPECT_TRUE(SendRtp1());
+    EXPECT_TRUE(SendRtp2());
+    EXPECT_TRUE(SendRtcp1());
+    EXPECT_TRUE(SendRtcp2());
+    EXPECT_TRUE(CheckRtp1());
+    EXPECT_TRUE(CheckRtp2());
+    EXPECT_TRUE(CheckNoRtp1());
+    EXPECT_TRUE(CheckNoRtp2());
+    EXPECT_TRUE(CheckRtcp1());
+    EXPECT_TRUE(CheckRtcp2());
+    EXPECT_TRUE(CheckNoRtcp1());
+    EXPECT_TRUE(CheckNoRtcp2());
+  }
+
+  // Check that SendAccept fails if the answerer doesn't support mux
+  // and the offerer requires it.
+  void SendRequireRtcpMuxToNoRtcpMux() {
+    CreateChannels(RTCP | RTCP_MUX, RTCP);
+    channel1_->ActivateRtcpMux();
+    EXPECT_TRUE(SendInitiate());
+    EXPECT_EQ(1U, GetTransport1()->channels().size());
+    EXPECT_EQ(2U, GetTransport2()->channels().size());
+    EXPECT_FALSE(SendAccept());
+  }
+
   // Check that RTCP data sent by the initiator before the accept is not muxed.
   void SendEarlyRtcpMuxToRtcp() {
     CreateChannels(RTCP | RTCP_MUX, RTCP);
@@ -1475,125 +1535,44 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
     channel1_->StopMediaMonitor();
   }
 
-  void TestMediaSinks() {
-    CreateChannels(0, 0);
-    EXPECT_TRUE(SendInitiate());
-    EXPECT_TRUE(SendAccept());
-    EXPECT_FALSE(channel1_->HasSendSinks(cricket::SINK_POST_CRYPTO));
-    EXPECT_FALSE(channel1_->HasRecvSinks(cricket::SINK_POST_CRYPTO));
-    EXPECT_FALSE(channel1_->HasSendSinks(cricket::SINK_PRE_CRYPTO));
-    EXPECT_FALSE(channel1_->HasRecvSinks(cricket::SINK_PRE_CRYPTO));
-
-    rtc::Pathname path;
-    EXPECT_TRUE(rtc::Filesystem::GetTemporaryFolder(path, true, NULL));
-    path.SetFilename("sink-test.rtpdump");
-    rtc::scoped_ptr<cricket::RtpDumpSink> sink(
-        new cricket::RtpDumpSink(Open(path.pathname())));
-    sink->set_packet_filter(cricket::PF_ALL);
-    EXPECT_TRUE(sink->Enable(true));
-    channel1_->RegisterSendSink(
-        sink.get(), &cricket::RtpDumpSink::OnPacket, cricket::SINK_POST_CRYPTO);
-    EXPECT_TRUE(channel1_->HasSendSinks(cricket::SINK_POST_CRYPTO));
-    EXPECT_FALSE(channel1_->HasRecvSinks(cricket::SINK_POST_CRYPTO));
-    EXPECT_FALSE(channel1_->HasSendSinks(cricket::SINK_PRE_CRYPTO));
-    EXPECT_FALSE(channel1_->HasRecvSinks(cricket::SINK_PRE_CRYPTO));
-
-    // The first packet is recorded with header + data.
-    EXPECT_TRUE(SendRtp1());
-    // The second packet is recorded with header only.
-    sink->set_packet_filter(cricket::PF_RTPHEADER);
-    EXPECT_TRUE(SendRtp1());
-    // The third packet is not recorded since sink is disabled.
-    EXPECT_TRUE(sink->Enable(false));
-    EXPECT_TRUE(SendRtp1());
-     // The fourth packet is not recorded since sink is unregistered.
-    EXPECT_TRUE(sink->Enable(true));
-    channel1_->UnregisterSendSink(sink.get(), cricket::SINK_POST_CRYPTO);
-    EXPECT_TRUE(SendRtp1());
-    sink.reset();  // This will close the file.
-
-    // Read the recorded file and verify two packets.
-    rtc::scoped_ptr<rtc::StreamInterface> stream(
-        rtc::Filesystem::OpenFile(path, "rb"));
-
-    cricket::RtpDumpReader reader(stream.get());
-    cricket::RtpDumpPacket packet;
-    EXPECT_EQ(rtc::SR_SUCCESS, reader.ReadPacket(&packet));
-    std::string read_packet(reinterpret_cast<const char*>(&packet.data[0]),
-        packet.data.size());
-    EXPECT_EQ(rtp_packet_, read_packet);
-
-    EXPECT_EQ(rtc::SR_SUCCESS, reader.ReadPacket(&packet));
-    size_t len = 0;
-    packet.GetRtpHeaderLen(&len);
-    EXPECT_EQ(len, packet.data.size());
-    EXPECT_EQ(0, memcmp(&packet.data[0], rtp_packet_.c_str(), len));
-
-    EXPECT_EQ(rtc::SR_EOS, reader.ReadPacket(&packet));
-
-    // Delete the file for media recording.
-    stream.reset();
-    EXPECT_TRUE(rtc::Filesystem::DeleteFile(path));
-  }
-
   void TestSetContentFailure() {
     CreateChannels(0, 0);
-    typename T::Content content;
-    cricket::SessionDescription* sdesc_loc = new cricket::SessionDescription();
-    cricket::SessionDescription* sdesc_rem = new cricket::SessionDescription();
 
-    // Set up the session description.
-    CreateContent(0, kPcmuCodec, kH264Codec, &content);
-    sdesc_loc->AddContent(cricket::CN_AUDIO, cricket::NS_JINGLE_RTP,
-                          new cricket::AudioContentDescription());
-    sdesc_loc->AddContent(cricket::CN_VIDEO, cricket::NS_JINGLE_RTP,
-                          new cricket::VideoContentDescription());
-    session1_.set_local_description(sdesc_loc);
-    sdesc_rem->AddContent(cricket::CN_AUDIO, cricket::NS_JINGLE_RTP,
-                          new cricket::AudioContentDescription());
-    sdesc_rem->AddContent(cricket::CN_VIDEO, cricket::NS_JINGLE_RTP,
-                          new cricket::VideoContentDescription());
-    session1_.set_remote_description(sdesc_rem);
+    auto sdesc = cricket::SessionDescription();
+    sdesc.AddContent(cricket::CN_AUDIO, cricket::NS_JINGLE_RTP,
+                     new cricket::AudioContentDescription());
+    sdesc.AddContent(cricket::CN_VIDEO, cricket::NS_JINGLE_RTP,
+                     new cricket::VideoContentDescription());
 
-    // Test failures in SetLocalContent.
+    std::string err;
     media_channel1_->set_fail_set_recv_codecs(true);
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_SENTINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_CONTENT, session1_.error());
-    media_channel1_->set_fail_set_recv_codecs(true);
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_SENTACCEPT);
-    EXPECT_EQ(cricket::BaseSession::ERROR_CONTENT, session1_.error());
+    EXPECT_FALSE(channel1_->PushdownLocalDescription(
+        &sdesc, cricket::CA_OFFER, &err));
+    EXPECT_FALSE(channel1_->PushdownLocalDescription(
+        &sdesc, cricket::CA_ANSWER, &err));
 
-    // Test failures in SetRemoteContent.
     media_channel1_->set_fail_set_send_codecs(true);
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_RECEIVEDINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_CONTENT, session1_.error());
+    EXPECT_FALSE(channel1_->PushdownRemoteDescription(
+        &sdesc, cricket::CA_OFFER, &err));
     media_channel1_->set_fail_set_send_codecs(true);
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_RECEIVEDACCEPT);
-    EXPECT_EQ(cricket::BaseSession::ERROR_CONTENT, session1_.error());
+    EXPECT_FALSE(channel1_->PushdownRemoteDescription(
+        &sdesc, cricket::CA_ANSWER, &err));
   }
 
   void TestSendTwoOffers() {
     CreateChannels(0, 0);
 
-    // Set up the initial session description.
-    cricket::SessionDescription* sdesc = CreateSessionDescriptionWithStream(1);
-    session1_.set_local_description(sdesc);
-
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_SENTINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    std::string err;
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc1(
+        CreateSessionDescriptionWithStream(1));
+    EXPECT_TRUE(channel1_->PushdownLocalDescription(
+        sdesc1.get(), cricket::CA_OFFER, &err));
     EXPECT_TRUE(media_channel1_->HasSendStream(1));
 
-    // Update the local description and set the state again.
-    sdesc = CreateSessionDescriptionWithStream(2);
-    session1_.set_local_description(sdesc);
-
-    session1_.SetState(cricket::BaseSession::STATE_SENTINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc2(
+        CreateSessionDescriptionWithStream(2));
+    EXPECT_TRUE(channel1_->PushdownLocalDescription(
+        sdesc2.get(), cricket::CA_OFFER, &err));
     EXPECT_FALSE(media_channel1_->HasSendStream(1));
     EXPECT_TRUE(media_channel1_->HasSendStream(2));
   }
@@ -1601,19 +1580,17 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
   void TestReceiveTwoOffers() {
     CreateChannels(0, 0);
 
-    // Set up the initial session description.
-    cricket::SessionDescription* sdesc = CreateSessionDescriptionWithStream(1);
-    session1_.set_remote_description(sdesc);
-
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_RECEIVEDINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    std::string err;
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc1(
+        CreateSessionDescriptionWithStream(1));
+    EXPECT_TRUE(channel1_->PushdownRemoteDescription(
+        sdesc1.get(), cricket::CA_OFFER, &err));
     EXPECT_TRUE(media_channel1_->HasRecvStream(1));
 
-    sdesc = CreateSessionDescriptionWithStream(2);
-    session1_.set_remote_description(sdesc);
-    session1_.SetState(cricket::BaseSession::STATE_RECEIVEDINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc2(
+        CreateSessionDescriptionWithStream(2));
+    EXPECT_TRUE(channel1_->PushdownRemoteDescription(
+        sdesc2.get(), cricket::CA_OFFER, &err));
     EXPECT_FALSE(media_channel1_->HasRecvStream(1));
     EXPECT_TRUE(media_channel1_->HasRecvStream(2));
   }
@@ -1621,30 +1598,27 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
   void TestSendPrAnswer() {
     CreateChannels(0, 0);
 
-    // Set up the initial session description.
-    cricket::SessionDescription* sdesc = CreateSessionDescriptionWithStream(1);
-    session1_.set_remote_description(sdesc);
-
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_RECEIVEDINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    std::string err;
+    // Receive offer
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc1(
+        CreateSessionDescriptionWithStream(1));
+    EXPECT_TRUE(channel1_->PushdownRemoteDescription(
+        sdesc1.get(), cricket::CA_OFFER, &err));
     EXPECT_TRUE(media_channel1_->HasRecvStream(1));
 
-    // Send PRANSWER
-    sdesc = CreateSessionDescriptionWithStream(2);
-    session1_.set_local_description(sdesc);
-
-    session1_.SetState(cricket::BaseSession::STATE_SENTPRACCEPT);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    // Send PR answer
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc2(
+        CreateSessionDescriptionWithStream(2));
+    EXPECT_TRUE(channel1_->PushdownLocalDescription(
+        sdesc2.get(), cricket::CA_PRANSWER, &err));
     EXPECT_TRUE(media_channel1_->HasRecvStream(1));
     EXPECT_TRUE(media_channel1_->HasSendStream(2));
 
-    // Send ACCEPT
-    sdesc = CreateSessionDescriptionWithStream(3);
-    session1_.set_local_description(sdesc);
-
-    session1_.SetState(cricket::BaseSession::STATE_SENTACCEPT);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    // Send answer
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc3(
+        CreateSessionDescriptionWithStream(3));
+    EXPECT_TRUE(channel1_->PushdownLocalDescription(
+        sdesc3.get(), cricket::CA_ANSWER, &err));
     EXPECT_TRUE(media_channel1_->HasRecvStream(1));
     EXPECT_FALSE(media_channel1_->HasSendStream(2));
     EXPECT_TRUE(media_channel1_->HasSendStream(3));
@@ -1653,30 +1627,27 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
   void TestReceivePrAnswer() {
     CreateChannels(0, 0);
 
-    // Set up the initial session description.
-    cricket::SessionDescription* sdesc = CreateSessionDescriptionWithStream(1);
-    session1_.set_local_description(sdesc);
-
-    session1_.SetError(cricket::BaseSession::ERROR_NONE, "");
-    session1_.SetState(cricket::BaseSession::STATE_SENTINITIATE);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    std::string err;
+    // Send offer
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc1(
+        CreateSessionDescriptionWithStream(1));
+    EXPECT_TRUE(channel1_->PushdownLocalDescription(
+        sdesc1.get(), cricket::CA_OFFER, &err));
     EXPECT_TRUE(media_channel1_->HasSendStream(1));
 
-    // Receive PRANSWER
-    sdesc = CreateSessionDescriptionWithStream(2);
-    session1_.set_remote_description(sdesc);
-
-    session1_.SetState(cricket::BaseSession::STATE_RECEIVEDPRACCEPT);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    // Receive PR answer
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc2(
+        CreateSessionDescriptionWithStream(2));
+    EXPECT_TRUE(channel1_->PushdownRemoteDescription(
+        sdesc2.get(), cricket::CA_PRANSWER, &err));
     EXPECT_TRUE(media_channel1_->HasSendStream(1));
     EXPECT_TRUE(media_channel1_->HasRecvStream(2));
 
-    // Receive ACCEPT
-    sdesc = CreateSessionDescriptionWithStream(3);
-    session1_.set_remote_description(sdesc);
-
-    session1_.SetState(cricket::BaseSession::STATE_RECEIVEDACCEPT);
-    EXPECT_EQ(cricket::BaseSession::ERROR_NONE, session1_.error());
+    // Receive answer
+    rtc::scoped_ptr<cricket::SessionDescription> sdesc3(
+        CreateSessionDescriptionWithStream(3));
+    EXPECT_TRUE(channel1_->PushdownRemoteDescription(
+        sdesc3.get(), cricket::CA_ANSWER, &err));
     EXPECT_TRUE(media_channel1_->HasSendStream(1));
     EXPECT_FALSE(media_channel1_->HasRecvStream(2));
     EXPECT_TRUE(media_channel1_->HasRecvStream(3));
@@ -1911,7 +1882,7 @@ cricket::VideoChannel* ChannelTest<VideoTraits>::CreateChannel(
     cricket::FakeVideoMediaChannel* ch, cricket::BaseSession* session,
     bool rtcp) {
   cricket::VideoChannel* channel = new cricket::VideoChannel(
-      thread, engine, ch, session, cricket::CN_VIDEO, rtcp);
+      thread, ch, session, cricket::CN_VIDEO, rtcp);
   if (!channel->Init()) {
     delete channel;
     channel = NULL;
@@ -2085,6 +2056,22 @@ TEST_F(VoiceChannelTest, SendRtcpMuxToRtcpMux) {
   Base::SendRtcpMuxToRtcpMux();
 }
 
+TEST_F(VoiceChannelTest, SendRequireRtcpMuxToRtcpMux) {
+  Base::SendRequireRtcpMuxToRtcpMux();
+}
+
+TEST_F(VoiceChannelTest, SendRtcpMuxToRequireRtcpMux) {
+  Base::SendRtcpMuxToRequireRtcpMux();
+}
+
+TEST_F(VoiceChannelTest, SendRequireRtcpMuxToRequireRtcpMux) {
+  Base::SendRequireRtcpMuxToRequireRtcpMux();
+}
+
+TEST_F(VoiceChannelTest, SendRequireRtcpMuxToNoRtcpMux) {
+  Base::SendRequireRtcpMuxToNoRtcpMux();
+}
+
 TEST_F(VoiceChannelTest, SendEarlyRtcpMuxToRtcp) {
   Base::SendEarlyRtcpMuxToRtcp();
 }
@@ -2215,10 +2202,6 @@ TEST_F(VoiceChannelTest, TestInsertDtmf) {
                               2, 5, 110, cricket::DF_PLAY));
   EXPECT_TRUE(CompareDtmfInfo(media_channel1_->dtmf_info_queue()[2],
                               3, 7, 120, cricket::DF_PLAY | cricket::DF_SEND));
-}
-
-TEST_F(VoiceChannelTest, TestMediaSinks) {
-  Base::TestMediaSinks();
 }
 
 TEST_F(VoiceChannelTest, TestSetContentFailure) {
@@ -2405,10 +2388,6 @@ TEST_F(VideoChannelTest, TestSetContentsRtcpMuxWithPrAnswer) {
   Base::TestSetContentsRtcpMux();
 }
 
-TEST_F(VideoChannelTest, TestSetContentsVideoOptions) {
-  Base::TestSetContentsVideoOptions();
-}
-
 TEST_F(VideoChannelTest, TestSetRemoteContentUpdate) {
   Base::TestSetRemoteContentUpdate();
 }
@@ -2507,6 +2486,22 @@ TEST_F(VideoChannelTest, SendRtcpMuxToRtcpMux) {
   Base::SendRtcpMuxToRtcpMux();
 }
 
+TEST_F(VideoChannelTest, SendRequireRtcpMuxToRtcpMux) {
+  Base::SendRequireRtcpMuxToRtcpMux();
+}
+
+TEST_F(VideoChannelTest, SendRtcpMuxToRequireRtcpMux) {
+  Base::SendRtcpMuxToRequireRtcpMux();
+}
+
+TEST_F(VideoChannelTest, SendRequireRtcpMuxToRequireRtcpMux) {
+  Base::SendRequireRtcpMuxToRequireRtcpMux();
+}
+
+TEST_F(VideoChannelTest, SendRequireRtcpMuxToNoRtcpMux) {
+  Base::SendRequireRtcpMuxToNoRtcpMux();
+}
+
 TEST_F(VideoChannelTest, SendEarlyRtcpMuxToRtcp) {
   Base::SendEarlyRtcpMuxToRtcp();
 }
@@ -2560,10 +2555,6 @@ TEST_F(VideoChannelTest, SendWithWritabilityLoss) {
 
 TEST_F(VideoChannelTest, TestMediaMonitor) {
   Base::TestMediaMonitor();
-}
-
-TEST_F(VideoChannelTest, TestMediaSinks) {
-  Base::TestMediaSinks();
 }
 
 TEST_F(VideoChannelTest, TestSetContentFailure) {

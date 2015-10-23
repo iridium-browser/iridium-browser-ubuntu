@@ -4,8 +4,8 @@
 
 #include "ash/touch/touch_transformer_controller.h"
 
-#include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
@@ -117,20 +117,21 @@ gfx::Transform TouchTransformerController::GetTouchTransform(
 }
 
 TouchTransformerController::TouchTransformerController() {
-  Shell::GetInstance()->display_controller()->AddObserver(this);
+  Shell::GetInstance()->window_tree_host_manager()->AddObserver(this);
 }
 
 TouchTransformerController::~TouchTransformerController() {
-  Shell::GetInstance()->display_controller()->RemoveObserver(this);
+  Shell::GetInstance()->window_tree_host_manager()->RemoveObserver(this);
 }
 
 void TouchTransformerController::UpdateTouchRadius(
     const DisplayInfo& display) const {
   ui::DeviceDataManager* device_manager = ui::DeviceDataManager::GetInstance();
-  device_manager->UpdateTouchRadiusScale(
-      display.touch_device_id(),
-      GetTouchResolutionScale(display,
-                              FindTouchscreenById(display.touch_device_id())));
+  for (const auto& device_id : display.input_devices()) {
+    device_manager->UpdateTouchRadiusScale(
+        device_id,
+        GetTouchResolutionScale(display, FindTouchscreenById(device_id)));
+  }
 }
 
 void TouchTransformerController::UpdateTouchTransform(
@@ -140,11 +141,12 @@ void TouchTransformerController::UpdateTouchTransform(
   ui::DeviceDataManager* device_manager = ui::DeviceDataManager::GetInstance();
   gfx::Size fb_size =
       Shell::GetInstance()->display_configurator()->framebuffer_size();
-  device_manager->UpdateTouchInfoForDisplay(
-      target_display_id, touch_display.touch_device_id(),
-      GetTouchTransform(target_display, touch_display,
-                        FindTouchscreenById(touch_display.touch_device_id()),
-                        fb_size));
+  for (const auto& device_id : touch_display.input_devices()) {
+    device_manager->UpdateTouchInfoForDisplay(
+        target_display_id, device_id,
+        GetTouchTransform(target_display, touch_display,
+                          FindTouchscreenById(device_id), fb_size));
+  }
 }
 
 void TouchTransformerController::UpdateTouchTransformer() const {
@@ -160,8 +162,8 @@ void TouchTransformerController::UpdateTouchTransformer() const {
   int64 single_display_id = gfx::Display::kInvalidDisplayID;
   DisplayInfo single_display;
 
-  DisplayController* display_controller =
-      Shell::GetInstance()->display_controller();
+  WindowTreeHostManager* window_tree_host_manager =
+      Shell::GetInstance()->window_tree_host_manager();
   DisplayManager* display_manager = GetDisplayManager();
   if (display_manager->num_connected_displays() == 0) {
     return;
@@ -187,7 +189,8 @@ void TouchTransformerController::UpdateTouchTransformer() const {
       Shell::GetInstance()->display_configurator()->framebuffer_size();
 
   if (display_manager->IsInMirrorMode()) {
-    int64_t primary_display_id = display_controller->GetPrimaryDisplayId();
+    int64_t primary_display_id =
+        window_tree_host_manager->GetPrimaryDisplayId();
     if (GetDisplayManager()->SoftwareMirroringEnabled()) {
       // In extended but software mirroring mode, there is a WindowTreeHost for
       // each display, but all touches are forwarded to the primary root

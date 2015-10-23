@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/ash/ash_keyboard_controller_proxy.h"
 
-#include "ash/display/display_controller.h"
 #include "ash/shell.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
@@ -14,22 +13,20 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/api/virtual_keyboard_private.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
 #include "ipc/ipc_message_macros.h"
-#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 
-namespace virtual_keyboard_private =
-    extensions::core_api::virtual_keyboard_private;
+namespace virtual_keyboard_private = extensions::api::virtual_keyboard_private;
 
 typedef virtual_keyboard_private::OnTextInputBoxFocused::Context Context;
 
@@ -95,6 +92,7 @@ class AshKeyboardControllerObserver
     event_args->Append(new_bounds.release());
 
     scoped_ptr<extensions::Event> event(new extensions::Event(
+        extensions::events::VIRTUAL_KEYBOARD_PRIVATE_ON_BOUNDS_CHANGED,
         virtual_keyboard_private::OnBoundsChanged::kEventName,
         event_args.Pass()));
     event->restrict_to_browser_context = context_;
@@ -115,19 +113,13 @@ AshKeyboardControllerProxy::AshKeyboardControllerProxy(
 }
 
 AshKeyboardControllerProxy::~AshKeyboardControllerProxy() {
-  DCHECK(!keyboard_controller_);
-}
-
-void AshKeyboardControllerProxy::OnRequest(
-    const ExtensionHostMsg_Request_Params& params) {
-  extension_function_dispatcher_->Dispatch(
-      params, web_contents()->GetRenderViewHost());
+  DCHECK(!keyboard_controller());
 }
 
 ui::InputMethod* AshKeyboardControllerProxy::GetInputMethod() {
-  aura::Window* root_window = ash::Shell::GetInstance()->GetPrimaryRootWindow();
+  aura::Window* root_window = ash::Shell::GetTargetRootWindow();
   DCHECK(root_window);
-  return root_window->GetProperty(aura::client::kRootWindowInputMethodKey);
+  return root_window->GetHost()->GetInputMethod();
 }
 
 void AshKeyboardControllerProxy::RequestAudioInput(
@@ -149,47 +141,24 @@ void AshKeyboardControllerProxy::RequestAudioInput(
 
 void AshKeyboardControllerProxy::SetupWebContents(
     content::WebContents* contents) {
-  extension_function_dispatcher_.reset(
-      new extensions::ExtensionFunctionDispatcher(browser_context(), this));
   extensions::SetViewType(contents, extensions::VIEW_TYPE_VIRTUAL_KEYBOARD);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       contents);
   Observe(contents);
 }
 
-extensions::WindowController*
-    AshKeyboardControllerProxy::GetExtensionWindowController() const {
-  // The keyboard doesn't have a window controller.
-  return NULL;
-}
-
 void AshKeyboardControllerProxy::SetController(
     keyboard::KeyboardController* controller) {
   // During KeyboardController destruction, controller can be set to null.
   if (!controller) {
-    DCHECK(keyboard_controller_);
-    keyboard_controller_->RemoveObserver(observer_.get());
-    keyboard_controller_ = nullptr;
+    DCHECK(keyboard_controller());
+    keyboard_controller()->RemoveObserver(observer_.get());
+    KeyboardControllerProxy::SetController(nullptr);
     return;
   }
-  keyboard_controller_ = controller;
+  KeyboardControllerProxy::SetController(controller);
   observer_.reset(new AshKeyboardControllerObserver(browser_context()));
-  keyboard_controller_->AddObserver(observer_.get());
-}
-
-content::WebContents*
-    AshKeyboardControllerProxy::GetAssociatedWebContents() const {
-  return web_contents();
-}
-
-bool AshKeyboardControllerProxy::OnMessageReceived(
-    const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(AshKeyboardControllerProxy, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
+  keyboard_controller()->AddObserver(observer_.get());
 }
 
 void AshKeyboardControllerProxy::RenderViewCreated(
@@ -231,6 +200,7 @@ void AshKeyboardControllerProxy::SetUpdateInputType(ui::TextInputType type) {
   event_args->Append(input_context.release());
 
   scoped_ptr<extensions::Event> event(new extensions::Event(
+      extensions::events::VIRTUAL_KEYBOARD_PRIVATE_ON_TEXT_INPUT_BOX_FOCUSED,
       virtual_keyboard_private::OnTextInputBoxFocused::kEventName,
       event_args.Pass()));
   event->restrict_to_browser_context = browser_context();

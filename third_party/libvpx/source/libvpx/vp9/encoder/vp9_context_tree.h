@@ -12,6 +12,7 @@
 #define VP9_ENCODER_VP9_CONTEXT_TREE_H_
 
 #include "vp9/common/vp9_blockd.h"
+#include "vp9/encoder/vp9_block.h"
 
 struct VP9_COMP;
 struct VP9Common;
@@ -20,6 +21,7 @@ struct ThreadData;
 // Structure to hold snapshot of coding context during the mode picking process
 typedef struct {
   MODE_INFO mic;
+  MB_MODE_INFO_EXT mbmi_ext;
   uint8_t *zcoeff_blk;
   tran_low_t *coeff[MAX_MB_PLANE][3];
   tran_low_t *qcoeff[MAX_MB_PLANE][3];
@@ -44,7 +46,6 @@ typedef struct {
   int hybrid_pred_diff;
   int comp_pred_diff;
   int single_pred_diff;
-  int64_t tx_rd_diff[TX_MODES];
   int64_t best_filter_diff[SWITCHABLE_FILTER_CONTEXTS];
 
   // TODO(jingning) Use RD_COST struct here instead. This involves a boarder

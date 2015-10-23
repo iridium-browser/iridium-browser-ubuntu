@@ -12,10 +12,10 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/common/experiments.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
@@ -37,7 +37,10 @@ Profile* PasswordUIViewAndroid::GetProfile() {
 }
 
 void PasswordUIViewAndroid::ShowPassword(
-    size_t index, const base::string16& password_value) {
+    size_t index,
+    const std::string& origin_url,
+    const std::string& username,
+    const base::string16& password_value) {
   NOTIMPLEMENTED();
 }
 
@@ -79,7 +82,7 @@ PasswordUIViewAndroid::GetSavedPasswordEntry(JNIEnv* env, jobject, int index) {
         ConvertUTF8ToJavaString(env, std::string()).obj(),
         ConvertUTF16ToJavaString(env, base::string16()).obj());
   }
-  std::string human_readable_origin = GetHumanReadableOrigin(
+  std::string human_readable_origin = password_manager::GetHumanReadableOrigin(
       *form, GetProfile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
   return Java_PasswordUIView_createSavedPasswordEntry(
       env, ConvertUTF8ToJavaString(env, human_readable_origin).obj(),
@@ -92,7 +95,7 @@ ScopedJavaLocalRef<jstring> PasswordUIViewAndroid::GetSavedPasswordException(
       password_manager_presenter_.GetPasswordException(index);
   if (!form)
     return ConvertUTF8ToJavaString(env, std::string());
-  std::string human_readable_origin = GetHumanReadableOrigin(
+  std::string human_readable_origin = password_manager::GetHumanReadableOrigin(
       *form, GetProfile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
   return ConvertUTF8ToJavaString(env, human_readable_origin);
 }

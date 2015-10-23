@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/command_line.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
@@ -20,6 +18,7 @@
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "third_party/WebKit/public/web/WebSandboxFlags.h"
 
 // For fine-grained suppression on flaky tests.
 #if defined(OS_WIN)
@@ -216,14 +215,14 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, OriginSetOnNavigation) {
   // Extra '/' is added because the replicated origin is serialized in RFC 6454
   // format, which dictates no trailing '/', whereas GURL::GetOrigin does put a
   // '/' at the end.
-  EXPECT_EQ(root->current_replication_state().origin.string() + '/',
+  EXPECT_EQ(root->current_replication_state().origin.Serialize() + '/',
             main_url.GetOrigin().spec());
 
   GURL frame_url(embedded_test_server()->GetURL("/title1.html"));
   NavigateFrameToURL(root->child_at(0), frame_url);
 
   EXPECT_EQ(
-      root->child_at(0)->current_replication_state().origin.string() + '/',
+      root->child_at(0)->current_replication_state().origin.Serialize() + '/',
       frame_url.GetOrigin().spec());
 
   GURL data_url("data:text/html,foo");
@@ -231,11 +230,11 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, OriginSetOnNavigation) {
 
   // Navigating to a data URL should set a unique origin.  This is represented
   // as "null" per RFC 6454.
-  EXPECT_EQ(root->current_replication_state().origin.string(), "null");
+  EXPECT_EQ(root->current_replication_state().origin.Serialize(), "null");
 
   // Re-navigating to a normal URL should update the origin.
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
-  EXPECT_EQ(root->current_replication_state().origin.string() + '/',
+  EXPECT_EQ(root->current_replication_state().origin.Serialize() + '/',
             main_url.GetOrigin().spec());
 }
 
@@ -254,31 +253,63 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, SandboxFlagsSetForChildFrames) {
   // SandboxFlags::AutomaticFeatures bits per blink::parseSandboxPolicy(), and
   // third frame has "allow-scripts allow-same-origin".
   EXPECT_EQ(root->current_replication_state().sandbox_flags,
-            SandboxFlags::NONE);
+            blink::WebSandboxFlags::None);
   EXPECT_EQ(root->child_at(0)->current_replication_state().sandbox_flags,
-            SandboxFlags::ALL);
+            blink::WebSandboxFlags::All);
   EXPECT_EQ(root->child_at(1)->current_replication_state().sandbox_flags,
-            SandboxFlags::ALL & ~SandboxFlags::SCRIPTS &
-                ~SandboxFlags::AUTOMATIC_FEATURES);
+            blink::WebSandboxFlags::All & ~blink::WebSandboxFlags::Scripts &
+                ~blink::WebSandboxFlags::AutomaticFeatures);
   EXPECT_EQ(root->child_at(2)->current_replication_state().sandbox_flags,
-            SandboxFlags::ALL & ~SandboxFlags::SCRIPTS &
-                ~SandboxFlags::AUTOMATIC_FEATURES & ~SandboxFlags::ORIGIN);
+            blink::WebSandboxFlags::All & ~blink::WebSandboxFlags::Scripts &
+                ~blink::WebSandboxFlags::AutomaticFeatures &
+                ~blink::WebSandboxFlags::Origin);
 
   // Sandboxed frames should set a unique origin unless they have the
   // "allow-same-origin" directive.
-  EXPECT_EQ(root->child_at(0)->current_replication_state().origin.string(),
+  EXPECT_EQ(root->child_at(0)->current_replication_state().origin.Serialize(),
             "null");
-  EXPECT_EQ(root->child_at(1)->current_replication_state().origin.string(),
+  EXPECT_EQ(root->child_at(1)->current_replication_state().origin.Serialize(),
             "null");
   EXPECT_EQ(
-      root->child_at(2)->current_replication_state().origin.string() + "/",
+      root->child_at(2)->current_replication_state().origin.Serialize() + "/",
       main_url.GetOrigin().spec());
 
   // Navigating to a different URL should not clear sandbox flags.
   GURL frame_url(embedded_test_server()->GetURL("/title1.html"));
   NavigateFrameToURL(root->child_at(0), frame_url);
   EXPECT_EQ(root->child_at(0)->current_replication_state().sandbox_flags,
-            SandboxFlags::ALL);
+            blink::WebSandboxFlags::All);
+}
+
+// Ensure that a popup opened from a subframe sets its opener to the subframe's
+// FrameTreeNode, and that the opener is cleared if the subframe is destroyed.
+IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, SubframeOpenerSetForNewWindow) {
+  GURL main_url(embedded_test_server()->GetURL("/frame_tree/top.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  // Open a new window from a subframe.
+  ShellAddedObserver new_shell_observer;
+  GURL popup_url(embedded_test_server()->GetURL("foo.com", "/title1.html"));
+  EXPECT_TRUE(ExecuteScript(root->child_at(0)->current_frame_host(),
+                            "window.open('" + popup_url.spec() + "');"));
+  Shell* new_shell = new_shell_observer.GetShell();
+  WebContents* new_contents = new_shell->web_contents();
+  WaitForLoadStop(new_contents);
+
+  // Check that the new window's opener points to the correct subframe on
+  // original window.
+  FrameTreeNode* popup_root =
+      static_cast<WebContentsImpl*>(new_contents)->GetFrameTree()->root();
+  EXPECT_EQ(root->child_at(0), popup_root->opener());
+
+  // Close the original window.  This should clear the new window's opener.
+  shell()->Close();
+  EXPECT_EQ(nullptr, popup_root->opener());
 }
 
 class CrossProcessFrameTreeBrowserTest : public ContentBrowserTest {
@@ -286,7 +317,7 @@ class CrossProcessFrameTreeBrowserTest : public ContentBrowserTest {
   CrossProcessFrameTreeBrowserTest() {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kSitePerProcess);
+    IsolateAllSitesForTesting(command_line);
   }
 
   void SetUpOnMainThread() override {
@@ -300,13 +331,8 @@ class CrossProcessFrameTreeBrowserTest : public ContentBrowserTest {
 };
 
 // Ensure that we can complete a cross-process subframe navigation.
-#if defined(OS_ANDROID)
-#define MAYBE_CreateCrossProcessSubframeProxies DISABLED_CreateCrossProcessSubframeProxies
-#else
-#define MAYBE_CreateCrossProcessSubframeProxies CreateCrossProcessSubframeProxies
-#endif
 IN_PROC_BROWSER_TEST_F(CrossProcessFrameTreeBrowserTest,
-                       MAYBE_CreateCrossProcessSubframeProxies) {
+                       CreateCrossProcessSubframeProxies) {
   GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
   NavigateToURL(shell(), main_url);
 
@@ -367,19 +393,19 @@ IN_PROC_BROWSER_TEST_F(CrossProcessFrameTreeBrowserTest,
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
                             ->GetFrameTree()->root();
 
-  EXPECT_EQ(root->current_replication_state().origin.string() + '/',
+  EXPECT_EQ(root->current_replication_state().origin.Serialize() + '/',
             main_url.GetOrigin().spec());
 
   // First frame is an about:blank frame.  Check that its origin is correctly
   // inherited from the parent.
   EXPECT_EQ(
-      root->child_at(0)->current_replication_state().origin.string() + '/',
+      root->child_at(0)->current_replication_state().origin.Serialize() + '/',
       main_url.GetOrigin().spec());
 
   // Second frame loads a same-site page.  Its origin should also be the same
   // as the parent.
   EXPECT_EQ(
-      root->child_at(1)->current_replication_state().origin.string() + '/',
+      root->child_at(1)->current_replication_state().origin.Serialize() + '/',
       main_url.GetOrigin().spec());
 
   // Load cross-site page into the first frame.
@@ -388,11 +414,11 @@ IN_PROC_BROWSER_TEST_F(CrossProcessFrameTreeBrowserTest,
   NavigateFrameToURL(root->child_at(0), cross_site_url);
 
   EXPECT_EQ(
-      root->child_at(0)->current_replication_state().origin.string() + '/',
+      root->child_at(0)->current_replication_state().origin.Serialize() + '/',
       cross_site_url.GetOrigin().spec());
 
   // The root's origin shouldn't have changed.
-  EXPECT_EQ(root->current_replication_state().origin.string() + '/',
+  EXPECT_EQ(root->current_replication_state().origin.Serialize() + '/',
             main_url.GetOrigin().spec());
 
   GURL data_url("data:text/html,foo");
@@ -400,7 +426,7 @@ IN_PROC_BROWSER_TEST_F(CrossProcessFrameTreeBrowserTest,
 
   // Navigating to a data URL should set a unique origin.  This is represented
   // as "null" per RFC 6454.
-  EXPECT_EQ(root->child_at(1)->current_replication_state().origin.string(),
+  EXPECT_EQ(root->child_at(1)->current_replication_state().origin.Serialize(),
             "null");
 }
 

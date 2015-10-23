@@ -36,7 +36,6 @@ namespace {
 
 const wchar_t kNameValue[] = L"GCP Virtual Driver";
 const wchar_t kUninstallId[] = L"{74AA24E0-AC50-4B28-BA46-9CF05467C9B7}";
-const wchar_t kInstallerName[] = L"virtual_driver_setup.exe";
 const wchar_t kGcpUrl[] = L"http://www.google.com/cloudprint";
 
 const wchar_t kDataFileName[] = L"gcp_driver.gpd";
@@ -284,7 +283,7 @@ HRESULT InstallDriver(const base::FilePath& install_path) {
   driver_info.pDriverPath = const_cast<LPWSTR>(xps_path.value().c_str());
   driver_info.pConfigFile = const_cast<LPWSTR>(ui_path.value().c_str());
 
-  base::string16 dependent_files(JoinString(dependent_array, L'\n'));
+  base::string16 dependent_files(base::JoinString(dependent_array, L"\n"));
   dependent_files.push_back(L'\n');
   std::replace(dependent_files.begin(), dependent_files.end(), L'\n', L'\0');
   driver_info.pDependentFiles = &dependent_files[0];

@@ -64,6 +64,8 @@
  */
 function WebGLRenderingContextBase() {}
 
+/** @typedef {number} */
+WebGLRenderingContextBase.GLenum;
 
 /** @type {number} */
 WebGLRenderingContextBase.DEPTH_BUFFER_BIT;
@@ -5090,22 +5092,22 @@ WebGL2RenderingContextBase.prototype.createVertexArray = function() {};
 WebGL2RenderingContextBase.prototype.deleteQuery = function(query) {};
 
 /**
- * @param {WebGLQuery} sampler
+ * @param {WebGLSampler} sampler
  */
 WebGL2RenderingContextBase.prototype.deleteSampler = function(sampler) {};
 
 /**
- * @param {WebGLQuery} sync
+ * @param {WebGLSync} sync
  */
 WebGL2RenderingContextBase.prototype.deleteSync = function(sync) {};
 
 /**
- * @param {WebGLQuery} feedback
+ * @param {WebGLTransformFeedback} feedback
  */
 WebGL2RenderingContextBase.prototype.deleteTransformFeedback = function(feedback) {};
 
 /**
- * @param {WebGLQuery} vertexArray
+ * @param {WebGLVertexArrayObject} vertexArray
  */
 WebGL2RenderingContextBase.prototype.deleteVertexArray = function(vertexArray) {};
 
@@ -5160,7 +5162,7 @@ WebGL2RenderingContextBase.prototype.fenceSync = function(condition, flags) {};
 /**
  * @param {number} target
  * @param {number} attachment
- * @param {number} texture
+ * @param {WebGLTexture} texture
  * @param {number} level
  * @param {number} layer
  */

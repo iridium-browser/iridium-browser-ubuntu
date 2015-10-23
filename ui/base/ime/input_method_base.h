@@ -11,6 +11,7 @@
 #include "base/observer_list.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/ui_base_ime_export.h"
+#include "ui/events/event_dispatcher.h"
 
 namespace gfx {
 class Rect;
@@ -76,7 +77,8 @@ class UI_BASE_IME_EXPORT InputMethodBase
 
   // Convenience method to call delegate_->DispatchKeyEventPostIME().
   // Returns true if the event was processed
-  bool DispatchKeyEventPostIME(const ui::KeyEvent& event) const;
+  ui::EventDispatchDetails DispatchKeyEventPostIME(
+      ui::KeyEvent* event) const;
 
   // Convenience method to notify all observers of TextInputClient changes.
   void NotifyTextInputStateChanged(const TextInputClient* client);
@@ -85,14 +87,6 @@ class UI_BASE_IME_EXPORT InputMethodBase
   // |client| which is the text input client with focus.
   void NotifyTextInputCaretBoundsChanged(const TextInputClient* client);
 
-  // Interface for for signalling candidate window events.
-  // See also *Callback functions below. To avoid reentrancy issue that
-  // TextInputClient manipulates IME state during even handling, these methods
-  // defer sending actual signals to renderer.
-  void OnCandidateWindowShown();
-  void OnCandidateWindowUpdated();
-  void OnCandidateWindowHidden();
-
   bool system_toplevel_window_focused() const {
     return system_toplevel_window_focused_;
   }
@@ -100,16 +94,10 @@ class UI_BASE_IME_EXPORT InputMethodBase
  private:
   void SetFocusedTextInputClientInternal(TextInputClient* client);
 
-  // Deferred callbacks for signalling TextInputClient about candidate window
-  // appearance changes.
-  void CandidateWindowShownCallback();
-  void CandidateWindowUpdatedCallback();
-  void CandidateWindowHiddenCallback();
-
   internal::InputMethodDelegate* delegate_;
   TextInputClient* text_input_client_;
 
-  ObserverList<InputMethodObserver> observer_list_;
+  base::ObserverList<InputMethodObserver> observer_list_;
 
   bool system_toplevel_window_focused_;
 

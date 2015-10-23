@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
+
 
 class PolymerPage(page_module.Page):
 
@@ -15,6 +17,7 @@ class PolymerPage(page_module.Page):
     """
     super(PolymerPage, self).__init__(
       url=url,
+      shared_page_state_class=shared_page_state.SharedMobilePageState,
       page_set=page_set)
     self.script_to_evaluate_on_commit = '''
       document.addEventListener("polymer-ready", function() {
@@ -212,16 +215,15 @@ class PolymerSampler(PolymerPage):
                                  speed_in_pixels_per_second=300)
 
 
-class PolymerPageSet(page_set_module.PageSet):
+class PolymerPageSet(story.StorySet):
 
   def __init__(self, run_no_page_interactions=False):
     super(PolymerPageSet, self).__init__(
-      user_agent_type='mobile',
       archive_data_file='data/polymer.json',
-      bucket=page_set_module.PUBLIC_BUCKET)
+      cloud_storage_bucket=story.PUBLIC_BUCKET)
 
-    self.AddUserStory(PolymerCalculatorPage(self, run_no_page_interactions))
-    self.AddUserStory(PolymerShadowPage(self, run_no_page_interactions))
+    self.AddStory(PolymerCalculatorPage(self, run_no_page_interactions))
+    self.AddStory(PolymerShadowPage(self, run_no_page_interactions))
 
     # Polymer Sampler subpages that are interesting to tap / swipe elements on
     TAPPABLE_PAGES = [
@@ -238,7 +240,7 @@ class PolymerPageSet(page_set_module.PageSet):
         'paper-toggle-button',
         ]
     for p in TAPPABLE_PAGES:
-      self.AddUserStory(PolymerSampler(
+      self.AddStory(PolymerSampler(
           self, p, run_no_page_interactions=run_no_page_interactions))
 
     # Polymer Sampler subpages that are interesting to scroll
@@ -246,7 +248,7 @@ class PolymerPageSet(page_set_module.PageSet):
         'core-scroll-header-panel',
         ]
     for p in SCROLLABLE_PAGES:
-      self.AddUserStory(PolymerSampler(
+      self.AddStory(PolymerSampler(
           self, p, run_no_page_interactions=run_no_page_interactions,
           scrolling_page=True))
 

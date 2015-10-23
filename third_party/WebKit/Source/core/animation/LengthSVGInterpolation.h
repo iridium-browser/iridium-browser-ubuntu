@@ -15,6 +15,7 @@ class LengthSVGInterpolation : public SVGInterpolation {
 public:
     typedef SVGLengthList ListType;
     struct NonInterpolableType {
+        DISALLOW_ALLOCATION();
         SVGLengthMode unitMode;
         SVGLengthNegativeValuesMode negativeValuesMode;
     };
@@ -37,7 +38,7 @@ public:
         SVGInterpolation::trace(visitor);
     }
 
-    virtual PassRefPtrWillBeRawPtr<SVGPropertyBase> interpolatedValue(SVGElement&) const override final;
+    PassRefPtrWillBeRawPtr<SVGPropertyBase> interpolatedValue(SVGElement&) const final;
 
 private:
     LengthSVGInterpolation(PassOwnPtrWillBeRawPtr<InterpolableValue> start, PassOwnPtrWillBeRawPtr<InterpolableValue> end, PassRefPtrWillBeRawPtr<SVGAnimatedPropertyBase> attribute, const NonInterpolableType& modeData)

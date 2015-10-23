@@ -7,6 +7,8 @@ import("//testing/test.gni")
 defines = [ "GN_BUILD" ]
 
 static_library("gn_lib") {
+  configs += [ "//build/config:precompiled_headers" ]
+
   sources = [
     "action_target_generator.cc",
     "action_target_generator.h",
@@ -32,6 +34,7 @@ static_library("gn_lib") {
     "command_gen.cc",
     "command_help.cc",
     "command_ls.cc",
+    "command_path.cc",
     "command_refs.cc",
     "commands.cc",
     "commands.h",
@@ -57,6 +60,7 @@ static_library("gn_lib") {
     "filesystem_utils.h",
     "function_exec_script.cc",
     "function_foreach.cc",
+    "function_forward_variables_from.cc",
     "function_get_label_info.cc",
     "function_get_path_info.cc",
     "function_get_target_outputs.cc",
@@ -211,6 +215,11 @@ action("last_commit_position") {
   ]
 }
 
+# Note for Windows debugging: GN is super-multithreaded and uses a lot of STL.
+# Iterator debugging on Windows does locking for every access, which ends up
+# slowing down debug runtime from 0:36 to 9:40. If you want to run debug builds
+# of GN over the large Chrome build, you will want to set the arg:
+#   enable_iterator_debugging = false
 executable("gn") {
   sources = [
     "gn_main.cc",
@@ -220,6 +229,15 @@ executable("gn") {
     ":gn_lib",
     ":last_commit_position",
     "//base",
+  ]
+}
+
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("gn_unittests_run") {
+  testonly = true
+  deps = [
+    ":gn_unittests",
   ]
 }
 
@@ -235,6 +253,7 @@ test("gn_unittests") {
     "exec_process_unittest.cc",
     "filesystem_utils_unittest.cc",
     "function_foreach_unittest.cc",
+    "function_forward_variables_from_unittest.cc",
     "function_get_label_info_unittest.cc",
     "function_get_path_info_unittest.cc",
     "function_get_target_outputs_unittest.cc",
@@ -264,6 +283,7 @@ test("gn_unittests") {
     "scope_per_file_provider_unittest.cc",
     "scope_unittest.cc",
     "source_dir_unittest.cc",
+    "source_file_unittest.cc",
     "string_utils_unittest.cc",
     "substitution_pattern_unittest.cc",
     "substitution_writer_unittest.cc",
@@ -277,6 +297,11 @@ test("gn_unittests") {
     "value_unittest.cc",
     "visibility_unittest.cc",
   ]
+
+  data = [
+    "format_test_data/",
+  ]
+
   deps = [
     ":gn_lib",
     "//base/test:run_all_unittests",

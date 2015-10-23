@@ -15,6 +15,7 @@
 #include "gflags/gflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "webrtc/base/checks.h"
 #include "webrtc/test/field_trial.h"
 #include "webrtc/test/frame_generator.h"
 #include "webrtc/test/frame_generator_capturer.h"
@@ -27,12 +28,14 @@
 namespace webrtc {
 namespace flags {
 
-// Fixed for prerecorded screenshare content.
+DEFINE_int32(width, 1850, "Video width (crops source).");
 size_t Width() {
-  return 1850;
+  return static_cast<size_t>(FLAGS_width);
 }
+
+DEFINE_int32(height, 1110, "Video height (crops source).");
 size_t Height() {
-  return 1110;
+  return static_cast<size_t>(FLAGS_height);
 }
 
 DEFINE_int32(fps, 5, "Frames per second.");
@@ -40,19 +43,39 @@ int Fps() {
   return static_cast<int>(FLAGS_fps);
 }
 
+DEFINE_int32(slide_change_interval,
+             10,
+             "Interval (in seconds) between simulated slide changes.");
+int SlideChangeInterval() {
+  return static_cast<int>(FLAGS_slide_change_interval);
+}
+
+DEFINE_int32(
+    scroll_duration,
+    0,
+    "Duration (in seconds) during which a slide will be scrolled into place.");
+int ScrollDuration() {
+  return static_cast<int>(FLAGS_scroll_duration);
+}
+
 DEFINE_int32(min_bitrate, 50, "Minimum video bitrate.");
 size_t MinBitrate() {
   return static_cast<size_t>(FLAGS_min_bitrate);
 }
 
-DEFINE_int32(tl0_bitrate, 100, "Temporal layer 0 target bitrate.");
+DEFINE_int32(tl0_bitrate, 200, "Temporal layer 0 target bitrate.");
 size_t StartBitrate() {
   return static_cast<size_t>(FLAGS_tl0_bitrate);
 }
 
-DEFINE_int32(tl1_bitrate, 1000, "Temporal layer 1 target bitrate.");
+DEFINE_int32(tl1_bitrate, 2000, "Temporal layer 1 target bitrate.");
 size_t MaxBitrate() {
   return static_cast<size_t>(FLAGS_tl1_bitrate);
+}
+
+DEFINE_int32(num_temporal_layers, 2, "Number of temporal layers to use.");
+int NumTemporalLayers() {
+  return static_cast<int>(FLAGS_num_temporal_layers);
 }
 
 DEFINE_int32(min_transmit_bitrate, 400, "Min transmit bitrate incl. padding.");
@@ -110,10 +133,20 @@ DEFINE_string(
 class ScreenshareLoopback : public test::Loopback {
  public:
   explicit ScreenshareLoopback(const Config& config) : Loopback(config) {
+    CHECK_GE(config.num_temporal_layers, 1u);
+    CHECK_LE(config.num_temporal_layers, 2u);
+
     vp8_settings_ = VideoEncoder::GetDefaultVp8Settings();
     vp8_settings_.denoisingOn = false;
     vp8_settings_.frameDroppingOn = false;
-    vp8_settings_.numberOfTemporalLayers = 2;
+    vp8_settings_.numberOfTemporalLayers =
+        static_cast<unsigned char>(config.num_temporal_layers);
+
+    vp9_settings_ = VideoEncoder::GetDefaultVp9Settings();
+    vp9_settings_.denoisingOn = false;
+    vp9_settings_.frameDroppingOn = false;
+    vp9_settings_.numberOfTemporalLayers =
+        static_cast<unsigned char>(config.num_temporal_layers);
   }
   virtual ~ScreenshareLoopback() {}
 
@@ -123,11 +156,24 @@ class ScreenshareLoopback : public test::Loopback {
     VideoStream* stream = &encoder_config.streams[0];
     encoder_config.content_type = VideoEncoderConfig::ContentType::kScreen;
     encoder_config.min_transmit_bitrate_bps = flags::MinTransmitBitrate();
-    encoder_config.encoder_specific_settings = &vp8_settings_;
+    int num_temporal_layers;
+    if (config_.codec == "VP8") {
+      encoder_config.encoder_specific_settings = &vp8_settings_;
+      num_temporal_layers = vp8_settings_.numberOfTemporalLayers;
+    } else if (config_.codec == "VP9") {
+      encoder_config.encoder_specific_settings = &vp9_settings_;
+      num_temporal_layers = vp9_settings_.numberOfTemporalLayers;
+    } else {
+      RTC_NOTREACHED() << "Codec not supported!";
+      abort();
+    }
     stream->temporal_layer_thresholds_bps.clear();
     stream->target_bitrate_bps =
         static_cast<int>(config_.start_bitrate_kbps) * 1000;
-    stream->temporal_layer_thresholds_bps.push_back(stream->target_bitrate_bps);
+    if (num_temporal_layers == 2) {
+      stream->temporal_layer_thresholds_bps.push_back(
+          stream->target_bitrate_bps);
+    }
     return encoder_config;
   }
 
@@ -138,9 +184,21 @@ class ScreenshareLoopback : public test::Loopback {
     slides.push_back(test::ResourcePath("photo_1850_1110", "yuv"));
     slides.push_back(test::ResourcePath("difficult_photo_1850_1110", "yuv"));
 
+    // Fixed for input resolution for prerecorded screenshare content.
+    const size_t kWidth = 1850;
+    const size_t kHeight = 1110;
+    CHECK_LE(flags::Width(), kWidth);
+    CHECK_LE(flags::Height(), kHeight);
+    CHECK_GT(flags::SlideChangeInterval(), 0);
+    const int kPauseDurationMs =
+        (flags::SlideChangeInterval() - flags::ScrollDuration()) * 1000;
+    CHECK_LE(flags::ScrollDuration(), flags::SlideChangeInterval());
+
     test::FrameGenerator* frame_generator =
-        test::FrameGenerator::CreateFromYuvFile(
-            slides, flags::Width(), flags::Height(), 10 * flags::Fps());
+        test::FrameGenerator::CreateScrollingInputFromYuvFiles(
+            Clock::GetRealTimeClock(), slides, kWidth, kHeight, flags::Width(),
+            flags::Height(), flags::ScrollDuration() * 1000, kPauseDurationMs);
+
     test::FrameGeneratorCapturer* capturer(new test::FrameGeneratorCapturer(
         clock_, send_stream->Input(), frame_generator, flags::Fps()));
     EXPECT_TRUE(capturer->Init());
@@ -148,6 +206,7 @@ class ScreenshareLoopback : public test::Loopback {
   }
 
   VideoCodecVP8 vp8_settings_;
+  VideoCodecVP9 vp9_settings_;
 };
 
 void Loopback() {
@@ -159,6 +218,7 @@ void Loopback() {
                                 flags::MaxBitrate(),
                                 flags::MinTransmitBitrate(),
                                 flags::Codec(),
+                                flags::NumTemporalLayers(),
                                 flags::LossPercent(),
                                 flags::LinkCapacity(),
                                 flags::QueueSize(),

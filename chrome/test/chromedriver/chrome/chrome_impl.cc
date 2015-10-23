@@ -20,7 +20,7 @@ Status ChromeImpl::GetAsDesktop(ChromeDesktopImpl** desktop) {
   return Status(kUnknownError, "operation unsupported");
 }
 
-const BrowserInfo* ChromeImpl::GetBrowserInfo() {
+const BrowserInfo* ChromeImpl::GetBrowserInfo() const {
   return devtools_http_client_->browser_info();
 }
 
@@ -55,7 +55,8 @@ Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
     if (view.type == WebViewInfo::kPage ||
         view.type == WebViewInfo::kApp ||
         (view.type == WebViewInfo::kOther &&
-         view.url.find("chrome-extension://") == 0)) {
+         (view.url.find("chrome-extension://") == 0 ||
+          view.url == "chrome://print/"))) {
       bool found = false;
       for (WebViewList::const_iterator web_view_iter = web_views_.begin();
            web_view_iter != web_views_.end(); ++web_view_iter) {
@@ -121,6 +122,10 @@ Status ChromeImpl::ActivateWebView(const std::string& id) {
 }
 
 bool ChromeImpl::IsMobileEmulationEnabled() const {
+  return false;
+}
+
+bool ChromeImpl::HasTouchScreen() const {
   return false;
 }
 

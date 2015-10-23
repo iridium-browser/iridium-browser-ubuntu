@@ -5,19 +5,21 @@
 #include "chromeos/dbus/fake_bluetooth_device_client.h"
 
 #include <fcntl.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <string>
 #include <utility>
 
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -43,6 +45,24 @@ const int kMaxRSSI = -30;
 // The default value of connection info properties from GetConnInfo().
 const int kUnkownPower = 127;
 
+// This is meant to delay the removal of a pre defined device until the
+// developer has time to see it.
+const int kVanishingDevicePairTimeMultiplier = 4;
+
+// Meant to delay a pair request for an observable amount of time.
+const int kIncomingSimulationPairTimeMultiplier = 45;
+
+// Meant to delay a request that asks for pair requests for an observable
+// amount of time.
+const int kIncomingSimulationStartPairTimeMultiplier = 30;
+
+// This allows the PIN code dialog to be shown for a long enough time to see
+// the PIN code UI in detail.
+const int kPinCodeDevicePairTimeMultiplier = 7;
+
+// This allows the pairing dialog to be shown for a long enough time to see
+// its UI in detail.
+const int kSimulateNormalPairTimeMultiplier = 3;
 
 void SimulatedProfileSocket(int fd) {
   // Simulate a server-side socket of a profile; read data from the socket,
@@ -75,6 +95,19 @@ void SimpleErrorCallback(const std::string& error_name,
 }  // namespace
 
 namespace chromeos {
+
+const char FakeBluetoothDeviceClient::kTestPinCode[] = "123456";
+const int FakeBluetoothDeviceClient::kTestPassKey = 123456;
+
+const char FakeBluetoothDeviceClient::kPairingMethodNone[] = "None";
+const char FakeBluetoothDeviceClient::kPairingMethodPinCode[] = "PIN Code";
+const char FakeBluetoothDeviceClient::kPairingMethodPassKey[] = "PassKey";
+
+const char FakeBluetoothDeviceClient::kPairingActionConfirmation[] =
+    "Confirmation";
+const char FakeBluetoothDeviceClient::kPairingActionDisplay[] = "Display";
+const char FakeBluetoothDeviceClient::kPairingActionFail[] = "Fail";
+const char FakeBluetoothDeviceClient::kPairingActionRequest[] = "Request";
 
 const char FakeBluetoothDeviceClient::kPairedDevicePath[] =
     "/fake/hci0/dev0";
@@ -224,6 +257,17 @@ void FakeBluetoothDeviceClient::Properties::Set(
   }
 }
 
+FakeBluetoothDeviceClient::SimulatedPairingOptions::SimulatedPairingOptions() {}
+
+FakeBluetoothDeviceClient::SimulatedPairingOptions::~SimulatedPairingOptions() {
+}
+
+FakeBluetoothDeviceClient::IncomingDeviceProperties::
+    IncomingDeviceProperties() {}
+
+FakeBluetoothDeviceClient::IncomingDeviceProperties::
+    ~IncomingDeviceProperties() {}
+
 FakeBluetoothDeviceClient::FakeBluetoothDeviceClient()
     : simulation_interval_ms_(kSimulationIntervalMs),
       discovery_simulation_step_(0),
@@ -232,10 +276,9 @@ FakeBluetoothDeviceClient::FakeBluetoothDeviceClient()
       connection_rssi_(kUnkownPower),
       transmit_power_(kUnkownPower),
       max_transmit_power_(kUnkownPower) {
-  Properties* properties = new Properties(base::Bind(
-      &FakeBluetoothDeviceClient::OnPropertyChanged,
-      base::Unretained(this),
-      dbus::ObjectPath(kPairedDevicePath)));
+  scoped_ptr<Properties> properties(new Properties(
+      base::Bind(&FakeBluetoothDeviceClient::OnPropertyChanged,
+                 base::Unretained(this), dbus::ObjectPath(kPairedDevicePath))));
   properties->address.ReplaceValue(kPairedDeviceAddress);
   properties->bluetooth_class.ReplaceValue(kPairedDeviceClass);
   properties->name.ReplaceValue("Fake Device (Name)");
@@ -252,12 +295,13 @@ FakeBluetoothDeviceClient::FakeBluetoothDeviceClient()
 
   properties->modalias.ReplaceValue("usb:v05ACp030Dd0306");
 
-  properties_map_[dbus::ObjectPath(kPairedDevicePath)] = properties;
+  properties_map_.insert(dbus::ObjectPath(kPairedDevicePath),
+                         properties.Pass());
   device_list_.push_back(dbus::ObjectPath(kPairedDevicePath));
 
-  properties = new Properties(base::Bind(
+  properties.reset(new Properties(base::Bind(
       &FakeBluetoothDeviceClient::OnPropertyChanged, base::Unretained(this),
-      dbus::ObjectPath(kPairedUnconnectableDevicePath)));
+      dbus::ObjectPath(kPairedUnconnectableDevicePath))));
   properties->address.ReplaceValue(kPairedUnconnectableDeviceAddress);
   properties->bluetooth_class.ReplaceValue(kPairedUnconnectableDeviceClass);
   properties->name.ReplaceValue("Fake Device 2 (Unconnectable)");
@@ -271,14 +315,12 @@ FakeBluetoothDeviceClient::FakeBluetoothDeviceClient()
 
   properties->modalias.ReplaceValue("usb:v05ACp030Dd0306");
 
-  properties_map_[dbus::ObjectPath(kPairedUnconnectableDevicePath)] =
-      properties;
+  properties_map_.insert(dbus::ObjectPath(kPairedUnconnectableDevicePath),
+                         properties.Pass());
   device_list_.push_back(dbus::ObjectPath(kPairedUnconnectableDevicePath));
 }
 
 FakeBluetoothDeviceClient::~FakeBluetoothDeviceClient() {
-  // Clean up Properties structures
-  STLDeleteValues(&properties_map_);
 }
 
 void FakeBluetoothDeviceClient::Init(dbus::Bus* bus) {
@@ -303,10 +345,20 @@ std::vector<dbus::ObjectPath> FakeBluetoothDeviceClient::GetDevicesForAdapter(
 
 FakeBluetoothDeviceClient::Properties*
 FakeBluetoothDeviceClient::GetProperties(const dbus::ObjectPath& object_path) {
-  PropertiesMap::iterator iter = properties_map_.find(object_path);
+  PropertiesMap::const_iterator iter = properties_map_.find(object_path);
   if (iter != properties_map_.end())
     return iter->second;
   return NULL;
+}
+
+FakeBluetoothDeviceClient::SimulatedPairingOptions*
+FakeBluetoothDeviceClient::GetPairingOptions(
+    const dbus::ObjectPath& object_path) {
+  PairingOptionsMap::const_iterator iter =
+      pairing_options_map_.find(object_path);
+  if (iter != pairing_options_map_.end())
+    return iter->second;
+  return iter != pairing_options_map_.end() ? iter->second : nullptr;
 }
 
 void FakeBluetoothDeviceClient::Connect(
@@ -517,7 +569,7 @@ void FakeBluetoothDeviceClient::BeginDiscoverySimulation(
 
   discovery_simulation_step_ = 1;
 
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&FakeBluetoothDeviceClient::DiscoverySimulationTimer,
                  base::Unretained(this)),
@@ -536,11 +588,13 @@ void FakeBluetoothDeviceClient::BeginIncomingPairingSimulation(
 
   incoming_pairing_simulation_step_ = 1;
 
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&FakeBluetoothDeviceClient::IncomingPairingSimulationTimer,
                  base::Unretained(this)),
-      base::TimeDelta::FromMilliseconds(30 * simulation_interval_ms_));
+      base::TimeDelta::FromMilliseconds(
+          kIncomingSimulationStartPairTimeMultiplier *
+          simulation_interval_ms_));
 }
 
 void FakeBluetoothDeviceClient::EndIncomingPairingSimulation(
@@ -560,10 +614,9 @@ void FakeBluetoothDeviceClient::CreateDevice(
                 device_list_.end(), device_path) != device_list_.end())
     return;
 
-  Properties* properties = new Properties(base::Bind(
-      &FakeBluetoothDeviceClient::OnPropertyChanged,
-      base::Unretained(this),
-      device_path));
+  scoped_ptr<Properties> properties(
+      new Properties(base::Bind(&FakeBluetoothDeviceClient::OnPropertyChanged,
+                                base::Unretained(this), device_path)));
   properties->adapter.ReplaceValue(adapter_path);
 
   if (device_path == dbus::ObjectPath(kLegacyAutopairPath)) {
@@ -663,10 +716,263 @@ void FakeBluetoothDeviceClient::CreateDevice(
 
   }
 
-  properties_map_[device_path] = properties;
+  properties_map_.insert(device_path, properties.Pass());
   device_list_.push_back(device_path);
   FOR_EACH_OBSERVER(BluetoothDeviceClient::Observer, observers_,
                     DeviceAdded(device_path));
+}
+
+void FakeBluetoothDeviceClient::CreateDeviceWithProperties(
+    const dbus::ObjectPath& adapter_path,
+    const IncomingDeviceProperties& props) {
+  dbus::ObjectPath device_path(props.device_path);
+  if (std::find(device_list_.begin(), device_list_.end(), device_path) !=
+      device_list_.end())
+    return;
+
+  scoped_ptr<Properties> properties(
+      new Properties(base::Bind(&FakeBluetoothDeviceClient::OnPropertyChanged,
+                                base::Unretained(this), device_path)));
+  properties->adapter.ReplaceValue(adapter_path);
+  properties->name.ReplaceValue(props.device_name);
+  properties->alias.ReplaceValue(props.device_alias);
+  properties->address.ReplaceValue(props.device_address);
+  properties->bluetooth_class.ReplaceValue(props.device_class);
+  properties->trusted.ReplaceValue(props.is_trusted);
+
+  if (props.is_trusted)
+    properties->paired.ReplaceValue(true);
+
+  scoped_ptr<SimulatedPairingOptions> options(new SimulatedPairingOptions);
+  options->pairing_method = props.pairing_method;
+  options->pairing_auth_token = props.pairing_auth_token;
+  options->pairing_action = props.pairing_action;
+  options->incoming = props.incoming;
+
+  properties_map_.insert(device_path, properties.Pass());
+  device_list_.push_back(device_path);
+  pairing_options_map_.insert(device_path, options.Pass());
+  FOR_EACH_OBSERVER(BluetoothDeviceClient::Observer, observers_,
+                    DeviceAdded(device_path));
+}
+
+scoped_ptr<base::ListValue>
+FakeBluetoothDeviceClient::GetBluetoothDevicesAsDictionaries() const {
+  scoped_ptr<base::ListValue> predefined_devices(new base::ListValue);
+  scoped_ptr<base::DictionaryValue> pairedDevice(new base::DictionaryValue);
+  pairedDevice->SetString("path", kPairedDevicePath);
+  pairedDevice->SetString("address", kPairedDeviceAddress);
+  pairedDevice->SetString("name", kPairedDeviceName);
+  pairedDevice->SetString("alias", kPairedDeviceName);
+  pairedDevice->SetString("pairingMethod", "");
+  pairedDevice->SetString("pairingAuthToken", "");
+  pairedDevice->SetString("pairingAction", "");
+  pairedDevice->SetInteger("classValue", kPairedDeviceClass);
+  pairedDevice->SetBoolean("discoverable", true);
+  pairedDevice->SetBoolean("isTrusted", true);
+  pairedDevice->SetBoolean("paired", true);
+  pairedDevice->SetBoolean("incoming", false);
+  predefined_devices->Append(pairedDevice.Pass());
+
+  scoped_ptr<base::DictionaryValue> legacyDevice(new base::DictionaryValue);
+  legacyDevice->SetString("path", kLegacyAutopairPath);
+  legacyDevice->SetString("address", kLegacyAutopairAddress);
+  legacyDevice->SetString("name", kLegacyAutopairName);
+  legacyDevice->SetString("alias", kLegacyAutopairName);
+  legacyDevice->SetString("pairingMethod", "");
+  legacyDevice->SetString("pairingAuthToken", "");
+  legacyDevice->SetString("pairingAction", "");
+  legacyDevice->SetInteger("classValue", kLegacyAutopairClass);
+  legacyDevice->SetBoolean("isTrusted", true);
+  legacyDevice->SetBoolean("discoverable", false);
+  legacyDevice->SetBoolean("paired", false);
+  legacyDevice->SetBoolean("incoming", false);
+  predefined_devices->Append(legacyDevice.Pass());
+
+  scoped_ptr<base::DictionaryValue> pin(new base::DictionaryValue);
+  pin->SetString("path", kDisplayPinCodePath);
+  pin->SetString("address", kDisplayPinCodeAddress);
+  pin->SetString("name", kDisplayPinCodeName);
+  pin->SetString("alias", kDisplayPinCodeName);
+  pin->SetString("pairingMethod", kPairingMethodPinCode);
+  pin->SetString("pairingAuthToken", kTestPinCode);
+  pin->SetString("pairingAction", kPairingActionDisplay);
+  pin->SetInteger("classValue", kDisplayPinCodeClass);
+  pin->SetBoolean("isTrusted", false);
+  pin->SetBoolean("discoverable", false);
+  pin->SetBoolean("paired", false);
+  pin->SetBoolean("incoming", false);
+  predefined_devices->Append(pin.Pass());
+
+  scoped_ptr<base::DictionaryValue> vanishing(new base::DictionaryValue);
+  vanishing->SetString("path", kVanishingDevicePath);
+  vanishing->SetString("address", kVanishingDeviceAddress);
+  vanishing->SetString("name", kVanishingDeviceName);
+  vanishing->SetString("alias", kVanishingDeviceName);
+  vanishing->SetString("pairingMethod", "");
+  vanishing->SetString("pairingAuthToken", "");
+  vanishing->SetString("pairingAction", "");
+  vanishing->SetInteger("classValue", kVanishingDeviceClass);
+  vanishing->SetBoolean("isTrusted", false);
+  vanishing->SetBoolean("discoverable", false);
+  vanishing->SetBoolean("paired", false);
+  vanishing->SetBoolean("incoming", false);
+  predefined_devices->Append(vanishing.Pass());
+
+  scoped_ptr<base::DictionaryValue> connect_unpairable(
+      new base::DictionaryValue);
+  connect_unpairable->SetString("path", kConnectUnpairablePath);
+  connect_unpairable->SetString("address", kConnectUnpairableAddress);
+  connect_unpairable->SetString("name", kConnectUnpairableName);
+  connect_unpairable->SetString("pairingMethod", "");
+  connect_unpairable->SetString("pairingAuthToken", "");
+  connect_unpairable->SetString("pairingAction", "");
+  connect_unpairable->SetString("alias", kConnectUnpairableName);
+  connect_unpairable->SetInteger("classValue", kConnectUnpairableClass);
+  connect_unpairable->SetBoolean("isTrusted", false);
+  connect_unpairable->SetBoolean("discoverable", false);
+  connect_unpairable->SetBoolean("paired", false);
+  connect_unpairable->SetBoolean("incoming", false);
+  predefined_devices->Append(connect_unpairable.Pass());
+
+  scoped_ptr<base::DictionaryValue> passkey(new base::DictionaryValue);
+  passkey->SetString("path", kDisplayPasskeyPath);
+  passkey->SetString("address", kDisplayPasskeyAddress);
+  passkey->SetString("name", kDisplayPasskeyName);
+  passkey->SetString("alias", kDisplayPasskeyName);
+  passkey->SetString("pairingMethod", kPairingMethodPassKey);
+  passkey->SetInteger("pairingAuthToken", kTestPassKey);
+  passkey->SetString("pairingAction", kPairingActionDisplay);
+  passkey->SetInteger("classValue", kDisplayPasskeyClass);
+  passkey->SetBoolean("isTrusted", false);
+  passkey->SetBoolean("discoverable", false);
+  passkey->SetBoolean("paired", false);
+  passkey->SetBoolean("incoming", false);
+  predefined_devices->Append(passkey.Pass());
+
+  scoped_ptr<base::DictionaryValue> request_pin(new base::DictionaryValue);
+  request_pin->SetString("path", kRequestPinCodePath);
+  request_pin->SetString("address", kRequestPinCodeAddress);
+  request_pin->SetString("name", kRequestPinCodeName);
+  request_pin->SetString("alias", kRequestPinCodeName);
+  request_pin->SetString("pairingMethod", "");
+  request_pin->SetString("pairingAuthToken", "");
+  request_pin->SetString("pairingAction", kPairingActionRequest);
+  request_pin->SetInteger("classValue", kRequestPinCodeClass);
+  request_pin->SetBoolean("isTrusted", false);
+  request_pin->SetBoolean("discoverable", false);
+  request_pin->SetBoolean("paired", false);
+  request_pin->SetBoolean("incoming", false);
+  predefined_devices->Append(request_pin.Pass());
+
+  scoped_ptr<base::DictionaryValue> confirm(new base::DictionaryValue);
+  confirm->SetString("path", kConfirmPasskeyPath);
+  confirm->SetString("address", kConfirmPasskeyAddress);
+  confirm->SetString("name", kConfirmPasskeyName);
+  confirm->SetString("alias", kConfirmPasskeyName);
+  confirm->SetString("pairingMethod", "");
+  confirm->SetInteger("pairingAuthToken", kTestPassKey);
+  confirm->SetString("pairingAction", kPairingActionConfirmation);
+  confirm->SetInteger("classValue", kConfirmPasskeyClass);
+  confirm->SetBoolean("isTrusted", false);
+  confirm->SetBoolean("discoverable", false);
+  confirm->SetBoolean("paired", false);
+  confirm->SetBoolean("incoming", false);
+  predefined_devices->Append(confirm.Pass());
+
+  scoped_ptr<base::DictionaryValue> request_passkey(new base::DictionaryValue);
+  request_passkey->SetString("path", kRequestPasskeyPath);
+  request_passkey->SetString("address", kRequestPasskeyAddress);
+  request_passkey->SetString("name", kRequestPasskeyName);
+  request_passkey->SetString("alias", kRequestPasskeyName);
+  request_passkey->SetString("pairingMethod", kPairingMethodPassKey);
+  request_passkey->SetString("pairingAction", kPairingActionRequest);
+  request_passkey->SetInteger("pairingAuthToken", kTestPassKey);
+  request_passkey->SetInteger("classValue", kRequestPasskeyClass);
+  request_passkey->SetBoolean("isTrusted", false);
+  request_passkey->SetBoolean("discoverable", false);
+  request_passkey->SetBoolean("paired", false);
+  request_passkey->SetBoolean("incoming", false);
+  predefined_devices->Append(request_passkey.Pass());
+
+  scoped_ptr<base::DictionaryValue> unconnectable(new base::DictionaryValue);
+  unconnectable->SetString("path", kUnconnectableDevicePath);
+  unconnectable->SetString("address", kUnconnectableDeviceAddress);
+  unconnectable->SetString("name", kUnconnectableDeviceName);
+  unconnectable->SetString("alias", kUnconnectableDeviceName);
+  unconnectable->SetString("pairingMethod", "");
+  unconnectable->SetString("pairingAuthToken", "");
+  unconnectable->SetString("pairingAction", "");
+  unconnectable->SetInteger("classValue", kUnconnectableDeviceClass);
+  unconnectable->SetBoolean("isTrusted", true);
+  unconnectable->SetBoolean("discoverable", false);
+  unconnectable->SetBoolean("paired", false);
+  unconnectable->SetBoolean("incoming", false);
+  predefined_devices->Append(unconnectable.Pass());
+
+  scoped_ptr<base::DictionaryValue> unpairable(new base::DictionaryValue);
+  unpairable->SetString("path", kUnpairableDevicePath);
+  unpairable->SetString("address", kUnpairableDeviceAddress);
+  unpairable->SetString("name", kUnpairableDeviceName);
+  unpairable->SetString("alias", kUnpairableDeviceName);
+  unpairable->SetString("pairingMethod", "");
+  unpairable->SetString("pairingAuthToken", "");
+  unpairable->SetString("pairingAction", kPairingActionFail);
+  unpairable->SetInteger("classValue", kUnpairableDeviceClass);
+  unpairable->SetBoolean("isTrusted", false);
+  unpairable->SetBoolean("discoverable", false);
+  unpairable->SetBoolean("paired", false);
+  unpairable->SetBoolean("incoming", false);
+  predefined_devices->Append(unpairable.Pass());
+
+  scoped_ptr<base::DictionaryValue> just_works(new base::DictionaryValue);
+  just_works->SetString("path", kJustWorksPath);
+  just_works->SetString("address", kJustWorksAddress);
+  just_works->SetString("name", kJustWorksName);
+  just_works->SetString("alias", kJustWorksName);
+  just_works->SetString("pairingMethod", "");
+  just_works->SetString("pairingAuthToken", "");
+  just_works->SetString("pairingAction", "");
+  just_works->SetInteger("classValue", kJustWorksClass);
+  just_works->SetBoolean("isTrusted", false);
+  just_works->SetBoolean("discoverable", false);
+  just_works->SetBoolean("paired", false);
+  just_works->SetBoolean("incoming", false);
+  predefined_devices->Append(just_works.Pass());
+
+  scoped_ptr<base::DictionaryValue> low_energy(new base::DictionaryValue);
+  low_energy->SetString("path", kLowEnergyPath);
+  low_energy->SetString("address", kLowEnergyAddress);
+  low_energy->SetString("name", kLowEnergyName);
+  low_energy->SetString("alias", kLowEnergyName);
+  low_energy->SetString("pairingMethod", "");
+  low_energy->SetString("pairingAuthToken", "");
+  low_energy->SetString("pairingAction", "");
+  low_energy->SetInteger("classValue", kLowEnergyClass);
+  low_energy->SetBoolean("isTrusted", false);
+  low_energy->SetBoolean("discoverable", false);
+  low_energy->SetBoolean("paireed", false);
+  low_energy->SetBoolean("incoming", false);
+  predefined_devices->Append(low_energy.Pass());
+
+  scoped_ptr<base::DictionaryValue> paired_unconnectable(
+      new base::DictionaryValue);
+  paired_unconnectable->SetString("path", kPairedUnconnectableDevicePath);
+  paired_unconnectable->SetString("address", kPairedUnconnectableDeviceAddress);
+  paired_unconnectable->SetString("name", kPairedUnconnectableDeviceName);
+  paired_unconnectable->SetString("pairingMethod", "");
+  paired_unconnectable->SetString("pairingAuthToken", "");
+  paired_unconnectable->SetString("pairingAction", "");
+  paired_unconnectable->SetString("alias", kPairedUnconnectableDeviceName);
+  paired_unconnectable->SetInteger("classValue",
+                                   kPairedUnconnectableDeviceClass);
+  paired_unconnectable->SetBoolean("isTrusted", false);
+  paired_unconnectable->SetBoolean("discoverable", true);
+  paired_unconnectable->SetBoolean("paired", true);
+  paired_unconnectable->SetBoolean("incoming", false);
+  predefined_devices->Append(paired_unconnectable.Pass());
+
+  return predefined_devices.Pass();
 }
 
 void FakeBluetoothDeviceClient::RemoveDevice(
@@ -677,7 +983,7 @@ void FakeBluetoothDeviceClient::RemoveDevice(
   if (listiter == device_list_.end())
     return;
 
-  PropertiesMap::iterator iter = properties_map_.find(device_path);
+  PropertiesMap::const_iterator iter = properties_map_.find(device_path);
   Properties* properties = iter->second;
 
   VLOG(1) << "removing device: " << properties->alias.value();
@@ -701,8 +1007,13 @@ void FakeBluetoothDeviceClient::RemoveDevice(
   FOR_EACH_OBSERVER(BluetoothDeviceClient::Observer, observers_,
                     DeviceRemoved(device_path));
 
-  delete properties;
   properties_map_.erase(iter);
+  PairingOptionsMap::const_iterator options_iter =
+      pairing_options_map_.find(device_path);
+
+  if (options_iter != pairing_options_map_.end()) {
+    pairing_options_map_.erase(options_iter);
+  }
 }
 
 void FakeBluetoothDeviceClient::OnPropertyChanged(
@@ -768,7 +1079,6 @@ void FakeBluetoothDeviceClient::DiscoverySimulationTimer() {
                      base::RandInt(kMinRSSI, kMaxRSSI));
     RemoveDevice(dbus::ObjectPath(FakeBluetoothAdapterClient::kAdapterPath),
                  dbus::ObjectPath(kVanishingDevicePath));
-
   } else if (discovery_simulation_step_ == 14) {
     UpdateDeviceRSSI(dbus::ObjectPath(kLowEnergyPath),
                      base::RandInt(kMinRSSI, kMaxRSSI));
@@ -777,7 +1087,7 @@ void FakeBluetoothDeviceClient::DiscoverySimulationTimer() {
   }
 
   ++discovery_simulation_step_;
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&FakeBluetoothDeviceClient::DiscoverySimulationTimer,
                  base::Unretained(this)),
@@ -838,11 +1148,12 @@ void FakeBluetoothDeviceClient::IncomingPairingSimulationTimer() {
   }
 
   ++incoming_pairing_simulation_step_;
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&FakeBluetoothDeviceClient::IncomingPairingSimulationTimer,
                  base::Unretained(this)),
-      base::TimeDelta::FromMilliseconds(45 * simulation_interval_ms_));
+      base::TimeDelta::FromMilliseconds(kIncomingSimulationPairTimeMultiplier *
+                                        simulation_interval_ms_));
 }
 
 void FakeBluetoothDeviceClient::SimulatePairing(
@@ -859,115 +1170,187 @@ void FakeBluetoothDeviceClient::SimulatePairing(
       fake_bluetooth_agent_manager_client->GetAgentServiceProvider();
   CHECK(agent_service_provider != NULL);
 
-  if (object_path == dbus::ObjectPath(kLegacyAutopairPath) ||
-      object_path == dbus::ObjectPath(kConnectUnpairablePath) ||
-      object_path == dbus::ObjectPath(kUnconnectableDevicePath) ||
-      object_path == dbus::ObjectPath(kLowEnergyPath)) {
-    // No need to call anything on the pairing delegate, just wait 3 times
-    // the interval before acting as if the other end accepted it.
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, callback, error_callback),
-        base::TimeDelta::FromMilliseconds(3 * simulation_interval_ms_));
+  // Grab the device's pairing properties.
+  PairingOptionsMap::const_iterator iter =
+      pairing_options_map_.find(object_path);
 
-  } else if (object_path == dbus::ObjectPath(kDisplayPinCodePath)) {
-    // Display a Pincode, and wait 7 times the interval before acting as
-    // if the other end accepted it.
-    agent_service_provider->DisplayPinCode(object_path, "123456");
+  // If the device with path |object_path| has simulated pairing properties
+  // defined, then pair it based on its |pairing_method|.
+  if (iter != pairing_options_map_.end()) {
+    if (iter->second->pairing_action == kPairingActionFail) {
+      // Fails the pairing with an org.bluez.Error.Failed error.
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::FailSimulatedPairing,
+                     base::Unretained(this), object_path, error_callback),
+          base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
+    } else if (iter->second->pairing_method == kPairingMethodNone ||
+               iter->second->pairing_method.empty()) {
+      if (!iter->second->incoming) {
+        // Simply pair and connect the device.
+        base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+            FROM_HERE,
+            base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
+                       base::Unretained(this), object_path, callback,
+                       error_callback),
+            base::TimeDelta::FromMilliseconds(
+                kSimulateNormalPairTimeMultiplier * simulation_interval_ms_));
+      } else {
+        agent_service_provider->RequestAuthorization(
+            object_path,
+            base::Bind(&FakeBluetoothDeviceClient::ConfirmationCallback,
+                       base::Unretained(this), object_path, callback,
+                       error_callback));
+      }
+    } else if (iter->second->pairing_method == kPairingMethodPinCode) {
+      if (iter->second->pairing_action == kPairingActionDisplay) {
+        // Display a Pincode, and wait before acting as if the other end
+        // accepted it.
+        agent_service_provider->DisplayPinCode(
+            object_path, iter->second->pairing_auth_token);
 
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, callback, error_callback),
-        base::TimeDelta::FromMilliseconds(7 * simulation_interval_ms_));
+        base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+            FROM_HERE,
+            base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
+                       base::Unretained(this), object_path, callback,
+                       error_callback),
+            base::TimeDelta::FromMilliseconds(kPinCodeDevicePairTimeMultiplier *
+                                              simulation_interval_ms_));
+      } else if (iter->second->pairing_action == kPairingActionRequest) {
+        // Request a pin code.
+        agent_service_provider->RequestPinCode(
+            object_path, base::Bind(&FakeBluetoothDeviceClient::PinCodeCallback,
+                                    base::Unretained(this), object_path,
+                                    callback, error_callback));
+      } else if (iter->second->pairing_action == kPairingActionConfirmation) {
+        error_callback.Run(kNoResponseError, "No confirm for pincode pairing.");
+      }
+    } else if (iter->second->pairing_method == kPairingMethodPassKey) {
+      // Display a passkey, and each interval act as if another key was entered
+      // for it.
+      if (iter->second->pairing_action == kPairingActionDisplay) {
+        agent_service_provider->DisplayPasskey(
+            object_path, std::stoi(iter->second->pairing_auth_token), 0);
 
-  } else if (object_path == dbus::ObjectPath(kVanishingDevicePath)) {
-    // The vanishing device simulates being too far away, and thus times out.
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::TimeoutSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
-        base::TimeDelta::FromMilliseconds(4 * simulation_interval_ms_));
-
-  } else if (object_path == dbus::ObjectPath(kDisplayPasskeyPath)) {
-    // Display a passkey, and each interval act as if another key was entered
-    // for it.
-    agent_service_provider->DisplayPasskey(object_path, 123456, 0);
-
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::SimulateKeypress,
-                   base::Unretained(this),
-                   1, object_path, callback, error_callback),
-        base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
-
-  } else if (object_path == dbus::ObjectPath(kRequestPinCodePath)) {
-    // Request a Pincode.
-    agent_service_provider->RequestPinCode(
-        object_path,
-        base::Bind(&FakeBluetoothDeviceClient::PinCodeCallback,
-                   base::Unretained(this),
-                   object_path,
-                   callback,
-                   error_callback));
-
-  } else if (object_path == dbus::ObjectPath(kConfirmPasskeyPath)) {
-    // Request confirmation of a Passkey.
-    agent_service_provider->RequestConfirmation(
-        object_path, 123456,
-        base::Bind(&FakeBluetoothDeviceClient::ConfirmationCallback,
-                   base::Unretained(this),
-                   object_path,
-                   callback,
-                   error_callback));
-
-  } else if (object_path == dbus::ObjectPath(kRequestPasskeyPath)) {
-    // Request a Passkey from the user.
-    agent_service_provider->RequestPasskey(
-        object_path,
-        base::Bind(&FakeBluetoothDeviceClient::PasskeyCallback,
-                   base::Unretained(this),
-                   object_path,
-                   callback,
-                   error_callback));
-
-  } else if (object_path == dbus::ObjectPath(kUnpairableDevicePath)) {
-    // Fails the pairing with an org.bluez.Error.Failed error.
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::FailSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
-        base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
-
-  } else if (object_path == dbus::ObjectPath(kJustWorksPath)) {
-    if (incoming_request) {
-      agent_service_provider->RequestAuthorization(
-          object_path,
-          base::Bind(&FakeBluetoothDeviceClient::ConfirmationCallback,
-                     base::Unretained(this),
-                     object_path,
-                     callback,
-                     error_callback));
-
-    } else {
+        base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+            FROM_HERE, base::Bind(&FakeBluetoothDeviceClient::SimulateKeypress,
+                                  base::Unretained(this), 1, object_path,
+                                  callback, error_callback),
+            base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
+      } else if (iter->second->pairing_action == kPairingActionRequest) {
+        agent_service_provider->RequestPasskey(
+            object_path, base::Bind(&FakeBluetoothDeviceClient::PasskeyCallback,
+                                    base::Unretained(this), object_path,
+                                    callback, error_callback));
+      } else if (iter->second->pairing_action == kPairingActionConfirmation) {
+        agent_service_provider->RequestConfirmation(
+            object_path, std::stoi(iter->second->pairing_auth_token),
+            base::Bind(&FakeBluetoothDeviceClient::ConfirmationCallback,
+                       base::Unretained(this), object_path, callback,
+                       error_callback));
+      }
+    }
+  } else {
+    if (object_path == dbus::ObjectPath(kLegacyAutopairPath) ||
+        object_path == dbus::ObjectPath(kConnectUnpairablePath) ||
+        object_path == dbus::ObjectPath(kUnconnectableDevicePath) ||
+        object_path == dbus::ObjectPath(kLowEnergyPath)) {
       // No need to call anything on the pairing delegate, just wait 3 times
       // the interval before acting as if the other end accepted it.
-      base::MessageLoop::current()->PostDelayedTask(
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
-                     base::Unretained(this),
-                     object_path, callback, error_callback),
-          base::TimeDelta::FromMilliseconds(3 * simulation_interval_ms_));
+                     base::Unretained(this), object_path, callback,
+                     error_callback),
+          base::TimeDelta::FromMilliseconds(kSimulateNormalPairTimeMultiplier *
+                                            simulation_interval_ms_));
 
+    } else if (object_path == dbus::ObjectPath(kDisplayPinCodePath)) {
+      // Display a Pincode, and wait before acting as if the other end accepted
+      // it.
+      agent_service_provider->DisplayPinCode(object_path, kTestPinCode);
+
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
+                     base::Unretained(this), object_path, callback,
+                     error_callback),
+          base::TimeDelta::FromMilliseconds(kPinCodeDevicePairTimeMultiplier *
+                                            simulation_interval_ms_));
+
+    } else if (object_path == dbus::ObjectPath(kVanishingDevicePath)) {
+      // The vanishing device simulates being too far away, and thus times out.
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::TimeoutSimulatedPairing,
+                     base::Unretained(this), object_path, error_callback),
+          base::TimeDelta::FromMilliseconds(kVanishingDevicePairTimeMultiplier *
+                                            simulation_interval_ms_));
+
+    } else if (object_path == dbus::ObjectPath(kDisplayPasskeyPath)) {
+      // Display a passkey, and each interval act as if another key was entered
+      // for it.
+      agent_service_provider->DisplayPasskey(object_path, kTestPassKey, 0);
+
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&FakeBluetoothDeviceClient::SimulateKeypress,
+                                base::Unretained(this), 1, object_path,
+                                callback, error_callback),
+          base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
+
+    } else if (object_path == dbus::ObjectPath(kRequestPinCodePath)) {
+      // Request a Pincode.
+      agent_service_provider->RequestPinCode(
+          object_path, base::Bind(&FakeBluetoothDeviceClient::PinCodeCallback,
+                                  base::Unretained(this), object_path, callback,
+                                  error_callback));
+
+    } else if (object_path == dbus::ObjectPath(kConfirmPasskeyPath)) {
+      // Request confirmation of a Passkey.
+      agent_service_provider->RequestConfirmation(
+          object_path, kTestPassKey,
+          base::Bind(&FakeBluetoothDeviceClient::ConfirmationCallback,
+                     base::Unretained(this), object_path, callback,
+                     error_callback));
+
+    } else if (object_path == dbus::ObjectPath(kRequestPasskeyPath)) {
+      // Request a Passkey from the user.
+      agent_service_provider->RequestPasskey(
+          object_path, base::Bind(&FakeBluetoothDeviceClient::PasskeyCallback,
+                                  base::Unretained(this), object_path, callback,
+                                  error_callback));
+
+    } else if (object_path == dbus::ObjectPath(kUnpairableDevicePath)) {
+      // Fails the pairing with an org.bluez.Error.Failed error.
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::FailSimulatedPairing,
+                     base::Unretained(this), object_path, error_callback),
+          base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
+
+    } else if (object_path == dbus::ObjectPath(kJustWorksPath)) {
+      if (incoming_request) {
+        agent_service_provider->RequestAuthorization(
+            object_path,
+            base::Bind(&FakeBluetoothDeviceClient::ConfirmationCallback,
+                       base::Unretained(this), object_path, callback,
+                       error_callback));
+
+      } else {
+        // No need to call anything on the pairing delegate, just wait before
+        // acting as if the other end accepted it.
+        base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+            FROM_HERE,
+            base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
+                       base::Unretained(this), object_path, callback,
+                       error_callback),
+            base::TimeDelta::FromMilliseconds(
+                kSimulateNormalPairTimeMultiplier * simulation_interval_ms_));
+      }
+
+    } else {
+      error_callback.Run(kNoResponseError, "No pairing fake");
     }
-
-  } else {
-    error_callback.Run(kNoResponseError, "No pairing fake");
   }
 }
 
@@ -1042,7 +1425,7 @@ void FakeBluetoothDeviceClient::AddInputDeviceIfNeeded(
 void FakeBluetoothDeviceClient::UpdateDeviceRSSI(
     const dbus::ObjectPath& object_path,
     int16 rssi) {
-  PropertiesMap::iterator iter = properties_map_.find(object_path);
+  PropertiesMap::const_iterator iter = properties_map_.find(object_path);
   if (iter == properties_map_.end()) {
     VLOG(2) << "Fake device does not exist: " << object_path.value();
     return;
@@ -1070,29 +1453,45 @@ void FakeBluetoothDeviceClient::PinCodeCallback(
   VLOG(1) << "PinCodeCallback: " << object_path.value();
 
   if (status == BluetoothAgentServiceProvider::Delegate::SUCCESS) {
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, callback, error_callback),
-        base::TimeDelta::FromMilliseconds(3 * simulation_interval_ms_));
+    PairingOptionsMap::const_iterator iter =
+        pairing_options_map_.find(object_path);
+
+    bool success = true;
+
+    // If the device has pairing options defined
+    if (iter != pairing_options_map_.end()) {
+      success = iter->second->pairing_auth_token == pincode;
+    }
+
+    if (success) {
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
+                     base::Unretained(this), object_path, callback,
+                     error_callback),
+          base::TimeDelta::FromMilliseconds(kSimulateNormalPairTimeMultiplier *
+                                            simulation_interval_ms_));
+    } else {
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::RejectSimulatedPairing,
+                     base::Unretained(this), object_path, error_callback),
+          base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
+    }
 
   } else if (status == BluetoothAgentServiceProvider::Delegate::CANCELLED) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::CancelSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
+                   base::Unretained(this), object_path, error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
 
   } else if (status == BluetoothAgentServiceProvider::Delegate::REJECTED) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::RejectSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
+                   base::Unretained(this), object_path, error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
-
   }
 }
 
@@ -1105,29 +1504,44 @@ void FakeBluetoothDeviceClient::PasskeyCallback(
   VLOG(1) << "PasskeyCallback: " << object_path.value();
 
   if (status == BluetoothAgentServiceProvider::Delegate::SUCCESS) {
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, callback, error_callback),
-        base::TimeDelta::FromMilliseconds(3 * simulation_interval_ms_));
+    PairingOptionsMap::const_iterator iter =
+        pairing_options_map_.find(object_path);
+    bool success = true;
+
+    if (iter != pairing_options_map_.end()) {
+      success = static_cast<uint32>(
+                    std::stoi(iter->second->pairing_auth_token)) == passkey;
+    }
+
+    if (success) {
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
+                     base::Unretained(this), object_path, callback,
+                     error_callback),
+          base::TimeDelta::FromMilliseconds(kSimulateNormalPairTimeMultiplier *
+                                            simulation_interval_ms_));
+    } else {
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&FakeBluetoothDeviceClient::RejectSimulatedPairing,
+                     base::Unretained(this), object_path, error_callback),
+          base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
+    }
 
   } else if (status == BluetoothAgentServiceProvider::Delegate::CANCELLED) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::CancelSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
+                   base::Unretained(this), object_path, error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
 
   } else if (status == BluetoothAgentServiceProvider::Delegate::REJECTED) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::RejectSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
+                   base::Unretained(this), object_path, error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
-
   }
 }
 
@@ -1139,29 +1553,27 @@ void FakeBluetoothDeviceClient::ConfirmationCallback(
   VLOG(1) << "ConfirmationCallback: " << object_path.value();
 
   if (status == BluetoothAgentServiceProvider::Delegate::SUCCESS) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, callback, error_callback),
-        base::TimeDelta::FromMilliseconds(3 * simulation_interval_ms_));
+                   base::Unretained(this), object_path, callback,
+                   error_callback),
+        base::TimeDelta::FromMilliseconds(kSimulateNormalPairTimeMultiplier *
+                                          simulation_interval_ms_));
 
   } else if (status == BluetoothAgentServiceProvider::Delegate::CANCELLED) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::CancelSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
+                   base::Unretained(this), object_path, error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
 
   } else if (status == BluetoothAgentServiceProvider::Delegate::REJECTED) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::RejectSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, error_callback),
+                   base::Unretained(this), object_path, error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
-
   }
 }
 
@@ -1183,24 +1595,22 @@ void FakeBluetoothDeviceClient::SimulateKeypress(
   if (!agent_service_provider)
     return;
 
-  agent_service_provider->DisplayPasskey(object_path, 123456, entered);
+  agent_service_provider->DisplayPasskey(object_path, kTestPassKey, entered);
 
   if (entered < 7) {
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&FakeBluetoothDeviceClient::SimulateKeypress,
-                   base::Unretained(this),
-                   entered + 1, object_path, callback, error_callback),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&FakeBluetoothDeviceClient::SimulateKeypress,
+                              base::Unretained(this), entered + 1, object_path,
+                              callback, error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
 
   } else {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&FakeBluetoothDeviceClient::CompleteSimulatedPairing,
-                   base::Unretained(this),
-                   object_path, callback, error_callback),
+                   base::Unretained(this), object_path, callback,
+                   error_callback),
         base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
-
   }
 }
 

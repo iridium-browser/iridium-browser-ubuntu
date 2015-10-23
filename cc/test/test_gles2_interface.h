@@ -56,6 +56,7 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   void Clear(GLbitfield mask) override;
   void Flush() override;
   void Finish() override;
+  void ShallowFinishCHROMIUM() override;
   void ShallowFlushCHROMIUM() override;
   void Enable(GLenum cap) override;
   void Disable(GLenum cap) override;
@@ -176,6 +177,7 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
 
   void ResizeCHROMIUM(GLuint width, GLuint height, float device_scale) override;
   void LoseContextCHROMIUM(GLenum current, GLenum other) override;
+  GLenum GetGraphicsResetStatusKHR() override;
 
  private:
   TestWebGraphicsContext3D* test_context_;

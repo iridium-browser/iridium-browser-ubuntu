@@ -11,12 +11,13 @@
 #include "extensions/common/extension.h"
 
 class Browser;
+class ExtensionService;
 class Profile;
 
 namespace extensions {
 
 class ExtensionPrefs;
-class SuspiciousExtensionBubble;
+class ExtensionRegistry;
 
 class ExtensionMessageBubbleController {
  public:
@@ -33,7 +34,7 @@ class ExtensionMessageBubbleController {
     explicit Delegate(Profile* profile);
     virtual ~Delegate();
 
-    virtual bool ShouldIncludeExtension(const std::string& extension_id) = 0;
+    virtual bool ShouldIncludeExtension(const Extension* extension) = 0;
     virtual void AcknowledgeExtension(
         const std::string& extension_id,
         BubbleAction action) = 0;
@@ -64,9 +65,8 @@ class ExtensionMessageBubbleController {
     // the toolbar.
     virtual bool ShouldHighlightExtensions() const = 0;
 
-    // In some cases, we want the delegate only to handle a single extension
-    // and this sets which extension.
-    virtual void RestrictToSingleExtension(const std::string& extension_id);
+    // Returns true if only enabled extensions should be considered.
+    virtual bool ShouldLimitToEnabledExtensions() const = 0;
 
     // Record, through UMA, how many extensions were found.
     virtual void LogExtensionCount(size_t count) = 0;
@@ -77,8 +77,14 @@ class ExtensionMessageBubbleController {
     virtual void SetBubbleInfoBeenAcknowledged(const std::string& extension_id,
                                                bool value);
 
+    // Returns the set of profiles for which this bubble has been shown.
+    // If profiles are not tracked, returns null (default).
+    virtual std::set<Profile*>* GetProfileSet();
+
    protected:
-    Profile* profile() const;
+    Profile* profile() { return profile_; }
+    ExtensionService* service() { return service_; }
+    const ExtensionRegistry* registry() const { return registry_; }
 
     std::string get_acknowledged_flag_pref_name() const;
     void set_acknowledged_flag_pref_name(std::string pref_name);
@@ -87,15 +93,27 @@ class ExtensionMessageBubbleController {
     // A weak pointer to the profile we are associated with. Not owned by us.
     Profile* profile_;
 
+    // The extension service associated with the profile.
+    ExtensionService* service_;
+
+    // The extension registry associated with the profile.
+    ExtensionRegistry* registry_;
+
     // Name for corresponding pref that keeps if the info the bubble contains
     // was acknowledged by user.
     std::string acknowledged_pref_name_;
+
+    DISALLOW_COPY_AND_ASSIGN(Delegate);
   };
 
-  ExtensionMessageBubbleController(Delegate* delegate, Profile* profile);
+  ExtensionMessageBubbleController(Delegate* delegate, Browser* browser);
   virtual ~ExtensionMessageBubbleController();
 
   Delegate* delegate() const { return delegate_.get(); }
+  Profile* profile();
+
+  // Returns true if the bubble should be displayed.
+  bool ShouldShow();
 
   // Obtains a list of all extensions (by name) the controller knows about.
   std::vector<base::string16> GetExtensionList();
@@ -123,6 +141,9 @@ class ExtensionMessageBubbleController {
   virtual void OnBubbleDismiss();
   virtual void OnLinkClicked();
 
+  static void set_should_ignore_learn_more_for_testing(
+      bool should_ignore_learn_more);
+
  private:
   // Iterate over the known extensions and acknowledge each one.
   void AcknowledgeExtensions();
@@ -133,8 +154,8 @@ class ExtensionMessageBubbleController {
   // Performs cleanup after the bubble closes.
   void OnClose();
 
-  // A weak pointer to the profile we are associated with. Not owned by us.
-  Profile* profile_;
+  // A weak pointer to the Browser we are associated with. Not owned by us.
+  Browser* browser_;
 
   // The list of extensions found.
   ExtensionIdList extension_list_;

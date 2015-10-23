@@ -139,10 +139,6 @@ class ActivityLog : public BrowserContextKeyedAPI,
   // --enable-extension-activity-logging flag is set.
   bool IsDatabaseEnabled();
 
-  // Delayed initialization of ExtensionRegistry which waits until after the
-  // ExtensionSystem/ExtensionService are done with their own setup.
-  void StartObserving();
-
   // ScriptExecutionObserver implementation.
   // Fires when a ContentScript is executed.
   void OnScriptsExecuted(const content::WebContents* web_contents,
@@ -161,7 +157,7 @@ class ActivityLog : public BrowserContextKeyedAPI,
   static const bool kServiceRedirectedInIncognito = true;
   static const bool kServiceIsCreatedWithBrowserContext = false;
 
-  typedef ObserverListThreadSafe<Observer> ObserverList;
+  typedef base::ObserverListThreadSafe<Observer> ObserverList;
   scoped_refptr<ObserverList> observers_;
 
   // Policy objects are owned by the ActivityLog, but cannot be scoped_ptrs
@@ -174,10 +170,6 @@ class ActivityLog : public BrowserContextKeyedAPI,
   // database_policy_ if the Watchdog app is installed or flag is set.
   ActivityLogDatabasePolicy* database_policy_;
   ActivityLogPolicy::PolicyType database_policy_type_;
-
-  // The UMA policy is used for recording statistics about extension behavior.
-  // This policy is always in use, except for Incognito profiles.
-  ActivityLogPolicy* uma_policy_;
 
   Profile* profile_;
   bool db_enabled_;  // Whether logging to disk is currently enabled.

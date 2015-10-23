@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -15,7 +15,6 @@
 #include "base/time/time.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_internals_util.h"
 #include "components/signin/core/browser/signin_manager_cookie_helper.h"
@@ -186,7 +185,7 @@ void SigninManager::SignOut(
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesAccountId);
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesUserAccountId);
   client_->GetPrefs()->ClearPref(prefs::kSignedInTime);
-  client_->OnSignedOut();
+  client_->SignOut();
 
   // Determine the duration the user was logged in and log that to UMA.
   if (!signin_time.is_null()) {
@@ -233,6 +232,10 @@ void SigninManager::Initialize(PrefService* local_state) {
     SignOut(signin_metrics::SIGNIN_PREF_CHANGED_DURING_SIGNIN);
   }
 
+  if (account_tracker_service()->GetMigrationState() ==
+      AccountTrackerService::MIGRATION_IN_PROGRESS) {
+    token_service_->AddObserver(this);
+  }
   InitTokenService();
   account_tracker_service()->AddObserver(this);
 }
@@ -406,6 +409,14 @@ void SigninManager::OnAccountUpdated(
 void SigninManager::OnAccountUpdateFailed(const std::string& account_id) {
   user_info_fetched_by_account_tracker_ = true;
   PostSignedIn();
+}
+
+void SigninManager::OnRefreshTokensLoaded() {
+  if (account_tracker_service()->GetMigrationState() ==
+      AccountTrackerService::MIGRATION_IN_PROGRESS) {
+    account_tracker_service()->SetMigrationDone();
+    token_service_->RemoveObserver(this);
+  }
 }
 
 void SigninManager::ProhibitSignout(bool prohibit_signout) {

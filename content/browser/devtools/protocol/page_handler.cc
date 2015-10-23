@@ -8,8 +8,11 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "content/browser/devtools/protocol/color_picker.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -142,6 +145,16 @@ void PageHandler::Detached() {
 }
 
 void PageHandler::OnSwapCompositorFrame(
+    const cc::CompositorFrameMetadata& frame_metadata) {
+  last_compositor_frame_metadata_ = frame_metadata;
+  has_compositor_frame_metadata_ = true;
+
+  if (screencast_enabled_)
+    InnerSwapCompositorFrame();
+  color_picker_->OnSwapCompositorFrame();
+}
+
+void PageHandler::OnSynchronousSwapCompositorFrame(
     const cc::CompositorFrameMetadata& frame_metadata) {
   last_compositor_frame_metadata_ = has_compositor_frame_metadata_ ?
       next_compositor_frame_metadata_ : frame_metadata;
@@ -426,10 +439,9 @@ void PageHandler::ScreencastFrameCaptured(
     processing_screencast_frame_ = false;
     if (capture_retry_count_) {
       --capture_retry_count_;
-      base::MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&PageHandler::InnerSwapCompositorFrame,
-                     weak_factory_.GetWeakPtr()),
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&PageHandler::InnerSwapCompositorFrame,
+                                weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMilliseconds(kFrameRetryDelayMs));
     }
     return;

@@ -19,13 +19,18 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-static const std::string kTypeParentId = "PrefsRootNodeID";
 static const syncer::ModelType kModelType = syncer::PREFERENCES;
 
 // Special constant value taken from cryptographer.cc.
 const char kNigoriKeyName[] = "nigori-key";
 
-namespace syncer {
+namespace syncer_v2 {
+
+using syncer::Cryptographer;
+using syncer::CommitContribution;
+using syncer::KeyParams;
+using syncer::Nigori;
+using syncer::sessions::StatusController;
 
 // Tests the ModelTypeSyncWorkerImpl.
 //
@@ -195,7 +200,7 @@ class ModelTypeSyncWorkerImplTest : public ::testing::Test {
 
  private:
   // An encryptor for our cryptographer.
-  FakeEncryptor fake_encryptor_;
+  syncer::FakeEncryptor fake_encryptor_;
 
   // The cryptographer itself.  NULL if we're not encrypting the type.
   scoped_ptr<Cryptographer> cryptographer_;
@@ -218,11 +223,11 @@ class ModelTypeSyncWorkerImplTest : public ::testing::Test {
   // A mock that emulates enough of the sync server that it can be used
   // a single UpdateHandler and CommitContributor pair.  In this test
   // harness, the |worker_| is both of them.
-  SingleTypeMockServer mock_server_;
+  syncer::SingleTypeMockServer mock_server_;
 
   // A mock to track the number of times the ModelTypeSyncWorker requests to
   // sync.
-  MockNudgeHandler mock_nudge_handler_;
+  syncer::MockNudgeHandler mock_nudge_handler_;
 };
 
 ModelTypeSyncWorkerImplTest::ModelTypeSyncWorkerImplTest()
@@ -239,7 +244,6 @@ void ModelTypeSyncWorkerImplTest::FirstInitialize() {
   DataTypeState initial_state;
   initial_state.progress_marker.set_data_type_id(
       GetSpecificsFieldNumberFromModelType(kModelType));
-  initial_state.next_client_id = 0;
 
   InitializeWithState(initial_state, UpdateResponseDataList());
 }
@@ -255,8 +259,6 @@ void ModelTypeSyncWorkerImplTest::InitializeWithPendingUpdates(
       GetSpecificsFieldNumberFromModelType(kModelType));
   initial_state.progress_marker.set_token("some_saved_progress_token");
 
-  initial_state.next_client_id = 10;
-  initial_state.type_root_id = kTypeParentId;
   initial_state.initial_sync_done = true;
 
   InitializeWithState(initial_state, initial_pending_updates);
@@ -328,7 +330,7 @@ void ModelTypeSyncWorkerImplTest::NewForeignEncryptionKey() {
   // Update the worker with the latest cryptographer.
   if (worker_) {
     worker_->UpdateCryptographer(
-        make_scoped_ptr<Cryptographer>(new Cryptographer(*cryptographer_)));
+        make_scoped_ptr(new Cryptographer(*cryptographer_)));
   }
 }
 
@@ -344,7 +346,7 @@ void ModelTypeSyncWorkerImplTest::UpdateLocalCryptographer() {
   // Update the worker with the latest cryptographer.
   if (worker_) {
     worker_->UpdateCryptographer(
-        make_scoped_ptr<Cryptographer>(new Cryptographer(*cryptographer_)));
+        make_scoped_ptr(new Cryptographer(*cryptographer_)));
   }
 }
 
@@ -375,7 +377,7 @@ void ModelTypeSyncWorkerImplTest::TriggerTypeRootUpdateFromServer() {
   SyncEntityList entity_list;
   entity_list.push_back(&entity);
 
-  sessions::StatusController dummy_status;
+  StatusController dummy_status;
 
   worker_->ProcessGetUpdatesResponse(mock_server_.GetProgress(),
                                      mock_server_.GetContext(),
@@ -399,7 +401,7 @@ void ModelTypeSyncWorkerImplTest::TriggerUpdateFromServer(
   SyncEntityList entity_list;
   entity_list.push_back(&entity);
 
-  sessions::StatusController dummy_status;
+  StatusController dummy_status;
 
   worker_->ProcessGetUpdatesResponse(mock_server_.GetProgress(),
                                      mock_server_.GetContext(),
@@ -410,7 +412,7 @@ void ModelTypeSyncWorkerImplTest::TriggerUpdateFromServer(
 
 void ModelTypeSyncWorkerImplTest::DeliverRawUpdates(
     const SyncEntityList& list) {
-  sessions::StatusController dummy_status;
+  StatusController dummy_status;
   worker_->ProcessGetUpdatesResponse(mock_server_.GetProgress(),
                                      mock_server_.GetContext(),
                                      list,
@@ -432,7 +434,7 @@ void ModelTypeSyncWorkerImplTest::TriggerTombstoneFromServer(
   SyncEntityList entity_list;
   entity_list.push_back(&entity);
 
-  sessions::StatusController dummy_status;
+  StatusController dummy_status;
 
   worker_->ProcessGetUpdatesResponse(mock_server_.GetProgress(),
                                      mock_server_.GetContext(),
@@ -477,7 +479,7 @@ void ModelTypeSyncWorkerImplTest::DoSuccessfulCommit() {
   sync_pb::ClientToServerResponse response =
       mock_server_.DoSuccessfulCommit(message);
 
-  sessions::StatusController dummy_status;
+  StatusController dummy_status;
   contribution->ProcessCommitResponse(response, &dummy_status);
   contribution->CleanUp();
 }
@@ -588,7 +590,7 @@ std::string ModelTypeSyncWorkerImplTest::GetLocalCryptographerKeyName() const {
 std::string ModelTypeSyncWorkerImplTest::GenerateTagHash(
     const std::string& tag) {
   const std::string& client_tag_hash =
-      syncable::GenerateSyncableHash(kModelType, tag);
+      syncer::syncable::GenerateSyncableHash(kModelType, tag);
   return client_tag_hash;
 }
 
@@ -672,7 +674,6 @@ TEST_F(ModelTypeSyncWorkerImplTest, SimpleCommit) {
   ASSERT_TRUE(HasCommitEntityOnServer("tag1"));
   const sync_pb::SyncEntity& entity = GetLatestCommitEntityOnServer("tag1");
   EXPECT_FALSE(entity.id_string().empty());
-  EXPECT_EQ(kTypeParentId, entity.parent_id_string());
   EXPECT_EQ(kUncommittedVersion, entity.version());
   EXPECT_NE(0, entity.mtime());
   EXPECT_NE(0, entity.ctime());
@@ -729,7 +730,7 @@ TEST_F(ModelTypeSyncWorkerImplTest, SimpleDelete) {
 
   // Deletions should contain enough specifics to identify the type.
   EXPECT_TRUE(entity.has_specifics());
-  EXPECT_EQ(kModelType, GetModelTypeFromSpecifics(entity.specifics()));
+  EXPECT_EQ(kModelType, syncer::GetModelTypeFromSpecifics(entity.specifics()));
 
   // Verify the commit response returned to the model thread.
   ASSERT_EQ(2U, GetNumModelThreadCommitResponses());
@@ -781,7 +782,6 @@ TEST_F(ModelTypeSyncWorkerImplTest, SendInitialSyncDone) {
 
   const DataTypeState& state = GetNthModelThreadUpdateState(1);
   EXPECT_FALSE(state.progress_marker.token().empty());
-  EXPECT_FALSE(state.type_root_id.empty());
   EXPECT_TRUE(state.initial_sync_done);
 }
 

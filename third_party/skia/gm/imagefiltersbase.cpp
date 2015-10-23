@@ -283,6 +283,7 @@ protected:
             SkPaint::kAntiAlias_Flag | SkPaint::kLCDRenderText_Flag,
         };
         SkPaint paint(origPaint);
+        sk_tool_utils::set_portable_typeface(&paint);
         paint.setTextSize(30);
 
         SkAutoCanvasRestore acr(canvas, true);

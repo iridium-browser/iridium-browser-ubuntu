@@ -51,7 +51,7 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
         << "Mutliple calls to BeginPaint per frame";
     return surface_->current_sw_canvas_;
   }
-  void EndPaint(cc::SoftwareFrameData* frame_data) override {}
+  void EndPaint() override {}
 
  private:
   SynchronousCompositorOutputSurface* surface_;
@@ -256,23 +256,11 @@ void SynchronousCompositorOutputSurface::SetMemoryPolicy(size_t bytes_limit) {
   if (became_zero) {
     // This is small hack to drop context resources without destroying it
     // when this compositor is put into the background.
-    context_provider()->DeleteCachedResources();
-    context_provider()->ContextSupport()->SetSurfaceVisible(false);
-
-    cc::ContextProvider* context = worker_context_provider();
-    base::AutoLock context_lock(*context->GetLock());
-    context->DetachFromThread();
-    context->DeleteCachedResources();
-    context->ContextSupport()->SetSurfaceVisible(false);
-    context->DetachFromThread();
+    context_provider()->ContextSupport()->SetAggressivelyFreeResources(
+        true /* aggressively_free_resources */);
   } else if (became_non_zero) {
-    context_provider()->ContextSupport()->SetSurfaceVisible(true);
-
-    cc::ContextProvider* context = worker_context_provider();
-    base::AutoLock context_lock(*context->GetLock());
-    context->DetachFromThread();
-    context->ContextSupport()->SetSurfaceVisible(true);
-    context->DetachFromThread();
+    context_provider()->ContextSupport()->SetAggressivelyFreeResources(
+        false /* aggressively_free_resources */);
   }
 }
 

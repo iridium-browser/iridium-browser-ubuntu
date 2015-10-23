@@ -17,7 +17,6 @@
 #include "net/base/network_delegate_impl.h"
 
 class ChromeExtensionsNetworkDelegate;
-class CookieSettings;
 class PrefService;
 
 template<class T> class PrefMember;
@@ -31,6 +30,10 @@ class Value;
 namespace chrome_browser_net {
 class ConnectInterceptor;
 class Predictor;
+}
+
+namespace content_settings {
+class CookieSettings;
 }
 
 namespace domain_reliability {
@@ -87,7 +90,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   // otherwise the settings are enforced on all observed network requests.
   // Not inlined because we assign a scoped_refptr, which requires us to include
   // the header file. Here we just forward-declare it.
-  void set_cookie_settings(CookieSettings* cookie_settings);
+  void set_cookie_settings(content_settings::CookieSettings* cookie_settings);
 
   // Causes requested URLs to be fed to |predictor| via ConnectInterceptor.
   void set_predictor(chrome_browser_net::Predictor* predictor);
@@ -111,10 +114,6 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
     domain_reliability_monitor_ = monitor;
   }
 
-  // Causes |OnCanThrottleRequest| to always return false, for all
-  // instances of this object.
-  static void NeverThrottleRequests();
-
   // Binds the pref members to |pref_service| and moves them to the IO thread.
   // |enable_referrers| cannot be NULL, the others can.
   // This method should be called on the UI thread.
@@ -130,8 +129,6 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   static void AllowAccessToAllFiles();
 
  private:
-  friend class ChromeNetworkDelegateThrottlingTest;
-
   // NetworkDelegate implementation.
   int OnBeforeURLRequest(net::URLRequest* request,
                          const net::CompletionCallback& callback,
@@ -166,7 +163,6 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
                       net::CookieOptions* options) override;
   bool OnCanAccessFile(const net::URLRequest& request,
                        const base::FilePath& path) const override;
-  bool OnCanThrottleRequest(const net::URLRequest& request) const override;
   bool OnCanEnablePrivacyMode(
       const GURL& url,
       const GURL& first_party_for_cookies) const override;
@@ -184,7 +180,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
 
   void* profile_;
   base::FilePath profile_path_;
-  scoped_refptr<CookieSettings> cookie_settings_;
+  scoped_refptr<content_settings::CookieSettings> cookie_settings_;
 
   scoped_ptr<chrome_browser_net::ConnectInterceptor> connect_interceptor_;
 
@@ -202,14 +198,6 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
 
   // When true, allow access to all file:// URLs.
   static bool g_allow_file_access_;
-
-  // True if OnCanThrottleRequest should always return false.
-  //
-  // Note: This needs to be static as the instance of
-  // ChromeNetworkDelegate used may change over time, and we need to
-  // set this variable once at start-up time.  It is effectively
-  // static anyway since it is based on a command-line flag.
-  static bool g_never_throttle_requests_;
 
   bool experimental_web_platform_features_enabled_;
 

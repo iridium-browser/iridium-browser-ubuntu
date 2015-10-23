@@ -592,7 +592,10 @@ bool Program::Link(ShaderManager* manager,
         transform_feedback_varyings_,
         transform_feedback_buffer_mode_);
 
-    if (status == ProgramCache::LINK_SUCCEEDED) {
+    bool cache_hit = status == ProgramCache::LINK_SUCCEEDED;
+    UMA_HISTOGRAM_BOOLEAN("GPU.ProgramCache.CacheHit", cache_hit);
+
+    if (cache_hit) {
       ProgramCache::ProgramLoadResult success =
           cache->LoadLinkedProgram(service_id(),
                                    attached_shaders_[0].get(),
@@ -841,7 +844,8 @@ void Program::GetCorrectedUniformData(
       found = uniform->findInfoByMappedName(name, &info, original_name);
     if (found) {
       const std::string kArraySpec("[0]");
-      if (info->arraySize > 0 && !EndsWith(name, kArraySpec, true)) {
+      if (info->arraySize > 0 &&
+          !base::EndsWith(name, kArraySpec, base::CompareCase::SENSITIVE)) {
         *corrected_name = name + kArraySpec;
         *original_name += kArraySpec;
       } else {
@@ -1188,6 +1192,8 @@ bool Program::DetectVaryingsMismatch(std::string* conflicting_name) const {
   const VaryingMap* vertex_varyings = &(attached_shaders_[0]->varying_map());
   const VaryingMap* fragment_varyings = &(attached_shaders_[1]->varying_map());
 
+  int shader_version = attached_shaders_[0]->shader_version();
+
   for (VaryingMap::const_iterator iter = fragment_varyings->begin();
        iter != fragment_varyings->end(); ++iter) {
     const std::string& name = iter->first;
@@ -1203,7 +1209,7 @@ bool Program::DetectVaryingsMismatch(std::string* conflicting_name) const {
       continue;
     }
 
-    if (!hit->second.isSameVaryingAtLinkTime(iter->second)) {
+    if (!hit->second.isSameVaryingAtLinkTime(iter->second, shader_version)) {
       *conflicting_name = name;
       return true;
     }

@@ -209,7 +209,8 @@ base::string16 AvatarMenu::GetSupervisedUserInformation() const {
     base::string16 custodian =
         base::UTF8ToUTF16(service->GetCustodianEmailAddress());
     if (browser_->profile()->IsLegacySupervised())
-      return l10n_util::GetStringFUTF16(IDS_SUPERVISED_USER_INFO, custodian);
+      return l10n_util::GetStringFUTF16(IDS_LEGACY_SUPERVISED_USER_INFO,
+                                        custodian);
     base::string16 second_custodian =
         base::UTF8ToUTF16(service->GetSecondCustodianEmailAddress());
     if (second_custodian.empty()) {
@@ -222,15 +223,6 @@ base::string16 AvatarMenu::GetSupervisedUserInformation() const {
 #endif
   }
   return base::string16();
-}
-
-const gfx::Image& AvatarMenu::GetSupervisedUserIcon() const {
-  if (browser_ && browser_->profile()->IsChild()) {
-    return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-        IDR_CHILD_USER_ICON);
-  }
-  return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_LEGACY_SUPERVISED_USER_ICON);
 }
 
 void AvatarMenu::ActiveBrowserChanged(Browser* browser) {

@@ -2,13 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import benchmark
-
+from core import perf_benchmark
 from measurements import startup
 import page_sets
 
+from telemetry import benchmark
 
-class _StartupCold(benchmark.Benchmark):
+
+class _StartupCold(perf_benchmark.PerfBenchmark):
   """Measures cold startup time with a clean profile."""
   options = {'pageset_repeat': 5}
 
@@ -20,7 +21,7 @@ class _StartupCold(benchmark.Benchmark):
     return startup.Startup(cold=True)
 
 
-class _StartupWarm(benchmark.Benchmark):
+class _StartupWarm(perf_benchmark.PerfBenchmark):
   """Measures warm startup time with a clean profile."""
   options = {'pageset_repeat': 20}
 
@@ -64,14 +65,13 @@ class StartupWarmBlankPage(_StartupWarm):
 class StartupLargeProfileColdBlankPage(_StartupCold):
   """Measures cold startup time with a large profile."""
   tag = 'cold'
-  page_set = page_sets.BlankPageSet
-  options = {'pageset_repeat': 1}
+  page_set = page_sets.BlankPageSetWithLargeProfile
+  options = {'pageset_repeat': 3}
 
   def __init__(self, max_failures=None):
     super(StartupLargeProfileColdBlankPage, self).__init__(max_failures)
-    self.generated_profile_archive = "large_profile.zip"
 
-  def CustomizeBrowserOptions(self, options):
+  def SetExtraBrowserOptions(self, options):
     options.browser_startup_timeout = 10 * 60
 
   @classmethod
@@ -84,14 +84,13 @@ class StartupLargeProfileColdBlankPage(_StartupCold):
 class StartupLargeProfileWarmBlankPage(_StartupWarm):
   """Measures warm startup time with a large profile."""
   tag = 'warm'
-  page_set = page_sets.BlankPageSet
-  options = {'pageset_repeat': 1}
+  page_set = page_sets.BlankPageSetWithLargeProfile
+  options = {'pageset_repeat': 4}
 
   def __init__(self, max_failures=None):
     super(StartupLargeProfileWarmBlankPage, self).__init__(max_failures)
-    self.generated_profile_archive = "large_profile.zip"
 
-  def CustomizeBrowserOptions(self, options):
+  def SetExtraBrowserOptions(self, options):
     options.browser_startup_timeout = 10 * 60
 
   @classmethod

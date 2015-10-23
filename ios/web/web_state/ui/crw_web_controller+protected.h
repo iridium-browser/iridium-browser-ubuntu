@@ -9,9 +9,13 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "ios/web/public/referrer.h"
-#include "ios/web/public/web_state/page_scroll_state.h"
+#include "ios/web/public/web_state/page_display_state.h"
 
 @class CRWSessionController;
+namespace web {
+struct FrameInfo;
+class NavigationItem;
+}  // namespace web
 
 namespace web {
 // Separator between window href and name.
@@ -128,6 +132,12 @@ struct NewWindowInfo {
 // Called before loading current URL in WebView.
 - (void)willLoadCurrentURLInWebView;
 
+// Loads request for the URL of the current navigation item. Subclasses may
+// choose to build a new NSURLRequest and call |loadRequest| on the underlying
+// web view, or use native web view navigation where possible (for example,
+// going back and forward through the history stack).
+- (void)loadRequestForCurrentNavigationItem;
+
 // Indicates whether or not there's an indication that the page is probably
 // about to change. This is called as a hint to the UIWebView-based subclass to
 // change polling behavior.
@@ -153,16 +163,12 @@ struct NewWindowInfo {
 // |command|. Subclasses may override to handle class-specific messages.
 - (SEL)selectorToHandleJavaScriptCommand:(const std::string&)command;
 
-// Extracts the absolute zoom scale of content displayed with |scrollState|,
-// given the differing ways in which UIWebView and WKWebView use UIScrollView's
-// zoom scale properties.  See comments in
-// |applyWebViewScrollZoomScaleFromScrollState:| implementations for details.
-- (CGFloat)absoluteZoomScaleForScrollState:
-    (const web::PageScrollState&)scrollState;
+// Sets zoom scale value for webview scroll view from |zoomState|.
+- (void)applyWebViewScrollZoomScaleFromZoomState:
+    (const web::PageZoomState&)zoomState;
 
-// Sets zoom scale value for webview scroll view from |scrollState|.
-- (void)applyWebViewScrollZoomScaleFromScrollState:
-    (const web::PageScrollState&)scrollState;
+// Handles cancelled load in WKWebView (error with NSURLErrorCancelled code).
+- (void)handleCancelledError:(NSError*)error;
 
 #pragma mark - Optional methods for subclasses
 // Subclasses may overwrite methods in this section.
@@ -172,6 +178,10 @@ struct NewWindowInfo {
 // TODO(stuartmorgan): Remove once the hook points are driven from the subclass.
 - (BOOL)checkForUnexpectedURLChange;
 
+// Handles 'window.history.willChangeState' message.
+- (BOOL)handleWindowHistoryWillChangeStateMessage:
+            (base::DictionaryValue*)message
+                                          context:(NSDictionary*)context;
 // Handles 'window.history.didPushState' message.
 - (BOOL)handleWindowHistoryDidPushStateMessage:(base::DictionaryValue*)message
                                        context:(NSDictionary*)context;
@@ -186,6 +196,15 @@ struct NewWindowInfo {
 
 // Clears WebUI, if one exists.
 - (void)clearWebUI;
+
+// Returns a NSMutableURLRequest that represents the current NavigationItem.
+- (NSMutableURLRequest*)requestForCurrentNavigationItem;
+
+// Compares the two URLs being navigated between during a history navigation to
+// determine if a # needs to be appended to the URL of |toItem| to trigger a
+// hashchange event. If so, also saves the modified URL into |toItem|.
+- (GURL)URLForHistoryNavigationFromItem:(web::NavigationItem*)fromItem
+                                 toItem:(web::NavigationItem*)toItem;
 
 #pragma mark - Internal methods for use by subclasses
 
@@ -248,6 +267,9 @@ struct NewWindowInfo {
 // operations are cancelled.
 - (void)loadCancelled;
 
+// Aborts any load for both the web view and web controller.
+- (void)abortLoad;
+
 // Returns the URL that the navigation system believes should be currently
 // active.
 // TODO(stuartmorgan):Remove this in favor of more specific getters.
@@ -292,10 +314,12 @@ struct NewWindowInfo {
 - (void)handleWebInvokeURL:(const GURL&)url request:(NSURLRequest*)request;
 
 // Returns YES if the given load request should be allowed to continue. If this
-// returns NO, the load should be cancelled.
-// |isLinkClick| should indicate whether the navigation is the result of a link
-// click (either directly, or via JS triggered by a link).
+// returns NO, the load should be cancelled. |targetFrame| contains information
+// about the frame to which navigation is targeted, can be null.
+// |isLinkClick| should indicate whether the navigation is the
+// result of a link click (either directly, or via JS triggered by a link).
 - (BOOL)shouldAllowLoadWithRequest:(NSURLRequest*)request
+                       targetFrame:(const web::FrameInfo*)targetFrame
                        isLinkClick:(BOOL)isLinkClick;
 
 // Prepares web controller and delegates for anticipated page change.
@@ -353,11 +377,31 @@ struct NewWindowInfo {
 // Tries to open a popup with the given new window information.
 - (void)openPopupWithInfo:(const web::NewWindowInfo&)windowInfo;
 
+// Returns the current entry from the underlying session controller.
+// TODO(stuartmorgan): Audit all calls to these methods; these are just wrappers
+// around the same logic as GetActiveEntry, so should probably not be used for
+// the same reason that GetActiveEntry is deprecated. (E.g., page operations
+// should generally be dealing with the last commited entry, not a pending
+// entry).
+- (CRWSessionEntry*)currentSessionEntry;
+// Returns the navigation item for the current page.
+- (web::NavigationItem*)currentNavItem;
+
+// The HTTP headers associated with the current navigation item. These are nil
+// unless the request was a POST.
+- (NSDictionary*)currentHTTPHeaders;
+
 // Returns the referrer for the current page.
 - (web::Referrer)currentReferrer;
 
+// Returns the referrer for current navigation item. May be empty.
+- (web::Referrer)currentSessionEntryReferrer;
+
 // Returns the current transition type.
 - (ui::PageTransition)currentTransition;
+
+// Returns the current entry from the underlying session controller.
+- (CRWSessionEntry*)currentSessionEntry;
 
 // Resets pending external request information.
 - (void)resetExternalRequest;

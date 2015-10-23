@@ -35,7 +35,7 @@ bool GetDeclarationValue(const base::StringPiece& line,
   std::string temp(line.data() + index + prefix.length(),
                    line.length() - index - prefix.length());
 
-  if (temp.empty() || !IsWhitespace(temp[0]))
+  if (temp.empty() || !base::IsUnicodeWhitespace(temp[0]))
     return false;
 
   base::TrimWhitespaceASCII(temp, base::TRIM_ALL, value);
@@ -87,12 +87,12 @@ bool UserScriptLoader::ParseMetadataHeader(const base::StringPiece& script_text,
       std::string value;
       if (GetDeclarationValue(line, kIncludeDeclaration, &value)) {
         // We escape some characters that MatchPattern() considers special.
-        ReplaceSubstringsAfterOffset(&value, 0, "\\", "\\\\");
-        ReplaceSubstringsAfterOffset(&value, 0, "?", "\\?");
+        base::ReplaceSubstringsAfterOffset(&value, 0, "\\", "\\\\");
+        base::ReplaceSubstringsAfterOffset(&value, 0, "?", "\\?");
         script->add_glob(value);
       } else if (GetDeclarationValue(line, kExcludeDeclaration, &value)) {
-        ReplaceSubstringsAfterOffset(&value, 0, "\\", "\\\\");
-        ReplaceSubstringsAfterOffset(&value, 0, "?", "\\?");
+        base::ReplaceSubstringsAfterOffset(&value, 0, "\\", "\\\\");
+        base::ReplaceSubstringsAfterOffset(&value, 0, "?", "\\?");
         script->add_exclude_glob(value);
       } else if (GetDeclarationValue(line, kNamespaceDeclaration, &value)) {
         script->set_name_space(value);
@@ -275,7 +275,7 @@ void UserScriptLoader::StartLoad() {
 // static
 scoped_ptr<base::SharedMemory> UserScriptLoader::Serialize(
     const UserScriptList& scripts) {
-  Pickle pickle;
+  base::Pickle pickle;
   pickle.WriteSizeT(scripts.size());
   for (const UserScript& script : scripts) {
     // TODO(aa): This can be replaced by sending content script metadata to
@@ -380,7 +380,7 @@ void UserScriptLoader::SendUpdate(content::RenderProcessHost* process,
                                   const std::set<HostID>& changed_hosts) {
   // Don't allow injection of non-whitelisted extensions' content scripts
   // into <webview>.
-  bool whitelisted_only = process->IsIsolatedGuest() && host_id().id().empty();
+  bool whitelisted_only = process->IsForGuestsOnly() && host_id().id().empty();
 
   // Make sure we only send user scripts to processes in our browser_context.
   if (!ExtensionsBrowserClient::Get()->IsSameContext(

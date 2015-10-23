@@ -2,24 +2,33 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/module_args/mojo.gni")
 import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 
 mojom("interfaces") {
   sources = [
     "animations.mojom",
+    "command_buffer.mojom",
+    "compositor_frame.mojom",
+    "gpu.mojom",
+    "gpu_capabilities.mojom",
+    "quads.mojom",
+    "surface_id.mojom",
+    "surfaces.mojom",
     "view_manager.mojom",
     "view_manager_constants.mojom",
     "view_manager_root.mojom",
   ]
 
-  import_dirs = [ get_path_info("../../../..", "abspath") ]
+  import_dirs = [
+    get_path_info("../../../..", "abspath"),
+    "//mojo/services",
+  ]
 
   deps = [
-    "//components/native_viewport/public/interfaces",
-    "//components/surfaces/public/interfaces:surface_id",
     "//mojo/application/public/interfaces",
+    "//mojo/services/network/public/interfaces",
     "//ui/mojo/events:interfaces",
+    "//ui/mojo/ime:interfaces",
     "//ui/mojo/geometry:interfaces",
   ]
 }

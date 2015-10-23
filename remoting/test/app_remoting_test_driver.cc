@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
@@ -18,11 +21,13 @@ namespace switches {
 const char kAuthCodeSwitchName[] = "authcode";
 const char kHelpSwitchName[] = "help";
 const char kLoggingLevelSwitchName[] = "verbosity";
+const char kRefreshTokenFileSwitchName[] = "refresh-token-file";
+const char kReleaseHostsAfterTestingSwitchName[] = "release-hosts-after-tests";
 const char kServiceEnvironmentSwitchName[] = "environment";
 const char kShowHostAvailabilitySwitchName[] = "show-host-availability";
 const char kSingleProcessTestsSwitchName[] = "single-process-tests";
 const char kUserNameSwitchName[] = "username";
-}
+}  // namespace switches
 
 namespace {
 
@@ -66,6 +71,8 @@ void PrintUsage() {
   printf("\nOptional Parameters:\n");
   printf("  %s: Exchanged for a refresh and access token for authentication\n",
          switches::kAuthCodeSwitchName);
+  printf("  %s: Path to a JSON file containing username/refresh_token KVPs\n",
+         switches::kRefreshTokenFileSwitchName);
   printf("  %s: Displays additional usage information\n",
          switches::kHelpSwitchName);
   printf("  %s: Specifies the service api to use (dev|test) [default: dev]\n",
@@ -74,6 +81,10 @@ void PrintUsage() {
       "  %s: Retrieves and displays the connection status for all known "
       "hosts, no tests will be run\n",
       switches::kShowHostAvailabilitySwitchName);
+  printf(
+      "  %s: Send a message to the service after all tests have been run to "
+      "release remote hosts the tool used for testing.\n",
+      switches::kReleaseHostsAfterTestingSwitchName);
   printf(
       "  %s: Specifies the optional logging level of the tool (0-3)."
       " [default: off]\n",
@@ -116,11 +127,52 @@ void PrintAuthCodeInfo() {
          switches::kUserNameSwitchName, switches::kAuthCodeSwitchName);
 }
 
+void PrintJsonFileInfo() {
+  printf("\n*****************************************\n");
+  printf("*** Refresh Token File Example Usage ***\n");
+  printf("****************************************\n\n");
+
+  printf("In order to use this option, a valid JSON file must exist, be\n");
+  printf("properly formatted, and contain a username/token KVP.\n");
+  printf("Contents of example_file.json\n");
+  printf("{\n");
+  printf("  \"username1@fauxdomain.com\": \"1/3798Gsdf898shksdvfyi8sshad\",\n");
+  printf("  \"username2@fauxdomain.com\": \"1/8974sdf87asdgadfgaerhfRsAa\",\n");
+  printf("}\n\n");
+
+  printf("\nTool usage example:\n");
+  printf("ar_test_driver --%s=%s --%s=./example_file.json\n\n",
+         switches::kUserNameSwitchName, "username1@fauxdomain.com",
+         switches::kRefreshTokenFileSwitchName);
+}
+
+// This class exists so that we can create a test suite which does not create
+// its own AtExitManager.  The problem we are working around occurs when
+// the test suite does not create an AtExitManager (e.g. if no tests are run)
+// and the environment object destroys its MessageLoop, then a crash will occur.
+class NoAtExitBaseTestSuite : public base::TestSuite {
+ public:
+  NoAtExitBaseTestSuite(int argc, char** argv)
+      : base::TestSuite(argc, argv, false) {}
+
+  static int RunTestSuite(int argc, char** argv) {
+    return NoAtExitBaseTestSuite(argc, argv).Run();
+  }
+};
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  base::AtExitManager at_exit;
+  base::MessageLoopForIO message_loop;
   testing::InitGoogleTest(&argc, argv);
-  base::TestSuite test_suite(argc, argv);
+
+  if (!base::CommandLine::InitializedForCurrentProcess()) {
+    if (!base::CommandLine::Init(argc, argv)) {
+      LOG(ERROR) << "Failed to initialize command line singleton.";
+      return -1;
+    }
+  }
 
   // The pointer returned here refers to a singleton, since we don't own the
   // lifetime of the object, don't wrap in a scoped_ptr construct or release it.
@@ -144,40 +196,50 @@ int main(int argc, char** argv) {
   //       help is written in parallel with our text and can appear interleaved.
   if (command_line->HasSwitch(switches::kHelpSwitchName)) {
     PrintUsage();
+    PrintJsonFileInfo();
     PrintAuthCodeInfo();
     return base::LaunchUnitTestsSerially(
         argc, argv,
-        base::Bind(&base::TestSuite::Run, base::Unretained(&test_suite)));
+        base::Bind(&NoAtExitBaseTestSuite::RunTestSuite, argc, argv));
   }
 
+  remoting::test::AppRemotingTestDriverEnvironment::EnvironmentOptions options;
+
   // Verify we received the required input from the command line.
-  if (!command_line->HasSwitch(switches::kUserNameSwitchName)) {
+  options.user_name =
+      command_line->GetSwitchValueASCII(switches::kUserNameSwitchName);
+  if (options.user_name.empty()) {
     LOG(ERROR) << "No user name passed in, can't authenticate without that!";
     PrintUsage();
     return -1;
   }
+  VLOG(1) << "Running tests as: " << options.user_name;
 
-  std::string user_name;
-  user_name = command_line->GetSwitchValueASCII(switches::kUserNameSwitchName);
-  DVLOG(1) << "Running tests as: " << user_name;
-
-  std::string auth_code;
   // Check to see if the user passed in a one time use auth_code for
   // refreshing their credentials.
-  auth_code = command_line->GetSwitchValueASCII(switches::kAuthCodeSwitchName);
+  std::string auth_code(
+      command_line->GetSwitchValueASCII(switches::kAuthCodeSwitchName));
+
+  options.refresh_token_file_path =
+      command_line->GetSwitchValuePath(switches::kRefreshTokenFileSwitchName);
+
+  options.release_hosts_when_done =
+      command_line->HasSwitch(switches::kReleaseHostsAfterTestingSwitchName);
 
   // If the user passed in a service environment, use it, otherwise set a
   // default value.
-  remoting::test::ServiceEnvironment service_environment;
-  std::string service_environment_switch = command_line->GetSwitchValueASCII(
-      switches::kServiceEnvironmentSwitchName);
+  std::string service_environment_switch(command_line->GetSwitchValueASCII(
+      switches::kServiceEnvironmentSwitchName));
   if (service_environment_switch.empty() ||
       service_environment_switch == "dev") {
-    service_environment =
+    options.service_environment =
         remoting::test::ServiceEnvironment::kDeveloperEnvironment;
   } else if (service_environment_switch == "test") {
-    service_environment =
+    options.service_environment =
         remoting::test::ServiceEnvironment::kTestingEnvironment;
+  } else if (service_environment_switch == "staging") {
+    options.service_environment =
+        remoting::test::ServiceEnvironment::kStagingEnvironment;
   } else {
     LOG(ERROR) << "Invalid " << switches::kServiceEnvironmentSwitchName
                << " argument passed in.";
@@ -186,9 +248,8 @@ int main(int argc, char** argv) {
   }
 
   // Update the logging verbosity level is user specified one.
-  std::string verbosity_level;
-  verbosity_level =
-      command_line->GetSwitchValueASCII(switches::kLoggingLevelSwitchName);
+  std::string verbosity_level(
+      command_line->GetSwitchValueASCII(switches::kLoggingLevelSwitchName));
   if (!verbosity_level.empty()) {
     // Turn on logging for the test_driver and remoting components.
     // This switch is parsed during logging::InitLogging.
@@ -202,10 +263,8 @@ int main(int argc, char** argv) {
   // retrieving an access token for the user and spinning up VMs.
   // The GTest framework will own the lifetime of this object once
   // it is registered below.
-  scoped_ptr<remoting::test::AppRemotingTestDriverEnvironment> shared_data;
-
-  shared_data.reset(new remoting::test::AppRemotingTestDriverEnvironment(
-      user_name, service_environment));
+  scoped_ptr<remoting::test::AppRemotingTestDriverEnvironment> shared_data(
+      new remoting::test::AppRemotingTestDriverEnvironment(options));
 
   if (!shared_data->Initialize(auth_code)) {
     // If we failed to initialize our shared data object, then bail.
@@ -214,9 +273,9 @@ int main(int argc, char** argv) {
 
   if (command_line->HasSwitch(switches::kShowHostAvailabilitySwitchName)) {
     // When this flag is specified, we will retrieve connection information
-    // for all known applications and report the status.  No tests will be run.
+    // for all known applications and report the status.  Tests can be skipped
+    // using a gtest_filter flag.
     shared_data->ShowHostAvailability();
-    return 0;
   }
 
   // Since we've successfully set up our shared_data object, we'll assign the
@@ -227,6 +286,5 @@ int main(int argc, char** argv) {
   // Because many tests may access the same remoting host(s), we need to run
   // the tests sequentially so they do not interfere with each other.
   return base::LaunchUnitTestsSerially(
-      argc, argv,
-      base::Bind(&base::TestSuite::Run, base::Unretained(&test_suite)));
+      argc, argv, base::Bind(&NoAtExitBaseTestSuite::RunTestSuite, argc, argv));
 }

@@ -14,8 +14,10 @@
 #include "modules/serviceworkers/ServiceWorkerError.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "modules/serviceworkers/ServiceWorkerWindowClient.h"
-#include "public/platform/WebServiceWorkerClientQueryOptions.h"
-#include "public/platform/WebServiceWorkerClientsInfo.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerClientQueryOptions.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerClientsInfo.h"
+#include "wtf/OwnPtr.h"
+#include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
 
@@ -25,23 +27,18 @@ namespace {
 
 class ClientArray {
 public:
-    typedef WebServiceWorkerClientsInfo WebType;
-    static HeapVector<Member<ServiceWorkerClient>> take(ScriptPromiseResolver*, WebType* webClientsRaw)
+    using WebType = const WebServiceWorkerClientsInfo&;
+    static HeapVector<Member<ServiceWorkerClient>> take(ScriptPromiseResolver*, const WebServiceWorkerClientsInfo& webClients)
     {
-        OwnPtr<WebType> webClients = adoptPtr(webClientsRaw);
         HeapVector<Member<ServiceWorkerClient>> clients;
-        for (size_t i = 0; i < webClients->clients.size(); ++i) {
-            const WebServiceWorkerClientInfo& client = webClients->clients[i];
+        for (size_t i = 0; i < webClients.clients.size(); ++i) {
+            const WebServiceWorkerClientInfo& client = webClients.clients[i];
             if (client.clientType == WebServiceWorkerClientTypeWindow)
                 clients.append(ServiceWorkerWindowClient::create(client));
             else
                 clients.append(ServiceWorkerClient::create(client));
         }
         return clients;
-    }
-    static void dispose(WebType* webClientsRaw)
-    {
-        delete webClientsRaw;
     }
 
 private:
@@ -81,7 +78,7 @@ ScriptPromise ServiceWorkerClients::matchAll(ScriptState* scriptState, const Cli
     if (!executionContext)
         return ScriptPromise();
 
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     WebServiceWorkerClientQueryOptions webOptions;
@@ -99,7 +96,7 @@ ScriptPromise ServiceWorkerClients::claim(ScriptState* scriptState)
     if (!executionContext)
         return ScriptPromise();
 
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     WebServiceWorkerClientsClaimCallbacks* callbacks = new CallbackPromiseAdapter<void, ServiceWorkerError>(resolver);
@@ -109,13 +106,13 @@ ScriptPromise ServiceWorkerClients::claim(ScriptState* scriptState)
 
 ScriptPromise ServiceWorkerClients::openWindow(ScriptState* scriptState, const String& url)
 {
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
     ExecutionContext* context = scriptState->executionContext();
 
     KURL parsedUrl = KURL(toWorkerGlobalScope(context)->location()->url(), url);
     if (!parsedUrl.isValid()) {
-        resolver->reject(DOMException::create(SyntaxError, "'" + url + "' is not a valid URL."));
+        resolver->reject(V8ThrowException::createTypeError(scriptState->isolate(), "'" + url + "' is not a valid URL."));
         return promise;
     }
 

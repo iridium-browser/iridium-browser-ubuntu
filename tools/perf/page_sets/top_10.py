@@ -2,18 +2,21 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 
 class SimplePage(page_module.Page):
   def __init__(self, url, page_set, credentials='', name=''):
     super(SimplePage, self).__init__(
         url, page_set=page_set, name=name,
-        credentials_path='data/credentials.json')
+        credentials_path='data/credentials.json',
+        shared_page_state_class=shared_page_state.SharedDesktopPageState)
     self.credentials = credentials
 
   def RunPageInteractions(self, action_runner):
     pass
+
 
 class Google(SimplePage):
   def __init__(self, page_set):
@@ -83,43 +86,42 @@ class Facebook(SimplePage):
     action_runner.WaitForElement(text='About')
 
 
-class Top10PageSet(page_set_module.PageSet):
+class Top10PageSet(story.StorySet):
   """10 Pages chosen from Alexa top sites"""
 
   def __init__(self):
     super(Top10PageSet, self).__init__(
       archive_data_file='data/top_10.json',
-      user_agent_type='desktop',
-      bucket=page_set_module.PARTNER_BUCKET)
+      cloud_storage_bucket=story.PARTNER_BUCKET)
 
     # top google property; a google tab is often open
-    self.AddUserStory(Google(self))
+    self.AddStory(Google(self))
 
     # productivity, top google properties
     # TODO(dominikg): fix crbug.com/386152
-    #self.AddUserStory(Gmail(self))
+    #self.AddStory(Gmail(self))
 
     # productivity, top google properties
-    self.AddUserStory(GoogleCalendar(self))
+    self.AddStory(GoogleCalendar(self))
 
     # #3 (Alexa global)
-    self.AddUserStory(Youtube(self))
+    self.AddStory(Youtube(self))
 
     # top social, Public profile
-    self.AddUserStory(Facebook(self))
+    self.AddStory(Facebook(self))
 
     # #6 (Alexa) most visited worldwide,Picked an interesting page
-    self.AddUserStory(SimplePage('http://en.wikipedia.org/wiki/Wikipedia',
+    self.AddStory(SimplePage('http://en.wikipedia.org/wiki/Wikipedia',
                                   self, name='Wikipedia'))
 
     # #1 world commerce website by visits; #3 commerce in the US by time spent
-    self.AddUserStory(SimplePage('http://www.amazon.com', self))
+    self.AddStory(SimplePage('http://www.amazon.com', self))
 
     # #4 Alexa
-    self.AddUserStory(SimplePage('http://www.yahoo.com/', self))
+    self.AddStory(SimplePage('http://www.yahoo.com/', self))
 
     # #16 Alexa
-    self.AddUserStory(SimplePage('http://www.bing.com/', self))
+    self.AddStory(SimplePage('http://www.bing.com/', self))
 
     # #20 Alexa
-    self.AddUserStory(SimplePage('http://www.ask.com/', self))
+    self.AddStory(SimplePage('http://www.ask.com/', self))

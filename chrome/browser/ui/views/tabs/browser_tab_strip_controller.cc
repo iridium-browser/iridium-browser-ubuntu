@@ -8,12 +8,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/favicon/favicon_helper.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
@@ -31,7 +30,8 @@
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/mime_util/mime_util.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/autocomplete_match.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
@@ -269,7 +269,7 @@ bool BrowserTabStripController::IsNewTabPage(int model_index) const {
 
   const WebContents* contents = model_->GetWebContentsAt(model_index);
   return contents && (contents->GetURL() == GURL(chrome::kChromeUINewTabURL) ||
-      chrome::IsInstantNTP(contents));
+                      search::IsInstantNTP(contents));
 }
 
 void BrowserTabStripController::SelectTab(int model_index) {
@@ -301,8 +301,8 @@ void BrowserTabStripController::CloseTab(int model_index,
 
 void BrowserTabStripController::ToggleTabAudioMute(int model_index) {
   content::WebContents* const contents = model_->GetWebContentsAt(model_index);
-  chrome::SetTabAudioMuted(contents, !chrome::IsTabAudioMuted(contents),
-                           chrome::kMutedToggleCauseUser);
+  chrome::SetTabAudioMuted(contents, !contents->IsAudioMuted(),
+                           TAB_MUTED_REASON_AUDIO_INDICATOR, std::string());
 }
 
 void BrowserTabStripController::ShowContextMenuForTab(
@@ -482,11 +482,6 @@ void BrowserTabStripController::TabReplacedAt(TabStripModel* tab_strip_model,
 
 void BrowserTabStripController::TabPinnedStateChanged(WebContents* contents,
                                                       int model_index) {
-  // Currently none of the renderers render pinned state differently.
-}
-
-void BrowserTabStripController::TabMiniStateChanged(WebContents* contents,
-                                                    int model_index) {
   SetTabDataAt(contents, model_index);
 }
 
@@ -510,8 +505,8 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->loading = contents->IsLoading();
   data->crashed_status = contents->GetCrashedStatus();
   data->incognito = contents->GetBrowserContext()->IsOffTheRecord();
-  data->mini = model_->IsMiniTab(model_index);
-  data->show_icon = data->mini || favicon::ShouldDisplayFavicon(contents);
+  data->pinned = model_->IsTabPinned(model_index);
+  data->show_icon = data->pinned || favicon::ShouldDisplayFavicon(contents);
   data->blocked = model_->IsTabBlocked(model_index);
   data->app = extensions::TabHelper::FromWebContents(contents)->is_app();
   data->media_state = chrome::GetTabMediaStateForContents(contents);

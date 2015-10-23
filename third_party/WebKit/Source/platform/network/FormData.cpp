@@ -29,6 +29,13 @@
 
 namespace blink {
 
+bool FormDataElement::isSafeToSendToAnotherThread() const
+{
+    return m_filename.isSafeToSendToAnotherThread()
+        && m_blobUUID.isSafeToSendToAnotherThread()
+        && m_fileSystemURL.isSafeToSendToAnotherThread();
+}
+
 inline FormData::FormData()
     : m_identifier(0)
     , m_containsPasswordData(false)
@@ -81,6 +88,10 @@ PassRefPtr<FormData> FormData::copy() const
 PassRefPtr<FormData> FormData::deepCopy() const
 {
     RefPtr<FormData> formData(create());
+
+    formData->m_identifier = m_identifier;
+    formData->m_boundary = m_boundary;
+    formData->m_containsPasswordData = m_containsPasswordData;
 
     size_t n = m_elements.size();
     formData->m_elements.reserveInitialCapacity(n);
@@ -181,6 +192,17 @@ unsigned long long FormData::sizeInBytes() const
         }
     }
     return size;
+}
+
+bool FormData::isSafeToSendToAnotherThread() const
+{
+    if (!hasOneRef())
+        return false;
+    for (auto& element : m_elements) {
+        if (!element.isSafeToSendToAnotherThread())
+            return false;
+    }
+    return true;
 }
 
 } // namespace blink

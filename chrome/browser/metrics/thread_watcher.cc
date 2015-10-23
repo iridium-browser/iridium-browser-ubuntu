@@ -10,17 +10,20 @@
 #include "base/compiler_specific.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/metrics/thread_watcher_report_hang.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/notification_service.h"
 
 #if defined(OS_WIN)
@@ -90,10 +93,9 @@ void ThreadWatcher::ActivateThreadWatching() {
   active_ = true;
   ping_count_ = unresponsive_threshold_;
   ResetHangCounters();
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&ThreadWatcher::PostPingMessage,
-                 weak_ptr_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&ThreadWatcher::PostPingMessage,
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ThreadWatcher::DeActivateThreadWatching() {
@@ -182,10 +184,9 @@ void ThreadWatcher::OnPongMessage(uint64 ping_sequence_number) {
   if (!active_ || --ping_count_ <= 0)
     return;
 
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&ThreadWatcher::PostPingMessage,
-                 weak_ptr_factory_.GetWeakPtr()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&ThreadWatcher::PostPingMessage,
+                            weak_ptr_factory_.GetWeakPtr()),
       sleep_time_);
 }
 
@@ -211,7 +212,7 @@ void ThreadWatcher::OnCheckResponsiveness(uint64 ping_sequence_number) {
   GotNoResponse();
 
   // Post a task to check the responsiveness of watched thread.
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ThreadWatcher::OnCheckResponsiveness,
                  weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
@@ -449,10 +450,10 @@ void ThreadWatcherList::ParseCommandLine(
 
   // Increase the unresponsive_threshold on the Stable and Beta channels to
   // reduce the number of crashes due to ThreadWatcher.
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_STABLE) {
+  version_info::Channel channel = chrome::GetChannel();
+  if (channel == version_info::Channel::STABLE) {
     *unresponsive_threshold *= 4;
-  } else if (channel == chrome::VersionInfo::CHANNEL_BETA) {
+  } else if (channel == version_info::Channel::BETA) {
     *unresponsive_threshold *= 2;
   }
 
@@ -469,7 +470,7 @@ void ThreadWatcherList::ParseCommandLine(
   if (command_line.HasSwitch(switches::kCrashOnHangThreads)) {
     crash_on_hang_thread_names =
         command_line.GetSwitchValueASCII(switches::kCrashOnHangThreads);
-  } else if (channel != chrome::VersionInfo::CHANNEL_STABLE) {
+  } else if (channel != version_info::Channel::STABLE) {
     // Default to crashing the browser if UI or IO or FILE threads are not
     // responsive except in stable channel.
     crash_on_hang_thread_names = base::StringPrintf(
@@ -492,11 +493,10 @@ void ThreadWatcherList::ParseCommandLineCrashOnHangThreads(
     uint32 default_crash_seconds,
     CrashOnHangThreadMap* crash_on_hang_threads) {
   base::StringTokenizer tokens(crash_on_hang_thread_names, ",");
-  std::vector<std::string> values;
   while (tokens.GetNext()) {
-    const std::string& token = tokens.token();
-    base::SplitString(token, ':', &values);
-    std::string thread_name = values[0];
+    std::vector<base::StringPiece> values = base::SplitStringPiece(
+        tokens.token_piece(), ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    std::string thread_name = values[0].as_string();
 
     uint32 live_threads_threshold = default_live_threads_threshold;
     uint32 crash_seconds = default_crash_seconds;
@@ -543,9 +543,9 @@ void ThreadWatcherList::InitializeAndStartWatching(
   // stable channel, disable ThreadWatcher in stable and unknown channels. We
   // will also not collect histogram data in these channels until
   // http://crbug.com/426203 is fixed.
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
-      channel == chrome::VersionInfo::CHANNEL_UNKNOWN) {
+  version_info::Channel channel = chrome::GetChannel();
+  if (channel == version_info::Channel::STABLE ||
+      channel == version_info::Channel::UNKNOWN) {
     return;
   }
 
@@ -688,9 +688,10 @@ void ThreadWatcherObserver::SetupNotifications(
   observer->registrar_.Add(observer,
                            content::NOTIFICATION_RENDER_WIDGET_HOST_HANG,
                            content::NotificationService::AllSources());
-  observer->registrar_.Add(observer,
-                           chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
-                           content::NotificationService::AllSources());
+  observer->omnibox_url_opened_subscription_ =
+      OmniboxEventGlobalTracker::GetInstance()->RegisterCallback(
+          base::Bind(&ThreadWatcherObserver::OnURLOpenedFromOmnibox,
+                     base::Unretained(observer)));
 }
 
 // static
@@ -706,6 +707,14 @@ void ThreadWatcherObserver::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  OnUserActivityDetected();
+}
+
+void ThreadWatcherObserver::OnURLOpenedFromOmnibox(OmniboxLog* log) {
+  OnUserActivityDetected();
+}
+
+void ThreadWatcherObserver::OnUserActivityDetected() {
   // There is some user activity, see if thread watchers are to be awakened.
   base::TimeTicks now = base::TimeTicks::Now();
   if ((now - last_wakeup_time_) < wakeup_interval_)
@@ -763,7 +772,7 @@ bool WatchDogThread::PostTaskHelper(
     base::MessageLoop* message_loop = g_watchdog_thread ?
         g_watchdog_thread->message_loop() : NULL;
     if (message_loop) {
-      message_loop->PostDelayedTask(from_here, task, delay);
+      message_loop->task_runner()->PostDelayedTask(from_here, task, delay);
       return true;
     }
   }
@@ -884,10 +893,9 @@ void StartupTimeBomb::DeleteStartupWatchdog() {
     startup_watchdog_ = NULL;
     return;
   }
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&StartupTimeBomb::DeleteStartupWatchdog,
-                 base::Unretained(this)),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&StartupTimeBomb::DeleteStartupWatchdog,
+                            base::Unretained(this)),
       base::TimeDelta::FromSeconds(10));
 }
 
@@ -921,11 +929,11 @@ void ShutdownWatcherHelper::Arm(const base::TimeDelta& duration) {
   DCHECK(!shutdown_watchdog_);
   base::TimeDelta actual_duration = duration;
 
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_STABLE) {
+  version_info::Channel channel = chrome::GetChannel();
+  if (channel == version_info::Channel::STABLE) {
     actual_duration *= 20;
-  } else if (channel == chrome::VersionInfo::CHANNEL_BETA ||
-             channel == chrome::VersionInfo::CHANNEL_DEV) {
+  } else if (channel == version_info::Channel::BETA ||
+             channel == version_info::Channel::DEV) {
     actual_duration *= 10;
   }
 

@@ -6,13 +6,13 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
 #include "chrome/common/safe_browsing/zip_analyzer_results.h"
 #include "chrome/utility/chrome_content_utility_ipc_whitelist.h"
+#include "chrome/utility/safe_json_parser_handler.h"
 #include "chrome/utility/utility_message_handler.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/content_switches.h"
@@ -31,12 +31,11 @@
 #endif
 
 #if !defined(OS_ANDROID)
+#include "chrome/common/resource_usage_reporter.mojom.h"
 #include "chrome/utility/profile_import_handler.h"
 #include "net/proxy/mojo_proxy_resolver_factory_impl.h"
-#endif
-
-#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
-#include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
+#include "net/proxy/proxy_resolver_v8.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
 #endif
 
 #if defined(OS_WIN)
@@ -58,6 +57,10 @@
 
 #if defined(ENABLE_MDNS)
 #include "chrome/utility/local_discovery/service_discovery_message_handler.h"
+#endif
+
+#if defined(OS_MACOSX) && defined(FULL_SAFE_BROWSING)
+#include "chrome/utility/safe_browsing/mac/dmg_analyzer.h"
 #endif
 
 namespace {
@@ -89,6 +92,34 @@ void CreateProxyResolverFactory(
   // other end (in the browser process), or by a connection error, this object
   // will be destroyed.
   new net::MojoProxyResolverFactoryImpl(request.Pass());
+}
+
+class ResourceUsageReporterImpl : public ResourceUsageReporter {
+ public:
+  explicit ResourceUsageReporterImpl(
+      mojo::InterfaceRequest<ResourceUsageReporter> req)
+      : binding_(this, req.Pass()) {}
+  ~ResourceUsageReporterImpl() override {}
+
+ private:
+  void GetUsageData(
+      const mojo::Callback<void(ResourceUsageDataPtr)>& callback) override {
+    ResourceUsageDataPtr data = ResourceUsageData::New();
+    size_t total_heap_size = net::ProxyResolverV8::GetTotalHeapSize();
+    if (total_heap_size) {
+      data->reports_v8_stats = true;
+      data->v8_bytes_allocated = total_heap_size;
+      data->v8_bytes_used = net::ProxyResolverV8::GetUsedHeapSize();
+    }
+    callback.Run(data.Pass());
+  }
+
+  mojo::StrongBinding<ResourceUsageReporter> binding_;
+};
+
+void CreateResourceUsageReporter(
+    mojo::InterfaceRequest<ResourceUsageReporter> request) {
+  new ResourceUsageReporterImpl(request.Pass());
 }
 #endif  // OS_ANDROID
 
@@ -123,6 +154,8 @@ ChromeContentUtilityClient::ChromeContentUtilityClient()
   handlers_.push_back(new ShellHandler());
   handlers_.push_back(new FontCacheHandler());
 #endif
+
+  handlers_.push_back(new SafeJsonParserHandler());
 }
 
 ChromeContentUtilityClient::~ChromeContentUtilityClient() {
@@ -155,7 +188,6 @@ bool ChromeContentUtilityClient::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_RobustJPEGDecodeImage,
                         OnRobustJPEGDecodeImage)
 #endif  // defined(OS_CHROMEOS)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseJSON, OnParseJSON)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_PatchFileBsdiff,
                         OnPatchFileBsdiff)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_PatchFileCourgette,
@@ -164,6 +196,10 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 #if defined(FULL_SAFE_BROWSING)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
                         OnAnalyzeZipFileForDownloadProtection)
+#if defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeDmgFileForDownloadProtection,
+                        OnAnalyzeDmgFileForDownloadProtection)
+#endif
 #endif
 #if defined(ENABLE_EXTENSIONS)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseMediaMetadata,
@@ -171,10 +207,6 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 #endif
 #if defined(OS_CHROMEOS)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CreateZipFile, OnCreateZipFile)
-#endif
-#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_DetectSeccompSupport,
-                        OnDetectSeccompSupport)
 #endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -192,6 +224,8 @@ void ChromeContentUtilityClient::RegisterMojoServices(
 #if !defined(OS_ANDROID)
   registry->AddService<net::interfaces::ProxyResolverFactory>(
       base::Bind(CreateProxyResolverFactory));
+  registry->AddService<ResourceUsageReporter>(
+      base::Bind(CreateResourceUsageReporter));
 #endif
 }
 
@@ -265,6 +299,7 @@ void ChromeContentUtilityClient::OnDecodeImage(
     const std::vector<unsigned char>& encoded_data,
     bool shrink_to_fit,
     int request_id) {
+  content::UtilityThread::Get()->EnsureBlinkInitialized();
   DecodeImageAndSend(encoded_data, shrink_to_fit, request_id);
 }
 
@@ -300,21 +335,6 @@ void ChromeContentUtilityClient::OnCreateZipFile(
 }
 #endif  // defined(OS_CHROMEOS)
 
-#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
-void ChromeContentUtilityClient::OnDetectSeccompSupport() {
-  bool supports_prctl = sandbox::SandboxBPF::SupportsSeccompSandbox(
-      sandbox::SandboxBPF::SeccompLevel::SINGLE_THREADED);
-  Send(new ChromeUtilityHostMsg_DetectSeccompSupport_ResultPrctl(
-      supports_prctl));
-
-  // Probing for the seccomp syscall can provoke kernel panics in certain LGE
-  // devices. For now, this data will not be collected. In the future, this
-  // should detect SeccompLevel::MULTI_THREADED. http://crbug.com/478478
-
-  ReleaseProcessIfNeeded();
-}
-#endif  // defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
-
 #if defined(OS_CHROMEOS)
 void ChromeContentUtilityClient::OnRobustJPEGDecodeImage(
     const std::vector<unsigned char>& encoded_data,
@@ -335,21 +355,6 @@ void ChromeContentUtilityClient::OnRobustJPEGDecodeImage(
   ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_CHROMEOS)
-
-void ChromeContentUtilityClient::OnParseJSON(const std::string& json) {
-  int error_code;
-  std::string error;
-  base::Value* value = base::JSONReader::ReadAndReturnError(
-      json, base::JSON_PARSE_RFC, &error_code, &error);
-  if (value) {
-    base::ListValue wrapper;
-    wrapper.Append(value);
-    Send(new ChromeUtilityHostMsg_ParseJSON_Succeeded(wrapper));
-  } else {
-    Send(new ChromeUtilityHostMsg_ParseJSON_Failed(error));
-  }
-  ReleaseProcessIfNeeded();
-}
 
 void ChromeContentUtilityClient::OnPatchFileBsdiff(
     const base::FilePath& input_file,
@@ -399,6 +404,19 @@ void ChromeContentUtilityClient::OnAnalyzeZipFileForDownloadProtection(
       results));
   ReleaseProcessIfNeeded();
 }
+
+#if defined(OS_MACOSX)
+void ChromeContentUtilityClient::OnAnalyzeDmgFileForDownloadProtection(
+    const IPC::PlatformFileForTransit& dmg_file) {
+  safe_browsing::zip_analyzer::Results results;
+  safe_browsing::dmg::AnalyzeDMGFile(
+      IPC::PlatformFileForTransitToFile(dmg_file), &results);
+  Send(new ChromeUtilityHostMsg_AnalyzeDmgFileForDownloadProtection_Finished(
+      results));
+  ReleaseProcessIfNeeded();
+}
+#endif
+
 #endif
 
 #if defined(ENABLE_EXTENSIONS)

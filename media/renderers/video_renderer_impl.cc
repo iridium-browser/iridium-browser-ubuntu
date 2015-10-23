@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/time/default_tick_clock.h"
@@ -17,6 +18,7 @@
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/buffers.h"
 #include "media/base/limits.h"
+#include "media/base/media_log.h"
 #include "media/base/media_switches.h"
 #include "media/base/pipeline.h"
 #include "media/base/video_frame.h"
@@ -36,29 +38,33 @@ static bool ShouldUseVideoRenderingPath() {
   const bool disabled_via_cli =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableNewVideoRenderer);
-  return !disabled_via_cli && !StartsWithASCII(group_name, "Disabled", true);
+  return !disabled_via_cli &&
+         !base::StartsWith(group_name, "Disabled",
+                           base::CompareCase::SENSITIVE);
 }
 
 VideoRendererImpl::VideoRendererImpl(
-    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
+    const scoped_refptr<base::TaskRunner>& worker_task_runner,
     VideoRendererSink* sink,
     ScopedVector<VideoDecoder> decoders,
     bool drop_frames,
     const scoped_refptr<GpuVideoAcceleratorFactories>& gpu_factories,
     const scoped_refptr<MediaLog>& media_log)
-    : task_runner_(task_runner),
+    : task_runner_(media_task_runner),
       use_new_video_renderering_path_(ShouldUseVideoRenderingPath()),
       sink_(sink),
       sink_started_(false),
       video_frame_stream_(
-          new VideoFrameStream(task_runner, decoders.Pass(), media_log)),
-      gpu_memory_buffer_pool_(
-          new GpuMemoryBufferVideoFramePool(task_runner, gpu_factories)),
+          new VideoFrameStream(media_task_runner, decoders.Pass(), media_log)),
+      gpu_memory_buffer_pool_(nullptr),
+      media_log_(media_log),
       low_delay_(false),
       received_end_of_stream_(false),
       rendered_end_of_stream_(false),
       frame_available_(&lock_),
       state_(kUninitialized),
+      sequence_token_(0),
       thread_(),
       pending_read_(false),
       drop_frames_(drop_frames),
@@ -72,6 +78,11 @@ VideoRendererImpl::VideoRendererImpl(
       render_first_frame_and_stop_(false),
       posted_maybe_stop_after_first_paint_(false),
       weak_factory_(this) {
+  if (gpu_factories &&
+      gpu_factories->ShouldUseGpuMemoryBuffersForVideoFrames()) {
+    gpu_memory_buffer_pool_.reset(new GpuMemoryBufferVideoFramePool(
+        media_task_runner, worker_task_runner, gpu_factories));
+  }
 }
 
 VideoRendererImpl::~VideoRendererImpl() {
@@ -166,6 +177,9 @@ void VideoRendererImpl::Initialize(
   DCHECK(!time_progressing_);
 
   low_delay_ = (stream->liveness() == DemuxerStream::LIVENESS_LIVE);
+  UMA_HISTOGRAM_BOOLEAN("Media.VideoRenderer.LowDelay", low_delay_);
+  if (low_delay_)
+    MEDIA_LOG(DEBUG, media_log_) << "Video rendering in low delay mode.";
 
   // Always post |init_cb_| because |this| could be destroyed if initialization
   // failed.
@@ -211,7 +225,18 @@ scoped_refptr<VideoFrame> VideoRendererImpl::Render(
   // end of stream, or have frames available.  We also don't want to do this in
   // background rendering mode unless this isn't the first background render
   // tick and we haven't seen any decoded frames since the last one.
-  const size_t effective_frames = MaybeFireEndedCallback();
+  //
+  // We use the inverse of |render_first_frame_and_stop_| as a proxy for the
+  // value of |time_progressing_| here since we can't access it from the
+  // compositor thread.  If we're here (in Render()) the sink must have been
+  // started -- but if it was started only to render the first frame and stop,
+  // then |time_progressing_| is likely false.  If we're still in Render() when
+  // |render_first_frame_and_stop_| is false, then |time_progressing_| is true.
+  // If |time_progressing_| is actually true when |render_first_frame_and_stop_|
+  // is also true, then the ended callback will be harmlessly delayed until
+  // MaybeStopSinkAfterFirstPaint() runs and the next Render() call comes in.
+  const size_t effective_frames =
+      MaybeFireEndedCallback_Locked(!render_first_frame_and_stop_);
   if (buffering_state_ == BUFFERING_HAVE_ENOUGH && !received_end_of_stream_ &&
       !effective_frames && (!background_rendering ||
                             (!frames_decoded_ && was_background_rendering_))) {
@@ -265,13 +290,15 @@ void VideoRendererImpl::OnFrameDropped() {
 void VideoRendererImpl::CreateVideoThread() {
   // This may fail and cause a crash if there are too many threads created in
   // the current process. See http://crbug.com/443291
-  CHECK(base::PlatformThread::Create(0, this, &thread_));
-
+  const base::ThreadPriority priority =
 #if defined(OS_WIN)
-  // Bump up our priority so our sleeping is more accurate.
-  // TODO(scherkus): find out if this is necessary, but it seems to help.
-  ::SetThreadPriority(thread_.platform_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
-#endif  // defined(OS_WIN)
+      // Bump up our priority so our sleeping is more accurate.
+      // TODO(scherkus): find out if this is necessary, but it seems to help.
+      base::ThreadPriority::DISPLAY;
+#else
+      base::ThreadPriority::NORMAL;
+#endif
+  CHECK(base::PlatformThread::CreateWithPriority(0, this, &thread_, priority));
 }
 
 void VideoRendererImpl::OnVideoFrameStreamInitialized(bool success) {
@@ -401,6 +428,11 @@ void VideoRendererImpl::SetTickClockForTesting(
   tick_clock_.swap(tick_clock);
 }
 
+void VideoRendererImpl::SetGpuMemoryBufferVideoForTesting(
+    scoped_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool) {
+  gpu_memory_buffer_pool_.swap(gpu_memory_buffer_pool);
+}
+
 void VideoRendererImpl::OnTimeStateChanged(bool time_progressing) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   time_progressing_ = time_progressing;
@@ -453,24 +485,41 @@ void VideoRendererImpl::DropNextReadyFrame_Locked() {
       base::Bind(&VideoRendererImpl::AttemptRead, weak_factory_.GetWeakPtr()));
 }
 
-void VideoRendererImpl::FrameReady(VideoFrameStream::Status status,
+void VideoRendererImpl::FrameReadyForCopyingToGpuMemoryBuffers(
+    VideoFrameStream::Status status,
+    const scoped_refptr<VideoFrame>& frame) {
+  if (status != VideoFrameStream::OK || start_timestamp_ > frame->timestamp()) {
+    VideoRendererImpl::FrameReady(sequence_token_, status, frame);
+    return;
+  }
+
+  DCHECK(frame);
+  gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
+      frame, base::Bind(&VideoRendererImpl::FrameReady,
+                        weak_factory_.GetWeakPtr(), sequence_token_, status));
+}
+
+void VideoRendererImpl::FrameReady(uint32_t sequence_token,
+                                   VideoFrameStream::Status status,
                                    const scoped_refptr<VideoFrame>& frame) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   bool start_sink = false;
   {
     base::AutoLock auto_lock(lock_);
+    // Stream has been reset and this VideoFrame was decoded before the reset
+    // but the async copy finished after.
+    if (sequence_token != sequence_token_)
+      return;
+
     DCHECK_NE(state_, kUninitialized);
     DCHECK_NE(state_, kFlushed);
 
     CHECK(pending_read_);
     pending_read_ = false;
 
-    if (status == VideoFrameStream::DECODE_ERROR ||
-        status == VideoFrameStream::DECRYPT_ERROR) {
+    if (status == VideoFrameStream::DECODE_ERROR) {
       DCHECK(!frame.get());
       PipelineStatus error = PIPELINE_ERROR_DECODE;
-      if (status == VideoFrameStream::DECRYPT_ERROR)
-        error = PIPELINE_ERROR_DECRYPT;
       task_runner_->PostTask(FROM_HERE, base::Bind(error_cb_, error));
       return;
     }
@@ -489,13 +538,23 @@ void VideoRendererImpl::FrameReady(VideoFrameStream::Status status,
       return;
     }
 
-    if (frame->end_of_stream()) {
+    // In low delay mode, don't accumulate frames that's earlier than the start
+    // time. Otherwise we could declare HAVE_ENOUGH_DATA and start playback
+    // prematurely.
+    if (low_delay_ &&
+        !frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM) &&
+        frame->timestamp() < start_timestamp_) {
+      AttemptRead_Locked();
+      return;
+    }
+
+    if (frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM)) {
       DCHECK(!received_end_of_stream_);
       received_end_of_stream_ = true;
 
       // See if we can fire EOS immediately instead of waiting for Render().
       if (use_new_video_renderering_path_)
-        MaybeFireEndedCallback();
+        MaybeFireEndedCallback_Locked(time_progressing_);
     } else {
       // Maintain the latest frame decoded so the correct frame is displayed
       // after prerolling has completed.
@@ -621,7 +680,7 @@ void VideoRendererImpl::AddReadyFrame_Locked(
     const scoped_refptr<VideoFrame>& frame) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   lock_.AssertAcquired();
-  DCHECK(!frame->end_of_stream());
+  DCHECK(!frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM));
 
   frames_decoded_++;
 
@@ -657,10 +716,16 @@ void VideoRendererImpl::AttemptRead_Locked() {
   switch (state_) {
     case kPlaying:
       pending_read_ = true;
-      video_frame_stream_->Read(base::Bind(&VideoRendererImpl::FrameReady,
-                                           weak_factory_.GetWeakPtr()));
+      if (gpu_memory_buffer_pool_) {
+        video_frame_stream_->Read(base::Bind(
+            &VideoRendererImpl::FrameReadyForCopyingToGpuMemoryBuffers,
+            weak_factory_.GetWeakPtr()));
+      } else {
+        video_frame_stream_->Read(base::Bind(&VideoRendererImpl::FrameReady,
+                                             weak_factory_.GetWeakPtr(),
+                                             sequence_token_));
+      }
       return;
-
     case kUninitialized:
     case kInitializing:
     case kFlushing:
@@ -672,12 +737,14 @@ void VideoRendererImpl::AttemptRead_Locked() {
 void VideoRendererImpl::OnVideoFrameStreamResetDone() {
   base::AutoLock auto_lock(lock_);
   DCHECK_EQ(kFlushing, state_);
-  DCHECK(!pending_read_);
   DCHECK(ready_frames_.empty());
   DCHECK(!received_end_of_stream_);
   DCHECK(!rendered_end_of_stream_);
   DCHECK_EQ(buffering_state_, BUFFERING_HAVE_NOTHING);
 
+  // Pending read might be true if an async video frame copy is in flight.
+  pending_read_ = false;
+  sequence_token_++;
   state_ = kFlushed;
   latest_possible_paint_time_ = last_media_time_ = base::TimeTicks();
   base::ResetAndReturn(&flush_cb_).Run();
@@ -707,13 +774,11 @@ void VideoRendererImpl::MaybeStopSinkAfterFirstPaint() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(use_new_video_renderering_path_);
 
-  {
-    base::AutoLock auto_lock(lock_);
-    render_first_frame_and_stop_ = false;
-  }
-
   if (!time_progressing_ && sink_started_)
     StopSink();
+
+  base::AutoLock auto_lock(lock_);
+  render_first_frame_and_stop_ = false;
 }
 
 bool VideoRendererImpl::HaveReachedBufferingCap() {
@@ -747,7 +812,9 @@ void VideoRendererImpl::StopSink() {
   was_background_rendering_ = false;
 }
 
-size_t VideoRendererImpl::MaybeFireEndedCallback() {
+size_t VideoRendererImpl::MaybeFireEndedCallback_Locked(bool time_progressing) {
+  lock_.AssertAcquired();
+
   // If there's only one frame in the video or Render() was never called, the
   // algorithm will have one frame linger indefinitely.  So in cases where the
   // frame duration is unknown and we've received EOS, fire it once we get down
@@ -759,7 +826,7 @@ size_t VideoRendererImpl::MaybeFireEndedCallback() {
     return effective_frames;
 
   // Don't fire ended if time isn't moving and we have frames.
-  if (!time_progressing_ && algorithm_->frames_queued())
+  if (!time_progressing && algorithm_->frames_queued())
     return effective_frames;
 
   // Fire ended if we have no more effective frames or only ever had one frame.

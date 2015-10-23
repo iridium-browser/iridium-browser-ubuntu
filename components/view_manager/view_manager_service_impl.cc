@@ -12,8 +12,10 @@
 #include "components/view_manager/server_view.h"
 #include "components/view_manager/window_manager_access_policy.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
+#include "mojo/converters/ime/ime_type_converters.h"
 #include "mojo/converters/input_events/input_events_type_converters.h"
 #include "mojo/converters/surfaces/surfaces_type_converters.h"
+#include "ui/platform_window/text_input_state.h"
 
 using mojo::Array;
 using mojo::Callback;
@@ -28,21 +30,35 @@ using mojo::ViewDataPtr;
 
 namespace view_manager {
 
+// Contains information needed to complete an Embed(). See description of
+// |pending_embeds_| for more details.
+struct ViewManagerServiceImpl::PendingEmbed
+    : public base::RefCounted<PendingEmbed> {
+  PendingEmbed() : embed_root(nullptr) {}
+
+  ViewManagerServiceImpl* embed_root;
+  ViewId view_id;
+  mojo::Callback<void(bool)> callback;
+
+ private:
+  friend class base::RefCounted<PendingEmbed>;
+
+  ~PendingEmbed() {}
+};
+
 ViewManagerServiceImpl::ViewManagerServiceImpl(
     ConnectionManager* connection_manager,
     mojo::ConnectionSpecificId creator_id,
-    const std::string& creator_url,
-    const std::string& url,
     const ViewId& root_id)
     : connection_manager_(connection_manager),
       id_(connection_manager_->GetAndAdvanceNextConnectionId()),
-      url_(url),
       creator_id_(creator_id),
-      creator_url_(creator_url),
-      client_(nullptr) {
-  CHECK(GetView(root_id));
+      client_(nullptr),
+      is_embed_root_(false) {
+  ServerView* view = GetView(root_id);
+  CHECK(view);
   root_.reset(new ViewId(root_id));
-  if (root_id == RootViewId())
+  if (view->GetRoot() == view)
     access_policy_.reset(new WindowManagerAccessPolicy(id_, this));
   else
     access_policy_.reset(new DefaultAccessPolicy(id_, this));
@@ -53,9 +69,7 @@ ViewManagerServiceImpl::~ViewManagerServiceImpl() {
 }
 
 void ViewManagerServiceImpl::Init(mojo::ViewManagerClient* client,
-                                  mojo::ViewManagerServicePtr service_ptr,
-                                  InterfaceRequest<ServiceProvider> services,
-                                  ServiceProviderPtr exposed_services) {
+                                  mojo::ViewManagerServicePtr service_ptr) {
   DCHECK(!client_);
   client_ = client;
   std::vector<const ServerView*> to_send;
@@ -68,8 +82,7 @@ void ViewManagerServiceImpl::Init(mojo::ViewManagerClient* client,
   const mojo::Id focused_view_transport_id(
       ViewIdToTransportId(focused_view ? focused_view->id() : ViewId()));
 
-  client->OnEmbed(id_, creator_url_, ViewToViewData(to_send.front()),
-                  service_ptr.Pass(), services.Pass(), exposed_services.Pass(),
+  client->OnEmbed(id_, ViewToViewData(to_send.front()), service_ptr.Pass(),
                   focused_view_transport_id);
 }
 
@@ -87,6 +100,7 @@ bool ViewManagerServiceImpl::IsRoot(const ViewId& id) const {
 
 void ViewManagerServiceImpl::OnWillDestroyViewManagerServiceImpl(
     ViewManagerServiceImpl* connection) {
+  InvalidatePendingEmbedForConnection(connection);
   if (creator_id_ == connection->id())
     creator_id_ = kInvalidConnectionId;
   if (connection->root_ && connection->root_->connection_id == id_ &&
@@ -142,23 +156,54 @@ bool ViewManagerServiceImpl::SetViewVisibility(const ViewId& view_id,
   return true;
 }
 
-bool ViewManagerServiceImpl::EmbedUrl(
-    const std::string& url,
+void ViewManagerServiceImpl::EmbedAllowingReembed(
     const ViewId& view_id,
-    InterfaceRequest<ServiceProvider> services,
-    ServiceProviderPtr exposed_services) {
-  if (!PrepareForEmbed(view_id))
-    return false;
-  connection_manager_->EmbedAtView(id_, url, view_id, services.Pass(),
-                                   exposed_services.Pass());
-  return true;
+    mojo::URLRequestPtr request,
+    const mojo::Callback<void(bool)>& callback) {
+  if (!CanEmbed(view_id)) {
+    callback.Run(false);
+    return;
+  }
+
+  ViewManagerServiceImpl* embed_root = nullptr;
+
+  ServerView* view = GetView(view_id);
+  DCHECK(view);  // CanEmbed() returns true only if |view_id| is valid.
+  if (view->id().connection_id == id_) {
+    view->set_allows_reembed(true);
+
+    // Only consult the embed root if the creator is doing the embed. If someone
+    // other than the creator is doing the embed they were granted embed access.
+    embed_root = connection_manager_->GetEmbedRoot(this);
+  }
+
+  if (!embed_root) {
+    PrepareForEmbed(view_id);
+    connection_manager_->EmbedAtView(id_, view_id, request.Pass());
+    callback.Run(true);
+    return;
+  }
+
+  // There is an embed root. We have to query it before completing the embed.
+  scoped_refptr<PendingEmbed> pending_embed(new PendingEmbed);
+  pending_embeds_.insert(pending_embed);
+  pending_embed->embed_root = embed_root;
+  pending_embed->view_id = view_id;
+  pending_embed->callback = callback;
+  pending_embeds_.insert(pending_embed);
+  embed_root->client()->OnEmbedForDescendant(
+      ViewIdToTransportId(view_id), request.Pass(),
+      base::Bind(&ViewManagerServiceImpl::OnEmbedForDescendantDone,
+                 base::Unretained(this), pending_embed));
 }
 
 bool ViewManagerServiceImpl::Embed(const ViewId& view_id,
                                    mojo::ViewManagerClientPtr client) {
-  if (!client.get() || !PrepareForEmbed(view_id))
+  if (!client.get() || !CanEmbed(view_id))
     return false;
-  connection_manager_->EmbedAtView(id_, view_id, client.Pass());
+  PrepareForEmbed(view_id);
+  ::ignore_result(
+      connection_manager_->EmbedAtView(id_, view_id, client.Pass()));
   return true;
 }
 
@@ -190,9 +235,8 @@ void ViewManagerServiceImpl::ProcessWillChangeViewHierarchy(
   if (originated_change)
     return;
 
-  const bool old_drawn = view->IsDrawn(connection_manager_->root());
-  const bool new_drawn = view->visible() && new_parent &&
-      new_parent->IsDrawn(connection_manager_->root());
+  const bool old_drawn = view->IsDrawn();
+  const bool new_drawn = view->visible() && new_parent && new_parent->IsDrawn();
   if (old_drawn == new_drawn)
     return;
 
@@ -270,6 +314,8 @@ void ViewManagerServiceImpl::ProcessViewDeleted(const ViewId& view,
   if (IsRoot(view))
     root_.reset();
 
+  InvalidatePendingEmbedForView(view);
+
   if (originated_change)
     return;
 
@@ -297,8 +343,7 @@ void ViewManagerServiceImpl::ProcessWillChangeViewVisibility(
     view_target_drawn_state = false;
   } else {
     // View is being shown. View will be drawn if its parent is drawn.
-    view_target_drawn_state =
-        view->parent() && view->parent()->IsDrawn(connection_manager_->root());
+    view_target_drawn_state = view->parent() && view->parent()->IsDrawn();
   }
 
   NotifyDrawnStateChanged(view, view_target_drawn_state);
@@ -389,6 +434,7 @@ void ViewManagerServiceImpl::RemoveRoot() {
   if (root_id.connection_id == id_)
     return;
 
+  client()->OnUnembed();
   client()->OnViewDeleted(ViewIdToTransportId(root_id));
   connection_manager_->OnConnectionMessagedClient(id_);
 
@@ -398,16 +444,6 @@ void ViewManagerServiceImpl::RemoveRoot() {
   RemoveFromKnown(GetView(root_id), &local_views);
   for (size_t i = 0; i < local_views.size(); ++i)
     local_views[i]->parent()->Remove(local_views[i]);
-}
-
-void ViewManagerServiceImpl::RemoveChildrenAsPartOfEmbed(
-    const ViewId& view_id) {
-  ServerView* view = GetView(view_id);
-  CHECK(view);
-  CHECK(view->id().connection_id == view_id.connection_id);
-  std::vector<ServerView*> children = view->GetChildren();
-  for (size_t i = 0; i < children.size(); ++i)
-    view->Remove(children[i]);
 }
 
 Array<ViewDataPtr> ViewManagerServiceImpl::ViewsToViewDatas(
@@ -432,9 +468,9 @@ ViewDataPtr ViewManagerServiceImpl::ViewToViewData(const ServerView* view) {
   view_data->properties =
       mojo::Map<String, Array<uint8_t>>::From(view->properties());
   view_data->visible = view->visible();
-  view_data->drawn = view->IsDrawn(connection_manager_->root());
+  view_data->drawn = view->IsDrawn();
   view_data->viewport_metrics =
-      connection_manager_->display_manager()->GetViewportMetrics().Clone();
+      connection_manager_->GetViewportMetricsForView(view);
   return view_data.Pass();
 }
 
@@ -465,8 +501,7 @@ void ViewManagerServiceImpl::NotifyDrawnStateChanged(const ServerView* view,
 
   const ServerView* root = GetView(*root_);
   DCHECK(root);
-  if (view->Contains(root) &&
-      (new_drawn_value != root->IsDrawn(connection_manager_->root()))) {
+  if (view->Contains(root) && (new_drawn_value != root->IsDrawn())) {
     client()->OnViewDrawnStateChanged(ViewIdToTransportId(root->id()),
                                       new_drawn_value);
   }
@@ -484,10 +519,14 @@ void ViewManagerServiceImpl::DestroyViews() {
   }
 }
 
-bool ViewManagerServiceImpl::PrepareForEmbed(const ViewId& view_id) {
+bool ViewManagerServiceImpl::CanEmbed(const ViewId& view_id) const {
   const ServerView* view = GetView(view_id);
-  if (!view || !access_policy_->CanEmbed(view))
-    return false;
+  return view && access_policy_->CanEmbed(view);
+}
+
+void ViewManagerServiceImpl::PrepareForEmbed(const ViewId& view_id) {
+  const ServerView* view = GetView(view_id);
+  DCHECK(view && access_policy_->CanEmbed(view));
 
   // Only allow a node to be the root for one connection.
   ViewManagerServiceImpl* existing_owner =
@@ -500,7 +539,60 @@ bool ViewManagerServiceImpl::PrepareForEmbed(const ViewId& view_id) {
     connection_manager_->OnConnectionMessagedClient(id_);
     existing_owner->RemoveRoot();
   }
-  return true;
+}
+
+void ViewManagerServiceImpl::RemoveChildrenAsPartOfEmbed(
+    const ViewId& view_id) {
+  ServerView* view = GetView(view_id);
+  CHECK(view);
+  CHECK(view->id().connection_id == view_id.connection_id);
+  std::vector<ServerView*> children = view->GetChildren();
+  for (size_t i = 0; i < children.size(); ++i)
+    view->Remove(children[i]);
+}
+
+void ViewManagerServiceImpl::OnEmbedForDescendantDone(
+    scoped_refptr<PendingEmbed> pending_embed,
+    mojo::ViewManagerClientPtr client) {
+  if (!pending_embeds_.count(pending_embed.get()))
+    return;
+
+  const bool allow_embed = client.get() && CanEmbed(pending_embed->view_id);
+  if (allow_embed) {
+    PrepareForEmbed(pending_embed->view_id);
+    connection_manager_->EmbedAtView(id_, pending_embed->view_id,
+                                     client.Pass());
+  }
+  RemovePendingEmbedAndNotifyCallback(pending_embed.get(), allow_embed);
+}
+
+void ViewManagerServiceImpl::InvalidatePendingEmbedForConnection(
+    ViewManagerServiceImpl* connection) {
+  if (pending_embeds_.empty())
+    return;
+  std::set<scoped_refptr<PendingEmbed>> copy(pending_embeds_);
+  for (auto& embed : copy) {
+    if (embed->embed_root == connection)
+      RemovePendingEmbedAndNotifyCallback(embed, false);
+  }
+}
+
+void ViewManagerServiceImpl::InvalidatePendingEmbedForView(
+    const ViewId& view_id) {
+  if (pending_embeds_.empty())
+    return;
+  std::set<scoped_refptr<PendingEmbed>> copy(pending_embeds_);
+  for (auto& embed : copy) {
+    if (embed->view_id == view_id)
+      RemovePendingEmbedAndNotifyCallback(embed, false);
+  }
+}
+
+void ViewManagerServiceImpl::RemovePendingEmbedAndNotifyCallback(
+    scoped_refptr<PendingEmbed> embed,
+    bool success) {
+  pending_embeds_.erase(embed);
+  embed->callback.Run(success);
 }
 
 void ViewManagerServiceImpl::CreateView(
@@ -622,15 +714,29 @@ void ViewManagerServiceImpl::SetViewProperty(
   callback.Run(success);
 }
 
-void ViewManagerServiceImpl::EmbedUrl(
-    const String& url,
-    Id transport_view_id,
-    InterfaceRequest<ServiceProvider> services,
-    ServiceProviderPtr exposed_services,
-    const Callback<void(bool)>& callback) {
-  callback.Run(EmbedUrl(url.To<std::string>(),
-                        ViewIdFromTransportId(transport_view_id),
-                        services.Pass(), exposed_services.Pass()));
+void ViewManagerServiceImpl::SetViewTextInputState(
+    uint32_t view_id,
+    mojo::TextInputStatePtr state) {
+  ServerView* view = GetView(ViewIdFromTransportId(view_id));
+  bool success = view && access_policy_->CanSetViewTextInputState(view);
+  if (success)
+    view->SetTextInputState(state.To<ui::TextInputState>());
+}
+
+void ViewManagerServiceImpl::SetImeVisibility(uint32_t view_id,
+                                              bool visible,
+                                              mojo::TextInputStatePtr state) {
+  ServerView* view = GetView(ViewIdFromTransportId(view_id));
+  bool success = view && access_policy_->CanSetViewTextInputState(view);
+  if (success) {
+    if (!state.is_null())
+      view->SetTextInputState(state.To<ui::TextInputState>());
+    connection_manager_->SetImeVisibility(view, visible);
+  }
+}
+
+void ViewManagerServiceImpl::SetEmbedRoot() {
+  is_embed_root_ = true;
 }
 
 void ViewManagerServiceImpl::Embed(mojo::Id transport_view_id,
@@ -639,11 +745,18 @@ void ViewManagerServiceImpl::Embed(mojo::Id transport_view_id,
   callback.Run(Embed(ViewIdFromTransportId(transport_view_id), client.Pass()));
 }
 
+void ViewManagerServiceImpl::EmbedAllowingReembed(
+    mojo::Id transport_view_id,
+    mojo::URLRequestPtr request,
+    const mojo::Callback<void(bool)>& callback) {
+  EmbedAllowingReembed(ViewIdFromTransportId(transport_view_id), request.Pass(),
+                       callback);
+}
+
 void ViewManagerServiceImpl::SetFocus(uint32_t view_id,
                                       const SetFocusCallback& callback) {
   ServerView* view = GetView(ViewIdFromTransportId(view_id));
-  bool success = view && view->IsDrawn(connection_manager_->root()) &&
-                 access_policy_->CanSetFocus(view);
+  bool success = view && view->IsDrawn() && access_policy_->CanSetFocus(view);
   if (success) {
     ConnectionManager::ScopedChange change(this, connection_manager_, false);
     connection_manager_->SetFocusedView(view);
@@ -665,6 +778,10 @@ bool ViewManagerServiceImpl::IsViewRootOfAnotherConnectionForAccessPolicy(
   ViewManagerServiceImpl* connection =
       connection_manager_->GetConnectionWithRoot(view->id());
   return connection && connection != this;
+}
+
+bool ViewManagerServiceImpl::IsDescendantOfEmbedRoot(const ServerView* view) {
+  return is_embed_root_ && root_ && GetView(*root_)->Contains(view);
 }
 
 }  // namespace view_manager

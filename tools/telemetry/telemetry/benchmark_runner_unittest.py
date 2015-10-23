@@ -1,15 +1,13 @@
 # Copyright 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
 import unittest
 
 from telemetry import benchmark
 from telemetry import benchmark_runner
-from telemetry.core import util
-from telemetry.unittest_util import stream
-
-util.AddDirToPythonPath(util.GetTelemetryDir(), 'third_party', 'mock')
-import mock # pylint: disable=F0401
+from telemetry.testing import stream
+import mock
 
 
 class BenchmarkFoo(benchmark.Benchmark):
@@ -70,20 +68,3 @@ class BenchmarkRunnerUnittest(unittest.TestCase):
       benchmark_runner.PrintBenchmarkList(
         [BenchmarkFoo, BenchmarkBar], self._mock_possible_browser, self._stream)
       self.assertEquals(expected_printed_stream, self._stream.output_data)
-
-  def testGetMostLikelyMatchedBenchmarks(self):
-    all_benchmarks = [BenchmarkFoo, BenchmarkBar, UnusualBenchmark]
-    self.assertEquals(
-        [BenchmarkFoo, BenchmarkBar],
-        benchmark_runner.GetMostLikelyMatchedBenchmarks(
-            all_benchmarks, 'BenchmarkFooz'))
-
-    self.assertEquals(
-        [BenchmarkBar, BenchmarkFoo],
-        benchmark_runner.GetMostLikelyMatchedBenchmarks(
-            all_benchmarks, 'BarBenchmark'))
-
-    self.assertEquals(
-        [UnusualBenchmark],
-        benchmark_runner.GetMostLikelyMatchedBenchmarks(
-            all_benchmarks, 'unusual'))

@@ -74,6 +74,11 @@ struct BitmapRec : public SkResourceCache::Rec {
     const Key& getKey() const override { return fKey; }
     size_t bytesUsed() const override { return sizeof(fKey) + fBitmap.getSize(); }
 
+    const char* getCategory() const override { return "bitmap"; }
+    SkDiscardableMemory* diagnostic_only_getDiscardable() const override {
+        return fBitmap.pixelRef()->diagnostic_only_getDiscardable();
+    }
+
     static bool Finder(const SkResourceCache::Rec& baseRec, void* contextBitmap) {
         const BitmapRec& rec = static_cast<const BitmapRec&>(baseRec);
         SkBitmap* result = (SkBitmap*)contextBitmap;
@@ -142,6 +147,20 @@ bool SkBitmapCache::Add(SkPixelRef* pr, const SkIRect& subset, const SkBitmap& r
     }
 }
 
+bool SkBitmapCache::Find(uint32_t genID, SkBitmap* result, SkResourceCache* localCache) {
+    BitmapKey key(genID, SK_Scalar1, SK_Scalar1, SkIRect::MakeEmpty());
+
+    return CHECK_LOCAL(localCache, find, Find, key, BitmapRec::Finder, result);
+}
+
+void SkBitmapCache::Add(uint32_t genID, const SkBitmap& result, SkResourceCache* localCache) {
+    SkASSERT(result.isImmutable());
+
+    BitmapRec* rec = SkNEW_ARGS(BitmapRec, (genID, 1, 1, SkIRect::MakeEmpty(), result));
+
+    CHECK_LOCAL(localCache, add, Add, rec);
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////
 
@@ -173,6 +192,10 @@ struct MipMapRec : public SkResourceCache::Rec {
 
     const Key& getKey() const override { return fKey; }
     size_t bytesUsed() const override { return sizeof(fKey) + fMipMap->size(); }
+    const char* getCategory() const override { return "mipmap"; }
+    SkDiscardableMemory* diagnostic_only_getDiscardable() const override {
+        return fMipMap->diagnostic_only_getDiscardable();
+    }
 
     static bool Finder(const SkResourceCache::Rec& baseRec, void* contextMip) {
         const MipMapRec& rec = static_cast<const MipMapRec&>(baseRec);

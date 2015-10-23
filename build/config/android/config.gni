@@ -16,13 +16,18 @@ if (is_android) {
 
   if (!defined(default_android_sdk_root)) {
     default_android_sdk_root = "//third_party/android_tools/sdk"
-    default_android_sdk_version = "22"
-    default_android_sdk_build_tools_version = "22.0.0"
+    default_android_sdk_version = "23"
+    default_android_sdk_build_tools_version = "23.0.0"
   }
 
   if (!defined(google_play_services_library)) {
     google_play_services_library =
         "//third_party/android_tools:google_play_services_default_java"
+  }
+
+  if (!defined(google_play_services_resources)) {
+    google_play_services_resources =
+        "//third_party/android_tools:google_play_services_default_resources"
   }
 
   declare_args() {
@@ -42,6 +47,9 @@ if (is_android) {
 
     # Set to true to run findbugs on JAR targets.
     run_findbugs = false
+
+    # Set to true to enable the Errorprone compiler
+    use_errorprone_java_compiler = false
   }
 
   # Host stuff -----------------------------------------------------------------
@@ -91,7 +99,7 @@ if (is_android) {
 
   # Subdirectories inside android_ndk_root that contain the sysroot for the
   # associated platform.
-  _android_api_level = 14
+  _android_api_level = 16
   x86_android_sysroot_subdir =
       "platforms/android-${_android_api_level}/arch-x86"
   arm_android_sysroot_subdir =
@@ -159,12 +167,13 @@ if (is_android) {
   android_gdbserver =
       "$android_ndk_root/prebuilt/$android_prebuilt_arch/gdbserver/gdbserver"
 
-  # stlport stuff --------------------------------------------------------------
+  # Toolchain stuff ------------------------------------------------------------
 
-  if (component_mode == "shared_library") {
-    android_stlport_library = "stlport_shared"
+  android_libcpp_root = "$android_ndk_root/sources/cxx-stl/llvm-libc++"
+  if (is_component_build) {
+    android_libcpp_library = "c++_shared"
   } else {
-    android_stlport_library = "stlport_static"
+    android_libcpp_library = "c++_static"
   }
 
   # ABI ------------------------------------------------------------------------

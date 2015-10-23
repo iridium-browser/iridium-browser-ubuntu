@@ -33,6 +33,7 @@ class VertexDataManager;
 class IndexDataManager;
 class StreamingIndexBufferInterface;
 class Blit11;
+class Buffer11;
 class Clear11;
 class PixelTransfer11;
 class RenderTarget11;
@@ -45,6 +46,9 @@ struct Renderer11DeviceCaps
     bool supportsDXGI1_2;               // Support for DXGI 1.2
     bool supportsClearView;             // Support for ID3D11DeviceContext1::ClearView
     bool supportsConstantBufferOffsets; // Support for Constant buffer offset
+    UINT B5G6R5support;                 // Bitfield of D3D11_FORMAT_SUPPORT values for DXGI_FORMAT_B5G6R5_UNORM
+    UINT B4G4R4A4support;               // Bitfield of D3D11_FORMAT_SUPPORT values for DXGI_FORMAT_B4G4R4A4_UNORM
+    UINT B5G5R5A1support;               // Bitfield of D3D11_FORMAT_SUPPORT values for DXGI_FORMAT_B5G5R5A1_UNORM
 };
 
 enum
@@ -101,6 +105,7 @@ class Renderer11 : public RendererD3D
     virtual bool resetDevice();
 
     egl::ConfigSet generateConfigs() const override;
+    void generateDisplayExtensions(egl::DisplayExtensions *outExtensions) const override;
 
     gl::Error flush() override;
     gl::Error finish() override;
@@ -112,8 +117,8 @@ class Renderer11 : public RendererD3D
     virtual gl::Error setTexture(gl::SamplerType type, int index, gl::Texture *texture);
 
     gl::Error setUniformBuffers(const gl::Data &data,
-                                const GLint vertexUniformBuffers[],
-                                const GLint fragmentUniformBuffers[]) override;
+                                const std::vector<GLint> &vertexUniformBuffers,
+                                const std::vector<GLint> &fragmentUniformBuffers) override;
 
     virtual gl::Error setRasterizerState(const gl::RasterizerState &rasterState);
     gl::Error setBlendState(const gl::Framebuffer *framebuffer, const gl::BlendState &blendState, const gl::ColorF &blendColor,
@@ -127,17 +132,20 @@ class Renderer11 : public RendererD3D
 
     virtual bool applyPrimitiveType(GLenum mode, GLsizei count, bool usesPointSize);
     gl::Error applyRenderTarget(const gl::Framebuffer *frameBuffer) override;
-    virtual gl::Error applyShaders(gl::Program *program, const gl::VertexFormat inputLayout[], const gl::Framebuffer *framebuffer,
-                                   bool rasterizerDiscard, bool transformFeedbackActive);
+    gl::Error applyShaders(gl::Program *program,
+                           const gl::Framebuffer *framebuffer,
+                           bool rasterizerDiscard,
+                           bool transformFeedbackActive) override;
 
     virtual gl::Error applyUniforms(const ProgramImpl &program, const std::vector<gl::LinkedUniform*> &uniformArray);
-    virtual gl::Error applyVertexBuffer(const gl::State &state, GLenum mode, GLint first, GLsizei count, GLsizei instances);
-    virtual gl::Error applyIndexBuffer(const GLvoid *indices, gl::Buffer *elementArrayBuffer, GLsizei count, GLenum mode, GLenum type, TranslatedIndexData *indexInfo);
+    virtual gl::Error applyVertexBuffer(const gl::State &state, GLenum mode, GLint first, GLsizei count, GLsizei instances, SourceIndexData *sourceIndexInfo);
+    virtual gl::Error applyIndexBuffer(const GLvoid *indices, gl::Buffer *elementArrayBuffer, GLsizei count, GLenum mode, GLenum type, TranslatedIndexData *indexInfo, SourceIndexData *sourceIndexInfo);
     void applyTransformFeedbackBuffers(const gl::State &state) override;
 
     gl::Error drawArrays(const gl::Data &data, GLenum mode, GLsizei count, GLsizei instances, bool usesPointSize) override;
     virtual gl::Error drawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices,
-                                   gl::Buffer *elementArrayBuffer, const TranslatedIndexData &indexInfo, GLsizei instances);
+                                   gl::Buffer *elementArrayBuffer, const TranslatedIndexData &indexInfo, GLsizei instances,
+                                   bool usesPointSize);
 
     virtual void markAllStateDirty();
 
@@ -147,14 +155,14 @@ class Renderer11 : public RendererD3D
 
     VendorID getVendorId() const override;
     std::string getRendererDescription() const override;
-    GUID getAdapterIdentifier() const override;
+    DeviceIdentifier getAdapterIdentifier() const override;
 
     virtual unsigned int getReservedVertexUniformVectors() const;
     virtual unsigned int getReservedFragmentUniformVectors() const;
     virtual unsigned int getReservedVertexUniformBuffers() const;
     virtual unsigned int getReservedFragmentUniformBuffers() const;
-    virtual bool getShareHandleSupport() const;
-    virtual bool getPostSubBufferSupport() const;
+
+    bool getShareHandleSupport() const;
 
     virtual int getMajorShaderModel() const;
     int getMinorShaderModel() const override;
@@ -180,7 +188,7 @@ class Renderer11 : public RendererD3D
     // Shader creation
     virtual CompilerImpl *createCompiler(const gl::Data &data);
     virtual ShaderImpl *createShader(GLenum type);
-    virtual ProgramImpl *createProgram();
+    virtual ProgramImpl *createProgram(const gl::Program::Data &data);
 
     // Shader operations
     virtual gl::Error loadExecutable(const void *function, size_t length, ShaderType type,
@@ -214,7 +222,7 @@ class Renderer11 : public RendererD3D
     virtual IndexBuffer *createIndexBuffer();
 
     // Vertex Array creation
-    virtual VertexArrayImpl *createVertexArray();
+    VertexArrayImpl *createVertexArray(const gl::VertexArray::Data &data) override;
 
     // Query and Fence creation
     virtual QueryImpl *createQuery(GLenum type);
@@ -244,8 +252,8 @@ class Renderer11 : public RendererD3D
     gl::Error packPixels(ID3D11Texture2D *readTexture, const PackPixelsParams &params, uint8_t *pixelsOut);
 
     bool getLUID(LUID *adapterLuid) const override;
-    virtual VertexConversionType getVertexConversionType(const gl::VertexFormat &vertexFormat) const;
-    virtual GLenum getVertexComponentType(const gl::VertexFormat &vertexFormat) const;
+    VertexConversionType getVertexConversionType(gl::VertexFormatType vertexFormatType) const override;
+    GLenum getVertexComponentType(gl::VertexFormatType vertexFormatType) const override;
 
     gl::Error readTextureData(ID3D11Texture2D *texture, unsigned int subResource, const gl::Rectangle &area, GLenum format,
                               GLenum type, GLuint outputPitch, const gl::PixelPackState &pack, uint8_t *pixels);
@@ -260,16 +268,31 @@ class Renderer11 : public RendererD3D
     const Renderer11DeviceCaps &getRenderer11DeviceCaps() { return mRenderer11DeviceCaps; };
 
     RendererClass getRendererClass() const override { return RENDERER_D3D11; }
+    InputLayoutCache *getInputLayoutCache() { return &mInputLayoutCache; }
+
+    void onSwap();
+    void onBufferDelete(const Buffer11 *deleted);
+
+  protected:
+    void createAnnotator() override;
+    gl::Error clearTextures(gl::SamplerType samplerType, size_t rangeStart, size_t rangeEnd) override;
 
   private:
-    void generateCaps(gl::Caps *outCaps, gl::TextureCapsMap *outTextureCaps, gl::Extensions *outExtensions) const override;
-    Workarounds generateWorkarounds() const override;
+    void generateCaps(gl::Caps *outCaps, gl::TextureCapsMap *outTextureCaps,
+                      gl::Extensions *outExtensions,
+                      gl::Limitations *outLimitations) const override;
+
+    WorkaroundsD3D generateWorkarounds() const override;
 
     gl::Error drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, int minIndex, gl::Buffer *elementArrayBuffer);
     gl::Error drawTriangleFan(GLsizei count, GLenum type, const GLvoid *indices, int minIndex, gl::Buffer *elementArrayBuffer, int instances);
 
     ID3D11Texture2D *resolveMultisampledTexture(ID3D11Texture2D *source, unsigned int subresource);
     void unsetConflictingSRVs(gl::SamplerType shaderType, uintptr_t resource, const gl::ImageIndex &index);
+
+    void populateRenderer11DeviceCaps();
+
+    void updateHistograms();
 
     HMODULE mD3d11Module;
     HMODULE mDxgiModule;
@@ -312,8 +335,41 @@ class Renderer11 : public RendererD3D
         uintptr_t resource;
         D3D11_SHADER_RESOURCE_VIEW_DESC desc;
     };
-    std::vector<SRVRecord> mCurVertexSRVs;
-    std::vector<SRVRecord> mCurPixelSRVs;
+
+    // A cache of current SRVs that also tracks the highest 'used' (non-NULL) SRV
+    // We might want to investigate a more robust approach that is also fast when there's
+    // a large gap between used SRVs (e.g. if SRV 0 and 7 are non-NULL, this approach will
+    // waste time on SRVs 1-6.)
+    class SRVCache : angle::NonCopyable
+    {
+      public:
+        SRVCache()
+            : mHighestUsedSRV(0)
+        {
+        }
+
+        void initialize(size_t size)
+        {
+            mCurrentSRVs.resize(size);
+        }
+
+        size_t size() const { return mCurrentSRVs.size(); }
+        size_t highestUsed() const { return mHighestUsedSRV; }
+
+        const SRVRecord &operator[](size_t index) const { return mCurrentSRVs[index]; }
+        void clear();
+        void update(size_t resourceIndex, ID3D11ShaderResourceView *srv);
+
+      private:
+        std::vector<SRVRecord> mCurrentSRVs;
+        size_t mHighestUsedSRV;
+    };
+
+    SRVCache mCurVertexSRVs;
+    SRVCache mCurPixelSRVs;
+
+    // A block of NULL pointers, cached so we don't re-allocate every draw call
+    std::vector<ID3D11ShaderResourceView*> mNullSRVs;
 
     // Currently applied blend state
     bool mForceSetBlendState;
@@ -349,6 +405,7 @@ class Renderer11 : public RendererD3D
     ID3D11Buffer *mAppliedIB;
     DXGI_FORMAT mAppliedIBFormat;
     unsigned int mAppliedIBOffset;
+    bool mAppliedIBChanged;
 
     // Currently applied transform feedback buffers
     size_t mAppliedNumXFBBindings;
@@ -405,6 +462,11 @@ class Renderer11 : public RendererD3D
     // Sync query
     ID3D11Query *mSyncQuery;
 
+    // Created objects state tracking
+    std::set<const Buffer11*> mAliveBuffers;
+
+    double mLastHistogramUpdateTime;
+
     ID3D11Device *mDevice;
     Renderer11DeviceCaps mRenderer11DeviceCaps;
     ID3D11DeviceContext *mDeviceContext;
@@ -414,8 +476,6 @@ class Renderer11 : public RendererD3D
     char mDescription[128];
     DXGIFactory *mDxgiFactory;
     ID3D11Debug *mDebug;
-
-    DebugAnnotator11 mAnnotator;
 };
 
 }

@@ -74,8 +74,9 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
   void Initialize() override;
   void GrabServer() override;
   void UngrabServer() override;
-  bool TakeDisplayControl() override;
-  bool RelinquishDisplayControl() override;
+  void TakeDisplayControl(const DisplayControlCallback& callback) override;
+  void RelinquishDisplayControl(
+      const DisplayControlCallback& callback) override;
   void SyncWithServer() override;
   void SetBackgroundColor(uint32_t color_argb) override;
   void ForceDPMSOn() override;
@@ -162,7 +163,7 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
   scoped_ptr<NativeDisplayEventDispatcherX11> platform_event_dispatcher_;
 
   // List of observers waiting for display configuration change events.
-  ObserverList<NativeDisplayObserver> observers_;
+  base::ObserverList<NativeDisplayObserver> observers_;
 
   // A background color used during boot time + multi displays.
   uint32_t background_color_argb_;

@@ -12,14 +12,12 @@
 #include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 #include "cc/base/math_util.h"
-#include "cc/base/util.h"
 #include "cc/debug/picture_debug_util.h"
 #include "cc/debug/traced_picture.h"
 #include "cc/debug/traced_value.h"
 #include "cc/layers/content_layer_client.h"
 #include "skia/ext/pixel_ref_utils.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkDrawPictureCallback.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "third_party/skia/include/core/SkStream.h"
@@ -33,6 +31,10 @@
 namespace cc {
 
 namespace {
+
+// We don't perform per-layer solid color analysis when there are too many skia
+// operations.
+const int kOpCountThatIsOkToAnalyze = 10;
 
 bool DecodeBitmap(const void* buffer, size_t size, SkBitmap* bm) {
   const unsigned char* data = static_cast<const unsigned char *>(buffer);
@@ -159,6 +161,10 @@ size_t Picture::ApproximateMemoryUsage() const {
   return SkPictureUtils::ApproximateBytesUsed(picture_.get());
 }
 
+bool Picture::ShouldBeAnalyzedForSolidColor() const {
+  return ApproximateOpCount() <= kOpCountThatIsOkToAnalyze;
+}
+
 bool Picture::HasText() const {
   DCHECK(picture_);
   return picture_->hasText();
@@ -236,7 +242,7 @@ void Picture::GatherPixelRefs() {
   if (!WillPlayBackBitmaps())
     return;
 
-  pixel_refs_.GatherPixelRefsFromPicture(picture_.get());
+  pixel_refs_.GatherPixelRefsFromPicture(picture_.get(), layer_rect_);
 }
 
 int Picture::Raster(SkCanvas* canvas,

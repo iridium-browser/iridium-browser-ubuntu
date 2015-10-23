@@ -6,31 +6,38 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
+#include "net/base/load_flags.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate.h"
+#include "net/base/network_quality_estimator.h"
 #include "net/filter/filter.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/url_request_context.h"
 
 namespace net {
 
 namespace {
 
 // Callback for TYPE_URL_REQUEST_FILTERS_SET net-internals event.
-base::Value* FiltersSetCallback(Filter* filter,
-                                NetLogCaptureMode /* capture_mode */) {
+scoped_ptr<base::Value> FiltersSetCallback(
+    Filter* filter,
+    NetLogCaptureMode /* capture_mode */) {
   scoped_ptr<base::DictionaryValue> event_params(new base::DictionaryValue());
   event_params->SetString("filters", filter->OrderedFilterList());
-  return event_params.release();
+  return event_params.Pass();
 }
 
 std::string ComputeMethodForRedirect(const std::string& method,
@@ -371,7 +378,9 @@ void URLRequestJob::NotifyHeadersComplete() {
   if (has_handled_response_)
     return;
 
-  DCHECK(!request_->status().is_io_pending());
+  // This should not be called on error, and the job type should have cleared
+  // IO_PENDING state before calling this method.
+  DCHECK(request_->status().is_success());
 
   // Initialize to the current time, and let the subclass optionally override
   // the time stamps if it has that information.  The default request_time is
@@ -538,14 +547,31 @@ void URLRequestJob::NotifyDone(const URLRequestStatus &status) {
       }
       request_->set_status(status);
     }
+
+    // If the request succeeded (And wasn't cancelled) and the response code was
+    // 4xx or 5xx, record whether or not the main frame was blank.  This is
+    // intended to be a short-lived histogram, used to figure out how important
+    // fixing http://crbug.com/331745 is.
+    if (request_->status().is_success()) {
+      int response_code = GetResponseCode();
+      if (400 <= response_code && response_code <= 599) {
+        bool page_has_content = (postfilter_bytes_read_ != 0);
+        if (request_->load_flags() & net::LOAD_MAIN_FRAME) {
+          UMA_HISTOGRAM_BOOLEAN("Net.ErrorResponseHasContentMainFrame",
+                                page_has_content);
+        } else {
+          UMA_HISTOGRAM_BOOLEAN("Net.ErrorResponseHasContentNonMainFrame",
+                                page_has_content);
+        }
+      }
+    }
   }
 
   // Complete this notification later.  This prevents us from re-entering the
   // delegate if we're done because of a synchronous call.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&URLRequestJob::CompleteNotifyDone,
-                 weak_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&URLRequestJob::CompleteNotifyDone,
+                            weak_factory_.GetWeakPtr()));
 }
 
 void URLRequestJob::CompleteNotifyDone() {
@@ -737,8 +763,15 @@ const URLRequestStatus URLRequestJob::GetStatus() {
 }
 
 void URLRequestJob::SetStatus(const URLRequestStatus &status) {
-  if (request_)
+  if (request_) {
+    // An error status should never be replaced by a non-error status by a
+    // URLRequestJob.  URLRequest has some retry paths, but it resets the status
+    // itself, if needed.
+    DCHECK(request_->status().is_io_pending() ||
+           request_->status().is_success() ||
+           (!status.is_success() && !status.is_io_pending()));
     request_->set_status(status);
+  }
 }
 
 void URLRequestJob::SetProxyServer(const HostPortPair& proxy_server) {
@@ -807,7 +840,22 @@ void URLRequestJob::OnRawReadComplete(int bytes_read) {
 }
 
 void URLRequestJob::RecordBytesRead(int bytes_read) {
+  DCHECK_GT(bytes_read, 0);
   prefilter_bytes_read_ += bytes_read;
+
+  // On first read, notify NetworkQualityEstimator that response headers have
+  // been received.
+  // TODO(tbansal): Move this to url_request_http_job.cc. This may catch
+  // Service Worker jobs twice.
+  // If prefilter_bytes_read_ is equal to bytes_read, it indicates this is the
+  // first raw read of the response body. This is used as the signal that
+  // response headers have been received.
+  if (request_ && request_->context()->network_quality_estimator() &&
+      prefilter_bytes_read_ == bytes_read) {
+    request_->context()->network_quality_estimator()->NotifyHeadersReceived(
+        *request_);
+  }
+
   if (!filter_.get())
     postfilter_bytes_read_ += bytes_read;
   DVLOG(2) << __FUNCTION__ << "() "

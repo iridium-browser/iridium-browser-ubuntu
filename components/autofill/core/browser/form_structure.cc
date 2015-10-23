@@ -14,6 +14,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -43,11 +44,13 @@ const char kAttributeClientVersion[] = "clientversion";
 const char kAttributeDataPresent[] = "datapresent";
 const char kAttributeFieldID[] = "fieldid";
 const char kAttributeFieldType[] = "fieldtype";
+const char kAttributeFieldLabel[] = "label";
 const char kAttributeFormSignature[] = "formsignature";
 const char kAttributeName[] = "name";
 const char kAttributeSignature[] = "signature";
 const char kAttributeControlType[] = "type";
 const char kAttributeAutocomplete[] = "autocomplete";
+const char kAttributeLoginFormSignature[] = "loginformsignature";
 const char kClientVersion[] = "6.1.1715.1442/en (GGLL)";
 const char kXMLDeclaration[] = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
 const char kXMLElementAutofillQuery[] = "autofillquery";
@@ -70,7 +73,7 @@ const int kNumberOfMismatchesThreshold = 3;
 bool IsAutofillFieldMetadataEnabled() {
   const std::string group_name =
       base::FieldTrialList::FindFullName("AutofillFieldMetadata");
-  return StartsWithASCII(group_name, "Enabled", true);
+  return base::StartsWith(group_name, "Enabled", base::CompareCase::SENSITIVE);
 }
 
 // Helper for |EncodeUploadRequest()| that creates a bit field corresponding to
@@ -126,6 +129,10 @@ buzz::XmlElement* EncodeFieldForQuery(const AutofillField& field,
     }
     field_element->SetAttr(buzz::QName(kAttributeControlType),
                            field.form_control_type);
+    if (!field.label.empty()) {
+      field_element->SetAttr(buzz::QName(kAttributeFieldLabel),
+                             base::UTF16ToUTF8(field.label));
+    }
   }
   parent->AddElement(field_element);
   return field_element;
@@ -146,14 +153,14 @@ void EncodeFieldForUpload(const AutofillField& field,
     // We use the same field elements as the query and add a few more below.
     buzz::XmlElement* field_element = EncodeFieldForQuery(field, parent);
 
-    if (IsAutofillFieldMetadataEnabled()) {
-      if (!field.autocomplete_attribute.empty()) {
-        field_element->SetAttr(buzz::QName(kAttributeAutocomplete),
-                               field.autocomplete_attribute);
-      }
-      field_element->SetAttr(buzz::QName(kAttributeAutofillType),
-                             base::IntToString(*field_type));
+    if (IsAutofillFieldMetadataEnabled() &&
+        !field.autocomplete_attribute.empty()) {
+      field_element->SetAttr(buzz::QName(kAttributeAutocomplete),
+                             field.autocomplete_attribute);
     }
+
+    field_element->SetAttr(buzz::QName(kAttributeAutofillType),
+                           base::IntToString(*field_type));
   }
 }
 
@@ -448,6 +455,7 @@ void FormStructure::DetermineHeuristicTypes() {
 bool FormStructure::EncodeUploadRequest(
     const ServerFieldTypeSet& available_field_types,
     bool form_was_autofilled,
+    const std::string& login_form_signature,
     std::string* encoded_xml) const {
   DCHECK(ShouldBeCrowdsourced());
 
@@ -477,6 +485,11 @@ bool FormStructure::EncodeUploadRequest(
                                form_was_autofilled ? "true" : "false");
   autofill_request_xml.SetAttr(buzz::QName(kAttributeDataPresent),
                                EncodeFieldTypes(available_field_types).c_str());
+
+  if (!login_form_signature.empty()) {
+    autofill_request_xml.SetAttr(buzz::QName(kAttributeLoginFormSignature),
+                                 login_form_signature);
+  }
 
   if (!EncodeFormRequest(FormStructure::UPLOAD, &autofill_request_xml))
     return false;  // Malformed form, skip it.
@@ -776,10 +789,14 @@ void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
         field->value = base::string16();
       }
 
+      // Transfer attributes of the cached AutofillField to the newly created
+      // AutofillField.
       field->set_heuristic_type(cached_field->second->heuristic_type());
       field->set_server_type(cached_field->second->server_type());
       field->SetHtmlType(cached_field->second->html_type(),
                          cached_field->second->html_mode());
+      field->set_previously_autofilled(
+          cached_field->second->previously_autofilled());
     }
   }
 
@@ -804,22 +821,28 @@ void FormStructure::LogQualityMetrics(
   size_t num_detected_field_types = 0;
   size_t num_server_mismatches = 0;
   size_t num_heuristic_mismatches = 0;
+  size_t num_edited_autofilled_fields = 0;
   bool did_autofill_all_possible_fields = true;
   bool did_autofill_some_possible_fields = false;
   for (size_t i = 0; i < field_count(); ++i) {
     const AutofillField* field = this->field(i);
+
+    // No further logging for password fields.  Those are primarily related to a
+    // different feature code path, and so make more sense to track outside of
+    // this metric.
+    if (field->form_control_type == "password")
+      continue;
+
+    // We count fields that were autofilled but later modified, regardless of
+    // whether the data now in the field is recognized.
+    if (field->previously_autofilled())
+      num_edited_autofilled_fields++;
 
     // No further logging for empty fields nor for fields where the entered data
     // does not appear to already exist in the user's stored Autofill data.
     const ServerFieldTypeSet& field_types = field->possible_types();
     DCHECK(!field_types.empty());
     if (field_types.count(EMPTY_TYPE) || field_types.count(UNKNOWN_TYPE))
-      continue;
-
-    // Similarly, no further logging for password fields.  Those are primarily
-    // related to a different feature code path, and so make more sense to track
-    // outside of this metric.
-    if (field->form_control_type == "password")
       continue;
 
     ++num_detected_field_types;
@@ -892,6 +915,9 @@ void FormStructure::LogQualityMetrics(
                                                 field_type);
     }
   }
+
+  AutofillMetrics::LogNumberOfEditedAutofilledFieldsAtSubmission(
+      num_edited_autofilled_fields);
 
   if (num_detected_field_types < kRequiredAutofillFields) {
     AutofillMetrics::LogUserHappinessMetric(
@@ -974,7 +1000,6 @@ size_t FormStructure::active_field_count() const {
 }
 
 FormData FormStructure::ToFormData() const {
-  // |data.user_submitted| will always be false.
   FormData data;
   data.name = form_name_;
   data.origin = source_url_;
@@ -1080,7 +1105,7 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
     // non-space characters (e.g. tab) to spaces, and converting to lowercase.
     std::string autocomplete_attribute =
         base::CollapseWhitespaceASCII(field->autocomplete_attribute, false);
-    autocomplete_attribute = base::StringToLowerASCII(autocomplete_attribute);
+    autocomplete_attribute = base::ToLowerASCII(autocomplete_attribute);
 
     // The autocomplete attribute is overloaded: it can specify either a field
     // type hint or whether autocomplete should be enabled at all.  Ignore the
@@ -1099,8 +1124,9 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
 
     // Tokenize the attribute value.  Per the spec, the tokens are parsed in
     // reverse order.
-    std::vector<std::string> tokens;
-    Tokenize(autocomplete_attribute, " ", &tokens);
+    std::vector<std::string> tokens = base::SplitString(
+        autocomplete_attribute, " ", base::KEEP_WHITESPACE,
+        base::SPLIT_WANT_NONEMPTY);
 
     // The final token must be the field type.
     // If it is not one of the known types, abort.
@@ -1145,7 +1171,8 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
     // The preceding token, if any, may be a named section.
     const std::string kSectionPrefix = "section-";
     if (!tokens.empty() &&
-        StartsWithASCII(tokens.back(), kSectionPrefix, true)) {
+        base::StartsWith(tokens.back(), kSectionPrefix,
+                         base::CompareCase::SENSITIVE)) {
       // Prepend this section name to the suffix set in the preceding block.
       section = tokens.back().substr(kSectionPrefix.size()) + section;
       tokens.pop_back();

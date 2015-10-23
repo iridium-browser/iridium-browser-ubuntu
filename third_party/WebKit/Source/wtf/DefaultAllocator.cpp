@@ -32,22 +32,23 @@
 #include "wtf/DefaultAllocator.h"
 
 #include "wtf/PartitionAlloc.h"
+#include "wtf/Partitions.h"
 
 namespace WTF {
 
 void* DefaultAllocator::allocateBacking(size_t size)
 {
-    return partitionAllocGeneric(Partitions::getBufferPartition(), size);
+    return Partitions::bufferMalloc(size);
 }
 
 void DefaultAllocator::freeVectorBacking(void* address)
 {
-    partitionFreeGeneric(Partitions::getBufferPartition(), address);
+    Partitions::bufferFree(address);
 }
 
 void DefaultAllocator::freeHashTableBacking(void* address)
 {
-    partitionFreeGeneric(Partitions::getBufferPartition(), address);
+    Partitions::bufferFree(address);
 }
 
 } // namespace WTF

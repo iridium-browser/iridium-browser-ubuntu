@@ -86,6 +86,10 @@ void SkSurface_Base::onDraw(SkCanvas* canvas, SkScalar x, SkScalar y, const SkPa
     }
 }
 
+bool SkSurface_Base::outstandingImageSnapshot() const {
+    return fCachedImage && !fCachedImage->unique();
+}
+
 void SkSurface_Base::aboutToDraw(ContentChangeMode mode) {
     this->dirtyGenerationID();
 
@@ -95,7 +99,8 @@ void SkSurface_Base::aboutToDraw(ContentChangeMode mode) {
         // the surface may need to fork its backend, if its sharing it with
         // the cached image. Note: we only call if there is an outstanding owner
         // on the image (besides us).
-        if (!fCachedImage->unique()) {
+        bool unique = fCachedImage->unique();
+        if (!unique) {
             this->onCopyOnWrite(mode);
         }
 
@@ -103,6 +108,13 @@ void SkSurface_Base::aboutToDraw(ContentChangeMode mode) {
         // that the next request will get our new contents.
         fCachedImage->unref();
         fCachedImage = NULL;
+
+        if (unique) {
+            // Our content isn't held by any image now, so we can consider that content mutable.
+            // Raster surfaces need to be told it's safe to consider its pixels mutable again.
+            // We make this call after the ->unref() so the subclass can assert there are no images.
+            this->onRestoreBackingMutability();
+        }
     } else if (kDiscard_ContentChangeMode == mode) {
         this->onDiscard();
     }
@@ -175,6 +187,14 @@ bool SkSurface::readPixels(const SkImageInfo& dstInfo, void* dstPixels, size_t d
     return this->getCanvas()->readPixels(dstInfo, dstPixels, dstRowBytes, srcX, srcY);
 }
 
+GrBackendObject SkSurface::getTextureHandle(BackendHandleAccess access) {
+    return asSB(this)->onGetTextureHandle(access);
+}
+
+bool SkSurface::getRenderTargetHandle(GrBackendObject* obj, BackendHandleAccess access) {
+    return asSB(this)->onGetRenderTargetHandle(obj, access);
+}
+
 //////////////////////////////////////////////////////////////////////////////////////
 
 #if !SK_SUPPORT_GPU
@@ -188,8 +208,13 @@ SkSurface* SkSurface::NewRenderTarget(GrContext*, Budgeted, const SkImageInfo&, 
     return NULL;
 }
 
-SkSurface* SkSurface::NewWrappedRenderTarget(GrContext*, GrBackendTextureDesc,
+SkSurface* SkSurface::NewFromBackendTexture(GrContext*, const GrBackendTextureDesc&,
                                              const SkSurfaceProps*) {
+    return NULL;
+}
+
+SkSurface* SkSurface::NewFromBackendRenderTarget(GrContext*, const GrBackendRenderTargetDesc&,
+                                                 const SkSurfaceProps*) {
     return NULL;
 }
 

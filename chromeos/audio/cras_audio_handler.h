@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/timer/timer.h"
 #include "chromeos/audio/audio_device.h"
 #include "chromeos/audio/audio_pref_observer.h"
 #include "chromeos/dbus/audio_node.h"
@@ -40,7 +41,12 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
     virtual void OnOutputNodeVolumeChanged(uint64_t node_id, int volume);
 
     // Called when output mute state changed.
-    virtual void OnOutputMuteChanged(bool mute_on);
+    // |mute_on|: True if output is muted.
+    // |system_adjust|: True if the mute state is adjusted by the system
+    // automatically(i.e. not by user). UI should reflect the system's mute
+    // state, but it should not be too loud, e.g., the volume pop up window
+    // should not be triggered.
+    virtual void OnOutputMuteChanged(bool mute_on, bool system_adjust);
 
     // Called when active input node's gain changed.
     virtual void OnInputNodeGainChanged(uint64_t node_id, int gain);
@@ -127,6 +133,8 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   virtual uint64_t GetPrimaryActiveInputNode() const;
 
   // Gets the audio devices back in |device_list|.
+  // This call can be invoked from I/O thread or UI thread because
+  // it does not need to access CrasAudioClient on DBus.
   virtual void GetAudioDevices(AudioDeviceList* device_list) const;
 
   virtual bool GetPrimaryActiveOutputDevice(AudioDevice* device) const;
@@ -187,6 +195,15 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   // Enables error logging.
   virtual void LogErrors();
+
+  // If necessary, sets the starting point for re-discovering the active HDMI
+  // output device caused by device entering/exiting docking mode, HDMI display
+  // changing resolution, or chromeos device suspend/resume. If
+  // |force_rediscovering| is true, it will force to set the starting point for
+  // re-discovering the active HDMI output device again if it has been in the
+  // middle of rediscovering the HDMI active output device.
+  virtual void SetActiveHDMIOutoutRediscoveringIfNecessary(
+      bool force_rediscovering);
 
  protected:
   explicit CrasAudioHandler(
@@ -293,6 +310,16 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // Removes |node_id| from additional active nodes.
   void RemoveActiveNodeInternal(uint64_t node_id, bool notify);
 
+  void UpdateAudioAfterHDMIRediscoverGracePeriod();
+
+  bool IsHDMIPrimaryOutputDevice() const;
+
+  void StartHDMIRediscoverGracePeriod();
+
+  bool hdmi_rediscovering() const { return hdmi_rediscovering_; }
+
+  void SetHDMIRediscoverGracePeriodForTesting(int duration_in_ms);
+
   enum DeviceStatus {
     OLD_DEVICE,
     NEW_DEVICE,
@@ -306,7 +333,7 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   void NotifyActiveNodeChanged(bool is_input);
 
   scoped_refptr<AudioDevicesPrefHandler> audio_pref_handler_;
-  ObserverList<AudioObserver> observers_;
+  base::ObserverList<AudioObserver> observers_;
 
   // Audio data and state.
   AudioDeviceMap audio_devices_;
@@ -327,6 +354,11 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   // Failures are not logged at startup, since CRAS may not be running yet.
   bool log_errors_;
+
+  // Timer for HDMI re-discovering grace period.
+  base::OneShotTimer<CrasAudioHandler> hdmi_rediscover_timer_;
+  int hdmi_rediscover_grace_period_duration_in_ms_;
+  bool hdmi_rediscovering_;
 
   base::WeakPtrFactory<CrasAudioHandler> weak_ptr_factory_;
 

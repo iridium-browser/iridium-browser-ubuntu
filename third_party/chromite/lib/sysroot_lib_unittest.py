@@ -12,6 +12,7 @@ import re
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import sysroot_lib
+from chromite.lib import toolchain
 
 
 class SysrootLibTest(cros_test_lib.MockTempDirTestCase):
@@ -88,7 +89,7 @@ baz
 
     sysroot._GenerateProfile()
 
-    profile_link = os.path.join(sysroot.path, 'etc', 'make.profile')
+    profile_link = os.path.join(sysroot.path, 'etc', 'portage', 'make.profile')
     profile_parent = osutils.ReadFile(
         os.path.join(profile_link, 'parent')).splitlines()
     self.assertTrue(os.path.islink(profile_link))
@@ -103,3 +104,13 @@ baz
         os.path.join(profile_link, 'parent')).splitlines()
     self.assertEqual(2, len(profile_parent))
     self.assertEqual(profile_dir, profile_parent[1])
+
+  def testGenerateConfigNoToolchainRaisesError(self):
+    """Tests _GenerateConfig() with no toolchain raises an error."""
+    self.PatchObject(toolchain, 'FilterToolchains', autospec=True,
+                     return_value={})
+    sysroot = sysroot_lib.Sysroot(self.tempdir)
+
+    with self.assertRaises(sysroot_lib.ConfigurationError):
+      # pylint: disable=protected-access
+      sysroot._GenerateConfig({}, ['foo_overlay'], ['foo_overlay'], '')

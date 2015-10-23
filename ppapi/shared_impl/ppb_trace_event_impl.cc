@@ -78,8 +78,9 @@ void TraceEventImpl::AddTraceEventWithThreadIdAndTimestamp(
           static_cast<const unsigned char*>(category_enabled),
           name,
           id,
+          trace_event_internal::kNoId,
           thread_id,
-          base::TimeTicks::FromInternalValue(timestamp),
+          base::TraceTicks::FromInternalValue(timestamp),
           num_args,
           arg_names,
           arg_types,
@@ -94,7 +95,7 @@ void TraceEventImpl::AddTraceEventWithThreadIdAndTimestamp(
 
 // static
 int64_t TraceEventImpl::Now() {
-  return base::TimeTicks::NowFromSystemTraceTime().ToInternalValue();
+  return base::TraceTicks::Now().ToInternalValue();
 }
 
 // static

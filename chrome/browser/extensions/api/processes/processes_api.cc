@@ -7,10 +7,12 @@
 #include "base/callback.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/processes/processes_api_constants.h"
@@ -312,7 +314,7 @@ void ProcessesEventRouter::OnItemsAdded(int start, int length) {
 
   args->Append(process);
 
-  DispatchEvent(keys::kOnCreated, args.Pass());
+  DispatchEvent(events::PROCESSES_ON_CREATED, keys::kOnCreated, args.Pass());
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
 
@@ -360,7 +362,7 @@ void ProcessesEventRouter::OnItemsChanged(int start, int length) {
 
     scoped_ptr<base::ListValue> args(new base::ListValue());
     args->Append(processes);
-    DispatchEvent(keys::kOnUpdated, args.Pass());
+    DispatchEvent(events::PROCESSES_ON_UPDATED, keys::kOnUpdated, args.Pass());
   }
 
   if (updated_memory) {
@@ -379,7 +381,8 @@ void ProcessesEventRouter::OnItemsChanged(int start, int length) {
 
     scoped_ptr<base::ListValue> args(new base::ListValue());
     args->Append(processes);
-    DispatchEvent(keys::kOnUpdatedWithMemory, args.Pass());
+    DispatchEvent(events::PROCESSES_ON_UPDATED_WITH_MEMORY,
+                  keys::kOnUpdatedWithMemory, args.Pass());
   }
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
@@ -408,7 +411,7 @@ void ProcessesEventRouter::OnItemsToBeRemoved(int start, int length) {
   // Third arg: The exit code for the process.
   args->Append(new base::FundamentalValue(0));
 
-  DispatchEvent(keys::kOnExited, args.Pass());
+  DispatchEvent(events::PROCESSES_ON_EXITED, keys::kOnExited, args.Pass());
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
 
@@ -437,7 +440,8 @@ void ProcessesEventRouter::ProcessHangEvent(content::RenderWidgetHost* widget) {
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(process);
 
-  DispatchEvent(keys::kOnUnresponsive, args.Pass());
+  DispatchEvent(events::PROCESSES_ON_UNRESPONSIVE, keys::kOnUnresponsive,
+                args.Pass());
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
 
@@ -457,17 +461,18 @@ void ProcessesEventRouter::ProcessClosedEvent(
   // Third arg: The exit code for the process.
   args->Append(new base::FundamentalValue(details->exit_code));
 
-  DispatchEvent(keys::kOnExited, args.Pass());
+  DispatchEvent(events::PROCESSES_ON_EXITED, keys::kOnExited, args.Pass());
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
 
 void ProcessesEventRouter::DispatchEvent(
+    events::HistogramValue histogram_value,
     const std::string& event_name,
     scoped_ptr<base::ListValue> event_args) {
   EventRouter* event_router = EventRouter::Get(browser_context_);
   if (event_router) {
-    scoped_ptr<extensions::Event> event(new extensions::Event(
-        event_name, event_args.Pass()));
+    scoped_ptr<Event> event(
+        new Event(histogram_value, event_name, event_args.Pass()));
     event_router->BroadcastEvent(event.Pass());
   }
 }
@@ -485,9 +490,9 @@ ProcessesAPI::ProcessesAPI(content::BrowserContext* context)
                                  processes_api_constants::kOnUpdatedWithMemory);
   ExtensionFunctionRegistry* registry =
       ExtensionFunctionRegistry::GetInstance();
-  registry->RegisterFunction<extensions::GetProcessIdForTabFunction>();
-  registry->RegisterFunction<extensions::TerminateFunction>();
-  registry->RegisterFunction<extensions::GetProcessInfoFunction>();
+  registry->RegisterFunction<GetProcessIdForTabFunction>();
+  registry->RegisterFunction<TerminateFunction>();
+  registry->RegisterFunction<GetProcessInfoFunction>();
 }
 
 ProcessesAPI::~ProcessesAPI() {
@@ -548,8 +553,9 @@ bool GetProcessIdForTabFunction::RunAsync() {
   if (ProcessesAPI::Get(GetProfile())
           ->processes_event_router()
           ->is_task_manager_listening()) {
-    base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-        &GetProcessIdForTabFunction::GetProcessIdForTab, this));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&GetProcessIdForTabFunction::GetProcessIdForTab, this));
   } else {
     TaskManager::GetInstance()->model()->RegisterOnDataReadyCallback(
         base::Bind(&GetProcessIdForTabFunction::GetProcessIdForTab, this));
@@ -576,9 +582,8 @@ void GetProcessIdForTabFunction::GetProcessIdForTab() {
                                     NULL,
                                     &contents,
                                     &tab_index)) {
-    error_ = ErrorUtils::FormatErrorMessage(
-        extensions::tabs_constants::kTabNotFoundError,
-        base::IntToString(tab_id_));
+    error_ = ErrorUtils::FormatErrorMessage(tabs_constants::kTabNotFoundError,
+                                            base::IntToString(tab_id_));
     SetResult(new base::FundamentalValue(-1));
     SendResponse(false);
   } else {
@@ -609,8 +614,8 @@ bool TerminateFunction::RunAsync() {
   if (ProcessesAPI::Get(GetProfile())
           ->processes_event_router()
           ->is_task_manager_listening()) {
-    base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-        &TerminateFunction::TerminateProcess, this));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&TerminateFunction::TerminateProcess, this));
   } else {
     TaskManager::GetInstance()->model()->RegisterOnDataReadyCallback(
         base::Bind(&TerminateFunction::TerminateProcess, this));
@@ -682,9 +687,7 @@ bool GetProcessInfoFunction::RunAsync() {
 
   EXTENSION_FUNCTION_VALIDATE(args_->Get(0, &processes));
   EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(1, &memory_));
-
-  EXTENSION_FUNCTION_VALIDATE(extensions::ReadOneOrMoreIntegers(
-      processes, &process_ids_));
+  EXTENSION_FUNCTION_VALIDATE(ReadOneOrMoreIntegers(processes, &process_ids_));
 
   // Add a reference, which is balanced in GatherProcessInfo to keep the object
   // around and allow for the callback to be invoked.
@@ -697,8 +700,9 @@ bool GetProcessInfoFunction::RunAsync() {
   if (ProcessesAPI::Get(GetProfile())
           ->processes_event_router()
           ->is_task_manager_listening()) {
-    base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-        &GetProcessInfoFunction::GatherProcessInfo, this));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&GetProcessInfoFunction::GatherProcessInfo, this));
   } else {
     TaskManager::GetInstance()->model()->RegisterOnDataReadyCallback(
         base::Bind(&GetProcessInfoFunction::GatherProcessInfo, this));

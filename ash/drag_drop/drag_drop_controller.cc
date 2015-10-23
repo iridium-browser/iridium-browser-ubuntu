@@ -26,7 +26,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/path.h"
-#include "ui/views/views_delegate.h"
 #include "ui/views/widget/native_widget_aura.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/public/drag_drop_delegate.h"
@@ -88,7 +87,6 @@ class DragDropTrackerDelegate : public aura::WindowDelegate {
 
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
-  ui::TextInputClient* GetFocusedTextInputClient() override { return nullptr; }
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }

@@ -13,7 +13,6 @@ var instance_ = null;
 
 /**
  * @constructor
- * @implements {remoting.WindowShape.ClientUI}
  * @implements {remoting.Identity.ConsentDialog}
  * @param {HTMLElement} rootElement The dialog DOM element.
  * @private
@@ -32,20 +31,6 @@ remoting.AuthDialog = function(rootElement) {
   this.onAuthButtonDeferred_ = null;
 
   this.authButton_.addEventListener('click', this.onClick_.bind(this), false);
-  remoting.windowShape.addCallback(this);
-};
-
-/**
- * @param {Array<{left: number, top: number, width: number, height: number}>}
- *     rects List of rectangles.
- */
-remoting.AuthDialog.prototype.addToRegion = function(rects) {
-  var rect =
-      /** @type {ClientRect} */(this.borderElement_.getBoundingClientRect());
-  rects.push({left: rect.left,
-              top: rect.top,
-              width: rect.width,
-              height: rect.height});
 };
 
 /** @private */
@@ -53,7 +38,6 @@ remoting.AuthDialog.prototype.onClick_ = function() {
   this.rootElement_.hidden = true;
   this.onAuthButtonDeferred_.resolve(null);
   this.onAuthButtonDeferred_ = null;
-  remoting.windowShape.updateClientWindowShape();
 };
 
 /**
@@ -65,8 +49,8 @@ remoting.AuthDialog.prototype.show = function() {
     return Promise.reject('Auth dialog is already showing.');
   }
   this.rootElement_.hidden = false;
-  base.debug.assert(this.onAuthButtonDeferred_ === null);
-  remoting.windowShape.updateClientWindowShape();
+  console.assert(this.onAuthButtonDeferred_ === null,
+                 'Duplicate show() invocation.');
   this.onAuthButtonDeferred_ = new base.Deferred();
   return this.onAuthButtonDeferred_.promise();
 };

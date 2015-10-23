@@ -4,16 +4,11 @@
 
 #include "chrome/browser/media/midi_permission_infobar_delegate.h"
 
-#include "chrome/browser/content_settings/permission_queue_controller.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
-#include "components/content_settings/core/common/permission_request_id.h"
 #include "components/infobars/core/infobar.h"
-#include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/web_contents.h"
+#include "components/url_formatter/url_formatter.h"
 #include "grit/theme_resources.h"
-#include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
 // static
@@ -24,20 +19,15 @@ infobars::InfoBar* MidiPermissionInfoBarDelegate::Create(
     const GURL& requesting_frame,
     const std::string& display_languages,
     ContentSettingsType type) {
-  const content::NavigationEntry* committed_entry =
-      infobar_service->web_contents()->GetController().GetLastCommittedEntry();
   return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
       scoped_ptr<ConfirmInfoBarDelegate>(new MidiPermissionInfoBarDelegate(
-          controller, id, requesting_frame,
-          committed_entry ? committed_entry->GetUniqueID() : 0,
-          display_languages, type))));
+          controller, id, requesting_frame, display_languages, type))));
 }
 
 MidiPermissionInfoBarDelegate::MidiPermissionInfoBarDelegate(
     PermissionQueueController* controller,
     const PermissionRequestID& id,
     const GURL& requesting_frame,
-    int contents_unique_id,
     const std::string& display_languages,
     ContentSettingsType type)
     : PermissionInfobarDelegate(controller, id, requesting_frame, type),
@@ -55,8 +45,9 @@ int MidiPermissionInfoBarDelegate::GetIconID() const {
 base::string16 MidiPermissionInfoBarDelegate::GetMessageText() const {
   return l10n_util::GetStringFUTF16(
       IDS_MIDI_SYSEX_INFOBAR_QUESTION,
-      net::FormatUrl(requesting_frame_.GetOrigin(), display_languages_,
-                     net::kFormatUrlOmitUsernamePassword |
-                     net::kFormatUrlOmitTrailingSlashOnBareHostname,
-                     net::UnescapeRule::SPACES, NULL, NULL, NULL));
+      url_formatter::FormatUrl(
+          requesting_frame_.GetOrigin(), display_languages_,
+          url_formatter::kFormatUrlOmitUsernamePassword |
+              url_formatter::kFormatUrlOmitTrailingSlashOnBareHostname,
+          net::UnescapeRule::SPACES, nullptr, nullptr, nullptr));
 }

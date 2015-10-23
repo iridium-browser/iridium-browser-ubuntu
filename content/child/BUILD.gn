@@ -16,6 +16,8 @@ source_set("child") {
                         ".",
                         "//content")
 
+  configs += [ "//build/config:precompiled_headers" ]
+
   public_deps = [
     "//third_party/mojo/src/mojo/edk/system",
   ]
@@ -24,11 +26,13 @@ source_set("child") {
     "//base",
     "//components/mime_util",
     "//components/tracing",
+    "//components/tracing:startup_tracing",
     "//components/webcrypto",
     "//content/common:mojo_bindings",
     "//mojo/application/public/interfaces",
     "//mojo/common",
     "//mojo/environment:chromium",
+    "//mojo/message_pump",
     "//skia",
     "//third_party/icu",
     "//ui/base",

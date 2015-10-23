@@ -136,7 +136,7 @@ bool IncrementAuthUserIndex(GURL* url) {
     return false;
   new_query_parts.push_back(
       base::StringPrintf("%s=%d", kAuthUserQueryKey, user_index + 1));
-  std::string new_query_string = JoinString(new_query_parts, '&');
+  std::string new_query_string = base::JoinString(new_query_parts, "&");
   url::Component new_query(0, new_query_string.size());
   url::Replacements<char> replacements;
   replacements.SetQuery(new_query_string.c_str(), new_query);
@@ -306,8 +306,8 @@ bool ExtensionDownloader::AddExtensionData(
   GURL update_url(extension_update_url);
   // Skip extensions with non-empty invalid update URLs.
   if (!update_url.is_empty() && !update_url.is_valid()) {
-    LOG(WARNING) << "Extension " << id << " has invalid update url "
-                 << update_url;
+    DLOG(WARNING) << "Extension " << id << " has invalid update url "
+                  << update_url;
     return false;
   }
 
@@ -318,7 +318,7 @@ bool ExtensionDownloader::AddExtensionData(
 
   // Skip extensions with empty IDs.
   if (id.empty()) {
-    LOG(WARNING) << "Found extension with empty ID";
+    DLOG(WARNING) << "Found extension with empty ID";
     return false;
   }
 
@@ -440,6 +440,7 @@ void ExtensionDownloader::StartUpdateCheck(
     NotifyExtensionsDownloadFailed(id_set,
                                    fetch_data->request_ids(),
                                    ExtensionDownloaderDelegate::DISABLED);
+    return;
   }
 
   RequestQueue<ManifestFetchData>::iterator i;
@@ -468,7 +469,7 @@ void ExtensionDownloader::CreateManifestFetcher() {
     std::vector<std::string> id_vector(
         manifests_queue_.active_request()->extension_ids().begin(),
         manifests_queue_.active_request()->extension_ids().end());
-    std::string id_list = JoinString(id_vector, ',');
+    std::string id_list = base::JoinString(id_vector, ",");
     VLOG(2) << "Fetching " << manifests_queue_.active_request()->full_url()
             << " for " << id_list;
   }
@@ -675,9 +676,9 @@ void ExtensionDownloader::DetermineUpdates(
             update->browser_min_version)) {
       // TODO(asargent) - We may want this to show up in the extensions UI
       // eventually. (http://crbug.com/12547).
-      LOG(WARNING) << "Updated version of extension " << id
-                   << " available, but requires chrome version "
-                   << update->browser_min_version;
+      DLOG(WARNING) << "Updated version of extension " << id
+                    << " available, but requires chrome version "
+                    << update->browser_min_version;
       continue;
     }
     VLOG(2) << "will try to update " << id;
@@ -690,8 +691,8 @@ void ExtensionDownloader::FetchUpdatedExtension(
     scoped_ptr<ExtensionFetch> fetch_data) {
   if (!fetch_data->url.is_valid()) {
     // TODO(asargent): This can sometimes be invalid. See crbug.com/130881.
-    LOG(ERROR) << "Invalid URL: '" << fetch_data->url.possibly_invalid_spec()
-               << "' for extension " << fetch_data->id;
+    DLOG(WARNING) << "Invalid URL: '" << fetch_data->url.possibly_invalid_spec()
+                  << "' for extension " << fetch_data->id;
     return;
   }
 
@@ -914,9 +915,8 @@ bool ExtensionDownloader::IterateFetchCredentialsAfterFailure(
         DCHECK(identity_provider_.get());
         OAuth2TokenService::ScopeSet webstore_scopes;
         webstore_scopes.insert(kWebstoreOAuth2Scope);
-        identity_provider_->GetTokenService()->InvalidateToken(
-            identity_provider_->GetActiveAccountId(),
-            webstore_scopes,
+        identity_provider_->GetTokenService()->InvalidateAccessToken(
+            identity_provider_->GetActiveAccountId(), webstore_scopes,
             access_token_);
         access_token_.clear();
         return true;

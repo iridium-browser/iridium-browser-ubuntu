@@ -11,7 +11,6 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_database_helper.h"
@@ -31,7 +30,6 @@
 #include "components/content_settings/core/browser/content_settings_details.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/rappor/rappor_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -49,26 +47,11 @@
 using content::BrowserThread;
 using content::NavigationController;
 using content::NavigationEntry;
-using content::RenderViewHost;
 using content::WebContents;
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(TabSpecificContentSettings);
 
 namespace {
-
-// Returns the object given a render frame's id.
-TabSpecificContentSettings* GetForFrame(int render_process_id,
-                                        int render_frame_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  content::RenderFrameHost* frame = content::RenderFrameHost::FromID(
-      render_process_id, render_frame_id);
-  WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
-  if (!web_contents)
-    return nullptr;
-
-  return TabSpecificContentSettings::FromWebContents(web_contents);
-}
 
 ContentSettingsUsagesState::CommittedDetails GetCommittedDetails(
     const content::LoadCommittedDetails& details) {
@@ -133,19 +116,16 @@ TabSpecificContentSettings::~TabSpecificContentSettings() {
       SiteDataObserver, observer_list_, ContentSettingsDestroyed());
 }
 
-// static
-TabSpecificContentSettings* TabSpecificContentSettings::Get(
-    int render_process_id, int render_view_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+TabSpecificContentSettings* TabSpecificContentSettings::GetForFrame(
+    int render_process_id,
+    int render_frame_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  RenderViewHost* view = RenderViewHost::FromID(render_process_id,
-                                                render_view_id);
-  if (!view)
-    return NULL;
-
-  WebContents* web_contents = WebContents::FromRenderViewHost(view);
+  content::RenderFrameHost* frame = content::RenderFrameHost::FromID(
+      render_process_id, render_frame_id);
+  WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
   if (!web_contents)
-    return NULL;
+    return nullptr;
 
   return TabSpecificContentSettings::FromWebContents(web_contents);
 }
@@ -243,8 +223,6 @@ void TabSpecificContentSettings::ServiceWorkerAccessed(int render_process_id,
                                                        const GURL& scope,
                                                        bool blocked_by_policy) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(scope.is_valid());
-
   TabSpecificContentSettings* settings =
       GetForFrame(render_process_id, render_frame_id);
   if (settings)
@@ -356,17 +334,9 @@ void TabSpecificContentSettings::OnContentBlockedWithDetail(
     if (type == CONTENT_SETTINGS_TYPE_MIXEDSCRIPT) {
       content_settings::RecordMixedScriptAction(
           content_settings::MIXED_SCRIPT_ACTION_DISPLAYED_SHIELD);
-
-      rappor::RapporService* rappor_service =
-          g_browser_process->rappor_service();
-      if (rappor_service) {
-        rappor_service->RecordSample(
-            "ContentSettings.MixedScript.DisplayedShield",
-            rappor::ETLD_PLUS_ONE_RAPPOR_TYPE,
-            net::registry_controlled_domains::GetDomainAndRegistry(
-                base::UTF16ToUTF8(details),
-                net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES));
-      }
+      content_settings::RecordMixedScriptActionWithRAPPOR(
+          content_settings::MIXED_SCRIPT_ACTION_DISPLAYED_SHIELD,
+          GURL(base::UTF16ToUTF8(details)));
     }
   }
 }

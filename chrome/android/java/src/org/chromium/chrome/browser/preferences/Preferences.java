@@ -31,6 +31,9 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.profiles.Profile;
 
 /**
  * The Chrome settings activity.
@@ -40,7 +43,7 @@ import org.chromium.chrome.R;
  * may freely modify its activity's action bar or title. This mimics the behavior of
  * android.preference.PreferenceActivity.
  */
-public abstract class Preferences extends AppCompatActivity implements
+public class Preferences extends AppCompatActivity implements
         OnPreferenceStartFragmentCallback {
 
     public static final String EXTRA_SHOW_FRAGMENT = "show_fragment";
@@ -59,56 +62,21 @@ public abstract class Preferences extends AppCompatActivity implements
 
     /**
      * Starts the browser process, if it's not already started.
-     */
-    protected abstract void startBrowserProcessSync() throws ProcessInitException;
-
-    /**
-     * Returns the name of the fragment to show if the intent doesn't request a specific fragment.
-     */
-    protected abstract String getTopLevelFragmentName();
-
-    /**
-     * Opens a URL in a new activity.
-     * @param titleResId The resource ID of the title to show above the web page.
-     * @param urlResId The resource ID of the URL to load.
      *
-     * TODO(newt): remove this method when EmbedContentViewActivity is upstreamed.
+     * TODO(newt): Delete this method once ChromeShellPreferences is deleted.
      */
-    public abstract void showUrl(int titleResId, int urlResId);
-
-    /**
-     * Launches the help page for Google translate.
-     */
-    public void showGoogleTranslateHelp() {}
-
-    /**
-     * Launches the help page for privacy settings.
-     */
-    public void showPrivacyPreferencesHelp() {}
-
-    /**
-     * Called when user changes the contextual search preference.
-     * @param newValue Whether contextual search is now enabled.
-     *
-     * TODO(newt): remove this method when contextual search is upstreamed.
-     */
-    public void logContextualSearchToggled(boolean newValue) {}
-
-    /**
-     * Returns whether contextual search is enabled.
-     *
-     * TODO(newt): remove this method when contextual search is upstreamed.
-     */
-    public boolean isContextualSearchEnabled() {
-        return false;
+    protected void startBrowserProcessSync() throws ProcessInitException {
+        ((ChromeApplication) getApplication()).startBrowserProcessesAndLoadLibrariesSync(true);
     }
 
     /**
-     * Notifies the precache launcher that the user has changed the network prediction preference.
+     * Returns the name of the fragment to show if the intent doesn't request a specific fragment.
      *
-     * TODO(newt): remove this method when precache logic is upstreamed.
+     * TODO(newt): Delete this method once ChromeShellPreferences is deleted.
      */
-    public void updatePrecachingEnabled() {}
+    protected String getTopLevelFragmentName() {
+        return MainPreferences.class.getName();
+    }
 
     @SuppressFBWarnings("DM_EXIT")
     @SuppressLint("InlinedApi")
@@ -227,6 +195,7 @@ public abstract class Preferences extends AppCompatActivity implements
     protected void onPause() {
         super.onPause();
         if (sResumedInstance == this) sResumedInstance = null;
+        ChromeApplication.flushPersistentData();
     }
 
     /**
@@ -261,6 +230,10 @@ public abstract class Preferences extends AppCompatActivity implements
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == android.R.id.home) {
             finish();
+            return true;
+        } else if (item.getItemId() == R.id.menu_id_help_general) {
+            HelpAndFeedback.getInstance(this).show(this, getString(R.string.help_context_settings),
+                    Profile.getLastUsedProfile(), null);
             return true;
         }
         return super.onOptionsItemSelected(item);

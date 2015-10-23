@@ -69,9 +69,14 @@ class GIN_EXPORT Arguments {
 
   template<typename T>
   void Return(T val) {
-    info_->GetReturnValue().Set(ConvertToV8(isolate_, val));
+    v8::Local<v8::Value> v8_value;
+    if (!TryConvertToV8(isolate_, val, &v8_value))
+      return;
+    info_->GetReturnValue().Set(v8_value);
   }
 
+  // Always check the return value whether the handle is empty before
+  // dereferencing the handle.
   v8::Local<v8::Value> PeekNext() const;
 
   void ThrowError() const;

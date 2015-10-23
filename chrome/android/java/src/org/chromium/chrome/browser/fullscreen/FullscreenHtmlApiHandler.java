@@ -20,9 +20,9 @@ import android.view.Window;
 import android.view.WindowManager;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
 import org.chromium.chrome.browser.preferences.website.FullscreenInfo;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.widget.TextBubble;
 import org.chromium.content.browser.ContentViewCore;
 
@@ -334,7 +334,7 @@ public class FullscreenHtmlApiHandler {
         contentView.setSystemUiVisibility(systemUiVisibility);
         mContentViewCoreInFullscreen = contentViewCore;
         mTabInFullscreen = tab;
-        FullscreenInfo fullscreenInfo = new FullscreenInfo(tab.getUrl(), null);
+        FullscreenInfo fullscreenInfo = new FullscreenInfo(tab.getUrl(), null, tab.isIncognito());
         ContentSetting fullscreenPermission = fullscreenInfo.getContentSetting();
         if (fullscreenPermission != ContentSetting.ALLOW) {
             mFullscreenInfoBarDelegate = FullscreenInfoBarDelegate.create(this, tab);

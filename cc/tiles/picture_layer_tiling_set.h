@@ -31,16 +31,16 @@ class CC_EXPORT PictureLayerTilingSet {
     LOWER_THAN_LOW_RES
   };
   struct TilingRange {
-    TilingRange(int start, int end) : start(start), end(end) {}
+    TilingRange(size_t start, size_t end) : start(start), end(end) {}
 
-    int start;
-    int end;
+    size_t start;
+    size_t end;
   };
 
   static scoped_ptr<PictureLayerTilingSet> Create(
       WhichTree tree,
       PictureLayerTilingClient* client,
-      size_t max_tiles_for_interest_area,
+      size_t tiling_interest_area_padding,
       float skewport_target_time_in_seconds,
       int skewport_extrapolation_limit_in_content);
 
@@ -51,9 +51,7 @@ class CC_EXPORT PictureLayerTilingSet {
   void CleanUpTilings(float min_acceptable_high_res_scale,
                       float max_acceptable_high_res_scale,
                       const std::vector<PictureLayerTiling*>& needed_tilings,
-                      bool should_have_low_res,
-                      PictureLayerTilingSet* twin_set,
-                      PictureLayerTilingSet* recycled_twin_set);
+                      PictureLayerTilingSet* twin_set);
   void RemoveNonIdealTilings();
 
   // This function is called on the active tree during activation.
@@ -153,14 +151,14 @@ class CC_EXPORT PictureLayerTilingSet {
     PictureLayerTiling* CurrentTiling() const;
 
    private:
-    int NextTiling() const;
+    size_t NextTiling() const;
 
     const PictureLayerTilingSet* set_;
     float contents_scale_;
     float ideal_contents_scale_;
     PictureLayerTiling::CoverageIterator tiling_iter_;
-    int current_tiling_;
-    int ideal_tiling_;
+    size_t current_tiling_;
+    size_t ideal_tiling_;
 
     Region current_region_;
     Region missing_region_;
@@ -176,7 +174,7 @@ class CC_EXPORT PictureLayerTilingSet {
   explicit PictureLayerTilingSet(
       WhichTree tree,
       PictureLayerTilingClient* client,
-      size_t max_tiles_for_interest_area,
+      size_t tiling_interest_area_padding,
       float skewport_target_time_in_seconds,
       int skewport_extrapolation_limit_in_content_pixels);
 
@@ -191,7 +189,7 @@ class CC_EXPORT PictureLayerTilingSet {
 
   ScopedPtrVector<PictureLayerTiling> tilings_;
 
-  const size_t max_tiles_for_interest_area_;
+  const size_t tiling_interest_area_padding_;
   const float skewport_target_time_in_seconds_;
   const int skewport_extrapolation_limit_in_content_pixels_;
   WhichTree tree_;

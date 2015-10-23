@@ -12,26 +12,8 @@
 #include "chrome/browser/ui/cocoa/passwords/manage_passwords_controller_test.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller_mock.h"
-#include "chrome/browser/ui/passwords/save_password_refusal_combobox_model.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
-
-@interface ManagePasswordsBubbleContentViewTestDelegate
-    : NSObject<ManagePasswordsBubbleContentViewDelegate> {
-  BOOL dismissed_;
-}
-@property(readonly) BOOL dismissed;
-@end
-
-@implementation ManagePasswordsBubbleContentViewTestDelegate
-
-@synthesize dismissed = dismissed_;
-
-- (void)viewShouldDismiss {
-  dismissed_ = YES;
-}
-
-@end
 
 namespace {
 
@@ -42,13 +24,10 @@ class ManagePasswordsBubbleConfirmationViewControllerTest
 
   void SetUp() override {
     ManagePasswordsControllerTest::SetUp();
-    delegate_.reset(
-        [[ManagePasswordsBubbleContentViewTestDelegate alloc] init]);
+    delegate_.reset([[ContentViewDelegateMock alloc] init]);
   }
 
-  ManagePasswordsBubbleContentViewTestDelegate* delegate() {
-    return delegate_.get();
-  }
+  ContentViewDelegateMock* delegate() { return delegate_.get(); }
 
   ManagePasswordsBubbleConfirmationViewController* controller() {
     if (!controller_) {
@@ -63,7 +42,7 @@ class ManagePasswordsBubbleConfirmationViewControllerTest
  private:
   base::scoped_nsobject<ManagePasswordsBubbleConfirmationViewController>
       controller_;
-  base::scoped_nsobject<ManagePasswordsBubbleContentViewTestDelegate> delegate_;
+  base::scoped_nsobject<ContentViewDelegateMock> delegate_;
 };
 
 TEST_F(ManagePasswordsBubbleConfirmationViewControllerTest,

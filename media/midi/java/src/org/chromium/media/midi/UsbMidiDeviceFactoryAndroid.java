@@ -15,8 +15,8 @@ import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
 import android.os.Parcelable;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -127,7 +127,7 @@ class UsbMidiDeviceFactoryAndroid {
         for (UsbDevice device : devices.values()) {
             requestDevicePermissionIfNecessary(context, device);
         }
-        return true;
+        return !mRequestedDevices.isEmpty();
     }
 
     /**

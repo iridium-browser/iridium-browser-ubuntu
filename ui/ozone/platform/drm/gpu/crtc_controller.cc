@@ -17,13 +17,19 @@ CrtcController::CrtcController(const scoped_refptr<DrmDevice>& drm,
                                uint32_t connector)
     : drm_(drm),
       crtc_(crtc),
-      connector_(connector),
-      is_disabled_(true),
-      time_of_last_flip_(0) {
-}
+      connector_(connector) {}
 
 CrtcController::~CrtcController() {
   if (!is_disabled_) {
+    const ScopedVector<HardwareDisplayPlane>& all_planes =
+        drm_->plane_manager()->planes();
+    for (auto* plane : all_planes) {
+      if (plane->owning_crtc() == crtc_) {
+        plane->set_owning_crtc(0);
+        plane->set_in_use(false);
+      }
+    }
+
     SetCursor(nullptr);
     drm_->DisableCrtc(crtc_);
     SignalPageFlipRequest();
@@ -69,13 +75,14 @@ bool CrtcController::Disable() {
 bool CrtcController::SchedulePageFlip(
     HardwareDisplayPlaneList* plane_list,
     const OverlayPlaneList& overlays,
+    bool test_only,
     scoped_refptr<PageFlipRequest> page_flip_request) {
-  DCHECK(!page_flip_request_.get());
+  DCHECK(!page_flip_request_.get() || test_only);
   DCHECK(!is_disabled_);
   const OverlayPlane* primary = OverlayPlane::GetPrimaryPlane(overlays);
   if (!primary) {
     LOG(ERROR) << "No primary plane to display on crtc " << crtc_;
-    page_flip_request->Signal();
+    page_flip_request->Signal(gfx::SwapResult::SWAP_ACK);
     return true;
   }
   DCHECK(primary->buffer.get());
@@ -85,19 +92,23 @@ bool CrtcController::SchedulePageFlip(
             << mode_.hdisplay << "x" << mode_.vdisplay << " got "
             << primary->buffer->GetSize().ToString() << " for"
             << " crtc=" << crtc_ << " connector=" << connector_;
-    page_flip_request->Signal();
+    page_flip_request->Signal(gfx::SwapResult::SWAP_ACK);
     return true;
   }
 
   if (!drm_->plane_manager()->AssignOverlayPlanes(plane_list, overlays, crtc_,
                                                   this)) {
     PLOG(ERROR) << "Failed to assign overlay planes for crtc " << crtc_;
-    page_flip_request->Signal();
+    page_flip_request->Signal(gfx::SwapResult::SWAP_FAILED);
     return false;
   }
 
-  pending_planes_ = overlays;
-  page_flip_request_ = page_flip_request;
+  if (test_only) {
+    page_flip_request->Signal(gfx::SwapResult::SWAP_ACK);
+  } else {
+    pending_planes_ = overlays;
+    page_flip_request_ = page_flip_request;
+  }
 
   return true;
 }
@@ -159,7 +170,7 @@ void CrtcController::SignalPageFlipRequest() {
     // locally to  avoid deleting the object we are making a call on.
     scoped_refptr<PageFlipRequest> last_request;
     last_request.swap(page_flip_request_);
-    last_request->Signal();
+    last_request->Signal(gfx::SwapResult::SWAP_ACK);
   }
 }
 

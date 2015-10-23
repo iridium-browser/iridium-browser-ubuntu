@@ -20,17 +20,18 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/metrics/chrome_stability_metrics_provider.h"
-#include "chrome/browser/metrics/drive_metrics_provider.h"
-#include "chrome/browser/metrics/omnibox_metrics_provider.h"
 #include "chrome/browser/metrics/time_ticks_experiment_win.h"
+#include "chrome/browser/process_resource_usage.h"
 #include "chrome/browser/ui/browser_otr_state.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/metrics/version_utils.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/render_messages.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
+#include "components/metrics/drive_metrics_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
@@ -38,11 +39,14 @@
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
 #include "components/metrics/url_constants.h"
+#include "components/omnibox/browser/omnibox_metrics_provider.h"
 #include "components/variations/variations_associated_data.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/common/service_registry.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/metrics/android_metrics_provider.h"
@@ -71,9 +75,9 @@
 #include "components/browser_watcher/watcher_metrics_provider_win.h"
 #endif
 
-#if !defined(OS_CHROMEOS) && !defined(OS_IOS)
+#if !defined(OS_CHROMEOS)
 #include "chrome/browser/metrics/signin_status_metrics_provider.h"
-#endif  // !defined(OS_CHROMEOS) && !defined(OS_IOS)
+#endif  // !defined(OS_CHROMEOS)
 
 namespace {
 
@@ -93,7 +97,9 @@ const int kStandardUploadIntervalSeconds = 30 * 60;  // Thirty minutes.
 // experimental group for enabled cellular uploads.
 bool IsCellularLogicEnabled() {
   if (variations::GetVariationParamValue("UMA_EnableCellularLogUpload",
-                                         "Enabled") != "true") {
+                                         "Enabled") != "true" ||
+      variations::GetVariationParamValue("UMA_EnableCellularLogUpload",
+                                         "Optimize") == "false") {
     return false;
   }
 
@@ -200,7 +206,7 @@ bool ChromeMetricsServiceClient::GetBrand(std::string* brand_code) {
 }
 
 metrics::SystemProfileProto::Channel ChromeMetricsServiceClient::GetChannel() {
-  return metrics::AsProtobufChannel(chrome::VersionInfo::GetChannel());
+  return metrics::AsProtobufChannel(chrome::GetChannel());
 }
 
 std::string ChromeMetricsServiceClient::GetVersionString() {
@@ -250,11 +256,34 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
       new MetricsMemoryDetails(callback, &memory_growth_tracker_));
   details->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
 
+  base::ScopedPtrMap<int, scoped_ptr<ProcessResourceUsage>> current_map;
+  host_resource_usage_map_.swap(current_map);
+
   // Collect WebCore cache information to put into a histogram.
   for (content::RenderProcessHost::iterator i(
           content::RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance()) {
-    i.GetCurrentValue()->Send(new ChromeViewMsg_GetCacheResourceStats());
+    content::RenderProcessHost* host = i.GetCurrentValue();
+    int host_id = host->GetID();
+    ProcessResourceUsage* resource_usage = nullptr;
+    auto iter = current_map.find(host_id);
+    if (iter != current_map.end()) {
+      resource_usage = iter->second;
+      host_resource_usage_map_.set(host_id, current_map.take_and_erase(iter));
+    } else {
+      content::ServiceRegistry* service_registry = host->GetServiceRegistry();
+      if (service_registry) {
+        ResourceUsageReporterPtr service;
+        service_registry->ConnectToRemoteService(mojo::GetProxy(&service));
+        resource_usage = new ProcessResourceUsage(service.Pass());
+        host_resource_usage_map_.set(host_id, make_scoped_ptr(resource_usage));
+      }
+    }
+    if (resource_usage) {
+      resource_usage->Refresh(
+          base::Bind(&ChromeMetricsServiceClient::OnWebCacheStatsRefresh,
+                     weak_ptr_factory_.GetWeakPtr(), host_id));
+    }
   }
 }
 
@@ -317,14 +346,21 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(new metrics::NetworkMetricsProvider(
           content::BrowserThread::GetBlockingPool())));
 
+  // Currently, we configure OmniboxMetricsProvider to not log events to UMA
+  // if there is a single incognito session visible. In the future, it may
+  // be worth revisiting this to still log events from non-incognito sessions.
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider));
+      scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider(
+          base::Bind(&chrome::IsOffTheRecordSessionActive))));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new ChromeStabilityMetricsProvider));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new metrics::GPUMetricsProvider));
 
-  drive_metrics_provider_ = new DriveMetricsProvider;
+  drive_metrics_provider_ = new metrics::DriveMetricsProvider(
+      content::BrowserThread::GetMessageLoopProxyForThread(
+          content::BrowserThread::FILE),
+      chrome::FILE_LOCAL_STATE);
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(drive_metrics_provider_));
 
@@ -350,10 +386,16 @@ void ChromeMetricsServiceClient::Initialize() {
 
   // Report exit funnels for canary and dev only.
   bool report_exit_funnels = false;
-  switch (chrome::VersionInfo::GetChannel()) {
-    case chrome::VersionInfo::CHANNEL_CANARY:
-    case chrome::VersionInfo::CHANNEL_DEV:
+  switch (chrome::GetChannel()) {
+    case version_info::Channel::CANARY:
+    case version_info::Channel::DEV:
       report_exit_funnels = true;
+      break;
+    case version_info::Channel::UNKNOWN:
+    case version_info::Channel::BETA:
+    case version_info::Channel::STABLE:
+      // report_exit_funnels was initialized to the right value above.
+      DCHECK(!report_exit_funnels);
       break;
   }
 
@@ -383,11 +425,11 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(signin_metrics_provider_cros));
 #endif  // defined(OS_CHROMEOS)
 
-#if !defined(OS_CHROMEOS) && !defined(OS_IOS)
+#if !defined(OS_CHROMEOS)
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(
           SigninStatusMetricsProvider::CreateInstance()));
-#endif  // !defined(OS_CHROMEOS) && !defined(OS_IOS)
+#endif  // !defined(OS_CHROMEOS)
 
   // Clear stability metrics if it is the first time cellular upload logic
   // should apply to avoid sudden bulk uploads. It needs to be done after all
@@ -425,6 +467,26 @@ void ChromeMetricsServiceClient::OnInitTaskGotGoogleUpdateData() {
   // call into |FinishedReceivingProfilerData()| when the task completes.
   metrics::TrackingSynchronizer::FetchProfilerDataAsynchronously(
       weak_ptr_factory_.GetWeakPtr());
+}
+
+void ChromeMetricsServiceClient::OnWebCacheStatsRefresh(int host_id) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  auto iter = host_resource_usage_map_.find(host_id);
+  if (iter != host_resource_usage_map_.end()) {
+    blink::WebCache::ResourceTypeStats stats =
+        iter->second->GetWebCoreCacheStats();
+    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.ImagesSizeKB",
+                           static_cast<int>(stats.images.size / 1024));
+    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.CSSStylesheetsSizeKB",
+                           static_cast<int>(stats.cssStyleSheets.size / 1024));
+    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.ScriptsSizeKB",
+                           static_cast<int>(stats.scripts.size / 1024));
+    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.XSLStylesheetsSizeKB",
+                           static_cast<int>(stats.xslStyleSheets.size / 1024));
+    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.FontsSizeKB",
+                           static_cast<int>(stats.fonts.size / 1024));
+  }
 }
 
 void ChromeMetricsServiceClient::ReceivedProfilerData(
@@ -536,8 +598,11 @@ void ChromeMetricsServiceClient::RegisterForNotifications() {
                  content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_HANG,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
-                 content::NotificationService::AllSources());
+
+  omnibox_url_opened_subscription_ =
+      OmniboxEventGlobalTracker::GetInstance()->RegisterCallback(
+          base::Bind(&ChromeMetricsServiceClient::OnURLOpenedFromOmnibox,
+                     base::Unretained(this)));
 }
 
 void ChromeMetricsServiceClient::Observe(
@@ -549,7 +614,6 @@ void ChromeMetricsServiceClient::Observe(
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_OPENED:
     case chrome::NOTIFICATION_BROWSER_CLOSED:
-    case chrome::NOTIFICATION_OMNIBOX_OPENED_URL:
     case chrome::NOTIFICATION_TAB_PARENTED:
     case chrome::NOTIFICATION_TAB_CLOSING:
     case content::NOTIFICATION_LOAD_STOP:
@@ -562,4 +626,8 @@ void ChromeMetricsServiceClient::Observe(
     default:
       NOTREACHED();
   }
+}
+
+void ChromeMetricsServiceClient::OnURLOpenedFromOmnibox(OmniboxLog* log) {
+  metrics_service_->OnApplicationNotIdle();
 }

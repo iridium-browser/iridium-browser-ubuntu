@@ -127,20 +127,6 @@ class VideoEngineOverride : public T {
   }
 };
 
-// Macroes that declare test functions for a given test class, before and after
-// Init().
-// To use, define a test function called FooBody and pass Foo to the macro.
-#define TEST_PRE_VIDEOENGINE_INIT(TestClass, func) \
-  TEST_F(TestClass, func##PreInit) { \
-    func##Body(); \
-  }
-#define TEST_POST_VIDEOENGINE_INIT(TestClass, func) \
-  TEST_F(TestClass, func##PostInit) { \
-    EXPECT_TRUE(engine_.Init(rtc::Thread::Current())); \
-    func##Body(); \
-    engine_.Terminate(); \
-  }
-
 template<class E>
 class VideoEngineTest : public testing::Test {
  protected:
@@ -496,7 +482,7 @@ class VideoMediaChannelTest : public testing::Test,
 
   virtual void SetUp() {
     cricket::Device device("test", "device");
-    EXPECT_TRUE(engine_.Init(rtc::Thread::Current()));
+    engine_.Init();
     channel_.reset(engine_.CreateChannel(cricket::VideoOptions(), NULL));
     EXPECT_TRUE(channel_.get() != NULL);
     ConnectVideoChannelError();
@@ -551,7 +537,6 @@ class VideoMediaChannelTest : public testing::Test,
   }
   virtual void TearDown() {
     channel_.reset();
-    engine_.Terminate();
   }
   void ConnectVideoChannelError() {
     channel_->SignalMediaError.connect(this,

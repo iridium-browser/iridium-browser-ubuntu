@@ -58,8 +58,8 @@ public:
     void loadFonts(ExecutionContext*);
     ScriptPromise promise() { return m_resolver->promise(); }
 
-    virtual void notifyLoaded(FontFace*) override;
-    virtual void notifyError(FontFace*) override;
+    void notifyLoaded(FontFace*) override;
+    void notifyError(FontFace*) override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -75,7 +75,7 @@ private:
     WillBeHeapVector<RefPtrWillBeMember<FontFace>> m_fontFaces;
     int m_numLoading;
     bool m_errorOccured;
-    RefPtrWillBeMember<ScriptPromiseResolver> m_resolver;
+    PersistentWillBeMember<ScriptPromiseResolver> m_resolver;
 };
 
 void LoadFontPromiseResolver::loadFonts(ExecutionContext* context)
@@ -114,11 +114,11 @@ DEFINE_TRACE(LoadFontPromiseResolver)
     LoadFontCallback::trace(visitor);
 }
 
-class FontsReadyPromiseResolver final : public NoBaseWillBeGarbageCollected<FontsReadyPromiseResolver> {
+class FontsReadyPromiseResolver final : public GarbageCollected<FontsReadyPromiseResolver> {
 public:
-    static PassOwnPtrWillBeRawPtr<FontsReadyPromiseResolver> create(ScriptState* scriptState)
+    static FontsReadyPromiseResolver* create(ScriptState* scriptState)
     {
-        return adoptPtrWillBeNoop(new FontsReadyPromiseResolver(scriptState));
+        return new FontsReadyPromiseResolver(scriptState);
     }
 
     void resolve(PassRefPtrWillBeRawPtr<FontFaceSet> fontFaceSet)
@@ -139,12 +139,13 @@ private:
     {
     }
 
-    RefPtrWillBeMember<ScriptPromiseResolver> m_resolver;
+    Member<ScriptPromiseResolver> m_resolver;
 };
 
 FontFaceSet::FontFaceSet(Document& document)
     : ActiveDOMObject(&document)
     , m_shouldFireLoadingEvent(false)
+    , m_isLoading(false)
     , m_asyncRunner(this, &FontFaceSet::handlePendingEventsAndPromises)
 {
     suspendIfNeeded();
@@ -185,7 +186,7 @@ AtomicString FontFaceSet::status() const
 {
     DEFINE_STATIC_LOCAL(AtomicString, loading, ("loading", AtomicString::ConstructFromLiteral));
     DEFINE_STATIC_LOCAL(AtomicString, loaded, ("loaded", AtomicString::ConstructFromLiteral));
-    return (!m_loadingFonts.isEmpty() || hasLoadedFonts()) ? loading : loaded;
+    return m_isLoading ? loading : loaded;
 }
 
 void FontFaceSet::handlePendingEventsAndPromisesSoon()
@@ -198,7 +199,7 @@ void FontFaceSet::didLayout()
 {
     if (document()->frame()->isMainFrame() && m_loadingFonts.isEmpty())
         m_histogram.record();
-    if (!m_loadingFonts.isEmpty() || (!hasLoadedFonts() && m_readyResolvers.isEmpty()))
+    if (!m_loadingFonts.isEmpty() || (!m_isLoading && m_readyResolvers.isEmpty()))
         return;
     handlePendingEventsAndPromisesSoon();
 }
@@ -254,7 +255,8 @@ void FontFaceSet::loadError(FontFace* fontFace)
 
 void FontFaceSet::addToLoadingFonts(PassRefPtrWillBeRawPtr<FontFace> fontFace)
 {
-    if (m_loadingFonts.isEmpty() && !hasLoadedFonts()) {
+    if (!m_isLoading) {
+        m_isLoading = true;
         m_shouldFireLoadingEvent = true;
         handlePendingEventsAndPromisesSoon();
     }
@@ -272,9 +274,9 @@ ScriptPromise FontFaceSet::ready(ScriptState* scriptState)
 {
     if (!inActiveDocumentContext())
         return ScriptPromise();
-    OwnPtrWillBeRawPtr<FontsReadyPromiseResolver> resolver = FontsReadyPromiseResolver::create(scriptState);
+    FontsReadyPromiseResolver* resolver = FontsReadyPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
-    m_readyResolvers.append(resolver.release());
+    m_readyResolvers.append(resolver);
     handlePendingEventsAndPromisesSoon();
     return promise;
 }
@@ -404,7 +406,7 @@ void FontFaceSet::fireDoneEventIfPossible()
 {
     if (m_shouldFireLoadingEvent)
         return;
-    if (!m_loadingFonts.isEmpty() || (!hasLoadedFonts() && m_readyResolvers.isEmpty()))
+    if (!m_loadingFonts.isEmpty() || (!m_isLoading && m_readyResolvers.isEmpty()))
         return;
 
     // If the layout was invalidated in between when we thought layout
@@ -414,7 +416,7 @@ void FontFaceSet::fireDoneEventIfPossible()
     if (!d->view() || d->view()->needsLayout())
         return;
 
-    if (hasLoadedFonts()) {
+    if (m_isLoading) {
         RefPtrWillBeRawPtr<FontFaceSetLoadEvent> doneEvent = nullptr;
         RefPtrWillBeRawPtr<FontFaceSetLoadEvent> errorEvent = nullptr;
         doneEvent = FontFaceSetLoadEvent::createForFontFaces(EventTypeNames::loadingdone, m_loadedFonts);
@@ -423,13 +425,14 @@ void FontFaceSet::fireDoneEventIfPossible()
             errorEvent = FontFaceSetLoadEvent::createForFontFaces(EventTypeNames::loadingerror, m_failedFonts);
             m_failedFonts.clear();
         }
+        m_isLoading = false;
         dispatchEvent(doneEvent);
         if (errorEvent)
             dispatchEvent(errorEvent);
     }
 
     if (!m_readyResolvers.isEmpty()) {
-        WillBeHeapVector<OwnPtrWillBeMember<FontsReadyPromiseResolver>> resolvers;
+        HeapVector<Member<FontsReadyPromiseResolver>> resolvers;
         m_readyResolvers.swap(resolvers);
         for (size_t index = 0; index < resolvers.size(); ++index)
             resolvers[index]->resolve(this);
@@ -443,7 +446,7 @@ ScriptPromise FontFaceSet::load(ScriptState* scriptState, const String& fontStri
 
     Font font;
     if (!resolveFontStyle(fontString, font)) {
-        RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+        ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
         ScriptPromise promise = resolver->promise();
         resolver->reject(DOMException::create(SyntaxError, "Could not resolve '" + fontString + "' as a font."));
         return promise;
@@ -584,7 +587,7 @@ DEFINE_TRACE(FontFaceSet)
     visitor->trace(m_loadedFonts);
     visitor->trace(m_failedFonts);
     visitor->trace(m_nonCSSConnectedFaces);
-    WillBeHeapSupplement<Document>::trace(visitor);
+    HeapSupplement<Document>::trace(visitor);
 #endif
     EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);

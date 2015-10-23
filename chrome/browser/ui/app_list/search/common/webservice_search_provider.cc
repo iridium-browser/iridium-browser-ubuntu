@@ -47,9 +47,8 @@ void WebserviceSearchProvider::StartThrottledQuery(
 bool WebserviceSearchProvider::IsValidQuery(const base::string16& query) {
   // If |query| contains sensitive data, bail out and do not create the place
   // holder "search-web-store" result.
-  if (IsSensitiveInput(query) ||
-      (query.size() < kMinimumQueryLength) ||
-      !chrome::IsSuggestPrefEnabled(profile_)) {
+  if (IsSensitiveInput(query) || (query.size() < kMinimumQueryLength) ||
+      !search::IsSuggestPrefEnabled(profile_)) {
     return false;
   }
 
@@ -71,7 +70,7 @@ bool WebserviceSearchProvider::IsSensitiveInput(const base::string16& query) {
   // file, we shouldn't send it. Sending such things is a waste of time and a
   // disclosure of potentially private, local data. If the scheme is OK, we
   // still need to check other cases below.
-  if (LowerCaseEqualsASCII(query_as_url.scheme(), url::kFileScheme))
+  if (base::LowerCaseEqualsASCII(query_as_url.scheme(), url::kFileScheme))
     return true;
 
   // Don't send URLs with usernames, queries or refs. Some of these are
@@ -90,7 +89,7 @@ bool WebserviceSearchProvider::IsSensitiveInput(const base::string16& query) {
   // Don't send anything for https except the hostname. Hostnames are OK
   // because they are visible when the TCP connection is established, but the
   // specific path may reveal private information.
-  if (LowerCaseEqualsASCII(query_as_url.scheme(), url::kHttpsScheme) &&
+  if (base::LowerCaseEqualsASCII(query_as_url.scheme(), url::kHttpsScheme) &&
       !query_as_url.path().empty() && query_as_url.path() != "/") {
     return true;
   }

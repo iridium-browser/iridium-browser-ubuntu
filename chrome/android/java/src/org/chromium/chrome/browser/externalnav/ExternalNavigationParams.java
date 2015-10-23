@@ -4,9 +4,8 @@
 
 package org.chromium.chrome.browser.externalnav;
 
-import org.chromium.chrome.browser.Tab;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabRedirectHandler;
-import org.chromium.chrome.browser.tab.TransitionPageHelper;
 
 /**
  * A container object for passing navigation parameters to {@link ExternalNavigationHandler}.
@@ -33,9 +32,6 @@ public class ExternalNavigationParams {
     /** A redirect handler. */
     private final TabRedirectHandler mRedirectHandler;
 
-    /** Transition page helper, used for apps with a transition animation. */
-    private final TransitionPageHelper mTransitionPageHelper;
-
     private final Tab mTab;
 
     /** Whether the intent should force a new tab to open. */
@@ -47,6 +43,9 @@ public class ExternalNavigationParams {
     /** Whether this navigation happens in main frame. */
     private final boolean mIsMainFrame;
 
+    /** Whether this navigation is launched by user gesture. */
+    private final boolean mHasUserGesture;
+
     /**
      * Whether the current tab should be closed when an URL load was overridden and an
      * intent launched.
@@ -55,8 +54,8 @@ public class ExternalNavigationParams {
 
     private ExternalNavigationParams(String url, boolean isIncognito, String referrerUrl,
             int pageTransition, boolean isRedirect, boolean appMustBeInForeground,
-            TabRedirectHandler redirectHandler, TransitionPageHelper transitionPageHelper, Tab tab,
-            boolean openInNewTab, boolean isBackgroundTabNavigation, boolean isMainFrame,
+            TabRedirectHandler redirectHandler, Tab tab, boolean openInNewTab,
+            boolean isBackgroundTabNavigation, boolean isMainFrame, boolean hasUserGesture,
             boolean shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent) {
         mUrl = url;
         mIsIncognito = isIncognito;
@@ -65,11 +64,11 @@ public class ExternalNavigationParams {
         mIsRedirect = isRedirect;
         mApplicationMustBeInForeground = appMustBeInForeground;
         mRedirectHandler = redirectHandler;
-        mTransitionPageHelper = transitionPageHelper;
         mTab = tab;
         mOpenInNewTab = openInNewTab;
         mIsBackgroundTabNavigation = isBackgroundTabNavigation;
         mIsMainFrame = isMainFrame;
+        mHasUserGesture = hasUserGesture;
         mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent =
                 shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent;
     }
@@ -109,11 +108,6 @@ public class ExternalNavigationParams {
         return mRedirectHandler;
     }
 
-    /** @return The page transition helper. */
-    public TransitionPageHelper getTransitionPageHelper() {
-        return mTransitionPageHelper;
-    }
-
     /** @return The current tab. */
     public Tab getTab() {
         return mTab;
@@ -135,6 +129,11 @@ public class ExternalNavigationParams {
     /** @return Whether this navigation happens in main frame. */
     public boolean isMainFrame() {
         return mIsMainFrame;
+    }
+
+    /** @return Whether this navigation is launched by user gesture. */
+    public boolean hasUserGesture() {
+        return mHasUserGesture;
     }
 
     /**
@@ -168,9 +167,6 @@ public class ExternalNavigationParams {
         /** A redirect handler. */
         private TabRedirectHandler mRedirectHandler;
 
-        /** Transition page helper, used for apps with a transition animation. */
-        private TransitionPageHelper mTransitionPageHelper;
-
         private Tab mTab;
 
         /** Whether the intent should force a new tab to open. */
@@ -181,6 +177,9 @@ public class ExternalNavigationParams {
 
         /** Whether this navigation happens in main frame. */
         private boolean mIsMainFrame;
+
+        /** Whether this navigation is launched by user gesture. */
+        private boolean mHasUserGesture;
 
         /**
          * Whether the current tab should be closed when an URL load was overridden and an
@@ -214,12 +213,6 @@ public class ExternalNavigationParams {
             return this;
         }
 
-        /** Sets a {@link TransitionPageHelper}. */
-        public Builder setTransitionPageHelper(TransitionPageHelper helper) {
-            mTransitionPageHelper = helper;
-            return this;
-        }
-
         /** Sets the current tab. */
         public Builder setTab(Tab tab) {
             mTab = tab;
@@ -244,6 +237,12 @@ public class ExternalNavigationParams {
             return this;
         }
 
+        /** Sets whether this navigation happens in main frame. */
+        public Builder setHasUserGesture(boolean v) {
+            mHasUserGesture = v;
+            return this;
+        }
+
         /** Sets whether the current tab should be closed when an URL load was overridden and an
          * intent launched.
          */
@@ -256,8 +255,8 @@ public class ExternalNavigationParams {
         public ExternalNavigationParams build() {
             return new ExternalNavigationParams(mUrl, mIsIncognito, mReferrerUrl, mPageTransition,
                     mIsRedirect, mApplicationMustBeInForeground, mRedirectHandler,
-                    mTransitionPageHelper, mTab, mOpenInNewTab, mIsBackgroundTabNavigation,
-                    mIsMainFrame, mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent);
+                    mTab, mOpenInNewTab, mIsBackgroundTabNavigation, mIsMainFrame,
+                    mHasUserGesture, mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent);
         }
     }
 }

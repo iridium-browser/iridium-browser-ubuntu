@@ -964,6 +964,12 @@ class TempDirTestCase(TestCase):
       self._tempdir_obj = None
       self.tempdir = None
 
+  def assertFileContents(self, file_path, content):
+    """Assert that the file contains the given content."""
+    self.assertExists(file_path)
+    read_content = osutils.ReadFile(file_path)
+    self.assertEqual(read_content, content)
+
 
 class LocalSqlServerTestCase(TempDirTestCase):
   """A TestCase that launches a local mysqld server in the background.
@@ -1622,13 +1628,15 @@ class WorkspaceTestCase(MockTempDirTestCase):
 
     return brick_lib.Brick(brick_path, initial_config=config)
 
-  def CreateBlueprint(self, name='theblueprintfoo.json', bsp=None, bricks=None):
+  def CreateBlueprint(self, name='theblueprintfoo.json', bsp=None, bricks=None,
+                      buildTargetId=None):
     """Creates a new blueprint.
 
     Args:
       name: Blueprint name/path relative to the workspace root.
       bsp: Path to BSP or None.
       bricks: List of paths to bricks or None.
+      buildTargetId: The BuildTargetID to populate the APP_ID with or None.
 
     Returns:
       The created Blueprint object.
@@ -1640,6 +1648,8 @@ class WorkspaceTestCase(MockTempDirTestCase):
       config[blueprint_lib.BRICKS_FIELD] = bricks
     if bsp:
       config[blueprint_lib.BSP_FIELD] = bsp
+    if buildTargetId:
+      config[blueprint_lib.APP_ID_FIELD] = buildTargetId
 
     return blueprint_lib.Blueprint(blueprint_path, initial_config=config)
 

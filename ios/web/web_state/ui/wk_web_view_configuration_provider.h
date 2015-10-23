@@ -32,22 +32,19 @@ class WKWebViewConfigurationProvider : public base::SupportsUserData::Data {
   // Callers must not retain the returned object.
   WKWebViewConfiguration* GetWebViewConfiguration();
 
-  // Returns true if this object holds a valid config. false if
-  // |GetWebViewConfiguration| was never called or configuration was purged by
-  // calling |Purge|.
-  bool HasWebViewConfiguration() const;
-
   // Purges config object if it exists. When this method is called config and
   // config's process pool must not be retained by anyone (this will be enforced
-  // in debug builds). |HasWebViewConfiguration| will return false after config
-  // is purged.
+  // in debug builds).
   void Purge();
 
  private:
-  WKWebViewConfigurationProvider();
+  explicit WKWebViewConfigurationProvider(bool is_off_the_record);
+  WKWebViewConfigurationProvider() = delete;
   ~WKWebViewConfigurationProvider() override;
 
   base::scoped_nsobject<WKWebViewConfiguration> configuration_;
+  // Result of |web::BrowserState::IsOffTheRecord| call.
+  bool is_off_the_record_;
 
   DISALLOW_COPY_AND_ASSIGN(WKWebViewConfigurationProvider);
 };

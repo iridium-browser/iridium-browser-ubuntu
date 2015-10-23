@@ -10,9 +10,12 @@
 
 #include "base/files/file_path.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/win/scoped_bstr.h"
+#include "base/win/scoped_comptr.h"
 #include "content/browser/accessibility/accessibility_tree_formatter_utils_win.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/accessibility/browser_accessibility_win.h"
@@ -29,6 +32,7 @@ const char* ALL_ATTRIBUTES[] = {
     "states",
     "attributes",
     "role_name",
+    "ia2_hypertext",
     "currentValue",
     "minimumValue",
     "maximumValue",
@@ -53,6 +57,67 @@ const char* ALL_ATTRIBUTES[] = {
     "selection_end"
 };
 
+namespace {
+
+base::string16 GetIA2Hypertext(BrowserAccessibilityWin& ax_object) {
+  base::win::ScopedBstr text_bstr;
+  HRESULT hr;
+
+  hr = ax_object.get_text(0, IA2_TEXT_OFFSET_LENGTH, text_bstr.Receive());
+  if (FAILED(hr))
+    return base::string16();
+
+  base::string16 ia2_hypertext(text_bstr, text_bstr.Length());
+  // IA2 Spec calls embedded objects hyperlinks. We stick to embeds for clarity.
+  LONG number_of_embeds;
+  hr = ax_object.get_nHyperlinks(&number_of_embeds);
+  if (FAILED(hr) || number_of_embeds == 0)
+    return ia2_hypertext;
+
+  // Replace all embedded characters with the child indices of the accessibility
+  // objects they refer to.
+  base::string16 embedded_character(1,
+      BrowserAccessibilityWin::kEmbeddedCharacter);
+  size_t character_index = 0;
+  size_t hypertext_index = 0;
+  while (hypertext_index < ia2_hypertext.length()) {
+    if (ia2_hypertext[hypertext_index] !=
+        BrowserAccessibilityWin::kEmbeddedCharacter) {
+      ++character_index;
+      ++hypertext_index;
+      continue;
+    }
+
+    LONG index_of_embed;
+    hr = ax_object.get_hyperlinkIndex(character_index, &index_of_embed);
+    // S_FALSE will be returned if no embedded object is found at the given
+    // embedded character offset. Exclude child index from such cases.
+    LONG child_index = -1;
+    if (hr == S_OK) {
+      DCHECK_GE(index_of_embed, 0);
+      base::win::ScopedComPtr<IAccessibleHyperlink> embedded_object;
+      DCHECK(SUCCEEDED(ax_object.get_hyperlink(
+             index_of_embed, embedded_object.Receive())));
+      base::win::ScopedComPtr<IAccessible2> ax_embed;
+      DCHECK(SUCCEEDED(embedded_object.QueryInterface(ax_embed.Receive())));
+      DCHECK(SUCCEEDED(ax_embed->get_indexInParent(&child_index)));
+    }
+
+    base::string16 child_index_str = base::StringPrintf(L"<obj%d>",
+        child_index);
+    base::ReplaceFirstSubstringAfterOffset(&ia2_hypertext, hypertext_index,
+        embedded_character, child_index_str);
+    ++character_index;
+    hypertext_index += child_index_str.length();
+    --number_of_embeds;
+  }
+  DCHECK_EQ(number_of_embeds, 0);
+
+  return ia2_hypertext;
+}
+
+} // Namespace
+
 void AccessibilityTreeFormatter::Initialize() {
   ui::win::CreateATLModuleIfNeeded();
 }
@@ -60,25 +125,27 @@ void AccessibilityTreeFormatter::Initialize() {
 void AccessibilityTreeFormatter::AddProperties(
     const BrowserAccessibility& node, base::DictionaryValue* dict) {
   dict->SetInteger("id", node.GetId());
-  BrowserAccessibilityWin* acc_obj =
+  BrowserAccessibilityWin* ax_object =
       const_cast<BrowserAccessibility*>(&node)->ToBrowserAccessibilityWin();
+  DCHECK(ax_object);
 
   VARIANT variant_self;
   variant_self.vt = VT_I4;
   variant_self.lVal = CHILDID_SELF;
 
-  dict->SetString("role", IAccessible2RoleToString(acc_obj->ia2_role()));
+  dict->SetString("role", IAccessible2RoleToString(ax_object->ia2_role()));
 
-  CComBSTR msaa_variant;
-  HRESULT hresult = acc_obj->get_accName(variant_self, &msaa_variant);
-  if (hresult == S_OK)
-    dict->SetString("name", msaa_variant.m_str);
-  hresult = acc_obj->get_accValue(variant_self, &msaa_variant);
-  if (hresult == S_OK)
-    dict->SetString("value", msaa_variant.m_str);
+  base::win::ScopedBstr temp_bstr;
+  if (SUCCEEDED(ax_object->get_accName(variant_self, temp_bstr.Receive())))
+    dict->SetString("name", base::string16(temp_bstr, temp_bstr.Length()));
+  temp_bstr.Reset();
+
+  if (SUCCEEDED(ax_object->get_accValue(variant_self, temp_bstr.Receive())))
+    dict->SetString("value", base::string16(temp_bstr, temp_bstr.Length()));
+  temp_bstr.Reset();
 
   std::vector<base::string16> state_strings;
-  int32 ia_state = acc_obj->ia_state();
+  int32 ia_state = ax_object->ia_state();
 
   // Avoid flakiness: these states depend on whether the window is focused
   // and the position of the mouse cursor.
@@ -86,62 +153,66 @@ void AccessibilityTreeFormatter::AddProperties(
   ia_state &= ~STATE_SYSTEM_OFFSCREEN;
 
   IAccessibleStateToStringVector(ia_state, &state_strings);
-  IAccessible2StateToStringVector(acc_obj->ia2_state(), &state_strings);
+  IAccessible2StateToStringVector(ax_object->ia2_state(), &state_strings);
   base::ListValue* states = new base::ListValue;
-  for (std::vector<base::string16>::const_iterator it = state_strings.begin();
-       it != state_strings.end();
-       ++it) {
-    states->AppendString(base::UTF16ToUTF8(*it));
-  }
+  for (const auto& state_string : state_strings)
+    states->AppendString(base::UTF16ToUTF8(state_string));
   dict->Set("states", states);
 
-  const std::vector<base::string16>& ia2_attributes = acc_obj->ia2_attributes();
+  const std::vector<base::string16>& ia2_attributes =
+      ax_object->ia2_attributes();
   base::ListValue* attributes = new base::ListValue;
-  for (std::vector<base::string16>::const_iterator it = ia2_attributes.begin();
-       it != ia2_attributes.end();
-       ++it) {
-    attributes->AppendString(base::UTF16ToUTF8(*it));
-  }
+  for (const auto& ia2_attribute : ia2_attributes)
+    attributes->AppendString(base::UTF16ToUTF8(ia2_attribute));
   dict->Set("attributes", attributes);
 
-  dict->SetString("role_name", acc_obj->role_name());
+  dict->SetString("role_name", ax_object->role_name());
+  dict->SetString("ia2_hypertext", GetIA2Hypertext(*ax_object));
 
   VARIANT currentValue;
-  if (acc_obj->get_currentValue(&currentValue) == S_OK)
+  if (ax_object->get_currentValue(&currentValue) == S_OK)
     dict->SetDouble("currentValue", V_R8(&currentValue));
 
   VARIANT minimumValue;
-  if (acc_obj->get_minimumValue(&minimumValue) == S_OK)
+  if (ax_object->get_minimumValue(&minimumValue) == S_OK)
     dict->SetDouble("minimumValue", V_R8(&minimumValue));
 
   VARIANT maximumValue;
-  if (acc_obj->get_maximumValue(&maximumValue) == S_OK)
+  if (ax_object->get_maximumValue(&maximumValue) == S_OK)
     dict->SetDouble("maximumValue", V_R8(&maximumValue));
 
-  hresult = acc_obj->get_accDescription(variant_self, &msaa_variant);
-  if (hresult == S_OK)
-    dict->SetString("description", msaa_variant.m_str);
+  if (SUCCEEDED(ax_object->get_accDescription(variant_self,
+      temp_bstr.Receive()))) {
+    dict->SetString("description", base::string16(temp_bstr,
+        temp_bstr.Length()));
+  }
+  temp_bstr.Reset();
 
-  hresult = acc_obj->get_accDefaultAction(variant_self, &msaa_variant);
-  if (hresult == S_OK)
-    dict->SetString("default_action", msaa_variant.m_str);
+  if (SUCCEEDED(ax_object->get_accDefaultAction(variant_self,
+      temp_bstr.Receive()))) {
+    dict->SetString("default_action", base::string16(temp_bstr,
+        temp_bstr.Length()));
+  }
+  temp_bstr.Reset();
 
-  hresult = acc_obj->get_accKeyboardShortcut(variant_self, &msaa_variant);
-  if (hresult == S_OK)
-    dict->SetString("keyboard_shortcut", msaa_variant.m_str);
+  if (SUCCEEDED(
+      ax_object->get_accKeyboardShortcut(variant_self, temp_bstr.Receive()))) {
+    dict->SetString("keyboard_shortcut", base::string16(temp_bstr,
+        temp_bstr.Length()));
+  }
+  temp_bstr.Reset();
 
-  hresult = acc_obj->get_accHelp(variant_self, &msaa_variant);
-  if (S_OK == hresult)
-    dict->SetString("help", msaa_variant.m_str);
+  if (SUCCEEDED(ax_object->get_accHelp(variant_self, temp_bstr.Receive())))
+    dict->SetString("help", base::string16(temp_bstr, temp_bstr.Length()));
+  temp_bstr.Reset();
 
   BrowserAccessibility* root = node.manager()->GetRoot();
   LONG left, top, width, height;
   LONG root_left, root_top, root_width, root_height;
-  if (acc_obj->accLocation(&left, &top, &width, &height, variant_self)
-      != S_FALSE
-      && root->ToBrowserAccessibilityWin()->accLocation(
-          &root_left, &root_top, &root_width, &root_height, variant_self)
-      != S_FALSE) {
+  if (SUCCEEDED(ax_object->accLocation(
+          &left, &top, &width, &height, variant_self)) &&
+      SUCCEEDED(root->ToBrowserAccessibilityWin()->accLocation(
+          &root_left, &root_top, &root_width, &root_height, variant_self))) {
     base::DictionaryValue* location = new base::DictionaryValue;
     location->SetInteger("x", left - root_left);
     location->SetInteger("y", top - root_top);
@@ -154,45 +225,52 @@ void AccessibilityTreeFormatter::AddProperties(
   }
 
   LONG index_in_parent;
-  if (acc_obj->get_indexInParent(&index_in_parent) == S_OK)
+  if (SUCCEEDED(ax_object->get_indexInParent(&index_in_parent)))
     dict->SetInteger("index_in_parent", index_in_parent);
 
   LONG n_relations;
-  if (acc_obj->get_nRelations(&n_relations) == S_OK)
+  if (SUCCEEDED(ax_object->get_nRelations(&n_relations)))
     dict->SetInteger("n_relations", n_relations);
 
   LONG group_level, similar_items_in_group, position_in_group;
-  if (acc_obj->get_groupPosition(&group_level,
+  if (SUCCEEDED(ax_object->get_groupPosition(&group_level,
                                  &similar_items_in_group,
-                                 &position_in_group) == S_OK) {
+                                 &position_in_group))) {
     dict->SetInteger("group_level", group_level);
     dict->SetInteger("similar_items_in_group", similar_items_in_group);
     dict->SetInteger("position_in_group", position_in_group);
   }
+
   LONG table_rows;
-  if (acc_obj->get_nRows(&table_rows) == S_OK)
+  if (SUCCEEDED(ax_object->get_nRows(&table_rows)))
     dict->SetInteger("table_rows", table_rows);
+
   LONG table_columns;
-  if (acc_obj->get_nRows(&table_columns) == S_OK)
+  if (SUCCEEDED(ax_object->get_nRows(&table_columns)))
     dict->SetInteger("table_columns", table_columns);
+
   LONG row_index;
-  if (acc_obj->get_rowIndex(&row_index) == S_OK)
+  if (SUCCEEDED(ax_object->get_rowIndex(&row_index)))
     dict->SetInteger("row_index", row_index);
+
   LONG column_index;
-  if (acc_obj->get_columnIndex(&column_index) == S_OK)
+  if (SUCCEEDED(ax_object->get_columnIndex(&column_index)))
     dict->SetInteger("column_index", column_index);
+
   LONG n_characters;
-  if (acc_obj->get_nCharacters(&n_characters) == S_OK)
+  if (SUCCEEDED(ax_object->get_nCharacters(&n_characters)))
     dict->SetInteger("n_characters", n_characters);
+
   LONG caret_offset;
-  if (acc_obj->get_caretOffset(&caret_offset) == S_OK)
+  if (ax_object->get_caretOffset(&caret_offset) == S_OK)
     dict->SetInteger("caret_offset", caret_offset);
+
   LONG n_selections;
-  if (acc_obj->get_nSelections(&n_selections) == S_OK) {
+  if (SUCCEEDED(ax_object->get_nSelections(&n_selections))) {
     dict->SetInteger("n_selections", n_selections);
     if (n_selections > 0) {
       LONG start, end;
-      if (acc_obj->get_selection(0, &start, &end) == S_OK) {
+      if (SUCCEEDED(ax_object->get_selection(0, &start, &end))) {
         dict->SetInteger("selection_start", start);
         dict->SetInteger("selection_end", end);
       }

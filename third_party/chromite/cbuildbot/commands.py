@@ -168,18 +168,18 @@ def BuildRootGitCleanup(buildroot):
       except cros_build_lib.RunCommandError as e:
         result = e.result
         cros_build_lib.PrintBuildbotStepWarnings()
-        logging.warn('\n%s', result.error)
+        logging.warning('\n%s', result.error)
 
         # If there's no repository corruption, just delete the index.
         corrupted = git.IsGitRepositoryCorrupted(cwd)
         lock.write_lock()
-        logging.warn('Deleting %s because %s failed', cwd, result.cmd)
+        logging.warning('Deleting %s because %s failed', cwd, result.cmd)
         osutils.RmDir(cwd, ignore_missing=True)
         if corrupted:
           # Looks like the object dir is corrupted. Delete the whole repository.
           deleted_objdirs.set()
           for store in (repo_git_store, repo_obj_store):
-            logging.warn('Deleting %s as well', store)
+            logging.warning('Deleting %s as well', store)
             osutils.RmDir(store, ignore_missing=True)
 
       # Delete all branches created by cbuildbot.
@@ -388,7 +388,8 @@ def VerifyBinpkg(buildroot, board, pkg, packages, extra_env=None):
     If the package is found and is built from source, raise MissingBinpkg.
     If the package is not found, or it is installed from a binpkg, do nothing.
   """
-  cmd = ['emerge-%s' % board, '-pegNvq', '--color=n'] + list(packages)
+  cmd = ['emerge-%s' % board, '-pegNvq', '--with-bdeps=y',
+         '--color=n'] + list(packages)
   result = RunBuildScript(buildroot, cmd, capture_output=True,
                           enter_chroot=True, extra_env=extra_env)
   pattern = r'^\[(ebuild|binary).*%s' % re.escape(pkg)
@@ -399,13 +400,18 @@ def VerifyBinpkg(buildroot, board, pkg, packages, extra_env=None):
     raise MissingBinpkg(msg)
 
 
-def RunBinhostTest(buildroot):
+def RunBinhostTest(buildroot, incremental=True):
   """Test prebuilts for all boards, making sure everybody gets Chrome prebuilts.
 
   Args:
     buildroot: The buildroot of the current build.
+    incremental: If True, run the incremental compatibility test.
   """
   cmd = ['../cbuildbot/binhost_test', '--log-level=debug']
+
+  # Non incremental tests are listed in a special test suite.
+  if not incremental:
+    cmd += ['NoIncremental']
   RunBuildScript(buildroot, cmd, chromite_cmd=True, enter_chroot=True)
 
 
@@ -591,20 +597,14 @@ def RunSignerTests(buildroot, board):
   RunBuildScript(buildroot, cmd, enter_chroot=True)
 
 
-def RunUnitTests(buildroot, board, full, blacklist=None, extra_env=None):
+def RunUnitTests(buildroot, board, blacklist=None, extra_env=None):
   cmd = ['cros_run_unit_tests', '--board=%s' % board]
-
-  # If we aren't running ALL tests, then restrict to just the packages
-  #   uprev noticed were changed.
-  if not full:
-    package_file = _PACKAGE_FILE % {'buildroot': buildroot}
-    cmd += ['--package_file=%s' %
-            path_util.ToChrootPath(package_file)]
 
   if blacklist:
     cmd += ['--blacklist_packages=%s' % ' '.join(blacklist)]
 
-  RunBuildScript(buildroot, cmd, enter_chroot=True, extra_env=extra_env or {})
+  RunBuildScript(buildroot, cmd, chromite_cmd=True, enter_chroot=True,
+                 extra_env=extra_env or {})
 
 
 def RunTestSuite(buildroot, board, image_dir, results_dir, test_type,
@@ -615,7 +615,7 @@ def RunTestSuite(buildroot, board, image_dir, results_dir, test_type,
   osutils.RmDir(results_dir_in_chroot, ignore_missing=True)
 
   cwd = os.path.join(buildroot, 'src', 'scripts')
-  image_path = os.path.join(image_dir, 'chromiumos_test_image.bin')
+  image_path = os.path.join(image_dir, constants.TEST_IMAGE_BIN)
 
   cmd = ['bin/ctest',
          '--board=%s' % board,
@@ -657,7 +657,7 @@ def RunTestSuite(buildroot, board, image_dir, results_dir, test_type,
 def RunDevModeTest(buildroot, board, image_dir):
   """Runs the dev mode testing script to verify dev-mode scripts work."""
   crostestutils = os.path.join(buildroot, 'src', 'platform', 'crostestutils')
-  image_path = os.path.join(image_dir, 'chromiumos_test_image.bin')
+  image_path = os.path.join(image_dir, constants.TEST_IMAGE_BIN)
   test_script = 'devmode-test/devinstall_test.py'
   cmd = [os.path.join(crostestutils, test_script), '--verbose', board,
          image_path]
@@ -666,7 +666,7 @@ def RunDevModeTest(buildroot, board, image_dir):
 
 def RunCrosVMTest(board, image_dir):
   """Runs cros_vm_test script to verify cros commands work."""
-  image_path = os.path.join(image_dir, 'chromiumos_test_image.bin')
+  image_path = os.path.join(image_dir, constants.TEST_IMAGE_BIN)
   test = cros_vm_test.CrosVMTest(board, image_path)
   test.Run()
 
@@ -831,7 +831,8 @@ def ArchiveVMFiles(buildroot, test_results_dir, archive_path):
 def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
                    wait_for_results=None, priority=None, timeout_mins=None,
                    retry=None, max_retries=None,
-                   minimum_duts=0, suite_min_duts=0, debug=True):
+                   minimum_duts=0, suite_min_duts=0,
+                   offload_failures_only=None, debug=True):
   """Run the test suite in the Autotest lab.
 
   Args:
@@ -856,11 +857,13 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
     suite_min_duts: Preferred minimum duts, lab will prioritize on getting
                     such many duts even if the suite is competing with
                     a suite that has higher priority.
+    offload_failures_only: Only offload failed tests to Google Storage.
     debug: Whether we are in debug mode.
   """
   cmd = _CreateRunSuiteCommand(build, suite, board, pool, num, file_bugs,
                                wait_for_results, priority, timeout_mins, retry,
-                               max_retries, minimum_duts, suite_min_duts)
+                               max_retries, minimum_duts, suite_min_duts,
+                               offload_failures_only)
   try:
     HWTestCreateAndWait(cmd, debug)
   except cros_build_lib.RunCommandError as e:
@@ -905,7 +908,7 @@ def _CreateRunSuiteCommand(build, suite, board, pool=None, num=None,
                            file_bugs=None, wait_for_results=None,
                            priority=None, timeout_mins=None,
                            retry=None, max_retries=None, minimum_duts=0,
-                           suite_min_duts=0):
+                           suite_min_duts=0, offload_failures_only=None):
   """Create a proxied run_suite command for the given arguments.
 
   Args:
@@ -951,6 +954,9 @@ def _CreateRunSuiteCommand(build, suite, board, pool=None, num=None,
 
   if suite_min_duts != 0:
     cmd += ['--suite_min_duts', str(suite_min_duts)]
+
+  if offload_failures_only is not None:
+    cmd += ['--offload_failures_only', str(offload_failures_only)]
 
   return cmd
 # pylint: enable=docstring-missing-args
@@ -1028,7 +1034,7 @@ def AbortHWTests(config_type_or_name, version, debug, suite=''):
   Args:
     config_type_or_name: Either the name of the builder (e.g. link-paladin) or
                          the config type if you want to abort all HWTests for
-                         that config (e.g. cbuildbot_config.CONFIG_TYPE_FULL).
+                         that config (e.g. config_lib.CONFIG_TYPE_FULL).
     version: The version of the current build. E.g. R18-1655.0.0-rc1
     debug: Whether we are in debug mode.
     suite: Name of the Autotest suite. If empty, abort all suites.
@@ -1878,7 +1884,7 @@ def BuildStandaloneArchive(archive_dir, image_dir, artifact_info):
   return [filename]
 
 
-def BuildGceTarball(archive_dir, image_dir, image, output):
+def BuildGceTarball(archive_dir, image_dir, image):
   """Builds a tarball that can be converted into a GCE image.
 
   GCE has some very specific requirements about the format of VM
@@ -1889,17 +1895,20 @@ def BuildGceTarball(archive_dir, image_dir, image, output):
     archive_dir: Directory to store the output tarball.
     image_dir: Directory where raw disk file can be found.
     image: Name of raw disk file.
-    output: Basename of the resulting tarball.
+
+  Returns:
+    The file name of the output tarball.
   """
   with osutils.TempDir() as tempdir:
     temp_disk_raw = os.path.join(tempdir, 'disk.raw')
+    output = '%s_gce.tar.gz' % os.path.splitext(image)[0]
     output_file = os.path.join(archive_dir, output)
     os.symlink(os.path.join(image_dir, image), temp_disk_raw)
 
     cros_build_lib.CreateTarball(
         output_file, tempdir, inputs=['disk.raw'],
         compression=cros_build_lib.COMP_GZIP, extra_args=['--dereference'])
-    return output_file
+    return os.path.basename(output_file)
 
 
 def BuildFirmwareArchive(buildroot, board, archive_dir):

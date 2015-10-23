@@ -207,6 +207,21 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_VIEWPORT:
       return 4;
+
+    // ES3
+    case GL_COPY_READ_BUFFER_BINDING:
+      return 1;
+    case GL_COPY_WRITE_BUFFER_BINDING:
+      return 1;
+    case GL_PIXEL_PACK_BUFFER_BINDING:
+      return 1;
+    case GL_PIXEL_UNPACK_BUFFER_BINDING:
+      return 1;
+    case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+      return 1;
+    case GL_UNIFORM_BUFFER_BINDING:
+      return 1;
+
     // -- glGetBooleanv, glGetFloatv, glGetIntergerv with
     //    GL_CHROMIUM_framebuffer_multisample
     case GL_MAX_SAMPLES_EXT:
@@ -218,6 +233,16 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     case GL_BUFFER_SIZE:
       return 1;
     case GL_BUFFER_USAGE:
+      return 1;
+
+    // ES3
+    case GL_BUFFER_MAPPED:
+      return 1;
+    case GL_BUFFER_ACCESS_FLAGS:
+      return 1;
+    case GL_BUFFER_MAP_LENGTH:
+      return 1;
+    case GL_BUFFER_MAP_OFFSET:
       return 1;
 
     // -- glGetFramebufferAttachmentParameteriv
@@ -257,7 +282,6 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_ACTIVE_UNIFORM_MAX_LENGTH:
       return 1;
-
 
     // -- glGetRenderbufferAttachmentParameteriv
     case GL_RENDERBUFFER_WIDTH:
@@ -433,6 +457,7 @@ int BytesPerElement(int type) {
     case GL_UNSIGNED_INT_10F_11F_11F_REV:
     case GL_UNSIGNED_INT_5_9_9_9_REV:
       return 4;
+    case GL_HALF_FLOAT:
     case GL_HALF_FLOAT_OES:
     case GL_UNSIGNED_SHORT:
     case GL_SHORT:
@@ -683,6 +708,23 @@ size_t GLES2Util::GetGLTypeSizeForTexturesAndBuffers(uint32 type) {
       return sizeof(GLfloat);  // NOLINT
     case GL_FIXED:
       return sizeof(GLfixed);  // NOLINT
+    default:
+      return 0;
+  }
+}
+
+size_t GLES2Util::GetGLTypeSizeForPathCoordType(uint32 type) {
+  switch (type) {
+    case GL_BYTE:
+      return sizeof(GLbyte);  // NOLINT
+    case GL_UNSIGNED_BYTE:
+      return sizeof(GLubyte);  // NOLINT
+    case GL_SHORT:
+      return sizeof(GLshort);  // NOLINT
+    case GL_UNSIGNED_SHORT:
+      return sizeof(GLushort);  // NOLINT
+    case GL_FLOAT:
+      return sizeof(GLfloat);  // NOLINT
     default:
       return 0;
   }
@@ -1068,7 +1110,7 @@ const int32 kBufferDestroyed = 0x3095;  // EGL_BUFFER_DESTROYED
 const int32 kBindGeneratesResource = 0x10000;
 const int32 kFailIfMajorPerfCaveat = 0x10001;
 const int32 kLoseContextWhenOutOfMemory = 0x10002;
-const int32 kES3ContextRequired = 0x10003;
+const int32 kWebGLVersion = 0x10003;
 
 }  // namespace
 
@@ -1085,7 +1127,8 @@ ContextCreationAttribHelper::ContextCreationAttribHelper()
       bind_generates_resource(true),
       fail_if_major_perf_caveat(false),
       lose_context_when_out_of_memory(false),
-      es3_context_required(false) {}
+      webgl_version(0) {
+}
 
 void ContextCreationAttribHelper::Serialize(std::vector<int32>* attribs) const {
   if (alpha_size != -1) {
@@ -1128,8 +1171,8 @@ void ContextCreationAttribHelper::Serialize(std::vector<int32>* attribs) const {
   attribs->push_back(fail_if_major_perf_caveat ? 1 : 0);
   attribs->push_back(kLoseContextWhenOutOfMemory);
   attribs->push_back(lose_context_when_out_of_memory ? 1 : 0);
-  attribs->push_back(kES3ContextRequired);
-  attribs->push_back(es3_context_required ? 1 : 0);
+  attribs->push_back(kWebGLVersion);
+  attribs->push_back(webgl_version);
   attribs->push_back(kNone);
 }
 
@@ -1184,8 +1227,8 @@ bool ContextCreationAttribHelper::Parse(const std::vector<int32>& attribs) {
       case kLoseContextWhenOutOfMemory:
         lose_context_when_out_of_memory = value != 0;
         break;
-      case kES3ContextRequired:
-        es3_context_required = value != 0;
+      case kWebGLVersion:
+        webgl_version = value;
         break;
       case kNone:
         // Terminate list, even if more attributes.

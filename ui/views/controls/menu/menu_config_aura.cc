@@ -11,6 +11,7 @@
 #include "ui/native_theme/native_theme_aura.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/menu/menu_image_util.h"
+#include "ui/views/resources/grit/views_resources.h"
 
 namespace views {
 
@@ -46,6 +47,9 @@ void MenuConfig::InitAura(const ui::NativeTheme* theme) {
   align_arrow_and_shortcut = true;
   offset_context_menus = true;
   corner_radius = kMenuCornerRadiusForAura;
+
+  // In Ash, the border is provided by the shadow.
+  use_outer_border = false;
 }
 
 #if !defined(OS_WIN)

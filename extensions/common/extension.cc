@@ -75,6 +75,10 @@ const char Extension::kMimeType[] = "application/x-chrome-extension";
 const int Extension::kValidWebExtentSchemes =
     URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS;
 
+const int Extension::kValidBookmarkAppSchemes = URLPattern::SCHEME_HTTP |
+                                                URLPattern::SCHEME_HTTPS |
+                                                URLPattern::SCHEME_EXTENSION;
+
 const int Extension::kValidHostPermissionSchemes = URLPattern::SCHEME_CHROMEUI |
                                                    URLPattern::SCHEME_HTTP |
                                                    URLPattern::SCHEME_HTTPS |
@@ -154,7 +158,8 @@ GURL Extension::GetResourceURL(const GURL& extension_url,
     path = relative_path.substr(1);
 
   GURL ret_val = GURL(extension_url.spec() + path);
-  DCHECK(StartsWithASCII(ret_val.spec(), extension_url.spec(), false));
+  DCHECK(base::StartsWith(ret_val.spec(), extension_url.spec(),
+                          base::CompareCase::INSENSITIVE_ASCII));
 
   return ret_val;
 }
@@ -205,7 +210,8 @@ bool Extension::ParsePEMKeyBytes(const std::string& input,
     return false;
 
   std::string working = input;
-  if (StartsWithASCII(working, kKeyBeginHeaderMarker, true)) {
+  if (base::StartsWith(working, kKeyBeginHeaderMarker,
+                       base::CompareCase::SENSITIVE)) {
     working = base::CollapseWhitespaceASCII(working, true);
     size_t header_pos = working.find(kKeyInfoEndMarker,
       sizeof(kKeyBeginHeaderMarker) - 1);

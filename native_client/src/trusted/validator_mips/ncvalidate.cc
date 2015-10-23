@@ -10,6 +10,7 @@
 
 #include "native_client/src/include/nacl_string.h"
 #include "native_client/src/include/portability.h"
+#include "native_client/src/shared/platform/nacl_check.h"
 #include "native_client/src/shared/utils/types.h"
 #include "native_client/src/trusted/service_runtime/arch/mips/sel_ldr_mips.h"
 #include "native_client/src/trusted/cpu_features/arch/mips/cpu_mips.h"
@@ -117,10 +118,12 @@ static NaClValidationStatus ApplyValidatorMips(
     uint8_t *data,
     size_t size,
     int stubout_mode,
+    uint32_t flags,
     int readonly_text,
     const NaClCPUFeatures *cpu_features,
     const struct NaClValidationMetadata *metadata,
     struct NaClValidationCache *cache) {
+  CHECK((flags & NACL_VALIDATION_FLAGS_MASK_MIPS) == 0);
   void *query = NULL;
   const NaClCPUFeaturesMips *features =
       (const NaClCPUFeaturesMips *) cpu_features;
@@ -200,6 +203,20 @@ static NaClValidationStatus ValidatorCopyNotImplemented(
   return NaClValidationFailedNotImplemented;
 }
 
+static NaClValidationStatus IsOnInstBoundaryMips(
+    uintptr_t guest_addr,
+    uintptr_t addr,
+    const uint8_t *data,
+    size_t size,
+    const NaClCPUFeatures *f) {
+  UNREFERENCED_PARAMETER(guest_addr);
+  UNREFERENCED_PARAMETER(addr);
+  UNREFERENCED_PARAMETER(data);
+  UNREFERENCED_PARAMETER(size);
+  UNREFERENCED_PARAMETER(f);
+  return NaClValidationFailedNotImplemented;
+}
+
 static struct NaClValidatorInterface validator = {
   TRUE,  /* Optional stubout_mode is implemented.                    */
   FALSE, /* Optional readonly_text mode is not implemented.          */
@@ -211,6 +228,7 @@ static struct NaClValidatorInterface validator = {
   NaClSetAllCPUFeaturesMips,
   NaClGetCurrentCPUFeaturesMips,
   NaClFixCPUFeaturesMips,
+  IsOnInstBoundaryMips,
 };
 
 const struct NaClValidatorInterface *NaClValidatorCreateMips() {

@@ -14,23 +14,36 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/sys_info.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/services/gcm/gcm_profile_service.h"
+#include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
+#include "chrome/browser/signin/chrome_proximity_auth_client.h"
 #include "chrome/browser/signin/easy_unlock_app_manager.h"
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service_observer.h"
-#include "chrome/browser/signin/proximity_auth_facade.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/proximity_auth/ble/proximity_auth_ble_system.h"
+#include "components/proximity_auth/cryptauth/cryptauth_client_impl.h"
+#include "components/proximity_auth/cryptauth/cryptauth_device_manager.h"
+#include "components/proximity_auth/cryptauth/cryptauth_enrollment_manager.h"
+#include "components/proximity_auth/cryptauth/secure_message_delegate.h"
 #include "components/proximity_auth/screenlock_bridge.h"
 #include "components/proximity_auth/switches.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user.h"
+#include "components/version_info/version_info.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 
@@ -38,6 +51,7 @@
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager_factory.h"
+#include "chrome/browser/chromeos/login/easy_unlock/secure_message_delegate_chromeos.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -75,7 +89,7 @@ EasyUnlockService::UserSettings::~UserSettings() {
 
 // static
 EasyUnlockService* EasyUnlockService::Get(Profile* profile) {
-  return EasyUnlockServiceFactory::GetForProfile(profile);
+  return EasyUnlockServiceFactory::GetForBrowserContext(profile);
 }
 
 // static
@@ -142,12 +156,6 @@ class EasyUnlockService::BluetoothDetector
     adapter_->AddObserver(this);
     service_->OnBluetoothAdapterPresentChanged();
 
-    // TODO(tengs): At the moment, there is no way for Bluetooth discoverability
-    // to be turned on except through the Easy Unlock setup. If we step on any
-    // toes in the future then we need to revisit this guard.
-    if (adapter_->IsDiscoverable())
-      TurnOffBluetoothDiscoverability();
-
 #if !defined(OS_CHROMEOS)
     // Bluetooth detection causes serious performance degradations on Mac
     // and possibly other platforms as well: http://crbug.com/467316
@@ -157,6 +165,12 @@ class EasyUnlockService::BluetoothDetector
     // TODO(bcwhite,xiyuan): Revisit when non-chromeos platforms are supported.
     adapter_->RemoveObserver(this);
     adapter_ = NULL;
+#else
+    // TODO(tengs): At the moment, there is no way for Bluetooth discoverability
+    // to be turned on except through the Easy Unlock setup. If we step on any
+    // toes in the future then we need to revisit this guard.
+    if (adapter_->IsDiscoverable())
+      TurnOffBluetoothDiscoverability();
 #endif  // !defined(OS_CHROMEOS)
   }
 
@@ -252,6 +266,7 @@ class EasyUnlockService::PowerMonitor
 
 EasyUnlockService::EasyUnlockService(Profile* profile)
     : profile_(profile),
+      proximity_auth_client_(profile),
       bluetooth_detector_(new BluetoothDetector(this)),
       shut_down_(false),
       tpm_key_checked_(false),
@@ -272,6 +287,14 @@ void EasyUnlockService::RegisterProfilePrefs(
       prefs::kEasyUnlockProximityRequired,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+
+  proximity_auth::CryptAuthGCMManager::RegisterPrefs(registry);
+  proximity_auth::CryptAuthDeviceManager::RegisterPrefs(registry);
+  proximity_auth::CryptAuthEnrollmentManager::RegisterPrefs(registry);
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery))
+    proximity_auth::ProximityAuthBleSystem::RegisterPrefs(registry);
 }
 
 // static
@@ -448,7 +471,8 @@ EasyUnlockScreenlockStateHandler*
     return NULL;
   if (!screenlock_state_handler_) {
     screenlock_state_handler_.reset(new EasyUnlockScreenlockStateHandler(
-        GetUserEmail(), GetHardlockState(), GetScreenlockBridgeInstance()));
+        GetUserEmail(), GetHardlockState(),
+        proximity_auth::ScreenlockBridge::Get()));
   }
   return screenlock_state_handler_.get();
 }
@@ -513,6 +537,16 @@ void EasyUnlockService::AttemptAuth(const std::string& user_id,
                                                 auth_attempt_type, callback));
   if (!auth_attempt_->Start())
     auth_attempt_.reset();
+
+  // TODO(tengs): We notify ProximityAuthBleSystem whenever unlock attempts are
+  // attempted. However, we ideally should refactor the auth attempt logic to
+  // the proximity_auth component.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery) &&
+      auth_attempt_type == EasyUnlockAuthAttempt::TYPE_UNLOCK &&
+      proximity_auth_ble_system_) {
+    proximity_auth_ble_system_->OnAuthAttempted(user_id);
+  }
 }
 
 void EasyUnlockService::FinalizeUnlock(bool success) {
@@ -619,7 +653,62 @@ void EasyUnlockService::RemoveObserver(EasyUnlockServiceObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void  EasyUnlockService::Shutdown() {
+PrefService* EasyUnlockService::GetPrefService() {
+  return profile()->GetPrefs();
+}
+
+scoped_ptr<proximity_auth::SecureMessageDelegate>
+EasyUnlockService::CreateSecureMessageDelegate() {
+#if defined(OS_CHROMEOS)
+  return make_scoped_ptr(new chromeos::SecureMessageDelegateChromeOS());
+#else
+  return nullptr;
+#endif
+}
+
+scoped_ptr<proximity_auth::CryptAuthClientFactory>
+EasyUnlockService::CreateCryptAuthClientFactory() {
+  return make_scoped_ptr(new proximity_auth::CryptAuthClientFactoryImpl(
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile()),
+      SigninManagerFactory::GetForProfile(profile())
+          ->GetAuthenticatedAccountId(),
+      profile()->GetRequestContext(), GetDeviceClassifier()));
+}
+
+cryptauth::DeviceClassifier EasyUnlockService::GetDeviceClassifier() {
+  cryptauth::DeviceClassifier device_classifier;
+
+#if defined(OS_CHROMEOS)
+  int32 major_version, minor_version, bugfix_version;
+  // TODO(tengs): base::OperatingSystemVersionNumbers only works for ChromeOS.
+  // We need to get different numbers for other platforms.
+  base::SysInfo::OperatingSystemVersionNumbers(&major_version, &minor_version,
+                                               &bugfix_version);
+  device_classifier.set_device_os_version_code(major_version);
+  device_classifier.set_device_type(cryptauth::CHROME);
+#endif
+
+  const std::vector<uint32_t>& version_components =
+      base::Version(version_info::GetVersionNumber()).components();
+  if (version_components.size() > 0)
+    device_classifier.set_device_software_version_code(version_components[0]);
+
+  device_classifier.set_device_software_package(version_info::GetProductName());
+  return device_classifier;
+}
+
+std::string EasyUnlockService::GetAccountId() {
+  return SigninManagerFactory::GetForProfile(profile())
+      ->GetAuthenticatedAccountId();
+}
+
+gcm::GCMDriver* EasyUnlockService::GetGCMDriver() {
+  gcm::GCMProfileService* gcm_profile_service =
+      gcm::GCMProfileServiceFactory::GetForProfile(profile_);
+  return gcm_profile_service->driver();
+}
+
+void EasyUnlockService::Shutdown() {
   if (shut_down_)
     return;
   shut_down_ = true;
@@ -654,7 +743,8 @@ void EasyUnlockService::UpdateAppState() {
         !proximity_auth_ble_system_) {
       proximity_auth_ble_system_.reset(
           new proximity_auth::ProximityAuthBleSystem(
-              GetScreenlockBridgeInstance(), profile_));
+              proximity_auth::ScreenlockBridge::Get(), &proximity_auth_client_,
+              CreateCryptAuthClientFactory(), profile_->GetPrefs()));
     }
 
 #if defined(OS_CHROMEOS)

@@ -10,7 +10,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_member.h"
-#import "chrome/browser/ui/cocoa/command_observer_bridge.h"
+#import "chrome/browser/ui/cocoa/has_weak_browser_pointer.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 #import "ui/base/cocoa/tracking_area.h"
@@ -35,6 +35,7 @@ class WebContents;
 }
 
 namespace ToolbarControllerInternal {
+class CommandObserverBridge;
 class NotificationBridge;
 }
 
@@ -43,8 +44,8 @@ class NotificationBridge;
 // Manages the bookmark bar and its position in the window relative to
 // the web content view.
 
-@interface ToolbarController : NSViewController<CommandObserverProtocol,
-                                                URLDropTargetController> {
+@interface ToolbarController
+    : NSViewController<URLDropTargetController, HasWeakBrowserPointer> {
  @protected
   // The ordering is important for unit tests. If new items are added or the
   // ordering is changed, make sure to update |-toolbarViews| and the
@@ -61,11 +62,10 @@ class NotificationBridge;
   CommandUpdater* commands_;  // weak, one per window
   Profile* profile_;  // weak, one per window
   Browser* browser_;  // weak, one per window
-  scoped_ptr<CommandObserverBridge> commandObserver_;
+  scoped_ptr<ToolbarControllerInternal::CommandObserverBridge> commandObserver_;
   scoped_ptr<LocationBarViewMac> locationBarView_;
   base::scoped_nsobject<AutocompleteTextFieldEditor>
       autocompleteTextFieldEditor_;
-  id<ViewResizer> resizeDelegate_;  // weak
   base::scoped_nsobject<BackForwardMenuController> backMenuController_;
   base::scoped_nsobject<BackForwardMenuController> forwardMenuController_;
   base::scoped_nsobject<BrowserActionsController> browserActionsController_;
@@ -102,8 +102,7 @@ class NotificationBridge;
 // the toolbar model and back/forward menus.
 - (id)initWithCommands:(CommandUpdater*)commands
                profile:(Profile*)profile
-               browser:(Browser*)browser
-        resizeDelegate:(id<ViewResizer>)resizeDelegate;
+               browser:(Browser*)browser;
 
 // Get the C++ bridge object representing the location bar for this tab.
 - (LocationBarViewMac*)locationBarBridge;
@@ -116,6 +115,10 @@ class NotificationBridge;
 
 // Make the location bar the first responder, if possible.
 - (void)focusLocationBar:(BOOL)selectAll;
+
+// Called by CommandObserverBridge when there is a state change for the given
+// command.
+- (void)enabledStateChangedForCommand:(int)command enabled:(bool)enabled;
 
 // Forces the toolbar (and transitively the location bar) to update its current
 // state.  If |tab| is non-NULL, we're switching (back?) to this tab and should
@@ -134,6 +137,9 @@ class NotificationBridge;
 // Sets whether or not an overflowed toolbar action wants to run.
 // Only used if the extension toolbar redesign is on.
 - (void)setOverflowedToolbarActionWantsToRun:(BOOL)overflowedActionWantsToRun;
+
+// Returns whether or not an overflowed toolbar action wants to run.
+- (BOOL)overflowedToolbarActionWantsToRun;
 
 // Happens when the zoom for the active tab changes, the active tab switches, or
 // a new tab or browser window is created. |canShowBubble| indicates if it is
@@ -187,7 +193,6 @@ class NotificationBridge;
 - (id)initWithCommands:(CommandUpdater*)commands
                profile:(Profile*)profile
                browser:(Browser*)browser
-        resizeDelegate:(id<ViewResizer>)resizeDelegate
           nibFileNamed:(NSString*)nibName;
 @end
 

@@ -7,6 +7,7 @@
 
 #include "gm.h"
 #include "SkCanvas.h"
+#include "SkPath.h"
 
 static void make_bm(SkBitmap* bm) {
     bm->allocN32Pixels(60, 60);
@@ -42,7 +43,7 @@ static void test_bitmaprect(SkCanvas* canvas) {
     SkScalar scale = 0.472560018f;
     canvas->save();
     canvas->scale(scale, scale);
-    canvas->drawBitmapRectToRect(bm, NULL, SkRect::MakeXYWH(100, 100, 128, 128), NULL);
+    canvas->drawBitmapRect(bm, SkRect::MakeXYWH(100, 100, 128, 128), nullptr);
     canvas->restore();
 
     canvas->scale(-1, 1);

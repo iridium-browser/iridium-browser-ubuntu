@@ -60,7 +60,7 @@ base::string16 GetPnpDeviceId(LPARAM data) {
     return base::string16();
   base::string16 device_id(dev_interface->dbcc_name);
   DCHECK(base::IsStringASCII(device_id));
-  return base::StringToLowerASCII(device_id);
+  return base::ToLowerASCII(device_id);
 }
 
 // Gets the friendly name of the device specified by the |pnp_device_id|. On
@@ -77,7 +77,7 @@ bool GetFriendlyName(const base::string16& pnp_device_id,
     return false;
 
   hr = device_manager->GetDeviceFriendlyName(
-      pnp_device_id.c_str(), WriteInto(name, name_len), &name_len);
+      pnp_device_id.c_str(), base::WriteInto(name, name_len), &name_len);
   return (SUCCEEDED(hr) && !name->empty());
 }
 
@@ -95,7 +95,7 @@ bool GetManufacturerName(const base::string16& pnp_device_id,
     return false;
 
   hr = device_manager->GetDeviceManufacturer(pnp_device_id.c_str(),
-                                             WriteInto(name, name_len),
+                                             base::WriteInto(name, name_len),
                                              &name_len);
   return (SUCCEEDED(hr) && !name->empty());
 }
@@ -113,9 +113,8 @@ bool GetDeviceDescription(const base::string16& pnp_device_id,
   if (FAILED(hr))
     return false;
 
-  hr = device_manager->GetDeviceDescription(pnp_device_id.c_str(),
-                                            WriteInto(description, desc_len),
-                                            &desc_len);
+  hr = device_manager->GetDeviceDescription(
+      pnp_device_id.c_str(), base::WriteInto(description, desc_len), &desc_len);
   return (SUCCEEDED(hr) && !description->empty());
 }
 
@@ -301,7 +300,8 @@ bool IsMassStoragePortableDevice(const base::string16& pnp_device_id,
                                  const base::string16& device_name) {
   // Based on testing, if the pnp device id starts with "\\?\wpdbusenumroot#",
   // then the attached device belongs to a mass storage class.
-  if (StartsWith(pnp_device_id, L"\\\\?\\wpdbusenumroot#", false))
+  if (base::StartsWith(pnp_device_id, L"\\\\?\\wpdbusenumroot#",
+                       base::CompareCase::INSENSITIVE_ASCII))
     return true;
 
   // If the device is a volume mounted device, |device_name| will be

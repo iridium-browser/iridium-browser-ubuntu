@@ -28,18 +28,6 @@ namespace {
 static const char kSettingsOrigin[] = "Chrome settings";
 static const char kErrorDataUnavailable[] = "Autofill data unavailable.";
 
-// Converts the UTF-8 strings in |input| to UTF-16 strings and adds them to
-// |output|.
-void UTF8VectorToUTF16Vector(
-    const std::vector<std::string>& input,
-    std::vector<base::string16>* output) {
-  // Ensure output is clear.
-  output->clear();
-
-  for (const std::string& s : input)
-    output->push_back(base::UTF8ToUTF16(s));
-}
-
 // Fills |components| with the address UI components that should be used to
 // input an address for |country_code| when UI BCP 47 language code is
 // |ui_language_code|.
@@ -120,8 +108,6 @@ void PopulateAddressComponents(
       case i18n::addressinput::RECIPIENT:
         component->field =
             autofill_private::AddressField::ADDRESS_FIELD_FULL_NAME;
-        component->placeholder.reset(new std::string(
-            l10n_util::GetStringUTF8(IDS_AUTOFILL_FIELD_LABEL_ADD_NAME)));
         break;
     }
 
@@ -204,13 +190,12 @@ ExtensionFunction::ResponseAction AutofillPrivateSaveAddressFunction::Run() {
   std::vector<base::string16> string16Container;
 
   if (address->full_names) {
-    autofill::AutofillProfile* old_profile =
-        personal_data->GetProfileByGUID(guid);
-    UTF8VectorToUTF16Vector(*address->full_names, &string16Container);
-    profile.CopyAndUpdateNameList(
-        string16Container,
-        old_profile,
-        g_browser_process->GetApplicationLocale());
+    std::string full_name;
+    if (!address->full_names->empty())
+      full_name = address->full_names->at(0);
+    profile.SetInfo(autofill::AutofillType(autofill::NAME_FULL),
+                    base::UTF8ToUTF16(full_name),
+                    g_browser_process->GetApplicationLocale());
   }
 
   if (address->company_name) {
@@ -262,14 +247,18 @@ ExtensionFunction::ResponseAction AutofillPrivateSaveAddressFunction::Run() {
   }
 
   if (address->phone_numbers) {
-    UTF8VectorToUTF16Vector(*address->phone_numbers, &string16Container);
-    profile.SetRawMultiInfo(
-        autofill::PHONE_HOME_WHOLE_NUMBER, string16Container);
+    std::string phone;
+    if (!address->phone_numbers->empty())
+      phone = address->phone_numbers->at(0);
+    profile.SetRawInfo(autofill::PHONE_HOME_WHOLE_NUMBER,
+                       base::UTF8ToUTF16(phone));
   }
 
   if (address->email_addresses) {
-    UTF8VectorToUTF16Vector(*address->email_addresses, &string16Container);
-    profile.SetRawMultiInfo(autofill::EMAIL_ADDRESS, string16Container);
+    std::string email;
+    if (!address->email_addresses->empty())
+      email = address->email_addresses->at(0);
+    profile.SetRawInfo(autofill::EMAIL_ADDRESS, base::UTF8ToUTF16(email));
   }
 
   if (address->language_code)

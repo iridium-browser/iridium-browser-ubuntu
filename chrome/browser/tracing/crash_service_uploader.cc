@@ -8,13 +8,15 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
+#include "base/json/json_writer.h"
 #include "base/memory/shared_memory.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "chrome/common/chrome_version_info.h"
+#include "components/tracing/tracing_switches.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "net/base/mime_util.h"
@@ -43,10 +45,25 @@ TraceCrashServiceUploader::TraceCrashServiceUploader(
     net::URLRequestContextGetter* request_context)
     : request_context_(request_context) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  std::string upload_url = kUploadURL;
+  if (command_line.HasSwitch(switches::kTraceUploadURL)) {
+    upload_url = command_line.GetSwitchValueASCII(switches::kTraceUploadURL);
+  }
+  SetUploadURL(upload_url);
 }
 
 TraceCrashServiceUploader::~TraceCrashServiceUploader() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+}
+
+void TraceCrashServiceUploader::SetUploadURL(const std::string& url) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  upload_url_ = url;
+
+  if (!GURL(upload_url_).is_valid())
+    upload_url_.clear();
 }
 
 void TraceCrashServiceUploader::OnURLFetchComplete(
@@ -76,6 +93,9 @@ void TraceCrashServiceUploader::OnURLFetchUploadProgress(
   DCHECK(url_fetcher_.get());
 
   LOG(WARNING) << "Upload progress: " << current << " of " << total;
+
+  if (progress_callback_.is_null())
+    return;
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
       base::Bind(progress_callback_, current, total));
@@ -83,18 +103,24 @@ void TraceCrashServiceUploader::OnURLFetchUploadProgress(
 
 void TraceCrashServiceUploader::DoUpload(
     const std::string& file_contents,
+    UploadMode upload_mode,
+    scoped_ptr<base::DictionaryValue> metadata,
     const UploadProgressCallback& progress_callback,
     const UploadDoneCallback& done_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::BrowserThread::PostTask(
       content::BrowserThread::FILE, FROM_HERE,
       base::Bind(&TraceCrashServiceUploader::DoUploadOnFileThread,
-                 base::Unretained(this), file_contents, progress_callback,
+                 base::Unretained(this), file_contents, upload_mode,
+                 upload_url_, base::Passed(metadata.Pass()), progress_callback,
                  done_callback));
 }
 
 void TraceCrashServiceUploader::DoUploadOnFileThread(
     const std::string& file_contents,
+    UploadMode upload_mode,
+    const std::string& upload_url,
+    scoped_ptr<base::DictionaryValue> metadata,
     const UploadProgressCallback& progress_callback,
     const UploadDoneCallback& done_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
@@ -102,15 +128,6 @@ void TraceCrashServiceUploader::DoUploadOnFileThread(
 
   progress_callback_ = progress_callback;
   done_callback_ = done_callback;
-
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-  std::string upload_url = kUploadURL;
-  if (command_line.HasSwitch(switches::kTraceUploadURL)) {
-    upload_url = command_line.GetSwitchValueASCII(switches::kTraceUploadURL);
-  }
-  if (!GURL(upload_url).is_valid())
-    upload_url.clear();
 
   if (upload_url.empty()) {
     OnUploadError("Upload URL empty or invalid");
@@ -131,12 +148,11 @@ void TraceCrashServiceUploader::DoUploadOnFileThread(
 #error Platform not supported.
 #endif
 
-  // VersionInfo::ProductNameAndVersionForUserAgent() returns a string like
+  // version_info::GetProductNameAndVersionForUserAgent() returns a string like
   // "Chrome/aa.bb.cc.dd", split out the part before the "/".
-  chrome::VersionInfo version_info;
-  std::vector<std::string> product_components;
-  base::SplitString(version_info.ProductNameAndVersionForUserAgent(), '/',
-                    &product_components);
+  std::vector<std::string> product_components = base::SplitString(
+      version_info::GetProductNameAndVersionForUserAgent(), "/",
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   DCHECK_EQ(2U, product_components.size());
   std::string version;
   if (product_components.size() == 2U) {
@@ -150,18 +166,28 @@ void TraceCrashServiceUploader::DoUploadOnFileThread(
     return;
   }
 
-  scoped_ptr<char[]> compressed_contents(new char[kMaxUploadBytes]);
-  int compressed_bytes;
-  if (!Compress(file_contents, kMaxUploadBytes, compressed_contents.get(),
-                &compressed_bytes)) {
-    OnUploadError("Compressing file failed.");
-    return;
+  std::string compressed_contents;
+  if (upload_mode == COMPRESSED_UPLOAD) {
+    scoped_ptr<char[]> compressed_buffer(new char[kMaxUploadBytes]);
+    int compressed_bytes;
+    if (!Compress(file_contents, kMaxUploadBytes, compressed_buffer.get(),
+                  &compressed_bytes)) {
+      OnUploadError("Compressing file failed.");
+      return;
+    }
+    compressed_contents =
+        std::string(compressed_buffer.get(), compressed_bytes);
+  } else {
+    if (file_contents.size() >= kMaxUploadBytes) {
+      OnUploadError("File is too large to upload.");
+      return;
+    }
+    compressed_contents = file_contents;
   }
 
   std::string post_data;
-  SetupMultipart(product, version, "trace.json.gz",
-                 std::string(compressed_contents.get(), compressed_bytes),
-                 &post_data);
+  SetupMultipart(product, version, metadata.Pass(), "trace.json.gz",
+                 compressed_contents, &post_data);
 
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
@@ -179,6 +205,7 @@ void TraceCrashServiceUploader::OnUploadError(std::string error_message) {
 void TraceCrashServiceUploader::SetupMultipart(
     const std::string& product,
     const std::string& version,
+    scoped_ptr<base::DictionaryValue> metadata,
     const std::string& trace_filename,
     const std::string& trace_contents,
     std::string* post_data) {
@@ -193,6 +220,19 @@ void TraceCrashServiceUploader::SetupMultipart(
   // No minidump means no need for crash to process the report.
   net::AddMultipartValueForUpload("should_process", "false", kMultipartBoundary,
                                   "", post_data);
+  if (metadata) {
+    for (base::DictionaryValue::Iterator it(*metadata); !it.IsAtEnd();
+         it.Advance()) {
+      std::string value;
+      if (!it.value().GetAsString(&value)) {
+        if (!base::JSONWriter::Write(it.value(), &value))
+          continue;
+      }
+
+      net::AddMultipartValueForUpload(it.key(), value, kMultipartBoundary, "",
+                                      post_data);
+    }
+  }
 
   AddTraceFile(trace_filename, trace_contents, post_data);
 

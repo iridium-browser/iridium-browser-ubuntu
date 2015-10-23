@@ -9,6 +9,8 @@
 #include <GLES2/gl2extchromium.h>
 
 #include "base/bind.h"
+#include "base/location.h"
+#include "base/thread_task_runner_handle.h"
 #ifndef NDEBUG
 #include "base/logging.h"
 #endif
@@ -64,7 +66,7 @@ class VideoDecoderShim::YUVConverter {
 
   GLuint internal_format_;
   GLuint format_;
-  media::VideoFrame::Format video_format_;
+  media::VideoPixelFormat video_format_;
 
   GLuint y_width_;
   GLuint y_height_;
@@ -93,7 +95,7 @@ VideoDecoderShim::YUVConverter::YUVConverter(
       a_texture_(0),
       internal_format_(0),
       format_(0),
-      video_format_(media::VideoFrame::UNKNOWN),
+      video_format_(media::PIXEL_FORMAT_UNKNOWN),
       y_width_(2),
       y_height_(2),
       uv_width_(2),
@@ -310,8 +312,7 @@ bool VideoDecoderShim::YUVConverter::Initialize() {
     return false;
   }
 
-  gl_->PushGroupMarkerEXT(0, "YUVConverterContext");
-
+  gl_->TraceBeginCHROMIUM("YUVConverter", "YUVConverterContext");
   gl_->GenFramebuffers(1, &frame_buffer_);
 
   y_texture_ = CreateTexture();
@@ -330,7 +331,7 @@ bool VideoDecoderShim::YUVConverter::Initialize() {
 
   program_ = CreateShader();
 
-  gl_->PopGroupMarkerEXT();
+  gl_->TraceEndCHROMIUM();
 
   context_provider_->InvalidateGrContext(kGrInvalidateState);
 
@@ -372,41 +373,34 @@ void VideoDecoderShim::YUVConverter::Convert(
         0.0f, -0.5f, -0.5f,
     };
 
-    switch (frame->format()) {
-      case media::VideoFrame::YV12:  // 420
-      case media::VideoFrame::YV12A:
-      case media::VideoFrame::I420:
-        uv_height_divisor_ = 2;
-        uv_width_divisor_ = 2;
-        yuv_matrix = yuv_to_rgb_rec601;
-        yuv_adjust = yuv_adjust_constrained;
-        break;
+    yuv_adjust = yuv_adjust_constrained;
+    yuv_matrix = yuv_to_rgb_rec601;
 
-      case media::VideoFrame::YV12HD:  // 420
-        uv_height_divisor_ = 2;
-        uv_width_divisor_ = 2;
-        yuv_matrix = yuv_to_rgb_rec709;
-        yuv_adjust = yuv_adjust_constrained;
-        break;
-
-      case media::VideoFrame::YV12J:  // 420
-        uv_height_divisor_ = 2;
-        uv_width_divisor_ = 2;
+    int result;
+    if (frame->metadata()->GetInteger(media::VideoFrameMetadata::COLOR_SPACE,
+                                      &result)) {
+      if (result == media::COLOR_SPACE_JPEG) {
         yuv_matrix = yuv_to_rgb_jpeg;
         yuv_adjust = yuv_adjust_full;
-        break;
+      } else if (result == media::COLOR_SPACE_HD_REC709) {
+        yuv_matrix = yuv_to_rgb_rec709;
+      }
+    }
 
-      case media::VideoFrame::YV16:  // 422
+    switch (frame->format()) {
+      case media::PIXEL_FORMAT_YV12:  // 420
+      case media::PIXEL_FORMAT_YV12A:
+      case media::PIXEL_FORMAT_I420:
+        uv_height_divisor_ = 2;
+        uv_width_divisor_ = 2;
+        break;
+      case media::PIXEL_FORMAT_YV16:  // 422
         uv_width_divisor_ = 2;
         uv_height_divisor_ = 1;
-        yuv_matrix = yuv_to_rgb_rec601;
-        yuv_adjust = yuv_adjust_constrained;
         break;
-      case media::VideoFrame::YV24:  // 444
+      case media::PIXEL_FORMAT_YV24:  // 444
         uv_width_divisor_ = 1;
         uv_height_divisor_ = 1;
-        yuv_matrix = yuv_to_rgb_rec601;
-        yuv_adjust = yuv_adjust_constrained;
         break;
 
       default:
@@ -419,7 +413,7 @@ void VideoDecoderShim::YUVConverter::Convert(
     y_width_ = y_height_ = 0;
   }
 
-  gl_->PushGroupMarkerEXT(0, "YUVConverterContext");
+  gl_->TraceBeginCHROMIUM("YUVConverter", "YUVConverterContext");
 
   uint32_t ywidth = frame->coded_size().width();
   uint32_t yheight = frame->coded_size().height();
@@ -449,7 +443,7 @@ void VideoDecoderShim::YUVConverter::Convert(
                     format_, GL_UNSIGNED_BYTE,
                     frame->data(media::VideoFrame::kYPlane));
 
-    if (video_format_ == media::VideoFrame::YV12A) {
+    if (video_format_ == media::PIXEL_FORMAT_YV12A) {
       DCHECK_EQ(frame->stride(media::VideoFrame::kYPlane),
                 frame->stride(media::VideoFrame::kAPlane));
       gl_->ActiveTexture(GL_TEXTURE3);
@@ -489,7 +483,7 @@ void VideoDecoderShim::YUVConverter::Convert(
                        GL_UNSIGNED_BYTE,
                        frame->data(media::VideoFrame::kYPlane));
 
-    if (video_format_ == media::VideoFrame::YV12A) {
+    if (video_format_ == media::PIXEL_FORMAT_YV12A) {
       DCHECK_EQ(frame->stride(media::VideoFrame::kYPlane),
                 frame->stride(media::VideoFrame::kAPlane));
       gl_->ActiveTexture(GL_TEXTURE3);
@@ -570,7 +564,7 @@ void VideoDecoderShim::YUVConverter::Convert(
   gl_->BindTexture(GL_TEXTURE_2D, 0);
   gl_->PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
-  gl_->PopGroupMarkerEXT();
+  gl_->TraceEndCHROMIUM();
 
   context_provider_->InvalidateGrContext(kGrInvalidateState);
 }
@@ -635,7 +629,7 @@ class VideoDecoderShim::DecoderImpl {
   void Stop();
 
  private:
-  void OnPipelineStatus(media::PipelineStatus status);
+  void OnInitDone(bool success);
   void DoDecode();
   void OnDecodeComplete(media::VideoDecoder::Status status);
   void OnOutputComplete(const scoped_refptr<media::VideoFrame>& frame);
@@ -644,7 +638,7 @@ class VideoDecoderShim::DecoderImpl {
   // WeakPtr is bound to main_message_loop_. Use only in shim callbacks.
   base::WeakPtr<VideoDecoderShim> shim_;
   scoped_ptr<media::VideoDecoder> decoder_;
-  scoped_refptr<base::MessageLoopProxy> main_message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   // Queue of decodes waiting for the decoder.
   typedef std::queue<PendingDecode> PendingDecodeQueue;
   PendingDecodeQueue pending_decodes_;
@@ -655,14 +649,17 @@ class VideoDecoderShim::DecoderImpl {
   // corresponding frames before decode is finished. |decode_id_| is used to
   // store id of the current buffer while Decode() call is pending.
   uint32_t decode_id_;
+
+  base::WeakPtrFactory<DecoderImpl> weak_ptr_factory_;
 };
 
 VideoDecoderShim::DecoderImpl::DecoderImpl(
     const base::WeakPtr<VideoDecoderShim>& proxy)
     : shim_(proxy),
-      main_message_loop_(base::MessageLoopProxy::current()),
+      main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       awaiting_decoder_(false),
-      decode_id_(0) {
+      decode_id_(0),
+      weak_ptr_factory_(this) {
 }
 
 VideoDecoderShim::DecoderImpl::~DecoderImpl() {
@@ -675,12 +672,12 @@ void VideoDecoderShim::DecoderImpl::Initialize(
 #if !defined(MEDIA_DISABLE_LIBVPX)
   if (config.codec() == media::kCodecVP9) {
     decoder_.reset(
-        new media::VpxVideoDecoder(base::MessageLoopProxy::current()));
+        new media::VpxVideoDecoder(base::ThreadTaskRunnerHandle::Get()));
   } else
 #endif
   {
     scoped_ptr<media::FFmpegVideoDecoder> ffmpeg_video_decoder(
-        new media::FFmpegVideoDecoder(base::MessageLoopProxy::current()));
+        new media::FFmpegVideoDecoder(base::ThreadTaskRunnerHandle::Get()));
     ffmpeg_video_decoder->set_decode_nalus(true);
     decoder_ = ffmpeg_video_decoder.Pass();
   }
@@ -689,16 +686,12 @@ void VideoDecoderShim::DecoderImpl::Initialize(
   // request.
   DCHECK_EQ(decoder_->GetMaxDecodeRequests(), 1);
 
-  // We can use base::Unretained() safely in decoder callbacks because
-  // |decoder_| is owned by DecoderImpl. During Stop(), the |decoder_| will be
-  // destroyed and all outstanding callbacks will be fired.
   decoder_->Initialize(
-      config,
-      true /* low_delay */,
-      base::Bind(&VideoDecoderShim::DecoderImpl::OnPipelineStatus,
-                 base::Unretained(this)),
+      config, true /* low_delay */,
+      base::Bind(&VideoDecoderShim::DecoderImpl::OnInitDone,
+                 weak_ptr_factory_.GetWeakPtr()),
       base::Bind(&VideoDecoderShim::DecoderImpl::OnOutputComplete,
-                 base::Unretained(this)));
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void VideoDecoderShim::DecoderImpl::Decode(
@@ -715,15 +708,13 @@ void VideoDecoderShim::DecoderImpl::Reset() {
   while (!pending_decodes_.empty()) {
     const PendingDecode& decode = pending_decodes_.front();
     scoped_ptr<PendingFrame> pending_frame(new PendingFrame(decode.decode_id));
-    main_message_loop_->PostTask(FROM_HERE,
-                                 base::Bind(&VideoDecoderShim::OnDecodeComplete,
-                                            shim_,
-                                            media::VideoDecoder::kAborted,
-                                            decode.decode_id));
+    main_task_runner_->PostTask(
+        FROM_HERE, base::Bind(&VideoDecoderShim::OnDecodeComplete, shim_,
+                              media::VideoDecoder::kAborted, decode.decode_id));
     pending_decodes_.pop();
   }
   decoder_->Reset(base::Bind(&VideoDecoderShim::DecoderImpl::OnResetComplete,
-                             base::Unretained(this)));
+                             weak_ptr_factory_.GetWeakPtr()));
 }
 
 void VideoDecoderShim::DecoderImpl::Stop() {
@@ -736,29 +727,12 @@ void VideoDecoderShim::DecoderImpl::Stop() {
   // This instance is deleted once we exit this scope.
 }
 
-void VideoDecoderShim::DecoderImpl::OnPipelineStatus(
-    media::PipelineStatus status) {
-  int32_t result;
-  switch (status) {
-    case media::PIPELINE_OK:
-      result = PP_OK;
-      break;
-    case media::DECODER_ERROR_NOT_SUPPORTED:
-      result = PP_ERROR_NOTSUPPORTED;
-      break;
-    default:
-      result = PP_ERROR_FAILED;
-      break;
-  }
+void VideoDecoderShim::DecoderImpl::OnInitDone(bool success) {
+  int32_t result = success ? PP_OK : PP_ERROR_NOTSUPPORTED;
 
-  // Calculate how many textures the shim should create.
-  uint32_t shim_texture_pool_size = media::limits::kMaxVideoFrames + 1;
-  main_message_loop_->PostTask(
-      FROM_HERE,
-      base::Bind(&VideoDecoderShim::OnInitializeComplete,
-                 shim_,
-                 result,
-                 shim_texture_pool_size));
+  main_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&VideoDecoderShim::OnInitializeComplete, shim_,
+                            result));
 }
 
 void VideoDecoderShim::DecoderImpl::DoDecode() {
@@ -770,7 +744,7 @@ void VideoDecoderShim::DecoderImpl::DoDecode() {
   decode_id_ = decode.decode_id;
   decoder_->Decode(decode.buffer,
                    base::Bind(&VideoDecoderShim::DecoderImpl::OnDecodeComplete,
-                              base::Unretained(this)));
+                              weak_ptr_factory_.GetWeakPtr()));
   pending_decodes_.pop();
 }
 
@@ -794,10 +768,9 @@ void VideoDecoderShim::DecoderImpl::OnDecodeComplete(
       break;
   }
 
-  main_message_loop_->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &VideoDecoderShim::OnDecodeComplete, shim_, result, decode_id_));
+  main_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&VideoDecoderShim::OnDecodeComplete, shim_, result,
+                            decode_id_));
 
   DoDecode();
 }
@@ -809,31 +782,30 @@ void VideoDecoderShim::DecoderImpl::OnOutputComplete(
   DCHECK(awaiting_decoder_);
 
   scoped_ptr<PendingFrame> pending_frame;
-  if (!frame->end_of_stream()) {
+  if (!frame->metadata()->IsTrue(media::VideoFrameMetadata::END_OF_STREAM))
     pending_frame.reset(new PendingFrame(decode_id_, frame));
-  } else {
+  else
     pending_frame.reset(new PendingFrame(decode_id_));
-  }
 
-  main_message_loop_->PostTask(FROM_HERE,
-                               base::Bind(&VideoDecoderShim::OnOutputComplete,
-                                          shim_,
-                                          base::Passed(&pending_frame)));
+  main_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&VideoDecoderShim::OnOutputComplete, shim_,
+                            base::Passed(&pending_frame)));
 }
 
 void VideoDecoderShim::DecoderImpl::OnResetComplete() {
-  main_message_loop_->PostTask(
+  main_task_runner_->PostTask(
       FROM_HERE, base::Bind(&VideoDecoderShim::OnResetComplete, shim_));
 }
 
-VideoDecoderShim::VideoDecoderShim(PepperVideoDecoderHost* host)
+VideoDecoderShim::VideoDecoderShim(
+    PepperVideoDecoderHost* host, uint32_t texture_pool_size)
     : state_(UNINITIALIZED),
       host_(host),
       media_task_runner_(
           RenderThreadImpl::current()->GetMediaThreadTaskRunner()),
       context_provider_(
           RenderThreadImpl::current()->SharedMainThreadContextProvider()),
-      texture_pool_size_(0),
+      texture_pool_size_(texture_pool_size),
       num_pending_decodes_(0),
       yuv_converter_(new YUVConverter(context_provider_)),
       weak_ptr_factory_(this) {
@@ -884,15 +856,11 @@ bool VideoDecoderShim::Initialize(
   }
 
   media::VideoDecoderConfig config(
-      codec,
-      profile,
-      media::VideoFrame::YV12,
+      codec, profile, media::PIXEL_FORMAT_YV12, media::COLOR_SPACE_UNSPECIFIED,
       gfx::Size(32, 24),  // Small sizes that won't fail.
-      gfx::Rect(32, 24),
-      gfx::Size(32, 24),
+      gfx::Rect(32, 24), gfx::Size(32, 24),
       NULL /* extra_data */,  // TODO(bbudge) Verify this isn't needed.
-      0 /* extra_data_size */,
-      false /* decryption */);
+      0 /* extra_data_size */, false /* decryption */);
 
   media_task_runner_->PostTask(
       FROM_HERE,
@@ -979,14 +947,12 @@ void VideoDecoderShim::Destroy() {
   delete this;
 }
 
-void VideoDecoderShim::OnInitializeComplete(int32_t result,
-                                            uint32_t texture_pool_size) {
+void VideoDecoderShim::OnInitializeComplete(int32_t result) {
   DCHECK(RenderThreadImpl::current());
   DCHECK(host_);
 
   if (result == PP_OK) {
     state_ = DECODING;
-    texture_pool_size_ = texture_pool_size;
   }
 
   host_->OnInitializeComplete(result);

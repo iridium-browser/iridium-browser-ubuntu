@@ -5,6 +5,7 @@
 #include "config.h"
 #include "core/paint/SVGRootInlineBoxPainter.h"
 
+#include "core/layout/api/SelectionState.h"
 #include "core/layout/svg/line/SVGInlineFlowBox.h"
 #include "core/layout/svg/line/SVGInlineTextBox.h"
 #include "core/layout/svg/line/SVGRootInlineBox.h"
@@ -20,19 +21,16 @@ void SVGRootInlineBoxPainter::paint(const PaintInfo& paintInfo, const LayoutPoin
 {
     ASSERT(paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseSelection);
 
-    bool isPrinting = m_svgRootInlineBox.layoutObject().document().printing();
-    bool hasSelection = !isPrinting && m_svgRootInlineBox.selectionState() != LayoutObject::SelectionNone;
+    bool hasSelection = !paintInfo.isPrinting() && m_svgRootInlineBox.selectionState() != SelectionNone;
 
     PaintInfo paintInfoBeforeFiltering(paintInfo);
-    if (hasSelection) {
+    if (hasSelection && !LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(*paintInfoBeforeFiltering.context, m_svgRootInlineBox.layoutObject(), paintInfoBeforeFiltering.phase)) {
         LayoutObjectDrawingRecorder recorder(*paintInfoBeforeFiltering.context, m_svgRootInlineBox.layoutObject(), paintInfoBeforeFiltering.phase, paintInfoBeforeFiltering.rect);
-        if (!recorder.canUseCachedDrawing()) {
-            for (InlineBox* child = m_svgRootInlineBox.firstChild(); child; child = child->nextOnLine()) {
-                if (child->isSVGInlineTextBox())
-                    SVGInlineTextBoxPainter(*toSVGInlineTextBox(child)).paintSelectionBackground(paintInfoBeforeFiltering);
-                else if (child->isSVGInlineFlowBox())
-                    SVGInlineFlowBoxPainter(*toSVGInlineFlowBox(child)).paintSelectionBackground(paintInfoBeforeFiltering);
-            }
+        for (InlineBox* child = m_svgRootInlineBox.firstChild(); child; child = child->nextOnLine()) {
+            if (child->isSVGInlineTextBox())
+                SVGInlineTextBoxPainter(*toSVGInlineTextBox(child)).paintSelectionBackground(paintInfoBeforeFiltering);
+            else if (child->isSVGInlineFlowBox())
+                SVGInlineFlowBoxPainter(*toSVGInlineFlowBox(child)).paintSelectionBackground(paintInfoBeforeFiltering);
         }
     }
 

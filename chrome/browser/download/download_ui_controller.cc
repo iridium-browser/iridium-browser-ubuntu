@@ -5,13 +5,13 @@
 #include "chrome/browser/download/download_ui_controller.h"
 
 #include "base/callback.h"
-#include "base/command_line.h"
 #include "base/stl_util.h"
 #include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/download/notification/download_notification_manager.h"
+#include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -19,6 +19,7 @@
 #if defined(OS_ANDROID)
 #include "content/public/browser/android/download_controller_android.h"
 #else
+#include "chrome/browser/download/notification/download_notification_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/host_desktop.h"
@@ -85,8 +86,11 @@ void DownloadShelfUIControllerDelegate::OnNewDownloadReady(
                                                 chrome::GetActiveDesktop());
   }
 
-  if (browser)
-    browser->ShowDownload(item);
+  if (browser && browser->window() &&
+      DownloadItemModel(item).ShouldShowInShelf()) {
+    // GetDownloadShelf creates the download shelf if it was not yet created.
+    browser->window()->GetDownloadShelf()->AddDownload(item);
+  }
 }
 
 #endif  // !OS_ANDROID
@@ -107,8 +111,7 @@ DownloadUIController::DownloadUIController(content::DownloadManager* manager,
     // The delegate should not be invoked after the profile has gone away. This
     // should be the case since DownloadUIController is owned by
     // DownloadService, which in turn is a profile keyed service.
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableDownloadNotification)) {
+    if (DownloadNotificationManager::IsEnabled()) {
       delegate_.reset(new DownloadNotificationManager(
           Profile::FromBrowserContext(manager->GetBrowserContext())));
     } else {
@@ -143,5 +146,25 @@ void DownloadUIController::OnDownloadUpdated(content::DownloadManager* manager,
     return;
 
   DownloadItemModel(item).SetWasUINotified(true);
+
+#if !defined(OS_ANDROID)
+  content::WebContents* web_contents = item->GetWebContents();
+  if (web_contents) {
+    Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+    // If the download occurs in a new tab, and it's not a save page
+    // download (started before initial navigation completed) close it.
+    // Avoid calling CloseContents if the tab is not in this browser's tab strip
+    // model; this can happen if the download was initiated by something
+    // internal to Chrome, such as by the app list.
+    if (browser && web_contents->GetController().IsInitialNavigation() &&
+        browser->tab_strip_model()->count() > 1 &&
+        browser->tab_strip_model()->GetIndexOfWebContents(web_contents) !=
+            TabStripModel::kNoTab &&
+        !item->IsSavePackageDownload()) {
+      web_contents->Close();
+    }
+  }
+#endif
+
   delegate_->OnNewDownloadReady(item);
 }

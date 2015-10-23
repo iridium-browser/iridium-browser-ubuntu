@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
-
 #include "src/bignum.h"
 #include "src/utils.h"
 
@@ -750,4 +748,5 @@ void Bignum::SubtractTimes(const Bignum& other, int factor) {
 }
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

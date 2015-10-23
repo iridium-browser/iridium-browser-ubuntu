@@ -2,11 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core import wpr_modes
 from telemetry import decorators
 from telemetry.page import page as page_module
-from telemetry.unittest_util import options_for_unittests
-from telemetry.unittest_util import page_test_test_case
+from telemetry.testing import options_for_unittests
+from telemetry.testing import page_test_test_case
+from telemetry.util import wpr_modes
 
 from measurements import smoothness
 from page_sets import repaint_helpers
@@ -36,7 +36,7 @@ class RepaintUnitTest(page_test_test_case.PageTestTestCase):
   @decorators.Disabled('chromeos')  # crbug.com/483212
   def testRepaint(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddUserStory(TestRepaintPage(ps, ps.base_dir))
+    ps.AddStory(TestRepaintPage(ps, ps.base_dir))
     measurement = smoothness.Repaint()
     results = self.RunMeasurement(measurement, ps, options=self._options)
     self.assertEquals(0, len(results.failures))

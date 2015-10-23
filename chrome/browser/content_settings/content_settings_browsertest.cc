@@ -7,7 +7,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
@@ -16,10 +16,10 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
@@ -73,24 +73,11 @@ class ContentSettingsTest : public InProcessBrowserTest {
     ASSERT_TRUE(content::GetCookies(browser()->profile(), url).empty());
 
     // Ensure cookies get wiped after last incognito window closes.
-    content::WindowedNotificationObserver signal(
-        chrome::NOTIFICATION_BROWSER_CLOSED,
-        content::Source<Browser>(incognito));
-
-    chrome::CloseWindow(incognito);
-
-#if defined(OS_MACOSX)
-    // BrowserWindowController depends on the auto release pool being recycled
-    // in the message loop to delete itself, which frees the Browser object
-    // which fires this event.
-    AutoreleasePool()->Recycle();
-#endif
-
-    signal.Wait();
+    CloseBrowserSynchronously(incognito);
 
     incognito = CreateIncognitoBrowser();
     ASSERT_TRUE(content::GetCookies(incognito->profile(), url).empty());
-    chrome::CloseWindow(incognito);
+    CloseBrowserSynchronously(incognito);
   }
 
   void PreBasic(const GURL& url) {
@@ -139,8 +126,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, BasicCookiesHttps) {
 // Verify that cookies are being blocked.
 IN_PROC_BROWSER_TEST_F(ContentSettingsTest, PRE_BlockCookies) {
   ASSERT_TRUE(test_server()->Start());
-  CookieSettings::Factory::GetForProfile(browser()->profile())->
-      SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
+  CookieSettingsFactory::GetForProfile(browser()->profile())
+      ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
   GURL url = test_server()->GetURL("files/setcookie.html");
   ui_test_utils::NavigateToURL(browser(), url);
   ASSERT_TRUE(GetCookies(browser()->profile(), url).empty());
@@ -149,10 +136,9 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, PRE_BlockCookies) {
 
 // Ensure that the setting persists.
 IN_PROC_BROWSER_TEST_F(ContentSettingsTest, BlockCookies) {
-  ASSERT_EQ(
-      CONTENT_SETTING_BLOCK,
-      CookieSettings::Factory::GetForProfile(browser()->profile())->
-          GetDefaultCookieSetting(NULL));
+  ASSERT_EQ(CONTENT_SETTING_BLOCK,
+            CookieSettingsFactory::GetForProfile(browser()->profile())
+                ->GetDefaultCookieSetting(NULL));
 }
 
 // Verify that cookies can be allowed and set using exceptions for particular
@@ -160,8 +146,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, BlockCookies) {
 IN_PROC_BROWSER_TEST_F(ContentSettingsTest, AllowCookiesUsingExceptions) {
   ASSERT_TRUE(test_server()->Start());
   GURL url = test_server()->GetURL("files/setcookie.html");
-  CookieSettings* settings =
-      CookieSettings::Factory::GetForProfile(browser()->profile()).get();
+  content_settings::CookieSettings* settings =
+      CookieSettingsFactory::GetForProfile(browser()->profile()).get();
   settings->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), url);
@@ -179,8 +165,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, AllowCookiesUsingExceptions) {
 IN_PROC_BROWSER_TEST_F(ContentSettingsTest, BlockCookiesUsingExceptions) {
   ASSERT_TRUE(test_server()->Start());
   GURL url = test_server()->GetURL("files/setcookie.html");
-  CookieSettings* settings =
-      CookieSettings::Factory::GetForProfile(browser()->profile()).get();
+  content_settings::CookieSettings* settings =
+      CookieSettingsFactory::GetForProfile(browser()->profile()).get();
   settings->SetCookieSetting(ContentSettingsPattern::FromURL(url),
                              ContentSettingsPattern::Wildcard(),
                              CONTENT_SETTING_BLOCK);
@@ -207,8 +193,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest,
   // across the restart.
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
       base::FilePath(FILE_PATH_LITERAL("setcookie.html")));
-  CookieSettings* settings =
-      CookieSettings::Factory::GetForProfile(browser()->profile()).get();
+  content_settings::CookieSettings* settings =
+      CookieSettingsFactory::GetForProfile(browser()->profile()).get();
   settings->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), url);
@@ -236,8 +222,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectLoopCookies) {
 
   GURL test_url = test_server()->GetURL("files/redirect-loop.html");
 
-  CookieSettings::Factory::GetForProfile(browser()->profile())->
-      SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
+  CookieSettingsFactory::GetForProfile(browser()->profile())
+      ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -279,8 +265,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectCrossOrigin) {
       host_port.port()));
   GURL test_url = test_server()->GetURL("server-redirect?" + redirect);
 
-  CookieSettings::Factory::GetForProfile(browser()->profile())->
-      SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
+  CookieSettingsFactory::GetForProfile(browser()->profile())
+      ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -290,243 +276,6 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectCrossOrigin) {
   EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
       IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
 }
-
-// On Aura NPAPI only works on Windows.
-#if !defined(USE_AURA) || defined(OS_WIN)
-
-class LoadPluginTest : public ContentSettingsTest {
- protected:
-  void PerformTest(bool expect_loaded) {
-    GURL url = ui_test_utils::GetTestUrl(
-        base::FilePath(),
-        base::FilePath().AppendASCII("load_npapi_plugin.html"));
-    ui_test_utils::NavigateToURL(browser(), url);
-
-    const char* expected_result = expect_loaded ? "Loaded" : "Not Loaded";
-    const char* unexpected_result = expect_loaded ? "Not Loaded" : "Loaded";
-
-    base::string16 expected_title(base::ASCIIToUTF16(expected_result));
-    base::string16 unexpected_title(base::ASCIIToUTF16(unexpected_result));
-
-    content::TitleWatcher title_watcher(
-        browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
-    title_watcher.AlsoWaitForTitle(unexpected_title);
-
-    EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-  }
-
-  void SetUpCommandLineInternal(base::CommandLine* command_line,
-                                bool expect_loaded) {
-#if defined(OS_MACOSX)
-    base::FilePath plugin_dir;
-    PathService::Get(base::DIR_MODULE, &plugin_dir);
-    plugin_dir = plugin_dir.AppendASCII("plugins");
-    // The plugins directory isn't read by default on the Mac, so it needs to be
-    // explicitly registered.
-    command_line->AppendSwitchPath(switches::kExtraPluginDir, plugin_dir);
-#endif
-    command_line->AppendSwitch(switches::kAlwaysAuthorizePlugins);
-    if (expect_loaded)
-      command_line->AppendSwitch(switches::kEnableNpapi);
-  }
-};
-
-class DisabledPluginTest : public LoadPluginTest {
- public:
-  DisabledPluginTest() {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    SetUpCommandLineInternal(command_line, false);
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(DisabledPluginTest, Load) {
-  PerformTest(false);
-}
-
-class EnabledPluginTest : public LoadPluginTest {
- public:
-  EnabledPluginTest() {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    SetUpCommandLineInternal(command_line, true);
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(EnabledPluginTest, Load) {
-  PerformTest(true);
-}
-
-class ClickToPlayPluginTest : public ContentSettingsTest {
- public:
-  ClickToPlayPluginTest() {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-#if defined(OS_MACOSX)
-    base::FilePath plugin_dir;
-    PathService::Get(base::DIR_MODULE, &plugin_dir);
-    plugin_dir = plugin_dir.AppendASCII("plugins");
-    // The plugins directory isn't read by default on the Mac, so it needs to be
-    // explicitly registered.
-    command_line->AppendSwitchPath(switches::kExtraPluginDir, plugin_dir);
-#endif
-    command_line->AppendSwitch(switches::kEnableNpapi);
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, Basic) {
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
-
-  GURL url = ui_test_utils::GetTestUrl(
-      base::FilePath(), base::FilePath().AppendASCII("clicktoplay.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
-
-  base::string16 expected_title(base::ASCIIToUTF16("OK"));
-  content::TitleWatcher title_watcher(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
-
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ChromePluginServiceFilter* filter = ChromePluginServiceFilter::GetInstance();
-  int process_id = web_contents->GetMainFrame()->GetProcess()->GetID();
-  base::FilePath path(FILE_PATH_LITERAL("blah"));
-  EXPECT_FALSE(filter->CanLoadPlugin(process_id, path));
-  filter->AuthorizeAllPlugins(web_contents, true, std::string());
-  EXPECT_TRUE(filter->CanLoadPlugin(process_id, path));
-
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-}
-
-// Verify that plugins can be allowed on a domain by adding an exception
-IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, AllowException) {
-  GURL url = ui_test_utils::GetTestUrl(
-      base::FilePath(), base::FilePath().AppendASCII("clicktoplay.html"));
-
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
-  browser()->profile()->GetHostContentSettingsMap()
-      ->SetContentSetting(ContentSettingsPattern::FromURL(url),
-                          ContentSettingsPattern::Wildcard(),
-                          CONTENT_SETTINGS_TYPE_PLUGINS,
-                          std::string(),
-                          CONTENT_SETTING_ALLOW);
-
-  base::string16 expected_title(base::ASCIIToUTF16("OK"));
-  content::TitleWatcher title_watcher(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
-  ui_test_utils::NavigateToURL(browser(), url);
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-}
-
-// Verify that plugins can be blocked on a domain by adding an exception.
-IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, BlockException) {
-  GURL url = ui_test_utils::GetTestUrl(
-      base::FilePath(), base::FilePath().AppendASCII("clicktoplay.html"));
-
-  browser()->profile()->GetHostContentSettingsMap()
-      ->SetContentSetting(ContentSettingsPattern::FromURL(url),
-                          ContentSettingsPattern::Wildcard(),
-                          CONTENT_SETTINGS_TYPE_PLUGINS,
-                          std::string(),
-                          CONTENT_SETTING_BLOCK);
-
-  base::string16 expected_title(base::ASCIIToUTF16("Click To Play"));
-  content::TitleWatcher title_watcher(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
-  ui_test_utils::NavigateToURL(browser(), url);
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-}
-
-// Crashes on Mac Asan.  http://crbug.com/239169
-#if defined(OS_MACOSX)
-#define MAYBE_LoadAllBlockedPlugins DISABLED_LoadAllBlockedPlugins
-// TODO(jschuh): Flaky plugin tests. crbug.com/244653
-#elif defined(OS_WIN) && defined(ARCH_CPU_X86_64)
-#define MAYBE_LoadAllBlockedPlugins DISABLED_LoadAllBlockedPlugins
-#else
-#define MAYBE_LoadAllBlockedPlugins LoadAllBlockedPlugins
-#endif
-IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, MAYBE_LoadAllBlockedPlugins) {
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
-
-  GURL url = ui_test_utils::GetTestUrl(
-      base::FilePath(),
-      base::FilePath().AppendASCII("load_all_blocked_plugins.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
-
-  base::string16 expected_title1(base::ASCIIToUTF16("1"));
-  content::TitleWatcher title_watcher1(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title1);
-
-  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
-      browser()->tab_strip_model()->GetActiveWebContents(), true,
-      std::string());
-  EXPECT_EQ(expected_title1, title_watcher1.WaitAndGetTitle());
-
-  base::string16 expected_title2(base::ASCIIToUTF16("2"));
-  content::TitleWatcher title_watcher2(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title2);
-
-  ASSERT_TRUE(content::ExecuteScript(
-      browser()->tab_strip_model()->GetActiveWebContents(), "window.inject()"));
-
-  EXPECT_EQ(expected_title2, title_watcher2.WaitAndGetTitle());
-}
-
-// If this flakes, use http://crbug.com/113057.
-// TODO(jschuh): Hanging plugin tests. crbug.com/244653
-#if !defined(OS_WIN) && !defined(ARCH_CPU_X86_64)
-IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, NoCallbackAtLoad) {
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
-
-  GURL url("data:application/vnd.npapi-test,CallOnStartup();");
-  ui_test_utils::NavigateToURL(browser(), url);
-
-  std::string script("CallOnStartup = function() { ");
-  script.append("document.documentElement.appendChild");
-  script.append("(document.createElement(\"head\")); ");
-  script.append("document.title = \"OK\"; }");
-
-  // Inject the callback function into the HTML page generated by the browser.
-  ASSERT_TRUE(content::ExecuteScript(
-      browser()->tab_strip_model()->GetActiveWebContents(), script));
-
-  base::string16 expected_title(base::ASCIIToUTF16("OK"));
-  content::TitleWatcher title_watcher(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
-
-  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
-      browser()->tab_strip_model()->GetActiveWebContents(), true,
-      std::string());
-
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-}
-#endif
-
-IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, DeleteSelfAtLoad) {
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
-
-  GURL url = ui_test_utils::GetTestUrl(
-      base::FilePath(),
-      base::FilePath().AppendASCII("plugin_delete_self_at_load.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
-
-  base::string16 expected_title(base::ASCIIToUTF16("OK"));
-  content::TitleWatcher title_watcher(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
-
-  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
-      browser()->tab_strip_model()->GetActiveWebContents(), true,
-      std::string());
-
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-}
-
-#endif  // !defined(USE_AURA) || defined(OS_WIN)
 
 #if defined(ENABLE_PLUGINS)
 class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {

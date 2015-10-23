@@ -4,11 +4,13 @@
 
 #include "chrome/browser/ui/startup/default_browser_prompt.h"
 
+#include "base/location.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -19,7 +21,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -27,6 +28,7 @@
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/web_contents.h"
@@ -41,18 +43,18 @@ namespace {
 // modal system UI.
 void SetChromeAsDefaultBrowser(bool interactive_flow, PrefService* prefs) {
   if (interactive_flow) {
-    UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefaultUI", 1);
+    UMA_HISTOGRAM_BOOLEAN("DefaultBrowserWarning.SetAsDefaultUI", true);
     if (!ShellIntegration::SetAsDefaultBrowserInteractive()) {
-      UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefaultUIFailed", 1);
+      UMA_HISTOGRAM_BOOLEAN("DefaultBrowserWarning.SetAsDefaultUIFailed", true);
     } else if (ShellIntegration::GetDefaultBrowser() ==
                ShellIntegration::NOT_DEFAULT) {
       // If the interaction succeeded but we are still not the default browser
       // it likely means the user simply selected another browser from the
       // panel. We will respect this choice and write it down as 'no, thanks'.
-      UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.DontSetAsDefault", 1);
+      UMA_HISTOGRAM_BOOLEAN("DefaultBrowserWarning.DontSetAsDefault", true);
     }
   } else {
-    UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefault", 1);
+    UMA_HISTOGRAM_BOOLEAN("DefaultBrowserWarning.SetAsDefault", true);
     ShellIntegration::SetAsDefaultBrowser();
   }
 }
@@ -75,7 +77,7 @@ class DefaultBrowserInfoBarDelegate : public ConfirmInfoBarDelegate {
 
   // ConfirmInfoBarDelegate:
   int GetIconID() const override;
-  bool ShouldExpireInternal(const NavigationDetails& details) const override;
+  bool ShouldExpire(const NavigationDetails& details) const override;
   base::string16 GetMessageText() const override;
   base::string16 GetButtonLabel(InfoBarButton button) const override;
   bool OKButtonTriggersUACPrompt() const override;
@@ -121,25 +123,24 @@ DefaultBrowserInfoBarDelegate::DefaultBrowserInfoBarDelegate(
       weak_factory_(this) {
   // We want the info-bar to stick-around for few seconds and then be hidden
   // on the next navigation after that.
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&DefaultBrowserInfoBarDelegate::AllowExpiry,
-                 weak_factory_.GetWeakPtr()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&DefaultBrowserInfoBarDelegate::AllowExpiry,
+                            weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(8));
 }
 
 DefaultBrowserInfoBarDelegate::~DefaultBrowserInfoBarDelegate() {
   if (!action_taken_)
-    UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.Ignored", 1);
+    UMA_HISTOGRAM_BOOLEAN("DefaultBrowserWarning.Ignored", true);
 }
 
 int DefaultBrowserInfoBarDelegate::GetIconID() const {
   return IDR_PRODUCT_LOGO_32;
 }
 
-bool DefaultBrowserInfoBarDelegate::ShouldExpireInternal(
+bool DefaultBrowserInfoBarDelegate::ShouldExpire(
     const NavigationDetails& details) const {
-  return should_expire_;
+  return should_expire_ && ConfirmInfoBarDelegate::ShouldExpire(details);
 }
 
 base::string16 DefaultBrowserInfoBarDelegate::GetMessageText() const {
@@ -169,7 +170,7 @@ bool DefaultBrowserInfoBarDelegate::Accept() {
 
 bool DefaultBrowserInfoBarDelegate::Cancel() {
   action_taken_ = true;
-  UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.DontSetAsDefault", 1);
+  UMA_HISTOGRAM_BOOLEAN("DefaultBrowserWarning.DontSetAsDefault", true);
   // User clicked "Don't ask me again", remember that.
   prefs_->SetBoolean(prefs::kCheckDefaultBrowser, false);
   return true;
@@ -269,8 +270,7 @@ void ShowDefaultBrowserPrompt(Profile* profile, HostDesktopType desktop_type) {
     const Version disable_version(disable_version_string);
     DCHECK(disable_version_string.empty() || disable_version.IsValid());
     if (disable_version.IsValid()) {
-      const chrome::VersionInfo version_info;
-      if (disable_version.Equals(Version(version_info.Version())))
+      if (disable_version.Equals(Version(version_info::GetVersionNumber())))
         show_prompt = false;
     }
   }

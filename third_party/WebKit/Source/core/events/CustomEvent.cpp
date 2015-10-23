@@ -37,10 +37,18 @@ CustomEvent::CustomEvent()
 CustomEvent::CustomEvent(const AtomicString& type, const CustomEventInit& initializer)
     : Event(type, initializer)
 {
+    if (initializer.hasDetail())
+        m_detail = initializer.detail();
 }
 
 CustomEvent::~CustomEvent()
 {
+}
+
+void CustomEvent::initCustomEvent(const AtomicString& type, bool canBubble, bool cancelable, const ScriptValue& detail)
+{
+    initEvent(type, canBubble, cancelable);
+    m_detail = detail;
 }
 
 void CustomEvent::initCustomEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<SerializedScriptValue> serializedDetail)

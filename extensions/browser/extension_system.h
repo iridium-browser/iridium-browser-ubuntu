@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/common/extension.h"
@@ -29,14 +30,11 @@ class BrowserContext;
 
 namespace extensions {
 
+class AppSorting;
 class ContentVerifier;
-class DeclarativeUserScriptManager;
-class EventRouter;
 class Extension;
 class ExtensionSet;
 class InfoMap;
-class InstallVerifier;
-class LazyBackgroundTaskQueue;
 class ManagementPolicy;
 class OneShotEvent;
 class QuotaService;
@@ -76,9 +74,6 @@ class ExtensionSystem : public KeyedService {
   // The SharedUserScriptMaster is created at startup.
   virtual SharedUserScriptMaster* shared_user_script_master() = 0;
 
-  // The DeclarativeUserScriptManager is created at startup.
-  virtual DeclarativeUserScriptManager* declarative_user_script_manager() = 0;
-
   // The StateStore is created at startup.
   virtual StateStore* state_store() = 0;
 
@@ -88,26 +83,22 @@ class ExtensionSystem : public KeyedService {
   // Returns the IO-thread-accessible extension data.
   virtual InfoMap* info_map() = 0;
 
-  // The LazyBackgroundTaskQueue is created at startup.
-  virtual LazyBackgroundTaskQueue* lazy_background_task_queue() = 0;
-
-  // The EventRouter is created at startup.
-  virtual EventRouter* event_router() = 0;
-
-  // The InstallVerifier is created at startup.
-  virtual InstallVerifier* install_verifier() = 0;
-
   // Returns the QuotaService that limits calls to certain extension functions.
   // Lives on the UI thread. Created at startup.
   virtual QuotaService* quota_service() = 0;
+
+  // Returns the AppSorting which provides an ordering for all installed apps.
+  virtual AppSorting* app_sorting() = 0;
 
   // Called by the ExtensionService that lives in this system. Gives the
   // info map a chance to react to the load event before the EXTENSION_LOADED
   // notification has fired. The purpose for handling this event first is to
   // avoid race conditions by making sure URLRequestContexts learn about new
-  // extensions before anything else needs them to know.
+  // extensions before anything else needs them to know. This operation happens
+  // asynchronously. |callback| is run on the calling thread once completed.
   virtual void RegisterExtensionWithRequestContexts(
-      const Extension* extension) {}
+      const Extension* extension,
+      const base::Closure& callback) {}
 
   // Called by the ExtensionService that lives in this system. Lets the
   // info map clean up its RequestContexts once all the listeners to the

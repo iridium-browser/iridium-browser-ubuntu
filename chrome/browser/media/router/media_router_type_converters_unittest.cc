@@ -11,10 +11,11 @@
 namespace media_router {
 
 TEST(MediaRouterTypeConvertersTest, ConvertMediaSink) {
-  MediaSink expected_media_sink("sinkId1", "Sink 1");
+  MediaSink expected_media_sink("sinkId1", "Sink 1", true);
   interfaces::MediaSinkPtr expected_mojo_sink(interfaces::MediaSink::New());
   expected_mojo_sink->sink_id = "sinkId1";
   expected_mojo_sink->name = "Sink 1";
+  expected_mojo_sink->is_launching = true;
 
   interfaces::MediaSinkPtr mojo_sink =
       mojo::TypeConverter<interfaces::MediaSinkPtr, MediaSink>::Convert(
@@ -29,14 +30,15 @@ TEST(MediaRouterTypeConvertersTest, ConvertMediaSink) {
   // Convert MediaSink and back should result in identical object.
   EXPECT_EQ(expected_media_sink.name(), media_sink.name());
   EXPECT_EQ(expected_media_sink.id(), media_sink.id());
+  EXPECT_EQ(expected_media_sink.is_launching(), media_sink.is_launching());
   EXPECT_TRUE(expected_media_sink.Equals(media_sink));
 }
 
 TEST(MediaRouterTypeConvertersTest, ConvertMediaRoute) {
-  MediaSource expected_source(ForTabMediaSource(123));
+  MediaSource expected_source(MediaSourceForTab(123));
   MediaRoute expected_media_route("routeId1", expected_source,
                                   MediaSink("sinkId", "sinkName"),
-                                  "Description", false);
+                                  "Description", false, "cast_view.html");
   interfaces::MediaRoutePtr expected_mojo_route(interfaces::MediaRoute::New());
   expected_mojo_route->media_route_id = "routeId1";
   expected_mojo_route->media_source = expected_source.id();
@@ -45,6 +47,7 @@ TEST(MediaRouterTypeConvertersTest, ConvertMediaRoute) {
   expected_mojo_route->media_sink->name = "sinkName";
   expected_mojo_route->description = "Description";
   expected_mojo_route->is_local = false;
+  expected_mojo_route->custom_controller_path = "cast_view.html";
 
   interfaces::MediaRoutePtr mojo_route = mojo::TypeConverter<
       media_router::interfaces::MediaRoutePtr,
@@ -58,24 +61,26 @@ TEST(MediaRouterTypeConvertersTest, ConvertMediaRoute) {
   EXPECT_EQ(expected_media_route.media_sink().id(),
             media_route.media_sink().id());
   EXPECT_EQ(expected_media_route.description(), media_route.description());
-  EXPECT_EQ(expected_media_route.state(), media_route.state());
   EXPECT_TRUE(
       expected_media_route.media_source().Equals(media_route.media_source()));
   EXPECT_EQ(expected_media_route.media_source().id(),
             media_route.media_source().id());
   EXPECT_EQ(expected_media_route.is_local(), media_route.is_local());
+  EXPECT_EQ(expected_media_route.custom_controller_path(),
+            media_route.custom_controller_path());
 }
 
 TEST(MediaRouterTypeConvertersTest, ConvertMediaRouteWithoutOptionalFields) {
   MediaRoute expected_media_route("routeId1", MediaSource(),
-                                  MediaSink("sinkId", "sinkName"),
-                                  "Description", false);
+                                  MediaSink("sinkId", "sinkName", false),
+                                  "Description", false, "");
   interfaces::MediaRoutePtr expected_mojo_route(interfaces::MediaRoute::New());
   // MediaRoute::media_source is omitted.
   expected_mojo_route->media_route_id = "routeId1";
   expected_mojo_route->media_sink = interfaces::MediaSink::New();
   expected_mojo_route->media_sink->sink_id = "sinkId";
   expected_mojo_route->media_sink->name = "sinkName";
+  expected_mojo_route->media_sink->is_launching = false;
   expected_mojo_route->description = "Description";
   expected_mojo_route->is_local = false;
 
@@ -107,9 +112,9 @@ TEST(MediaRouterTypeConvertersTest, ConvertIssue) {
   mojoIssue->help_url = "help_url";
 
   std::vector<IssueAction> secondary_actions;
-  secondary_actions.push_back(IssueAction(IssueAction::CANCEL));
-  secondary_actions.push_back(IssueAction(IssueAction::DISMISS));
-  Issue expected_issue("title", "msg", IssueAction(IssueAction::OK),
+  secondary_actions.push_back(IssueAction(IssueAction::TYPE_CANCEL));
+  secondary_actions.push_back(IssueAction(IssueAction::TYPE_DISMISS));
+  Issue expected_issue("title", "msg", IssueAction(IssueAction::TYPE_OK),
                        secondary_actions, "routeId", Issue::WARNING, true,
                        "help_url");
   Issue converted_issue = mojo::TypeConverter<
@@ -144,7 +149,7 @@ TEST(MediaRouterTypeConvertersTest, ConvertIssueWithoutOptionalFields) {
   mojoIssue->severity = interfaces::Issue::Severity::SEVERITY_WARNING;
   mojoIssue->is_blocking = true;
 
-  Issue expected_issue("title", "", IssueAction(IssueAction::OK),
+  Issue expected_issue("title", "", IssueAction(IssueAction::TYPE_OK),
                        std::vector<IssueAction>(), "", Issue::WARNING, true,
                        "");
 

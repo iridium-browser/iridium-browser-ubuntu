@@ -37,8 +37,7 @@ class DummyEntryptionHandler : public syncer::SyncEncryptionHandler {
 namespace syncer {
 
 SyncRollbackManagerBase::SyncRollbackManagerBase()
-    : report_unrecoverable_error_function_(NULL),
-      dummy_handler_(new DummyEntryptionHandler),
+    : dummy_handler_(new DummyEntryptionHandler),
       initialized_(false),
       weak_ptr_factory_(this) {
 }
@@ -50,9 +49,9 @@ bool SyncRollbackManagerBase::InitInternal(
     const base::FilePath& database_location,
     InternalComponentsFactory* internal_components_factory,
     InternalComponentsFactory::StorageOption storage,
-    scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler,
-    ReportUnrecoverableErrorFunction report_unrecoverable_error_function) {
-  unrecoverable_error_handler_ = unrecoverable_error_handler.Pass();
+    const WeakHandle<UnrecoverableErrorHandler>& unrecoverable_error_handler,
+    const base::Closure& report_unrecoverable_error_function) {
+  unrecoverable_error_handler_ = unrecoverable_error_handler;
   report_unrecoverable_error_function_ = report_unrecoverable_error_function;
 
   if (!InitBackupDB(database_location, internal_components_factory, storage)) {
@@ -214,7 +213,7 @@ void SyncRollbackManagerBase::NotifyInitializationFailure() {
           false, ModelTypeSet()));
 }
 
-syncer::SyncContextProxy* SyncRollbackManagerBase::GetSyncContextProxy() {
+syncer_v2::SyncContextProxy* SyncRollbackManagerBase::GetSyncContextProxy() {
   return NULL;
 }
 
@@ -246,7 +245,7 @@ bool SyncRollbackManagerBase::InitBackupDB(
   share_.directory.reset(
       new syncable::Directory(
           backing_store.release(),
-          unrecoverable_error_handler_.get(),
+          unrecoverable_error_handler_,
           report_unrecoverable_error_function_,
           NULL,
           NULL));
@@ -309,7 +308,8 @@ void SyncRollbackManagerBase::InitBookmarkFolder(const std::string& folder) {
   entry.PutSpecifics(specifics);
 }
 
-ObserverList<SyncManager::Observer>* SyncRollbackManagerBase::GetObservers() {
+base::ObserverList<SyncManager::Observer>*
+SyncRollbackManagerBase::GetObservers() {
   return &observers_;
 }
 
@@ -323,5 +323,8 @@ bool SyncRollbackManagerBase::HasDirectoryTypeDebugInfoObserver(
     syncer::TypeDebugInfoObserver* observer) { return false; }
 
 void SyncRollbackManagerBase::RequestEmitDebugInfo() {}
+
+void SyncRollbackManagerBase::ClearServerData(
+    const ClearServerDataCallback& callback) {}
 
 }  // namespace syncer

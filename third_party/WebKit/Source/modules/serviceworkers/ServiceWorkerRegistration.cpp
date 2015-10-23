@@ -16,7 +16,7 @@
 #include "modules/EventTargetModules.h"
 #include "modules/serviceworkers/ServiceWorkerContainerClient.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
-#include "public/platform/WebServiceWorkerProvider.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
 
 namespace blink {
 
@@ -63,19 +63,19 @@ void ServiceWorkerRegistration::setActive(WebServiceWorker* serviceWorker)
     m_active = ServiceWorker::from(executionContext(), serviceWorker);
 }
 
-ServiceWorkerRegistration* ServiceWorkerRegistration::from(ExecutionContext* executionContext, WebType* registration)
+ServiceWorkerRegistration* ServiceWorkerRegistration::from(ExecutionContext* executionContext, WebServiceWorkerRegistration* registration)
 {
     if (!registration)
         return 0;
     return getOrCreate(executionContext, registration);
 }
 
-ServiceWorkerRegistration* ServiceWorkerRegistration::take(ScriptPromiseResolver* resolver, WebType* registration)
+ServiceWorkerRegistration* ServiceWorkerRegistration::take(ScriptPromiseResolver* resolver, WebServiceWorkerRegistration* registration)
 {
     return from(resolver->scriptState()->executionContext(), registration);
 }
 
-void ServiceWorkerRegistration::dispose(WebType* registration)
+void ServiceWorkerRegistration::dispose(WebServiceWorkerRegistration* registration)
 {
     if (registration && !registration->proxy())
         delete registration;
@@ -86,9 +86,23 @@ String ServiceWorkerRegistration::scope() const
     return m_outerRegistration->scope().string();
 }
 
+ScriptPromise ServiceWorkerRegistration::update(ScriptState* scriptState)
+{
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromise promise = resolver->promise();
+
+    if (!m_provider) {
+        resolver->reject(DOMException::create(InvalidStateError, "Failed to update a ServiceWorkerRegistration: No associated provider is available."));
+        return promise;
+    }
+
+    m_outerRegistration->update(m_provider, new CallbackPromiseAdapter<void, ServiceWorkerError>(resolver));
+    return promise;
+}
+
 ScriptPromise ServiceWorkerRegistration::unregister(ScriptState* scriptState)
 {
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     if (!m_provider) {
@@ -96,16 +110,7 @@ ScriptPromise ServiceWorkerRegistration::unregister(ScriptState* scriptState)
         return promise;
     }
 
-    RefPtr<SecurityOrigin> documentOrigin = scriptState->executionContext()->securityOrigin();
-    KURL scopeURL = scriptState->executionContext()->completeURL(scope());
-    scopeURL.removeFragmentIdentifier();
-    if (!scope().isEmpty() && !documentOrigin->canRequest(scopeURL)) {
-        RefPtr<SecurityOrigin> scopeOrigin = SecurityOrigin::create(scopeURL);
-        resolver->reject(DOMException::create(SecurityError, "Failed to unregister a ServiceWorkerRegistration: The origin of the registration's scope ('" + scopeOrigin->toString() + "') does not match the current origin ('" + documentOrigin->toString() + "')."));
-        return promise;
-    }
-
-    m_provider->unregisterServiceWorker(scopeURL, new CallbackPromiseAdapter<bool, ServiceWorkerError>(resolver));
+    m_outerRegistration->unregister(m_provider, new CallbackPromiseAdapter<bool, ServiceWorkerError>(resolver));
     return promise;
 }
 
@@ -132,7 +137,6 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(ExecutionContext* execution
     , m_stopped(false)
 {
     ASSERT(m_outerRegistration);
-    ThreadState::current()->registerPreFinalizer(*this);
 
     if (!executionContext)
         return;
@@ -143,13 +147,6 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(ExecutionContext* execution
 
 ServiceWorkerRegistration::~ServiceWorkerRegistration()
 {
-    ASSERT(!m_outerRegistration);
-}
-
-void ServiceWorkerRegistration::dispose()
-{
-    // See ServiceWorker::dispose() comment why this explicit dispose() action is needed.
-    m_outerRegistration.clear();
 }
 
 DEFINE_TRACE(ServiceWorkerRegistration)

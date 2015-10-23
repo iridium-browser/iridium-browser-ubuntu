@@ -28,8 +28,10 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/modules/v8/ToV8ForModules.h"
 #include "bindings/modules/v8/V8BindingForModules.h"
+#include "bindings/modules/v8/V8IDBRequest.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/inspector/ScriptCallStack.h"
 #include "modules/IndexedDBNames.h"
@@ -83,33 +85,43 @@ DEFINE_TRACE(IDBCursor)
     visitor->trace(m_primaryKey);
 }
 
+// Keep the request's wrapper alive as long as the cursor's wrapper is alive,
+// so that the same script object is seen each time the cursor is used.
+v8::Local<v8::Object> IDBCursor::associateWithWrapper(v8::Isolate* isolate, const WrapperTypeInfo* wrapperType, v8::Local<v8::Object> wrapper)
+{
+    wrapper = ScriptWrappable::associateWithWrapper(isolate, wrapperType, wrapper);
+    if (!wrapper.IsEmpty())
+        V8HiddenValue::setHiddenValue(isolate, wrapper, V8HiddenValue::idbCursorRequest(isolate), toV8(m_request.get(), wrapper, isolate));
+    return wrapper;
+}
+
 IDBRequest* IDBCursor::update(ScriptState* scriptState, const ScriptValue& value, ExceptionState& exceptionState)
 {
     IDB_TRACE("IDBCursor::update");
 
     if (!m_gotValue) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::noValueErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (isKeyCursor()) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::isKeyCursorErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (isDeleted()) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::sourceDeletedErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (m_transaction->isFinished() || m_transaction->isFinishing()) {
         exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionFinishedErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (!m_transaction->isActive()) {
         exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionInactiveErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (m_transaction->isReadOnly()) {
         exceptionState.throwDOMException(ReadOnlyError, "The record may not be updated inside a read-only transaction.");
-        return 0;
+        return nullptr;
     }
 
     IDBObjectStore* objectStore = effectiveObjectStore();
@@ -150,22 +162,43 @@ void IDBCursor::continueFunction(ScriptState* scriptState, const ScriptValue& ke
 {
     IDB_TRACE("IDBCursor::continue");
     IDBKey* key = keyValue.isUndefined() || keyValue.isNull() ? nullptr : ScriptValue::to<IDBKey*>(scriptState->isolate(), keyValue, exceptionState);
+    if (exceptionState.hadException())
+        return;
     if (key && !key->isValid()) {
         exceptionState.throwDOMException(DataError, IDBDatabase::notValidKeyErrorMessage);
         return;
     }
-    continueFunction(key, 0, exceptionState);
+    continueFunction(key, nullptr, exceptionState);
 }
 
 void IDBCursor::continuePrimaryKey(ScriptState* scriptState, const ScriptValue& keyValue, const ScriptValue& primaryKeyValue, ExceptionState& exceptionState)
 {
     IDB_TRACE("IDBCursor::continuePrimaryKey");
+    if (m_source->type() != IDBAny::IDBIndexType) {
+        exceptionState.throwDOMException(InvalidAccessError, "The cursor's source is not an index.");
+        return;
+    }
+    if (m_direction != WebIDBCursorDirectionNext && m_direction != WebIDBCursorDirectionPrev) {
+        exceptionState.throwDOMException(InvalidAccessError, "The cursor's direction is not 'next' or 'prev'.");
+        return;
+    }
+
     IDBKey* key = ScriptValue::to<IDBKey*>(scriptState->isolate(), keyValue, exceptionState);
-    IDBKey* primaryKey = ScriptValue::to<IDBKey*>(scriptState->isolate(), primaryKeyValue, exceptionState);
-    if (!key->isValid() || !primaryKey->isValid()) {
+    if (exceptionState.hadException())
+        return;
+    if (!key->isValid()) {
         exceptionState.throwDOMException(DataError, IDBDatabase::notValidKeyErrorMessage);
         return;
     }
+
+    IDBKey* primaryKey = ScriptValue::to<IDBKey*>(scriptState->isolate(), primaryKeyValue, exceptionState);
+    if (exceptionState.hadException())
+        return;
+    if (!primaryKey->isValid()) {
+        exceptionState.throwDOMException(DataError, IDBDatabase::notValidKeyErrorMessage);
+        return;
+    }
+
     continueFunction(key, primaryKey, exceptionState);
 }
 
@@ -224,32 +257,32 @@ IDBRequest* IDBCursor::deleteFunction(ScriptState* scriptState, ExceptionState& 
     IDB_TRACE("IDBCursor::delete");
     if (m_transaction->isFinished() || m_transaction->isFinishing()) {
         exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionFinishedErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (!m_transaction->isActive()) {
         exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionInactiveErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (m_transaction->isReadOnly()) {
         exceptionState.throwDOMException(ReadOnlyError, "The record may not be deleted inside a read-only transaction.");
-        return 0;
+        return nullptr;
     }
 
     if (!m_gotValue) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::noValueErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (isKeyCursor()) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::isKeyCursorErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (isDeleted()) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::sourceDeletedErrorMessage);
-        return 0;
+        return nullptr;
     }
     if (!m_transaction->backendDB()) {
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
-        return 0;
+        return nullptr;
     }
 
     IDBKeyRange* keyRange = IDBKeyRange::only(m_primaryKey, exceptionState);
@@ -342,7 +375,7 @@ bool IDBCursor::isDeleted() const
     return m_source->idbIndex()->isDeleted();
 }
 
-WebIDBCursorDirection IDBCursor::stringToDirection(const String& directionString, ExceptionState& exceptionState)
+WebIDBCursorDirection IDBCursor::stringToDirection(const String& directionString)
 {
     if (directionString == IndexedDBNames::next)
         return WebIDBCursorDirectionNext;
@@ -353,7 +386,7 @@ WebIDBCursorDirection IDBCursor::stringToDirection(const String& directionString
     if (directionString == IndexedDBNames::prevunique)
         return WebIDBCursorDirectionPrevNoDuplicate;
 
-    exceptionState.throwTypeError("The direction provided ('" + directionString + "') is not one of 'next', 'nextunique', 'prev', or 'prevunique'.");
+    ASSERT_NOT_REACHED();
     return WebIDBCursorDirectionNext;
 }
 

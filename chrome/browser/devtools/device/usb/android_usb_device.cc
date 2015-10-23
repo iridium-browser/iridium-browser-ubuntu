@@ -74,7 +74,7 @@ void CountAndroidDevices(const base::Callback<void(int)>& callback,
                          const UsbDevices& devices) {
   int device_count = 0;
   for (const scoped_refptr<UsbDevice>& device : devices) {
-    const UsbConfigDescriptor* config = device->GetConfiguration();
+    const UsbConfigDescriptor* config = device->GetActiveConfiguration();
     if (config) {
       for (const UsbInterfaceDescriptor& iface : config->interfaces) {
         if (IsAndroidInterface(iface)) {
@@ -200,20 +200,14 @@ void OpenAndroidDevice(AndroidUsbDevices* devices,
                        crypto::RSAPrivateKey* rsa_key,
                        const base::Closure& barrier,
                        scoped_refptr<UsbDevice> device,
-                       int interface_id,
-                       bool success) {
+                       int interface_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!success) {
-    barrier.Run();
-    return;
-  }
-
   if (device->serial_number().empty()) {
     barrier.Run();
     return;
   }
 
-  const UsbConfigDescriptor* config = device->GetConfiguration();
+  const UsbConfigDescriptor* config = device->GetActiveConfiguration();
   if (!config) {
     barrier.Run();
     return;
@@ -257,7 +251,7 @@ void OpenAndroidDevices(
       base::Bind(&RespondOnUIThread, callback, devices, caller_task_runner));
 
   for (const scoped_refptr<UsbDevice>& device : usb_devices) {
-    const UsbConfigDescriptor* config = device->GetConfiguration();
+    const UsbConfigDescriptor* config = device->GetActiveConfiguration();
     if (!config) {
       barrier.Run();
       continue;
@@ -268,9 +262,7 @@ void OpenAndroidDevices(
         continue;
       }
 
-      device->RequestUsbAccess(j, base::Bind(&OpenAndroidDevice, devices,
-                                             rsa_key, barrier, device, j));
-
+      OpenAndroidDevice(devices, rsa_key, barrier, device, j);
       has_android_interface = true;
       break;
     }

@@ -1,4 +1,5 @@
-/* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com) * All rights reserved.
+/* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
+ * All rights reserved.
  *
  * This package is an SSL implementation written
  * by Eric Young (eay@cryptsoft.com).
@@ -104,7 +105,7 @@ void md5_block_data_order(MD5_CTX *md5, const void *p, size_t num);
 #define HASH_FINAL MD5_Final
 #define HASH_MAKE_STRING(c, s) \
   do {                         \
-    unsigned long ll;          \
+    uint32_t ll;               \
     ll = (c)->A;               \
     (void) HOST_l2c(ll, (s));  \
     ll = (c)->B;               \

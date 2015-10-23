@@ -27,10 +27,12 @@ enum UIDisplayDisposition {
   AUTOMATIC_WITH_PASSWORD_PENDING = 0,
   MANUAL_WITH_PASSWORD_PENDING,
   MANUAL_MANAGE_PASSWORDS,
-  MANUAL_BLACKLISTED,
+  MANUAL_BLACKLISTED,  // obsolete.
   AUTOMATIC_GENERATED_PASSWORD_CONFIRMATION,
   AUTOMATIC_CREDENTIAL_REQUEST,
   AUTOMATIC_SIGNIN_TOAST,
+  MANUAL_WITH_PASSWORD_PENDING_UPDATE,
+  AUTOMATIC_WITH_PASSWORD_PENDING_UPDATE,
   NUM_DISPLAY_DISPOSITIONS
 };
 
@@ -40,7 +42,7 @@ enum UIDismissalReason {
   // infobar", depending on which experiment is active.
   NO_DIRECT_INTERACTION = 0,
   CLICKED_SAVE,
-  CLICKED_NOPE,
+  CLICKED_CANCEL,
   CLICKED_NEVER,
   CLICKED_MANAGE,
   CLICKED_DONE,
@@ -66,6 +68,44 @@ enum FormDeserializationStatus {
   GNOME_SUCCESS,
   GNOME_FAILURE,
   NUM_DESERIALIZATION_STATUSES
+};
+
+// Metrics: "PasswordManager.PasswordSyncState"
+enum PasswordSyncState {
+  SYNCING_OK,
+  NOT_SYNCING_FAILED_READ,
+  NOT_SYNCING_DUPLICATE_TAGS,
+  NOT_SYNCING_SERVER_ERROR,
+  NUM_SYNC_STATES
+};
+
+// Metrics: "PasswordGeneration.SubmissionEvent"
+enum PasswordSubmissionEvent {
+  PASSWORD_SUBMITTED,
+  PASSWORD_SUBMISSION_FAILED,
+  PASSWORD_NOT_SUBMITTED,
+  PASSWORD_OVERRIDDEN,
+  PASSWORD_USED,
+  GENERATED_PASSWORD_FORCE_SAVED,
+  SUBMISSION_EVENT_ENUM_COUNT
+};
+
+enum UpdatePasswordSubmissionEvent {
+  NO_ACCOUNTS_CLICKED_UPDATE,
+  NO_ACCOUNTS_CLICKED_NOPE,
+  NO_ACCOUNTS_NO_INTERACTION,
+  ONE_ACCOUNT_CLICKED_UPDATE,
+  ONE_ACCOUNT_CLICKED_NOPE,
+  ONE_ACCOUNT_NO_INTERACTION,
+  MULTIPLE_ACCOUNTS_CLICKED_UPDATE,
+  MULTIPLE_ACCOUNTS_CLICKED_NOPE,
+  MULTIPLE_ACCOUNTS_NO_INTERACTION,
+  PASSWORD_OVERRIDDEN_CLICKED_UPDATE,
+  PASSWORD_OVERRIDDEN_CLICKED_NOPE,
+  PASSWORD_OVERRIDDEN_NO_INTERACTION,
+  UPDATE_PASSWORD_EVENT_COUNT,
+
+  NO_UPDATE_SUBMISSION
 };
 
 // We monitor the performance of the save password heuristic for a handful of
@@ -115,6 +155,22 @@ void LogUIDisplayDisposition(UIDisplayDisposition disposition);
 
 // Log if a saved FormData was deserialized correctly.
 void LogFormDataDeserializationStatus(FormDeserializationStatus status);
+
+// When a credential was filled, log whether it came from an Android app.
+void LogFilledCredentialIsFromAndroidApp(bool from_android);
+
+// Log what's preventing passwords from syncing.
+void LogPasswordSyncState(PasswordSyncState state);
+
+// Log submission events related to generation.
+void LogPasswordGenerationSubmissionEvent(PasswordSubmissionEvent event);
+
+// Log when password generation is available for a particular form.
+void LogPasswordGenerationAvailableSubmissionEvent(
+    PasswordSubmissionEvent event);
+
+// Log submission events related to password update.
+void LogUpdatePasswordSubmissionEvent(UpdatePasswordSubmissionEvent event);
 
 }  // namespace metrics_util
 

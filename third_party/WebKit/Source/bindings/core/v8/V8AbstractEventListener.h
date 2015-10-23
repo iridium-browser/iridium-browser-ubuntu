@@ -53,7 +53,7 @@ class Event;
 // but ALLOWs duplicated non-HTML event handlers.
 class CORE_EXPORT V8AbstractEventListener : public EventListener {
 public:
-    virtual ~V8AbstractEventListener();
+    ~V8AbstractEventListener() override;
 
     static const V8AbstractEventListener* cast(const EventListener* listener)
     {
@@ -69,19 +69,21 @@ public:
 
     // Implementation of EventListener interface.
 
-    virtual bool operator==(const EventListener& other) override { return this == &other; }
+    bool operator==(const EventListener& other) override { return this == &other; }
 
-    virtual void handleEvent(ExecutionContext*, Event*) override final;
+    void handleEvent(ExecutionContext*, Event*) final;
     virtual void handleEvent(ScriptState*, Event*);
 
-    // Returns the listener object, either a function or an object.
+    // Returns the listener object, either a function or an object, or the empty
+    // handle if the user script is not compilable.  No exception will be thrown
+    // even if the user script is not compilable.
     v8::Local<v8::Object> getListenerObject(ExecutionContext* executionContext)
     {
         // prepareListenerObject can potentially deref this event listener
         // as it may attempt to compile a function (lazy event listener), get an error
         // and invoke onerror callback which can execute arbitrary JS code.
         // Protect this event listener to keep it alive.
-        RefPtr<V8AbstractEventListener> guard(this);
+        RefPtrWillBeRawPtr<V8AbstractEventListener> protect(this);
         prepareListenerObject(executionContext);
         return m_listener.newLocal(m_isolate);
     }
@@ -108,9 +110,19 @@ public:
         m_listener.clear();
     }
 
-    virtual bool belongsToTheCurrentWorld() const override final;
+    bool belongsToTheCurrentWorld() const final;
     v8::Isolate* isolate() const { return m_isolate; }
     DOMWrapperWorld& world() const { return *m_world; }
+
+    // Oilpan: promptly clear listener wrapper.
+    EAGERLY_FINALIZE();
+#if ENABLE(OILPAN)
+    DECLARE_EAGER_FINALIZATION_OPERATOR_NEW();
+#endif
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        EventListener::trace(visitor);
+    }
 
 protected:
     V8AbstractEventListener(bool isAttribute, DOMWrapperWorld&, v8::Isolate*);
@@ -126,7 +138,7 @@ protected:
 
 private:
     // Implementation of EventListener function.
-    virtual bool virtualisAttribute() const override { return m_isAttribute; }
+    bool virtualisAttribute() const override { return m_isAttribute; }
 
     // This could return an empty handle and callers need to check return value.
     // We don't use v8::MaybeLocal because it can fail without exception.

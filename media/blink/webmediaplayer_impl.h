@@ -25,19 +25,22 @@
 #include "media/blink/skcanvas_video_renderer.h"
 #include "media/blink/video_frame_compositor.h"
 #include "media/blink/webmediaplayer_params.h"
+#include "media/blink/webmediaplayer_util.h"
 #include "third_party/WebKit/public/platform/WebAudioSourceProvider.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayer.h"
-#include "third_party/WebKit/public/platform/WebMediaPlayerClient.h"
 #include "url/gurl.h"
 
 namespace blink {
 class WebGraphicsContext3D;
 class WebLocalFrame;
+class WebMediaPlayerClient;
+class WebMediaPlayerEncryptedMediaClient;
 }
 
 namespace base {
 class SingleThreadTaskRunner;
+class TaskRunner;
 }
 
 namespace cc_blink {
@@ -67,12 +70,14 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   // internal renderer will be created.
   // TODO(xhwang): Drop the internal renderer path and always pass in a renderer
   // here.
-  WebMediaPlayerImpl(blink::WebLocalFrame* frame,
-                     blink::WebMediaPlayerClient* client,
-                     base::WeakPtr<WebMediaPlayerDelegate> delegate,
-                     scoped_ptr<RendererFactory> renderer_factory,
-                     CdmFactory* cdm_factory,
-                     const WebMediaPlayerParams& params);
+  WebMediaPlayerImpl(
+      blink::WebLocalFrame* frame,
+      blink::WebMediaPlayerClient* client,
+      blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
+      base::WeakPtr<WebMediaPlayerDelegate> delegate,
+      scoped_ptr<RendererFactory> renderer_factory,
+      CdmFactory* cdm_factory,
+      const WebMediaPlayerParams& params);
   virtual ~WebMediaPlayerImpl();
 
   virtual void load(LoadType load_type,
@@ -86,6 +91,8 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   virtual void seek(double seconds);
   virtual void setRate(double rate);
   virtual void setVolume(double volume);
+  virtual void setSinkId(const blink::WebString& device_id,
+                         WebSetSinkIdCB* web_callbacks);
   virtual void setPreload(blink::WebMediaPlayer::Preload preload);
   virtual blink::WebTimeRanges buffered() const;
   virtual blink::WebTimeRanges seekable() const;
@@ -128,22 +135,13 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   virtual unsigned audioDecodedByteCount() const;
   virtual unsigned videoDecodedByteCount() const;
 
-  // TODO(dshwang): remove |level|. crbug.com/443151
-  virtual bool copyVideoTextureToPlatformTexture(
-      blink::WebGraphicsContext3D* web_graphics_context,
-      unsigned int texture,
-      unsigned int level,
-      unsigned int internal_format,
-      unsigned int type,
-      bool premultiply_alpha,
-      bool flip_y);
-  virtual bool copyVideoTextureToPlatformTexture(
+  bool copyVideoTextureToPlatformTexture(
       blink::WebGraphicsContext3D* web_graphics_context,
       unsigned int texture,
       unsigned int internal_format,
       unsigned int type,
       bool premultiply_alpha,
-      bool flip_y);
+      bool flip_y) override;
 
   virtual blink::WebAudioSourceProvider* audioSourceProvider();
 
@@ -229,8 +227,7 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   void SetCdm(const CdmAttachedCB& cdm_attached_cb, CdmContext* cdm_context);
 
   // Called when a CDM has been attached to the |pipeline_|.
-  void OnCdmAttached(blink::WebContentDecryptionModuleResult result,
-                     bool success);
+  void OnCdmAttached(bool success);
 
   // Updates |paused_time_| to the current media time with consideration for the
   // |ended_| state by clamping current time to duration upon |ended_|.
@@ -250,6 +247,7 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   const scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
 
   scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
+  scoped_refptr<base::TaskRunner> worker_task_runner_;
   scoped_refptr<MediaLog> media_log_;
   Pipeline pipeline_;
 
@@ -295,6 +293,7 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   bool should_notify_time_changed_;
 
   blink::WebMediaPlayerClient* client_;
+  blink::WebMediaPlayerEncryptedMediaClient* encrypted_client_;
 
   base::WeakPtr<WebMediaPlayerDelegate> delegate_;
 
@@ -328,6 +327,8 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   scoped_ptr<cc_blink::WebLayerImpl> video_weblayer_;
 
   EncryptedMediaPlayerSupport encrypted_media_support_;
+
+  scoped_ptr<blink::WebContentDecryptionModuleResult> set_cdm_result_;
 
   scoped_ptr<RendererFactory> renderer_factory_;
 

@@ -13,6 +13,7 @@
 #include "base/strings/stringprintf.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
+#include "url/origin.h"
 
 namespace net {
 
@@ -35,7 +36,7 @@ uint32 LinearCongruentialGenerator::Generate() {
 
 std::string WebSocketStandardRequest(const std::string& path,
                                      const std::string& host,
-                                     const std::string& origin,
+                                     const url::Origin& origin,
                                      const std::string& extra_headers) {
   return WebSocketStandardRequestWithCookies(path, host, origin, std::string(),
                                              extra_headers);
@@ -44,7 +45,7 @@ std::string WebSocketStandardRequest(const std::string& path,
 std::string WebSocketStandardRequestWithCookies(
     const std::string& path,
     const std::string& host,
-    const std::string& origin,
+    const url::Origin& origin,
     const std::string& cookies,
     const std::string& extra_headers) {
   // Unrelated changes in net/http may change the order and default-values of
@@ -66,7 +67,7 @@ std::string WebSocketStandardRequestWithCookies(
       "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
       "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n"
       "%s\r\n",
-      path.c_str(), host.c_str(), origin.c_str(), cookies.c_str(),
+      path.c_str(), host.c_str(), origin.Serialize().c_str(), cookies.c_str(),
       extra_headers.c_str());
 }
 
@@ -80,29 +81,29 @@ std::string WebSocketStandardResponse(const std::string& extra_headers) {
       extra_headers.c_str());
 }
 
-struct WebSocketDeterministicMockClientSocketFactoryMaker::Detail {
+struct WebSocketMockClientSocketFactoryMaker::Detail {
   std::string expect_written;
   std::string return_to_read;
   std::vector<MockRead> reads;
   MockWrite write;
-  ScopedVector<DeterministicSocketData> socket_data_vector;
+  ScopedVector<SequencedSocketData> socket_data_vector;
   ScopedVector<SSLSocketDataProvider> ssl_socket_data_vector;
-  DeterministicMockClientSocketFactory factory;
+  MockClientSocketFactory factory;
 };
 
-WebSocketDeterministicMockClientSocketFactoryMaker::
-    WebSocketDeterministicMockClientSocketFactoryMaker()
-    : detail_(new Detail) {}
+WebSocketMockClientSocketFactoryMaker::WebSocketMockClientSocketFactoryMaker()
+    : detail_(new Detail) {
+}
 
-WebSocketDeterministicMockClientSocketFactoryMaker::
-    ~WebSocketDeterministicMockClientSocketFactoryMaker() {}
+WebSocketMockClientSocketFactoryMaker::
+    ~WebSocketMockClientSocketFactoryMaker() {
+}
 
-DeterministicMockClientSocketFactory*
-WebSocketDeterministicMockClientSocketFactoryMaker::factory() {
+MockClientSocketFactory* WebSocketMockClientSocketFactoryMaker::factory() {
   return &detail_->factory;
 }
 
-void WebSocketDeterministicMockClientSocketFactoryMaker::SetExpectations(
+void WebSocketMockClientSocketFactoryMaker::SetExpectations(
     const std::string& expect_written,
     const std::string& return_to_read) {
   const size_t kHttpStreamParserBufferSize = 4096;
@@ -124,27 +125,23 @@ void WebSocketDeterministicMockClientSocketFactoryMaker::SetExpectations(
                           kHttpStreamParserBufferSize),
                  sequence++));
   }
-  scoped_ptr<DeterministicSocketData> socket_data(
-      new DeterministicSocketData(vector_as_array(&detail_->reads),
-                                  detail_->reads.size(),
-                                  &detail_->write,
-                                  1));
+  scoped_ptr<SequencedSocketData> socket_data(
+      new SequencedSocketData(vector_as_array(&detail_->reads),
+                              detail_->reads.size(), &detail_->write, 1));
   socket_data->set_connect_data(MockConnect(SYNCHRONOUS, OK));
-  socket_data->SetStop(sequence);
   AddRawExpectations(socket_data.Pass());
 }
 
-void WebSocketDeterministicMockClientSocketFactoryMaker::AddRawExpectations(
-    scoped_ptr<DeterministicSocketData> socket_data) {
+void WebSocketMockClientSocketFactoryMaker::AddRawExpectations(
+    scoped_ptr<SequencedSocketData> socket_data) {
   detail_->factory.AddSocketDataProvider(socket_data.get());
-  detail_->socket_data_vector.push_back(socket_data.release());
+  detail_->socket_data_vector.push_back(socket_data.Pass());
 }
 
-void
-WebSocketDeterministicMockClientSocketFactoryMaker::AddSSLSocketDataProvider(
+void WebSocketMockClientSocketFactoryMaker::AddSSLSocketDataProvider(
     scoped_ptr<SSLSocketDataProvider> ssl_socket_data) {
   detail_->factory.AddSSLSocketDataProvider(ssl_socket_data.get());
-  detail_->ssl_socket_data_vector.push_back(ssl_socket_data.release());
+  detail_->ssl_socket_data_vector.push_back(ssl_socket_data.Pass());
 }
 
 WebSocketTestURLRequestContextHost::WebSocketTestURLRequestContextHost()
@@ -155,7 +152,7 @@ WebSocketTestURLRequestContextHost::WebSocketTestURLRequestContextHost()
 WebSocketTestURLRequestContextHost::~WebSocketTestURLRequestContextHost() {}
 
 void WebSocketTestURLRequestContextHost::AddRawExpectations(
-    scoped_ptr<DeterministicSocketData> socket_data) {
+    scoped_ptr<SequencedSocketData> socket_data) {
   maker_.AddRawExpectations(socket_data.Pass());
 }
 

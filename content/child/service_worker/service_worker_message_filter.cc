@@ -50,13 +50,14 @@ bool ServiceWorkerMessageFilter::ShouldHandleMessage(
 void ServiceWorkerMessageFilter::OnFilteredMessageReceived(
     const IPC::Message& msg) {
   ServiceWorkerDispatcher::GetOrCreateThreadSpecificInstance(
-      thread_safe_sender())->OnMessageReceived(msg);
+      thread_safe_sender(), main_thread_task_runner())
+      ->OnMessageReceived(msg);
 }
 
 bool ServiceWorkerMessageFilter::GetWorkerThreadIdForMessage(
     const IPC::Message& msg,
     int* ipc_thread_id) {
-  return PickleIterator(msg).ReadInt(ipc_thread_id);
+  return base::PickleIterator(msg).ReadInt(ipc_thread_id);
 }
 
 void ServiceWorkerMessageFilter::OnStaleMessageReceived(

@@ -10,13 +10,13 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/browser/sync/sync_error_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/sync_driver/sync_error_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/notification.h"
@@ -82,9 +82,9 @@ class FakeLoginUI : public LoginUIService::LoginUI {
   int focus_ui_call_count_;
 };
 
-KeyedService* BuildMockLoginUIService(
+scoped_ptr<KeyedService> BuildMockLoginUIService(
     content::BrowserContext* profile) {
-  return new FakeLoginUIService();
+  return make_scoped_ptr(new FakeLoginUIService());
 }
 
 class SyncErrorNotifierTest : public AshTestBase  {

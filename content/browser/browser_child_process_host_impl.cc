@@ -40,7 +40,7 @@ namespace {
 static base::LazyInstance<BrowserChildProcessHostImpl::BrowserChildProcessList>
     g_child_process_list = LAZY_INSTANCE_INITIALIZER;
 
-base::LazyInstance<ObserverList<BrowserChildProcessObserver> >
+base::LazyInstance<base::ObserverList<BrowserChildProcessObserver>>
     g_observers = LAZY_INSTANCE_INITIALIZER;
 
 void NotifyProcessHostConnected(const ChildProcessData& data) {
@@ -58,12 +58,28 @@ void NotifyProcessCrashed(const ChildProcessData& data, int exit_code) {
                     BrowserChildProcessCrashed(data, exit_code));
 }
 
+void NotifyProcessKilled(const ChildProcessData& data, int exit_code) {
+  FOR_EACH_OBSERVER(BrowserChildProcessObserver, g_observers.Get(),
+                    BrowserChildProcessKilled(data, exit_code));
+}
+
 }  // namespace
 
 BrowserChildProcessHost* BrowserChildProcessHost::Create(
     content::ProcessType process_type,
     BrowserChildProcessHostDelegate* delegate) {
   return new BrowserChildProcessHostImpl(process_type, delegate);
+}
+
+BrowserChildProcessHost* BrowserChildProcessHost::FromID(int child_process_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  BrowserChildProcessHostImpl::BrowserChildProcessList* process_list =
+      g_child_process_list.Pointer();
+  for (BrowserChildProcessHostImpl* host : *process_list) {
+    if (host->GetData().id == child_process_id)
+      return host;
+  }
+  return nullptr;
 }
 
 #if defined(OS_MACOSX)
@@ -101,7 +117,7 @@ BrowserChildProcessHostImpl::BrowserChildProcessHostImpl(
   data_.id = ChildProcessHostImpl::GenerateChildProcessUniqueId();
 
   child_process_host_.reset(ChildProcessHost::Create(this));
-  AddFilter(new TraceMessageFilter);
+  AddFilter(new TraceMessageFilter(data_.id));
   AddFilter(new ProfilerMessageFilter(process_type));
   AddFilter(new HistogramMessageFilter);
 
@@ -185,6 +201,11 @@ void BrowserChildProcessHostImpl::SetName(const base::string16& name) {
 void BrowserChildProcessHostImpl::SetHandle(base::ProcessHandle handle) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   data_.handle = handle;
+}
+
+ServiceRegistry* BrowserChildProcessHostImpl::GetServiceRegistry() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  return delegate_->GetServiceRegistry();
 }
 
 void BrowserChildProcessHostImpl::ForceShutdown() {
@@ -290,8 +311,17 @@ void BrowserChildProcessHostImpl::OnChildDisconnected() {
                                   PROCESS_TYPE_MAX);
         break;
       }
+#if defined(OS_ANDROID)
+      case base::TERMINATION_STATUS_OOM_PROTECTED:
+#endif
+#if defined(OS_CHROMEOS)
+      case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
+#endif
       case base::TERMINATION_STATUS_PROCESS_WAS_KILLED: {
         delegate_->OnProcessCrashed(exit_code);
+        BrowserThread::PostTask(
+            BrowserThread::UI, FROM_HERE,
+            base::Bind(&NotifyProcessKilled, data_, exit_code));
         // Report that this child process was killed.
         UMA_HISTOGRAM_ENUMERATION("ChildProcess.Killed2",
                                   data_.process_type,
@@ -309,6 +339,13 @@ void BrowserChildProcessHostImpl::OnChildDisconnected() {
     UMA_HISTOGRAM_ENUMERATION("ChildProcess.Disconnected2",
                               data_.process_type,
                               PROCESS_TYPE_MAX);
+#if defined(OS_CHROMEOS)
+    if (status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM) {
+      UMA_HISTOGRAM_ENUMERATION("ChildProcess.Killed2.OOM",
+                                data_.process_type,
+                                PROCESS_TYPE_MAX);
+    }
+#endif
   }
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::Bind(&NotifyProcessHostDisconnected, data_));

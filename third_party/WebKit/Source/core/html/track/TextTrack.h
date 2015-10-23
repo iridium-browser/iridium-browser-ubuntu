@@ -45,21 +45,21 @@ class TextTrackList;
 class VTTRegion;
 class VTTRegionList;
 
-class CORE_EXPORT TextTrack : public EventTargetWithInlineData, public TrackBase {
+class CORE_EXPORT TextTrack : public RefCountedGarbageCollectedEventTargetWithInlineData<TextTrack>, public TrackBase {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_EVENT_TARGET(TrackBase);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(TextTrack);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(TextTrack);
+    USING_GARBAGE_COLLECTED_MIXIN(TextTrack);
 public:
-    static PassRefPtrWillBeRawPtr<TextTrack> create(const AtomicString& kind, const AtomicString& label, const AtomicString& language)
+    static TextTrack* create(const AtomicString& kind, const AtomicString& label, const AtomicString& language)
     {
-        return adoptRefWillBeNoop(new TextTrack(kind, label, language, emptyAtom, AddTrack));
+        return new TextTrack(kind, label, language, emptyAtom, AddTrack);
     }
-    virtual ~TextTrack();
+    ~TextTrack() override;
 
     virtual void setTrackList(TextTrackList*);
     TextTrackList* trackList() { return m_trackList; }
 
-    virtual void setKind(const AtomicString&) override;
+    void setKind(const AtomicString&) override;
 
     static const AtomicString& subtitlesKeyword();
     static const AtomicString& captionsKeyword();
@@ -85,11 +85,11 @@ public:
     HTMLMediaElement* mediaElement() const;
     Node* owner() const;
 
-    void addCue(PassRefPtrWillBeRawPtr<TextTrackCue>);
+    void addCue(TextTrackCue*);
     void removeCue(TextTrackCue*, ExceptionState&);
 
     VTTRegionList* regions();
-    void addRegion(PassRefPtrWillBeRawPtr<VTTRegion>);
+    void addRegion(VTTRegion*);
     void removeRegion(VTTRegion*, ExceptionState&);
 
     void cueWillChange(TextTrackCue*);
@@ -114,30 +114,30 @@ public:
     void removeAllCues();
 
     // EventTarget methods
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override;
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
 
     DECLARE_VIRTUAL_TRACE();
 
 protected:
     TextTrack(const AtomicString& kind, const AtomicString& label, const AtomicString& language, const AtomicString& id, TextTrackType);
 
-    virtual bool isValidKind(const AtomicString& kind) const override { return isValidKindKeyword(kind); }
-    virtual AtomicString defaultKind() const override { return subtitlesKeyword(); }
+    bool isValidKind(const AtomicString& kind) const override { return isValidKindKeyword(kind); }
+    AtomicString defaultKind() const override { return subtitlesKeyword(); }
 
-    void addListOfCues(WillBeHeapVector<RefPtrWillBeMember<TextTrackCue>>&);
+    void addListOfCues(HeapVector<Member<TextTrackCue>>&);
 
 private:
     CueTimeline* cueTimeline() const;
 
     TextTrackCueList* ensureTextTrackCueList();
-    RefPtrWillBeMember<TextTrackCueList> m_cues;
-    RefPtrWillBeMember<TextTrackCueList> m_activeCues;
+    Member<TextTrackCueList> m_cues;
+    Member<TextTrackCueList> m_activeCues;
 
     VTTRegionList* ensureVTTRegionList();
-    RefPtrWillBeMember<VTTRegionList> m_regions;
+    Member<VTTRegionList> m_regions;
 
-    RawPtrWillBeMember<TextTrackList> m_trackList;
+    Member<TextTrackList> m_trackList;
     AtomicString m_mode;
     TextTrackType m_trackType;
     ReadinessState m_readinessState;

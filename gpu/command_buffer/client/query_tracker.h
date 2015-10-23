@@ -7,6 +7,7 @@
 
 #include <GLES2/gl2.h>
 
+#include <bitset>
 #include <deque>
 #include <list>
 
@@ -27,15 +28,15 @@ class GLES2Implementation;
 // Manages buckets of QuerySync instances in mapped memory.
 class GLES2_IMPL_EXPORT QuerySyncManager {
  public:
-  static const size_t kSyncsPerBucket = 1024;
+  static const size_t kSyncsPerBucket = 256;
 
   struct Bucket {
-    explicit Bucket(QuerySync* sync_mem)
-        : syncs(sync_mem),
-          used_query_count(0) {
-    }
+    Bucket(QuerySync* sync_mem, int32 shm_id, uint32 shm_offset);
+    ~Bucket();
     QuerySync* syncs;
-    unsigned used_query_count;
+    int32 shm_id;
+    uint32 base_shm_offset;
+    std::bitset<kSyncsPerBucket> in_use_queries;
   };
   struct QueryInfo {
     QueryInfo(Bucket* bucket, int32 id, uint32 offset, QuerySync* sync_mem)
@@ -68,7 +69,6 @@ class GLES2_IMPL_EXPORT QuerySyncManager {
  private:
   MappedMemoryManager* mapped_memory_;
   std::deque<Bucket*> buckets_;
-  std::deque<QueryInfo> free_queries_;
 
   DISALLOW_COPY_AND_ASSIGN(QuerySyncManager);
 };
@@ -91,7 +91,7 @@ class GLES2_IMPL_EXPORT QueryTracker {
       return target_;
     }
 
-    GLenum id() const {
+    GLuint id() const {
       return id_;
     }
 
@@ -125,20 +125,25 @@ class GLES2_IMPL_EXPORT QueryTracker {
       return state_ == kUninitialized;
     }
 
+    bool Active() const {
+      return state_ == kActive;
+    }
+
     bool Pending() const {
       return state_ == kPending;
     }
 
     bool CheckResultsAvailable(CommandBufferHelper* helper);
 
-    uint32 GetResult() const;
-
-    void Begin(GLES2Implementation* gl);
-    void End(GLES2Implementation* gl);
+    uint64 GetResult() const;
 
    private:
     friend class QueryTracker;
     friend class QueryTrackerTest;
+
+    void Begin(GLES2Implementation* gl);
+    void End(GLES2Implementation* gl);
+    void QueryCounter(GLES2Implementation* gl);
 
     GLuint id_;
     GLenum target_;
@@ -148,7 +153,7 @@ class GLES2_IMPL_EXPORT QueryTracker {
     int32 token_;
     uint32 flush_count_;
     uint64 client_begin_time_us_; // Only used for latency query target.
-    uint32 result_;
+    uint64 result_;
   };
 
   QueryTracker(MappedMemoryManager* manager);
@@ -156,17 +161,41 @@ class GLES2_IMPL_EXPORT QueryTracker {
 
   Query* CreateQuery(GLuint id, GLenum target);
   Query* GetQuery(GLuint id);
+  Query* GetCurrentQuery(GLenum target);
   void RemoveQuery(GLuint id);
   void Shrink();
   void FreeCompletedQueries();
 
+  bool BeginQuery(GLuint id, GLenum target, GLES2Implementation* gl);
+  bool EndQuery(GLenum target, GLES2Implementation* gl);
+  bool QueryCounter(GLuint id, GLenum target, GLES2Implementation* gl);
+  bool SetDisjointSync(GLES2Implementation* gl);
+  bool CheckAndResetDisjoint();
+
+  int32_t DisjointCountSyncShmID() const {
+    return disjoint_count_sync_shm_id_;
+  }
+
+  uint32_t DisjointCountSyncShmOffset() const {
+    return disjoint_count_sync_shm_offset_;
+  }
+
  private:
-  typedef base::hash_map<GLuint, Query*> QueryMap;
+  typedef base::hash_map<GLuint, Query*> QueryIdMap;
+  typedef base::hash_map<GLenum, Query*> QueryTargetMap;
   typedef std::list<Query*> QueryList;
 
-  QueryMap queries_;
+  QueryIdMap queries_;
+  QueryTargetMap current_queries_;
   QueryList removed_queries_;
   QuerySyncManager query_sync_manager_;
+
+  // The shared memory used for synchronizing timer disjoint values.
+  MappedMemoryManager* mapped_memory_;
+  int32_t disjoint_count_sync_shm_id_;
+  uint32_t disjoint_count_sync_shm_offset_;
+  DisjointValueSync* disjoint_count_sync_;
+  uint32_t local_disjoint_count_;
 
   DISALLOW_COPY_AND_ASSIGN(QueryTracker);
 };

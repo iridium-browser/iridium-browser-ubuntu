@@ -2,9 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This implements the entry point for CLI toolsets `cros` and `brillo`.
+"""This implements the entry point for the `cros` CLI toolset.
 
-This script is invoked by chromite/bin/{cros,brillo}, which sets up the
+This script is invoked by chromite/bin/cros, which sets up the
 proper execution environment and calls this module's main() function.
 
 In turn, this script looks for a subcommand based on how it was invoked. For
@@ -25,14 +25,7 @@ from chromite.lib import stats
 
 def GetOptions(my_commands):
   """Returns the argparse to use for commandline parsing."""
-  if command.GetToolset() == 'brillo':
-    parser = commandline.ArgumentParser(caching=True,
-                                        default_log_level='notice')
-    # For brillo commands, we want to store the logs to a file for error
-    # handling at logging level notice.
-    command.SetupFileLogger()
-  else:
-    parser = commandline.ArgumentParser(caching=True)
+  parser = commandline.ArgumentParser(caching=True, default_log_level='notice')
   if not command:
     return parser
 
@@ -74,7 +67,21 @@ def main(argv):
                      subcommand.upload_stats_timeout])
       # TODO: to make command completion faster, send an interrupt signal to the
       # stats uploader task after the subcommand completes.
-      code = _RunSubCommand(subcommand)
+      try:
+        code = _RunSubCommand(subcommand)
+      except (commandline.ChrootRequiredError, commandline.ExecRequiredError):
+        # The higher levels want these passed back, so oblige.
+        raise
+      except Exception as e:
+        code = 1
+        logging.error('%s %s failed before completing.',
+                      command.GetToolset(),
+                      subcommand.command_name)
+        if namespace.debug:
+          raise
+        else:
+          logging.error(e)
+
       if code is not None:
         return code
 

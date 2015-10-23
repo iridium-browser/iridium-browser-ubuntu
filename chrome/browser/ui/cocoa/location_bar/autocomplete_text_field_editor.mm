@@ -56,13 +56,12 @@ BOOL ThePasteboardIsTooDamnBig() {
 
     forbiddenCharacters_.reset([[NSCharacterSet controlCharacterSet] retain]);
 
-    // These checks seem inappropriate to the omnibox, and also
-    // unlikely to work reliably due to our autocomplete interfering.
+    // Disable all substitutions by default. In regular NSTextFields a user may
+    // selectively enable them via context menu, but that submenu is not enabled
+    // for the omnibox. The substitutions are unlikely to be useful in any case.
     //
-    // Also see <http://crbug.com/173405>.
-    NSTextCheckingTypes checkingTypes = [self enabledTextCheckingTypes];
-    checkingTypes &= ~NSTextCheckingTypeReplacement;
-    checkingTypes &= ~NSTextCheckingTypeCorrection;
+    // Also see http://crbug.com/173405 and http://crbug.com/528014.
+    NSTextCheckingTypes checkingTypes = 0;
     [self setEnabledTextCheckingTypes:checkingTypes];
   }
   return self;
@@ -359,6 +358,10 @@ BOOL ThePasteboardIsTooDamnBig() {
 // Prevent control characters from being entered into the Omnibox.
 // This is invoked for keyboard entry, not for pasting.
 - (void)insertText:(id)aString {
+  AutocompleteTextFieldObserver* observer = [self observer];
+  if (observer)
+    observer->OnInsertText();
+
   // Repeatedly remove control characters.  The loop will only ever
   // execute at all when the user enters control characters (using
   // Ctrl-Alt- or Ctrl-Q).  Making this generally efficient would
@@ -407,9 +410,6 @@ BOOL ThePasteboardIsTooDamnBig() {
     return observer->SelectionRangeForProposedRange(modifiedRange);
   return modifiedRange;
 }
-
-
-
 
 - (void)setSelectedRange:(NSRange)charRange
                 affinity:(NSSelectionAffinity)affinity
@@ -546,6 +546,9 @@ BOOL ThePasteboardIsTooDamnBig() {
       [[self delegate] suggestColor],
       self,
       [self bounds]);
+  AutocompleteTextFieldObserver* observer = [self observer];
+  if (observer)
+    observer->OnDidDrawRect();
 }
 
 @end

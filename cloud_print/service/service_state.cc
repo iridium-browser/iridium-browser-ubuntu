@@ -8,6 +8,7 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/elements_upload_data_stream.h"
@@ -134,8 +135,6 @@ bool ServiceState::IsValid() const {
 }
 
 std::string ServiceState::ToString() {
-  scoped_ptr<base::DictionaryValue> services(new base::DictionaryValue());
-
   scoped_ptr<base::DictionaryValue> cloud_print(new base::DictionaryValue());
   cloud_print->SetBoolean(kEnabledOptionName, true);
 
@@ -147,12 +146,12 @@ std::string ServiceState::ToString() {
   SetNotEmptyJsonString(cloud_print.get(), kXmppAuthTokenOptionName,
                         xmpp_auth_token_);
 
-  services->Set(kCloudPrintJsonName, cloud_print.release());
+  base::DictionaryValue services;
+  services.Set(kCloudPrintJsonName, cloud_print.Pass());
 
   std::string json;
-  base::JSONWriter::WriteWithOptions(services.get(),
-                                     base::JSONWriter::OPTIONS_PRETTY_PRINT,
-                                     &json);
+  base::JSONWriter::WriteWithOptions(
+      services, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);
   return json;
 }
 
@@ -198,11 +197,13 @@ std::string ServiceState::LoginToGoogle(const std::string& service,
   base::MessageLoop::current()->Run();
 
   const char kAuthStart[] = "Auth=";
-  std::vector<std::string> lines;
-  Tokenize(fetcher_delegate.data(), "\r\n", &lines);
-  for (size_t i = 0; i < lines.size(); ++i) {
-    if (StartsWithASCII(lines[i], kAuthStart, false))
-      return lines[i].substr(arraysize(kAuthStart) - 1);
+  for (const base::StringPiece& line :
+       base::SplitStringPiece(fetcher_delegate.data(), "\r\n",
+                              base::KEEP_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY)) {
+    if (base::StartsWith(line, kAuthStart,
+                         base::CompareCase::INSENSITIVE_ASCII))
+      return line.substr(arraysize(kAuthStart) - 1).as_string();
   }
 
   return std::string();

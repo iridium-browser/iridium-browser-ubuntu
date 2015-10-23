@@ -16,6 +16,7 @@
 #include "components/autofill/core/common/autofill_data_validation.h"
 #include "components/autofill/core/common/autofill_regexes.h"
 #include "components/autofill/core/common/autofill_switches.h"
+#include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -871,9 +872,7 @@ void PreviewFormField(const FormFieldData& data,
   if (is_initiating_node &&
       (IsTextInput(input_element) || IsTextAreaElement(*field))) {
     // Select the part of the text that the user didn't type.
-    int start = field->value().length();
-    int end = field->suggestedValue().length();
-    field->setSelectionRange(start, end);
+    PreviewSuggestion(field->suggestedValue(), field->value(), field);
   }
 }
 
@@ -1183,7 +1182,8 @@ void WebFormControlElementToFormField(const WebFormControlElement& element,
     // attribute was present.
     field->autocomplete_attribute = "x-max-data-length-exceeded";
   }
-  if (LowerCaseEqualsASCII(element.getAttribute(kRole), "presentation"))
+  if (base::LowerCaseEqualsASCII(
+          base::StringPiece16(element.getAttribute(kRole)), "presentation"))
     field->role = FormFieldData::ROLE_ATTRIBUTE_PRESENTATION;
 
   if (!IsAutofillableElement(element))
@@ -1191,7 +1191,8 @@ void WebFormControlElementToFormField(const WebFormControlElement& element,
 
   const WebInputElement* input_element = toWebInputElement(&element);
   if (IsAutofillableInputElement(input_element) ||
-      IsTextAreaElement(element)) {
+      IsTextAreaElement(element) ||
+      IsSelectElement(element)) {
     field->is_autofilled = element.isAutofilled();
     field->is_focusable = element.isFocusable();
     field->should_autocomplete = element.autoComplete();
@@ -1257,7 +1258,6 @@ bool WebFormElementToFormData(
   form->name = GetFormIdentifier(form_element);
   form->origin = frame->document().url();
   form->action = frame->document().completeURL(form_element.action());
-  form->user_submitted = form_element.wasUserSubmitted();
 
   // If the completed URL is not valid, just use the action we get from
   // WebKit.
@@ -1314,14 +1314,14 @@ bool UnownedFormElementsAndFieldSetsToFormData(
   std::string lang;
   if (!html_element.isNull())
     lang = html_element.getAttribute("lang").utf8();
-  if ((lang.empty() || StartsWithASCII(lang, "en", false)) &&
+  if ((lang.empty() ||
+       base::StartsWith(lang, "en", base::CompareCase::INSENSITIVE_ASCII)) &&
       !MatchesPattern(document.title(),
           base::UTF8ToUTF16("payment|checkout|address|delivery|shipping"))) {
     return false;
   }
 
   form->origin = document.url();
-  form->user_submitted = false;
   form->is_form_tag = false;
 
   return FormOrFieldsetsToFormData(nullptr, element, fieldsets,
@@ -1532,6 +1532,21 @@ gfx::RectF GetScaledBoundingBox(float scale, WebElement* element) {
                     bounding_box.y() * scale,
                     bounding_box.width() * scale,
                     bounding_box.height() * scale);
+}
+
+void PreviewSuggestion(const base::string16& suggestion,
+                       const base::string16& user_input,
+                       blink::WebFormControlElement* input_element) {
+  size_t selection_start = user_input.length();
+  if (IsFeatureSubstringMatchEnabled()) {
+    size_t offset =
+        autofill::GetTextSelectionStart(suggestion, user_input, false);
+    // Zero selection start is for password manager, which can show usernames
+    // that do not begin with the user input value.
+    selection_start = (offset == base::string16::npos) ? 0 : offset;
+  }
+
+  input_element->setSelectionRange(selection_start, suggestion.length());
 }
 
 }  // namespace autofill

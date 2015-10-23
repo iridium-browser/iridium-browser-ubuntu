@@ -173,7 +173,9 @@ inline v8::Local<v8::Value> toV8(v8::Local<v8::Value> value, v8::Local<v8::Objec
 
 // Undefined
 
-struct ToV8UndefinedGenerator { }; // Used only for having toV8 return v8::Undefined.
+struct ToV8UndefinedGenerator {
+    DISALLOW_ALLOCATION();
+}; // Used only for having toV8 return v8::Undefined.
 
 inline v8::Local<v8::Value> toV8(const ToV8UndefinedGenerator&  value, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
 {
@@ -247,7 +249,7 @@ inline v8::Local<v8::Value> toV8(const Vector<std::pair<String, T>>& value, v8::
 // declared but not defined (so it's not clear that T is a subclass of
 // ScriptWrappable).
 // This hack helps detect such unwanted implicit conversions from T* to bool.
-v8::Local<v8::Value> toV8(void* value, v8::Local<v8::Object> creationContext, v8::Isolate*);
+v8::Local<v8::Value> toV8(void* value, v8::Local<v8::Object> creationContext, v8::Isolate*) = delete;
 
 } // namespace blink
 

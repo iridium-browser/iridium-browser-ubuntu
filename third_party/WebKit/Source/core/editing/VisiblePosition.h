@@ -28,7 +28,9 @@
 
 #include "core/CoreExport.h"
 #include "core/editing/EditingBoundary.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/PositionWithAffinity.h"
+#include "core/editing/TextAffinity.h"
 #include "platform/heap/Handle.h"
 #include "platform/text/TextDirection.h"
 
@@ -38,28 +40,50 @@ namespace blink {
 // the callers do not really care (they just want the
 // deep position without regard to line position), and this
 // is cheaper than UPSTREAM
-#define VP_DEFAULT_AFFINITY DOWNSTREAM
+#define VP_DEFAULT_AFFINITY TextAffinity::Downstream
 
 // Callers who do not know where on the line the position is,
 // but would like UPSTREAM if at a line break or DOWNSTREAM
 // otherwise, need a clear way to specify that.  The
 // constructors auto-correct UPSTREAM to DOWNSTREAM if the
 // position is not at a line break.
-#define VP_UPSTREAM_IF_POSSIBLE UPSTREAM
+#define VP_UPSTREAM_IF_POSSIBLE TextAffinity::Upstream
 
 class InlineBox;
 class Range;
 
+// |VisiblePosition| is an immutable object representing "canonical position"
+// with affinity.
+//
+// "canonical position" is roughly equivalent to a position where we can place
+// caret, see |canonicalPosition()| for actual definition.
+//
+// "affinity" represents a place of caret at wrapped line. UPSTREAM affinity
+// means caret is placed at end of line. DOWNSTREAM affinity means caret is
+// placed at start of line.
+//
+// Example of affinity:
+//    abc^def where "^" represent |Position|
+// When above text line wrapped after "abc"
+//    abc|  UPSTREAM |VisiblePosition|
+//    |def  DOWNSTREAM |VisiblePosition|
+//
+// NOTE: UPSTREAM affinity will be used only if pos is at end of a wrapped line,
+// otherwise it will be converted to DOWNSTREAM.
 class CORE_EXPORT VisiblePosition final {
     DISALLOW_ALLOCATION();
 public:
-    // NOTE: UPSTREAM affinity will be used only if pos is at end of a wrapped line,
-    // otherwise it will be converted to DOWNSTREAM
     VisiblePosition() : m_affinity(VP_DEFAULT_AFFINITY) { }
-    explicit VisiblePosition(const Position&, EAffinity = VP_DEFAULT_AFFINITY);
+    explicit VisiblePosition(const Position&, TextAffinity = VP_DEFAULT_AFFINITY);
+    explicit VisiblePosition(const PositionInComposedTree&, TextAffinity = VP_DEFAULT_AFFINITY);
     explicit VisiblePosition(const PositionWithAffinity&);
 
-    void clear() { m_deepPosition.clear(); }
+    // Intentionally delete |operator==()| and |operator!=()| for reducing
+    // compilation error message.
+    // TODO(yosin) We'll have |equals()| when we have use cases of checking
+    // equality of both position and affinity.
+    bool operator==(const VisiblePosition&) const = delete;
+    bool operator!=(const VisiblePosition&) const = delete;
 
     bool isNull() const { return m_deepPosition.isNull(); }
     bool isNotNull() const { return m_deepPosition.isNotNull(); }
@@ -67,10 +91,8 @@ public:
 
     Position deepEquivalent() const { return m_deepPosition; }
     Position toParentAnchoredPosition() const { return deepEquivalent().parentAnchoredEquivalent(); }
-    EAffinity affinity() const { ASSERT(m_affinity == UPSTREAM || m_affinity == DOWNSTREAM); return m_affinity; }
-    void setAffinity(EAffinity affinity) { m_affinity = affinity; }
-
-    // FIXME: Change the following functions' parameter from a boolean to StayInEditableContent.
+    PositionWithAffinity toPositionWithAffinity() const { return PositionWithAffinity(m_deepPosition, m_affinity); }
+    TextAffinity affinity() const { return m_affinity; }
 
     // next() and previous() will increment/decrement by a character cluster.
     VisiblePosition next(EditingBoundaryCrossingRule = CanCrossEditingBoundary) const;
@@ -80,19 +102,14 @@ public:
     VisiblePosition skipToStartOfEditingBoundary(const VisiblePosition&) const;
     VisiblePosition skipToEndOfEditingBoundary(const VisiblePosition&) const;
 
-    VisiblePosition left(bool stayInEditableContent = false) const;
-    VisiblePosition right(bool stayInEditableContent = false) const;
+    VisiblePosition left() const;
+    VisiblePosition right() const;
 
     UChar32 characterAfter() const;
     UChar32 characterBefore() const { return previous().characterAfter(); }
 
     // FIXME: This does not handle [table, 0] correctly.
-    Element* rootEditableElement() const { return m_deepPosition.isNotNull() ? m_deepPosition.deprecatedNode()->rootEditableElement() : 0; }
-
-    void getInlineBoxAndOffset(InlineBox*& inlineBox, int& caretOffset) const
-    {
-        m_deepPosition.getInlineBoxAndOffset(m_affinity, inlineBox, caretOffset);
-    }
+    Element* rootEditableElement() const { return m_deepPosition.isNotNull() ? m_deepPosition.anchorNode()->rootEditableElement() : 0; }
 
     // Rect is local to the returned layoutObject
     LayoutRect localCaretRect(LayoutObject*&) const;
@@ -111,36 +128,22 @@ public:
 #endif
 
 private:
-    void init(const Position&, EAffinity);
-    Position canonicalPosition(const Position&);
+    template<typename Strategy>
+    void init(const PositionAlgorithm<Strategy>&, TextAffinity);
 
     Position leftVisuallyDistinctCandidate() const;
     Position rightVisuallyDistinctCandidate() const;
 
     Position m_deepPosition;
-    EAffinity m_affinity;
+    TextAffinity m_affinity;
 };
 
-// FIXME: This shouldn't ignore affinity.
-inline bool operator==(const VisiblePosition& a, const VisiblePosition& b)
-{
-    return a.deepEquivalent() == b.deepEquivalent();
-}
+EphemeralRange makeRange(const VisiblePosition&, const VisiblePosition&);
 
-inline bool operator!=(const VisiblePosition& a, const VisiblePosition& b)
-{
-    return !(a == b);
-}
-
-PassRefPtrWillBeRawPtr<Range> makeRange(const VisiblePosition&, const VisiblePosition&);
-bool setStart(Range*, const VisiblePosition&);
-bool setEnd(Range*, const VisiblePosition&);
-VisiblePosition startVisiblePosition(const Range*, EAffinity);
-
-Element* enclosingBlockFlowElement(const VisiblePosition&);
-
-bool isFirstVisiblePositionInNode(const VisiblePosition&, const ContainerNode*);
-bool isLastVisiblePositionInNode(const VisiblePosition&, const ContainerNode*);
+CORE_EXPORT Position canonicalPositionOf(const Position&);
+CORE_EXPORT PositionInComposedTree canonicalPositionOf(const PositionInComposedTree&);
+PositionWithAffinity honorEditingBoundaryAtOrBeforeOf(const PositionWithAffinity&, const Position& anchor);
+PositionInComposedTreeWithAffinity honorEditingBoundaryAtOrBeforeOf(const PositionInComposedTreeWithAffinity&, const PositionInComposedTree& anchor);
 
 } // namespace blink
 

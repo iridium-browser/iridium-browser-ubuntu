@@ -4,6 +4,7 @@
 
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -16,24 +17,22 @@
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_notification_delegate.h"
 #include "content/public/browser/notification_event_dispatcher.h"
 #include "content/public/browser/platform_notification_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/platform_notification_data.h"
-#include "net/base/net_util.h"
 #include "ui/message_center/notifier_settings.h"
 #include "url/url_constants.h"
 
 #if defined(ENABLE_EXTENSIONS)
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/notifier_state_tracker.h"
+#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
 #endif
@@ -52,15 +51,17 @@ namespace {
 // Callback to provide when deleting the data associated with persistent Web
 // Notifications from the notification database.
 void OnPersistentNotificationDataDeleted(bool success) {
-  // TODO(peter): Record UMA for notification deletion requests created by the
-  // PlatformNotificationService.
+  UMA_HISTOGRAM_BOOLEAN("Notifications.PersistentNotificationDataDeleted",
+      success);
 }
 
 // Persistent notifications fired through the delegate do not care about the
 // lifetime of the Service Worker responsible for executing the event.
 void OnEventDispatchComplete(content::PersistentNotificationStatus status) {
-  // TODO(peter): Record UMA statistics about the result status of running
-  // events for persistent Web Notifications.
+  UMA_HISTOGRAM_ENUMERATION(
+      "Notifications.PersistentWebNotificationClickResult", status,
+      content::PersistentNotificationStatus::
+          PERSISTENT_NOTIFICATION_STATUS_MAX);
 }
 
 void CancelNotification(const std::string& id, ProfileID profile_id) {
@@ -84,13 +85,15 @@ PlatformNotificationServiceImpl::~PlatformNotificationServiceImpl() {}
 void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
     BrowserContext* browser_context,
     int64_t persistent_notification_id,
-    const GURL& origin) const {
+    const GURL& origin,
+    int action_index) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::NotificationEventDispatcher::GetInstance()
       ->DispatchNotificationClickEvent(
             browser_context,
             persistent_notification_id,
             origin,
+            action_index,
             base::Bind(&OnEventDispatchComplete));
 }
 
@@ -127,46 +130,28 @@ PlatformNotificationServiceImpl::CheckPermissionOnUIThread(
   // Extensions support an API permission named "notification". This will grant
   // not only grant permission for using the Chrome App extension API, but also
   // for the Web Notification API.
-  extensions::ExtensionRegistry* registry =
-      extensions::ExtensionRegistry::Get(browser_context);
-  extensions::ProcessMap* process_map =
-      extensions::ProcessMap::Get(browser_context);
-  extensions::ExtensionSet extensions;
-
-  DesktopNotificationService* desktop_notification_service =
-      DesktopNotificationServiceFactory::GetForProfile(profile);
-  DCHECK(desktop_notification_service);
-
-  // If |origin| is an enabled extension, only select that one. Otherwise select
-  // all extensions whose web content matches |origin|.
   if (origin.SchemeIs(extensions::kExtensionScheme)) {
-    const extensions::Extension* extension = registry->GetExtensionById(
-        origin.host(), extensions::ExtensionRegistry::ENABLED);
-    if (extension)
-      extensions.Insert(extension);
-    } else {
-      for (const auto& extension : registry->enabled_extensions()) {
-        if (extension->web_extent().MatchesSecurityOrigin(origin))
-          extensions.Insert(extension);
+    extensions::ExtensionRegistry* registry =
+        extensions::ExtensionRegistry::Get(browser_context);
+    extensions::ProcessMap* process_map =
+        extensions::ProcessMap::Get(browser_context);
+
+    const extensions::Extension* extension =
+        registry->GetExtensionById(origin.host(),
+                                   extensions::ExtensionRegistry::ENABLED);
+
+    if (extension &&
+        extension->permissions_data()->HasAPIPermission(
+            extensions::APIPermission::kNotifications) &&
+        process_map->Contains(extension->id(), render_process_id)) {
+      NotifierStateTracker* notifier_state_tracker =
+          NotifierStateTrackerFactory::GetForProfile(profile);
+      DCHECK(notifier_state_tracker);
+
+      NotifierId notifier_id(NotifierId::APPLICATION, extension->id());
+      if (notifier_state_tracker->IsNotifierEnabled(notifier_id))
+        return blink::WebNotificationPermissionAllowed;
     }
-  }
-
-  // Check if any of the selected extensions have the "notification" API
-  // permission, are active in |render_process_id| and has not been manually
-  // disabled by the user. If all of that is true, grant permission.
-  for (const auto& extension : extensions) {
-    if (!extension->permissions_data()->HasAPIPermission(
-        extensions::APIPermission::kNotifications))
-      continue;
-
-    if (!process_map->Contains(extension->id(), render_process_id))
-      continue;
-
-    NotifierId notifier_id(NotifierId::APPLICATION, extension->id());
-    if (!desktop_notification_service->IsNotifierEnabled(notifier_id))
-      continue;
-
-    return blink::WebNotificationPermissionAllowed;
   }
 #endif
 
@@ -190,20 +175,24 @@ PlatformNotificationServiceImpl::CheckPermissionOnIOThread(
 
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
 #if defined(ENABLE_EXTENSIONS)
-  extensions::InfoMap* extension_info_map = io_data->GetExtensionInfoMap();
+  // Extensions support an API permission named "notification". This will grant
+  // not only grant permission for using the Chrome App extension API, but also
+  // for the Web Notification API.
+  if (origin.SchemeIs(extensions::kExtensionScheme)) {
+    extensions::InfoMap* extension_info_map = io_data->GetExtensionInfoMap();
+    const extensions::ProcessMap& process_map =
+        extension_info_map->process_map();
 
-  // We want to see if there is an extension that hasn't been manually disabled
-  // that has the notifications permission and applies to this security origin.
-  // First, get the list of extensions with permission for the origin.
-  extensions::ExtensionSet extensions;
-  extension_info_map->GetExtensionsWithAPIPermissionForSecurityOrigin(
-      origin,
-      render_process_id,
-      extensions::APIPermission::kNotifications,
-      &extensions);
-  for (const auto& extension : extensions) {
-    if (!extension_info_map->AreNotificationsDisabled(extension->id()))
-      return blink::WebNotificationPermissionAllowed;
+    const extensions::Extension* extension =
+        extension_info_map->extensions().GetByID(origin.host());
+
+    if (extension &&
+        extension->permissions_data()->HasAPIPermission(
+            extensions::APIPermission::kNotifications) &&
+        process_map.Contains(extension->id(), render_process_id)) {
+      if (!extension_info_map->AreNotificationsDisabled(extension->id()))
+        return blink::WebNotificationPermissionAllowed;
+    }
   }
 #endif
 
@@ -317,8 +306,8 @@ bool PlatformNotificationServiceImpl::GetDisplayedPersistentNotifications(
     return false;  // Tests will not have a message center.
 
   // TODO(peter): Filter for persistent notifications only.
-  *displayed_notifications =
-      GetNotificationUIManager()->GetAllIdsByProfile(profile);
+  *displayed_notifications = GetNotificationUIManager()->GetAllIdsByProfile(
+      NotificationUIManager::GetProfileID(profile));
 
   return true;
 #else
@@ -334,19 +323,25 @@ Notification PlatformNotificationServiceImpl::CreateNotificationFromData(
     const SkBitmap& icon,
     const content::PlatformNotificationData& notification_data,
     NotificationDelegate* delegate) const {
-  base::string16 display_source = DisplayNameForOrigin(profile, origin);
-
   // TODO(peter): Icons for Web Notifications are currently always requested for
   // 1x scale, whereas the displays on which they can be displayed can have a
   // different pixel density. Be smarter about this when the API gets updated
   // with a way for developers to specify images of different resolutions.
-  Notification notification(origin, notification_data.title,
-      notification_data.body, gfx::Image::CreateFrom1xBitmap(icon),
-      display_source, notification_data.tag, delegate);
+  Notification notification(
+      origin, notification_data.title, notification_data.body,
+      gfx::Image::CreateFrom1xBitmap(icon), base::UTF8ToUTF16(origin.host()),
+      notification_data.tag, delegate);
 
-  notification.set_context_message(display_source);
+  notification.set_context_message(
+      DisplayNameForContextMessage(profile, origin));
   notification.set_vibration_pattern(notification_data.vibration_pattern);
   notification.set_silent(notification_data.silent);
+
+  std::vector<message_center::ButtonInfo> buttons;
+  for (const auto& action : notification_data.actions)
+    buttons.push_back(message_center::ButtonInfo(action.title));
+
+  notification.set_buttons(buttons);
 
   // Web Notifications do not timeout.
   notification.set_never_timeout(true);
@@ -367,7 +362,7 @@ void PlatformNotificationServiceImpl::SetNotificationUIManagerForTesting(
   notification_ui_manager_for_tests_ = manager;
 }
 
-base::string16 PlatformNotificationServiceImpl::DisplayNameForOrigin(
+base::string16 PlatformNotificationServiceImpl::DisplayNameForContextMessage(
     Profile* profile,
     const GURL& origin) const {
 #if defined(ENABLE_EXTENSIONS)
@@ -382,35 +377,5 @@ base::string16 PlatformNotificationServiceImpl::DisplayNameForOrigin(
   }
 #endif
 
-  std::string languages =
-      profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
-
-  return WebOriginDisplayName(origin, languages);
-}
-
-// static
-base::string16 PlatformNotificationServiceImpl::WebOriginDisplayName(
-    const GURL& origin,
-    const std::string& languages) {
-  if (origin.SchemeIsHTTPOrHTTPS()) {
-    base::string16 formatted_origin;
-    if (origin.SchemeIs(url::kHttpScheme)) {
-      const url::Parsed& parsed = origin.parsed_for_possibly_invalid_spec();
-      const std::string& spec = origin.possibly_invalid_spec();
-      formatted_origin.append(
-          spec.begin(),
-          spec.begin() +
-              parsed.CountCharactersBefore(url::Parsed::USERNAME, true));
-    }
-    formatted_origin.append(net::IDNToUnicode(origin.host(), languages));
-    if (origin.has_port()) {
-      formatted_origin.push_back(':');
-      formatted_origin.append(base::UTF8ToUTF16(origin.port()));
-    }
-    return formatted_origin;
-  }
-
-  // TODO(dewittj): Once file:// URLs are passed in to the origin
-  // GURL here, begin returning the path as the display name.
-  return net::FormatUrl(origin, languages);
+  return base::string16();
 }

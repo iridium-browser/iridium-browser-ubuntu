@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/threading/thread_checker.h"
 #include "chrome/browser/chromeos/drive/change_list_loader_observer.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
@@ -70,6 +71,7 @@ class FileSystem : public FileSystemInterface,
              JobScheduler* scheduler,
              internal::ResourceMetadata* resource_metadata,
              base::SequencedTaskRunner* blocking_task_runner,
+             base::SingleThreadTaskRunner* file_task_runner,
              const base::FilePath& temporary_file_directory);
   ~FileSystem() override;
 
@@ -271,9 +273,10 @@ class FileSystem : public FileSystemInterface,
 
   scoped_ptr<internal::SyncClient> sync_client_;
 
-  ObserverList<FileSystemObserver> observers_;
+  base::ObserverList<FileSystemObserver> observers_;
 
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
 
   base::FilePath temporary_file_directory_;
 
@@ -291,6 +294,8 @@ class FileSystem : public FileSystemInterface,
   scoped_ptr<file_system::GetFileForSavingOperation>
       get_file_for_saving_operation_;
   scoped_ptr<file_system::SetPropertyOperation> set_property_operation_;
+
+  base::ThreadChecker thread_checker_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

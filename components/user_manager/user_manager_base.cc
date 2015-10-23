@@ -88,6 +88,9 @@ const char kUsingSAMLKey[] = "using_saml";
 // Key of Device Id.
 const char kDeviceId[] = "device_id";
 
+// Key of GAPS cookie.
+const char kGAPSCookie[] = "gaps_cookie";
+
 // Key of the reason for re-auth.
 const char kReauthReasonKey[] = "reauth_reason";
 
@@ -378,6 +381,7 @@ void UserManagerBase::RemoveUserFromList(const std::string& user_id) {
     // boostrapping user during user list loading.
     ListPrefUpdate users_update(GetLocalState(), kRegularUsers);
     users_update->Remove(base::StringValue(user_id), NULL);
+    OnUserRemoved(user_id);
   } else {
     NOTREACHED() << "Users are not loaded yet.";
     return;
@@ -1020,6 +1024,8 @@ bool UserManagerBase::FindKnownUserPrefs(
   // Local State may not be initialized in tests.
   if (!local_state)
     return false;
+  if (IsUserNonCryptohomeDataEphemeral(user_id))
+    return false;
 
   const base::ListValue* known_users = local_state->GetList(kKnownUsers);
   for (size_t i = 0; i < known_users->GetSize(); ++i) {
@@ -1041,6 +1047,9 @@ void UserManagerBase::UpdateKnownUserPrefs(const UserID& user_id,
 
   // Local State may not be initialized in tests.
   if (!local_state)
+    return;
+
+  if (IsUserNonCryptohomeDataEphemeral(user_id))
     return;
 
   ListPrefUpdate update(local_state, kKnownUsers);
@@ -1163,6 +1172,19 @@ std::string UserManagerBase::GetKnownUserDeviceId(const UserID& user_id) {
   return std::string();
 }
 
+void UserManagerBase::SetKnownUserGAPSCookie(const UserID& user_id,
+                                             const std::string& gaps_cookie) {
+  SetKnownUserStringPref(user_id, kGAPSCookie, gaps_cookie);
+}
+
+std::string UserManagerBase::GetKnownUserGAPSCookie(const UserID& user_id) {
+  std::string gaps_cookie;
+  if (GetKnownUserStringPref(user_id, kGAPSCookie, &gaps_cookie)) {
+    return gaps_cookie;
+  }
+  return std::string();
+}
+
 User* UserManagerBase::RemoveRegularOrSupervisedUserFromList(
     const std::string& user_id) {
   ListPrefUpdate prefs_users_update(GetLocalState(), kRegularUsers);
@@ -1179,6 +1201,7 @@ User* UserManagerBase::RemoveRegularOrSupervisedUserFromList(
       ++it;
     }
   }
+  OnUserRemoved(user_id);
   return user;
 }
 

@@ -4,7 +4,7 @@
 
 #include "ppapi/nacl_irt/manifest_service.h"
 
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sync_message_filter.h"
@@ -28,7 +28,8 @@ namespace ppapi {
 class ManifestMessageFilter : public IPC::SyncMessageFilter {
  public:
   ManifestMessageFilter(base::WaitableEvent* shutdown_event)
-      : SyncMessageFilter(shutdown_event),
+      : SyncMessageFilter(shutdown_event,
+                          false /* is_channel_send_thread_safe */),
         connected_event_(
             true /* manual_reset */, false /* initially_signaled */) {
   }
@@ -66,13 +67,12 @@ class ManifestMessageFilter : public IPC::SyncMessageFilter {
 
 ManifestService::ManifestService(
     const IPC::ChannelHandle& handle,
-    scoped_refptr<base::MessageLoopProxy> io_message_loop,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     base::WaitableEvent* shutdown_event) {
   filter_ = new ManifestMessageFilter(shutdown_event);
-  channel_ = IPC::ChannelProxy::Create(handle,
-                                       IPC::Channel::MODE_SERVER,
+  channel_ = IPC::ChannelProxy::Create(handle, IPC::Channel::MODE_SERVER,
                                        NULL,  // Listener
-                                       io_message_loop.get());
+                                       io_task_runner.get());
   channel_->AddFilter(filter_.get());
 }
 

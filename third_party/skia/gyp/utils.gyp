@@ -19,22 +19,22 @@
       ],
       'include_dirs': [
         '../include/effects',
+        '../include/gpu',
         '../include/images',
         '../include/pathops',
         '../include/pipe',
+        '../include/private',
         '../include/utils',
         '../include/utils/mac',
         '../include/utils/unix',
         '../include/utils/win',
         '../src/core',
+        '../src/image',
         '../src/opts',
         '../src/utils',
       ],
       'sources': [
         'utils.gypi', # Makes the gypi appear in IDEs (but does not modify the build).
-      ],
-      'sources!': [
-          '../src/utils/SDL/SkOSWindow_SDL.cpp',
       ],
       'conditions': [
         [ 'skia_os == "mac"', {
@@ -105,11 +105,6 @@
             '../src/utils/win/SkDWriteGeometrySink.h',
             '../src/utils/win/SkHRESULT.cpp',
             '../src/utils/win/SkIStream.cpp',
-          ],
-        }],
-        ['skia_run_pdfviewer_in_gm', {
-          'defines': [
-            'SK_BUILD_NATIVE_PDF_RENDERER',
           ],
         }],
       ],

@@ -32,8 +32,8 @@
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
-#include "chrome/browser/crash_upload_list.h"
-#include "chrome/common/chrome_version_info_values.h"
+#include "components/upload_list/crash_upload_list.h"
+#include "components/version_info/version_info_values.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -45,8 +45,9 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/channel_info.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/version_info/version_info.h"
 #endif
 
 namespace chrome {
@@ -135,8 +136,8 @@ bool ChromeCrashReporterClient::ShouldShowRestartDialog(base::string16* title,
   // The CHROME_RESTART var contains the dialog strings separated by '|'.
   // See ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment()
   // for details.
-  std::vector<std::string> dlg_strings;
-  base::SplitString(restart_info, '|', &dlg_strings);
+  std::vector<std::string> dlg_strings = base::SplitString(
+      restart_info, "|", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   if (dlg_strings.size() < 3)
     return false;
@@ -322,7 +323,7 @@ bool ChromeCrashReporterClient::GetCollectStatsConsent() {
   bool is_guest_session = base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kGuestSession);
   bool is_stable_channel =
-      chrome::VersionInfo::GetChannel() == chrome::VersionInfo::CHANNEL_STABLE;
+      chrome::GetChannel() == version_info::Channel::STABLE;
 
   if (is_guest_session && is_stable_channel)
     return false;

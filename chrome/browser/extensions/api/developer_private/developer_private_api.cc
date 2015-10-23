@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/devtools_util.h"
+#include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_ui_util.h"
@@ -43,8 +44,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
@@ -152,7 +153,24 @@ void PerformVerificationCheck(content::BrowserContext* context) {
   UMA_HISTOGRAM_BOOLEAN("ExtensionSettings.ShouldDoVerificationCheck",
                         should_do_verification_check);
   if (should_do_verification_check)
-    ExtensionSystem::Get(context)->install_verifier()->VerifyAllExtensions();
+    InstallVerifier::Get(context)->VerifyAllExtensions();
+}
+
+scoped_ptr<developer::ProfileInfo> CreateProfileInfo(Profile* profile) {
+  scoped_ptr<developer::ProfileInfo> info(new developer::ProfileInfo());
+  info->is_supervised = profile->IsSupervised();
+  PrefService* prefs = profile->GetPrefs();
+  info->is_incognito_available =
+      IncognitoModePrefs::GetAvailability(prefs) !=
+          IncognitoModePrefs::DISABLED;
+  info->in_developer_mode =
+      !info->is_supervised &&
+      prefs->GetBoolean(prefs::kExtensionsUIDeveloperMode);
+  info->app_info_dialog_enabled = CanShowAppInfoDialog();
+  info->can_load_unpacked =
+      !ExtensionManagementFactory::GetForBrowserContext(profile)
+          ->BlacklistedByDefault();
+  return info.Pass();
 }
 
 }  // namespace
@@ -188,6 +206,10 @@ DeveloperPrivateEventRouter::DeveloperPrivateEventRouter(Profile* profile)
       process_manager_observer_(this),
       app_window_registry_observer_(this),
       extension_action_api_observer_(this),
+      warning_service_observer_(this),
+      extension_prefs_observer_(this),
+      extension_management_observer_(this),
+      command_service_observer_(this),
       profile_(profile),
       event_router_(EventRouter::Get(profile_)),
       weak_factory_(this) {
@@ -196,6 +218,18 @@ DeveloperPrivateEventRouter::DeveloperPrivateEventRouter(Profile* profile)
   process_manager_observer_.Add(ProcessManager::Get(profile));
   app_window_registry_observer_.Add(AppWindowRegistry::Get(profile));
   extension_action_api_observer_.Add(ExtensionActionAPI::Get(profile));
+  warning_service_observer_.Add(WarningService::Get(profile));
+  extension_prefs_observer_.Add(ExtensionPrefs::Get(profile));
+  extension_management_observer_.Add(
+      ExtensionManagementFactory::GetForBrowserContext(profile));
+  command_service_observer_.Add(CommandService::Get(profile));
+  pref_change_registrar_.Init(profile->GetPrefs());
+  // The unretained is safe, since the PrefChangeRegistrar unregisters the
+  // callback on destruction.
+  pref_change_registrar_.Add(
+      prefs::kExtensionsUIDeveloperMode,
+      base::Bind(&DeveloperPrivateEventRouter::OnProfilePrefChanged,
+                 base::Unretained(this)));
 }
 
 DeveloperPrivateEventRouter::~DeveloperPrivateEventRouter() {
@@ -285,10 +319,53 @@ void DeveloperPrivateEventRouter::OnAppWindowRemoved(AppWindow* window) {
                             window->extension_id());
 }
 
+void DeveloperPrivateEventRouter::OnExtensionCommandAdded(
+    const std::string& extension_id,
+    const Command& added_command) {
+  BroadcastItemStateChanged(developer::EVENT_TYPE_PREFS_CHANGED,
+                            extension_id);
+}
+
+void DeveloperPrivateEventRouter::OnExtensionCommandRemoved(
+    const std::string& extension_id,
+    const Command& removed_command) {
+  BroadcastItemStateChanged(developer::EVENT_TYPE_PREFS_CHANGED,
+                            extension_id);
+}
+
 void DeveloperPrivateEventRouter::OnExtensionActionVisibilityChanged(
     const std::string& extension_id,
     bool is_now_visible) {
   BroadcastItemStateChanged(developer::EVENT_TYPE_PREFS_CHANGED, extension_id);
+}
+
+void DeveloperPrivateEventRouter::OnExtensionDisableReasonsChanged(
+    const std::string& extension_id, int disable_reasons) {
+  BroadcastItemStateChanged(developer::EVENT_TYPE_PREFS_CHANGED, extension_id);
+}
+
+void DeveloperPrivateEventRouter::OnExtensionManagementSettingsChanged() {
+  scoped_ptr<base::ListValue> args(new base::ListValue());
+  args->Append(CreateProfileInfo(profile_)->ToValue());
+  scoped_ptr<Event> event(
+      new Event(events::DEVELOPER_PRIVATE_ON_PROFILE_STATE_CHANGED,
+                developer::OnProfileStateChanged::kEventName, args.Pass()));
+  event_router_->BroadcastEvent(event.Pass());
+}
+
+void DeveloperPrivateEventRouter::ExtensionWarningsChanged(
+    const ExtensionIdSet& affected_extensions) {
+  for (const ExtensionId& id : affected_extensions)
+    BroadcastItemStateChanged(developer::EVENT_TYPE_WARNINGS_CHANGED, id);
+}
+
+void DeveloperPrivateEventRouter::OnProfilePrefChanged() {
+  scoped_ptr<base::ListValue> args(new base::ListValue());
+  args->Append(CreateProfileInfo(profile_)->ToValue());
+  scoped_ptr<Event> event(
+      new Event(events::DEVELOPER_PRIVATE_ON_PROFILE_STATE_CHANGED,
+                developer::OnProfileStateChanged::kEventName, args.Pass()));
+  event_router_->BroadcastEvent(event.Pass());
 }
 
 void DeveloperPrivateEventRouter::BroadcastItemStateChanged(
@@ -329,8 +406,9 @@ void DeveloperPrivateEventRouter::BroadcastItemStateChangedHelper(
 
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(dict.release());
-  scoped_ptr<Event> event(new Event(
-      developer::OnItemStateChanged::kEventName, args.Pass()));
+  scoped_ptr<Event> event(
+      new Event(events::DEVELOPER_PRIVATE_ON_ITEM_STATE_CHANGED,
+                developer::OnItemStateChanged::kEventName, args.Pass()));
   event_router_->BroadcastEvent(event.Pass());
 }
 
@@ -499,18 +577,7 @@ DeveloperPrivateGetProfileConfigurationFunction::
 
 ExtensionFunction::ResponseAction
 DeveloperPrivateGetProfileConfigurationFunction::Run() {
-  developer::ProfileInfo info;
-  info.is_supervised = GetProfile()->IsSupervised();
-  info.is_incognito_available =
-      IncognitoModePrefs::GetAvailability(GetProfile()->GetPrefs()) !=
-          IncognitoModePrefs::DISABLED;
-  info.in_developer_mode =
-      !info.is_supervised &&
-      GetProfile()->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
-  info.app_info_dialog_enabled = CanShowAppInfoDialog();
-  info.can_load_unpacked =
-      !ExtensionManagementFactory::GetForBrowserContext(browser_context())
-          ->BlacklistedByDefault();
+  scoped_ptr<developer::ProfileInfo> info = CreateProfileInfo(GetProfile());
 
   // If this is called from the chrome://extensions page, we use this as a
   // heuristic that it's a good time to verify installs. We do this on startup,
@@ -519,7 +586,7 @@ DeveloperPrivateGetProfileConfigurationFunction::Run() {
   if (source_context_type() == Feature::WEBUI_CONTEXT)
     PerformVerificationCheck(browser_context());
 
-  return RespondNow(OneArgument(info.ToValue()));
+  return RespondNow(OneArgument(info->ToValue()));
 }
 
 DeveloperPrivateUpdateProfileConfigurationFunction::
@@ -818,7 +885,7 @@ bool DeveloperPrivateLoadDirectoryFunction::RunAsync() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(2, &directory_url_str));
 
   context_ = content::BrowserContext::GetStoragePartition(
-      GetProfile(), render_view_host()->GetSiteInstance())
+                 GetProfile(), render_frame_host()->GetSiteInstance())
                  ->GetFileSystemContext();
 
   // Directory url is non empty only for syncfilesystem.
@@ -833,11 +900,10 @@ bool DeveloperPrivateLoadDirectoryFunction::RunAsync() {
     return LoadByFileSystemAPI(directory_url);
   } else {
     // Check if the DirecotryEntry is the instance of chrome filesystem.
-    if (!app_file_handler_util::ValidateFileEntryAndGetPath(filesystem_name,
-                                                            filesystem_path,
-                                                            render_view_host_,
-                                                            &project_base_path_,
-                                                            &error_)) {
+    if (!app_file_handler_util::ValidateFileEntryAndGetPath(
+            filesystem_name, filesystem_path,
+            render_frame_host()->GetProcess()->GetID(), &project_base_path_,
+            &error_)) {
       SetError("DirectoryEntry of unsupported filesystem.");
       return false;
     }
@@ -1204,19 +1270,20 @@ DeveloperPrivateOpenDevToolsFunction::Run() {
     return RespondNow(NoArguments());
   }
 
-  content::RenderViewHost* rvh =
-      content::RenderViewHost::FromID(properties.render_process_id,
-                                      properties.render_view_id);
+  // NOTE(devlin): Even though the properties use "render_view_id", this
+  // actually refers to a render frame.
+  content::RenderFrameHost* rfh = content::RenderFrameHost::FromID(
+      properties.render_process_id, properties.render_view_id);
 
   content::WebContents* web_contents =
-      rvh ? content::WebContents::FromRenderViewHost(rvh) : nullptr;
-  // It's possible that the render view was closed since we last updated the
+      rfh ? content::WebContents::FromRenderFrameHost(rfh) : nullptr;
+  // It's possible that the render frame was closed since we last updated the
   // links. Handle this gracefully.
   if (!web_contents)
     return RespondNow(Error(kNoSuchRendererError));
 
   // If we include a url, we should inspect it specifically (and not just the
-  // render view).
+  // render frame).
   if (properties.url) {
     // Line/column numbers are reported in display-friendly 1-based numbers,
     // but are inspected in zero-based numbers.
@@ -1346,6 +1413,45 @@ ExtensionFunction::ResponseAction DeveloperPrivateShowPathFunction::Run() {
                                   extension->path().Append(kManifestFilename));
   return RespondNow(NoArguments());
 }
+
+DeveloperPrivateSetShortcutHandlingSuspendedFunction::
+~DeveloperPrivateSetShortcutHandlingSuspendedFunction() {}
+
+ExtensionFunction::ResponseAction
+DeveloperPrivateSetShortcutHandlingSuspendedFunction::Run() {
+  scoped_ptr<developer::SetShortcutHandlingSuspended::Params> params(
+      developer::SetShortcutHandlingSuspended::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+  ExtensionCommandsGlobalRegistry::Get(GetProfile())->
+      SetShortcutHandlingSuspended(params->is_suspended);
+  return RespondNow(NoArguments());
+}
+
+DeveloperPrivateUpdateExtensionCommandFunction::
+~DeveloperPrivateUpdateExtensionCommandFunction() {}
+
+ExtensionFunction::ResponseAction
+DeveloperPrivateUpdateExtensionCommandFunction::Run() {
+  scoped_ptr<developer::UpdateExtensionCommand::Params> params(
+      developer::UpdateExtensionCommand::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const developer::ExtensionCommandUpdate& update = params->update;
+
+  CommandService* command_service = CommandService::Get(GetProfile());
+
+  if (update.scope != developer::COMMAND_SCOPE_NONE) {
+    command_service->SetScope(update.extension_id, update.command_name,
+                              update.scope == developer::COMMAND_SCOPE_GLOBAL);
+  }
+
+  if (update.keybinding) {
+    command_service->UpdateKeybindingPrefs(
+        update.extension_id, update.command_name, *update.keybinding);
+  }
+
+  return RespondNow(NoArguments());
+}
+
 
 }  // namespace api
 

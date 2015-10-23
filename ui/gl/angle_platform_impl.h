@@ -22,6 +22,9 @@ class ANGLEPlatformImpl : public angle::Platform {
   // angle::Platform:
   double currentTime() override;
   double monotonicallyIncreasingTime() override;
+  void logError(const char* errorMessage) override;
+  void logWarning(const char* warningMessage) override;
+  void logInfo(const char* infoMessage) override;
   const unsigned char* getTraceCategoryEnabledFlag(
       const char* category_group) override;
   TraceEventHandle addTraceEvent(char phase,
@@ -46,6 +49,7 @@ class ANGLEPlatformImpl : public angle::Platform {
                             int sample,
                             int boundary_value) override;
   void histogramSparse(const char* name, int sample) override;
+  void histogramBoolean(const char* name, bool sample) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ANGLEPlatformImpl);

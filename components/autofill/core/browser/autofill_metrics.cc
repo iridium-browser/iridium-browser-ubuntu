@@ -5,7 +5,7 @@
 #include "components/autofill/core/browser/autofill_metrics.h"
 
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_type.h"
@@ -606,10 +606,24 @@ void AutofillMetrics::LogAddressSuggestionsCount(size_t num_suggestions) {
   UMA_HISTOGRAM_COUNTS("Autofill.AddressSuggestionsCount", num_suggestions);
 }
 
+// static
+void AutofillMetrics::LogSuggestionAcceptedIndex(int index) {
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Autofill.SuggestionAcceptedIndex", index);
+}
+
+// static
 void AutofillMetrics::LogPasswordFormQueryVolume(
     PasswordFormQueryVolumeMetric metric) {
   UMA_HISTOGRAM_ENUMERATION("Autofill.PasswordFormQueryVolume", metric,
                             NUM_PASSWORD_FORM_QUERY_VOLUME_METRIC);
+}
+
+// static
+void AutofillMetrics::LogNumberOfEditedAutofilledFieldsAtSubmission(
+    size_t num_edited_autofilled_fields) {
+  UMA_HISTOGRAM_COUNTS_1000(
+      "Autofill.NumberOfEditedAutofilledFieldsAtSubmission",
+      num_edited_autofilled_fields);
 }
 
 AutofillMetrics::FormEventLogger::FormEventLogger(bool is_for_credit_card)

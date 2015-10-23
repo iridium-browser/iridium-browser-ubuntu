@@ -246,12 +246,11 @@ void WebViewPermissionHelper::OnMediaPermissionResponse(
 }
 
 void WebViewPermissionHelper::CanDownload(
-    content::RenderViewHost* render_view_host,
     const GURL& url,
     const std::string& request_method,
     const base::Callback<void(bool)>& callback) {
-  web_view_permission_helper_delegate_->CanDownload(
-      render_view_host, url, request_method, callback);
+  web_view_permission_helper_delegate_->CanDownload(url, request_method,
+                                                    callback);
 }
 
 void WebViewPermissionHelper::RequestPointerLockPermission(
@@ -327,7 +326,8 @@ int WebViewPermissionHelper::RequestPermission(
   int request_id = next_permission_request_id_++;
   pending_permission_requests_[request_id] =
       PermissionResponseInfo(callback, permission_type, allowed_by_default);
-  scoped_ptr<base::DictionaryValue> args(request_info.DeepCopy());
+  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  args->Set(webview::kRequestInfo, request_info.DeepCopy());
   args->SetInteger(webview::kRequestId, request_id);
   switch (permission_type) {
     case WEB_VIEW_PERMISSION_TYPE_NEW_WINDOW: {

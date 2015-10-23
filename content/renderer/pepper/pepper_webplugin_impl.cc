@@ -8,7 +8,6 @@
 
 #include "base/debug/crash_logging.h"
 #include "base/message_loop/message_loop.h"
-#include "content/public/common/page_zoom.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/pepper/message_channel.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
@@ -65,7 +64,8 @@ PepperWebPluginImpl::PepperWebPluginImpl(
       full_frame_(params.loadManually),
       throttler_(throttler.Pass()),
       instance_object_(PP_MakeUndefined()),
-      container_(NULL) {
+      container_(NULL),
+      weak_factory_(this) {
   DCHECK(plugin_module);
   init_data_->module = plugin_module;
   init_data_->render_frame = render_frame;
@@ -98,12 +98,28 @@ bool PepperWebPluginImpl::initialize(WebPluginContainer* container) {
   // Enable script objects for this plugin.
   container->allowScriptObjects();
 
+  auto weak_this = weak_factory_.GetWeakPtr();
   bool success =
       instance_->Initialize(init_data_->arg_names, init_data_->arg_values,
                             full_frame_, throttler_.Pass());
+  // The above call to Initialize can result in re-entrancy and destruction of
+  // the plugin instance. In this case it's quite unclear whether this object
+  // could also have been destroyed. We could return false here, but it would be
+  // better if this object was guaranteed to outlast the recursive call.
+  // Otherwise, the caller of this function would also have to take care that,
+  // in the case of the object being deleted, we never access it again, and we
+  // would just keep passing that responsibility further up the call stack.
+  // Classes tend not to be written with this possibility in mind so it's best
+  // to make this assumption as far down the call stack (as close to the
+  // re-entrant call) as possible. Also take care not to access the plugin
+  // instance again in that case. crbug.com/487146.
+  CHECK(weak_this);
+
   if (!success) {
-    instance_->Delete();
-    instance_ = NULL;
+    if (instance_) {
+      instance_->Delete();
+      instance_ = NULL;
+    }
 
     blink::WebPlugin* replacement_plugin =
         GetContentClient()->renderer()->CreatePluginReplacement(
@@ -137,6 +153,10 @@ void PepperWebPluginImpl::destroy() {
 
 v8::Local<v8::Object> PepperWebPluginImpl::v8ScriptableObject(
       v8::Isolate* isolate) {
+  // Re-entrancy may cause JS to try to execute script on the plugin before it
+  // is fully initialized. See e.g. crbug.com/503401.
+  if (!instance_.get())
+    return v8::Local<v8::Object>();
   // Call through the plugin to get its instance object. The plugin should pass
   // us a reference which we release in destroy().
   if (instance_object_.type == PP_VARTYPE_UNDEFINED)
@@ -247,10 +267,6 @@ WebURL PepperWebPluginImpl::linkAtPosition(const WebPoint& position) const {
   return GURL(instance_->GetLinkAtPosition(position));
 }
 
-void PepperWebPluginImpl::setZoomLevel(double level, bool text_only) {
-  instance_->Zoom(content::ZoomLevelToZoomFactor(level), text_only);
-}
-
 bool PepperWebPluginImpl::startFind(const blink::WebString& search_text,
                                     bool case_sensitive,
                                     int identifier) {
@@ -275,11 +291,11 @@ int PepperWebPluginImpl::printBegin(const WebPrintParams& print_params) {
   return instance_->PrintBegin(print_params);
 }
 
-bool PepperWebPluginImpl::printPage(int page_number, blink::WebCanvas* canvas) {
-  return instance_->PrintPage(page_number, canvas);
+void PepperWebPluginImpl::printPage(int page_number, blink::WebCanvas* canvas) {
+  instance_->PrintPage(page_number, canvas);
 }
 
-void PepperWebPluginImpl::printEnd() { return instance_->PrintEnd(); }
+void PepperWebPluginImpl::printEnd() { instance_->PrintEnd(); }
 
 bool PepperWebPluginImpl::getPrintPresetOptionsFromDocument(
     blink::WebPrintPresetOptions* preset_options) {

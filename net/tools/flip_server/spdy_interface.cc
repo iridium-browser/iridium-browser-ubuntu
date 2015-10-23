@@ -9,11 +9,11 @@
 
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_protocol.h"
-#include "net/tools/dump_cache/url_utilities.h"
 #include "net/tools/flip_server/constants.h"
 #include "net/tools/flip_server/flip_config.h"
 #include "net/tools/flip_server/http_interface.h"
 #include "net/tools/flip_server/spdy_util.h"
+#include "net/tools/flip_server/url_utilities.h"
 
 namespace net {
 
@@ -292,6 +292,8 @@ void SpdySM::OnSynReply(SpdyStreamId stream_id,
 void SpdySM::OnHeaders(SpdyStreamId stream_id,
                        bool has_priority,
                        SpdyPriority priority,
+                       SpdyStreamId parent_stream_id,
+                       bool exclusive,
                        bool fin,
                        const SpdyHeaderBlock& headers) {
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnHeaders(" << stream_id << ")";

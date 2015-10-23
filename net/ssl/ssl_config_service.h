@@ -14,8 +14,6 @@
 #include "net/cert/ct_ev_whitelist.h"
 #include "net/ssl/ssl_config.h"
 
-class GURL;
-
 namespace net {
 
 // The interface for retrieving the SSL configuration.  This interface
@@ -68,9 +66,6 @@ class NET_EXPORT SSLConfigService
   // called on the IO thread.
   void NotifySSLConfigChange();
 
-  // Returns true if the |url| should use fastradio padding.
-  virtual bool SupportsFastradioPadding(const GURL& url);
-
  protected:
   friend class base::RefCountedThreadSafe<SSLConfigService>;
 
@@ -81,7 +76,7 @@ class NET_EXPORT SSLConfigService
                            const SSLConfig& new_config);
 
  private:
-  ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer> observer_list_;
 };
 
 }  // namespace net

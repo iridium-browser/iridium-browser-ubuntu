@@ -4,10 +4,9 @@
 
 #include "base/run_loop.h"
 #include "base/stl_util.h"
-#include "chrome/browser/chromeos/drive/file_change.h"
 #include "chrome/browser/chromeos/extensions/file_manager/event_router.h"
-#include "chrome/browser/chromeos/file_manager/drive_test_util.h"
 #include "chrome/browser/chromeos/file_manager/file_watcher.h"
+#include "chrome/browser/chromeos/file_manager/mount_test_util.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.h"
@@ -15,6 +14,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/mock_disk_mount_manager.h"
+#include "components/drive/file_change.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/install_warning.h"
 #include "google_apis/drive/test_util.h"
@@ -317,7 +317,8 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, Mount) {
   // |source| flags properly down to Files app.
   chromeos::file_system_provider::ProvidedFileSystemInfo info(
       "testing-extension-id", chromeos::file_system_provider::MountOptions(),
-      base::FilePath(), true /* configurable */, extensions::SOURCE_NETWORK);
+      base::FilePath(), true /* configurable */, false /* watchable */,
+      extensions::SOURCE_NETWORK);
 
   file_manager::VolumeManager::Get(browser()->profile())
       ->AddVolumeForTesting(
@@ -387,7 +388,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, OnFileChanged) {
   FileChange first_change;
   first_change.Update(
       base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a")),
-      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::CHANGE_TYPE_DELETE);
   event_router_->OnFileChanged(first_change);
   EXPECT_EQ(2, counter);
 
@@ -395,7 +396,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, OnFileChanged) {
   FileChange second_change;
   second_change.Update(
       base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a/b/c")),
-      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::CHANGE_TYPE_DELETE);
   event_router_->OnFileChanged(second_change);
   EXPECT_EQ(3, counter);
 
@@ -403,7 +404,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, OnFileChanged) {
   FileChange third_change;
   third_change.Update(
       base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/z/y")),
-      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::CHANGE_TYPE_DELETE);
   event_router_->OnFileChanged(third_change);
   EXPECT_EQ(3, counter);
 

@@ -138,7 +138,7 @@ void PepperVideoCaptureHost::OnFrameReady(
 
   for (uint32_t i = 0; i < buffers_.size(); ++i) {
     if (!buffers_[i].in_use) {
-      DCHECK_EQ(frame->format(), media::VideoFrame::I420);
+      DCHECK_EQ(frame->format(), media::PIXEL_FORMAT_I420);
       if (buffers_[i].buffer->size() <
           media::VideoFrame::AllocationSize(frame->format(), alloc_size_)) {
         // TODO(ihf): handle size mismatches gracefully here.
@@ -176,7 +176,7 @@ void PepperVideoCaptureHost::AllocBuffers(const gfx::Size& resolution,
   ReleaseBuffers();
 
   const size_t size = media::VideoFrame::AllocationSize(
-      media::VideoFrame::I420, gfx::Size(info.width, info.height));
+      media::PIXEL_FORMAT_I420, gfx::Size(info.width, info.height));
 
   ppapi::proxy::ResourceMessageReplyParams params(pp_resource(), 0);
 
@@ -220,21 +220,11 @@ void PepperVideoCaptureHost::AllocBuffers(const gfx::Size& resolution,
     {
       EnterResourceNoLock<PPB_Buffer_API> enter(res, true);
       DCHECK(enter.succeeded());
-      int handle;
-      int32_t result = enter.object()->GetSharedMemory(&handle);
+      base::SharedMemory* shm;
+      int32_t result = enter.object()->GetSharedMemory(&shm);
       DCHECK(result == PP_OK);
-      // TODO(piman/brettw): Change trusted interface to return a PP_FileHandle,
-      // those casts are ugly.
-      base::PlatformFile platform_file =
-#if defined(OS_WIN)
-          reinterpret_cast<HANDLE>(static_cast<intptr_t>(handle));
-#elif defined(OS_POSIX)
-          handle;
-#else
-#error Not implemented.
-#endif
       params.AppendHandle(ppapi::proxy::SerializedHandle(
-          dispatcher->ShareHandleWithRemote(platform_file, false), size));
+          dispatcher->ShareSharedMemoryHandleWithRemote(shm->handle()), size));
     }
   }
 
@@ -360,9 +350,8 @@ void PepperVideoCaptureHost::SetRequestedInfo(
                static_cast<uint32_t>(media::limits::kMaxFramesPerSecond - 1));
 
   video_capture_params_.requested_format = media::VideoCaptureFormat(
-      gfx::Size(device_info.width, device_info.height),
-      frames_per_second,
-      media::PIXEL_FORMAT_I420);
+      gfx::Size(device_info.width, device_info.height), frames_per_second,
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420);
 }
 
 void PepperVideoCaptureHost::DetachPlatformVideoCapture() {

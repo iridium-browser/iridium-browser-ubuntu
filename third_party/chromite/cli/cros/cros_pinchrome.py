@@ -376,6 +376,10 @@ class PinchromeCommand(command.CliCommand):
     message = [
         '%s' % subject,
         '',
+        'DO NOT REVERT THIS CL.',
+        'In general, reverting chrome (un)pin CLs does not do what you expect.',
+        'Instead, use `cros pinchrome` to generate new CLs.',
+        '',
         'BUG=%s' % self.options.bug,
         'TEST=None',
     ]
@@ -442,6 +446,8 @@ class PinchromeCommand(command.CliCommand):
     for pkg_dir in other_dirs:
       ebs.append(RevertStableEBuild(pkg_dir, target_sha))
     RevertBinhostConf(overlay, pin_version.conf_files, target_sha)
+    git.RevertPath(os.path.join(overlay, 'chromeos', 'binhost'),
+                   'chromium.json', target_sha)
     MaskNewerPackages(overlay, (eb for eb in ebs if eb))
 
     pub_cid = git.Commit(overlay, 'Public overlay commit')
@@ -468,6 +474,8 @@ class PinchromeCommand(command.CliCommand):
       raise Exception('Failed to find private binhost uprev.')
     target_sha = binhost_uprev.sha
     RevertBinhostConf(priv_overlay, binhost_uprev.conf_files, target_sha)
+    git.RevertPath(os.path.join(priv_overlay, 'chromeos', 'binhost'),
+                   'chrome.json', target_sha)
 
     commit_message = self.CommitMessage(commit_subject, pub_cid)
     priv_cid = git.Commit(priv_overlay, commit_message)

@@ -14,7 +14,7 @@
 #include "chrome/browser/search/instant_unittest_base.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/signin/fake_signin_manager.h"
+#include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -23,7 +23,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/ntp_logging_events.h"
-#include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -31,6 +30,7 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/omnibox/common/omnibox_focus_state.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -84,7 +84,7 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
   content::BrowserContext* CreateBrowserContext() override {
     TestingProfile::Builder builder;
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
-                              FakeSigninManagerBase::Build);
+                              BuildFakeSigninManagerBase);
     builder.AddTestingFactory(
         ProfileSyncServiceFactory::GetInstance(),
         ProfileSyncServiceMock::BuildMockProfileSyncService);
@@ -190,8 +190,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatch) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, get<0>(params));
-  ASSERT_TRUE(get<1>(params));
+  EXPECT_EQ(test_identity, base::get<0>(params));
+  ASSERT_TRUE(base::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail) {
@@ -213,8 +213,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, get<0>(params));
-  ASSERT_TRUE(get<1>(params));
+  EXPECT_EQ(test_identity, base::get<0>(params));
+  ASSERT_TRUE(base::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail2) {
@@ -237,8 +237,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail2) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, get<0>(params));
-  ASSERT_TRUE(get<1>(params));
+  EXPECT_EQ(test_identity, base::get<0>(params));
+  ASSERT_TRUE(base::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMismatch) {
@@ -257,8 +257,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMismatch) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, get<0>(params));
-  ASSERT_FALSE(get<1>(params));
+  EXPECT_EQ(test_identity, base::get<0>(params));
+  ASSERT_FALSE(base::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckSignedOutMismatch) {
@@ -277,8 +277,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckSignedOutMismatch) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, get<0>(params));
-  ASSERT_FALSE(get<1>(params));
+  EXPECT_EQ(test_identity, base::get<0>(params));
+  ASSERT_FALSE(base::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnHistorySyncCheckSyncing) {
@@ -296,7 +296,7 @@ TEST_F(SearchTabHelperTest, OnHistorySyncCheckSyncing) {
 
   ChromeViewMsg_HistorySyncCheckResult::Param params;
   ChromeViewMsg_HistorySyncCheckResult::Read(message, &params);
-  ASSERT_TRUE(get<0>(params));
+  ASSERT_TRUE(base::get<0>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnHistorySyncCheckNotSyncing) {
@@ -314,7 +314,7 @@ TEST_F(SearchTabHelperTest, OnHistorySyncCheckNotSyncing) {
 
   ChromeViewMsg_HistorySyncCheckResult::Param params;
   ChromeViewMsg_HistorySyncCheckResult::Read(message, &params);
-  ASSERT_FALSE(get<0>(params));
+  ASSERT_FALSE(base::get<0>(params));
 }
 
 class TabTitleObserver : public content::WebContentsObserver {
@@ -401,7 +401,7 @@ class SearchTabHelperPrerenderTest : public InstantUnitTestBase {
   }
 
   bool IsInstantURLMarkedForPrerendering() {
-    GURL instant_url(chrome::GetSearchResultPrefetchBaseURL(profile()));
+    GURL instant_url(search::GetSearchResultPrefetchBaseURL(profile()));
     prerender::PrerenderManager* prerender_manager =
         prerender::PrerenderManagerFactory::GetForProfile(profile());
     return prerender_manager->HasPrerenderedUrl(instant_url, web_contents());

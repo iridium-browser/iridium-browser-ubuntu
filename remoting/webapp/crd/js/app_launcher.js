@@ -52,41 +52,27 @@ remoting.V1AppLauncher = function() {};
 remoting.V1AppLauncher.prototype.launch = function(opt_launchArgs) {
   var url = base.urlJoin('main.html', opt_launchArgs);
 
-  return new Promise(
-      /**
-       * @param {function(*=):void} resolve
-       * @param {function(*=):void} reject
-       */
-      function(resolve, reject) {
-        chrome.tabs.create({ url: url, selected: true },
-            /** @param {chrome.Tab} tab The created tab. */
-            function(tab) {
-              if (!tab) {
-                reject(new Error(chrome.runtime.lastError.message));
-              } else {
-                resolve(String(tab.id));
-              }
-            });
-       });
+  return new Promise(function(resolve, reject) {
+    chrome.tabs.create({ url: url, selected: true }, function(/**Tab*/ tab){
+      if (!tab) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(String(tab.id));
+      }
+    });
+  });
 };
 
 remoting.V1AppLauncher.prototype.close = function(id) {
-  return new Promise(
-      /**
-       * @param {function(*=):void} resolve
-       * @param {function(*=):void} reject
-       */
-      function(resolve, reject) {
-        chrome.tabs.get(id,
-            /** @param {chrome.Tab} tab The retrieved tab. */
-            function(tab) {
-              if (!tab) {
-                reject(new Error(chrome.runtime.lastError.message));
-              } else {
-                chrome.tabs.remove(tab.id, /** function(*=):void */ (resolve));
-              }
-            });
-      });
+  return new Promise(function(resolve, reject) {
+    chrome.tabs.get(parseInt(id, 10), function(/** Tab */ tab) {
+      if (!tab) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        chrome.tabs.remove(tab.id, resolve);
+      }
+    });
+  });
 };
 
 
@@ -100,48 +86,60 @@ var APP_MAIN_URL = 'main.html';
 
 /**
  * @param {string} id
+ * @return {Promise<string>}  A promise that resolves with the id of the created
+ *     window, which is guaranteed to be the same as the current window id.
  */
 remoting.V2AppLauncher.prototype.restart = function(id) {
-  this.close(id).then(function() {
-    // Not using the launch() method because we want to launch a new window with
-    // the same id, such that the size and positioning of the original window
-    // can be preserved.
-    return chrome.app.window.create(APP_MAIN_URL, {'id' : id, 'frame': 'none'});
+  return this.close(id).then(function() {
+    return createWindow_({'id' : id, 'frame': 'none'});
+  }).then(function (/** string */ newId) {
+    console.assert(newId === id, 'restart() should preserve the window id.');
+    return newId;
   });
 };
 
-remoting.V2AppLauncher.prototype.launch = function(opt_launchArgs) {
+/**
+ * @param {chrome.app.window.CreateWindowOptions=} opt_options
+ * @param {Object=} opt_launchArgs
+ * @return {Promise<string>} A promise that resolves with the id of the created
+ *     window.
+ */
+function createWindow_(opt_options, opt_launchArgs) {
   var url = base.urlJoin(APP_MAIN_URL, opt_launchArgs);
+  var deferred = new base.Deferred();
 
-  return new Promise(
-      /**
-       * @param {function(*=):void} resolve
-       * @param {function(*=):void} reject
-       */
-      function(resolve, reject) {
-        var START_FULLSCREEN = 'start-fullscreen';
-        /** @param {Object} values */
-        var onValues = function(values) {
-          /** @type {string} */
-          var state = values[START_FULLSCREEN] ? 'fullscreen' : 'normal';
-          chrome.app.window.create(url, {
-              'width': 800,
-              'height': 600,
-              'frame': 'none',
-              'id': String(getNextWindowId()),
-              'state': state
-            },
-            /** @param {AppWindow=} appWindow */
-            function(appWindow) {
-              if (!appWindow) {
-                reject(new Error(chrome.runtime.lastError.message));
-              } else {
-                resolve(appWindow.id);
-              }
-            });
-        };
-        chrome.storage.local.get(START_FULLSCREEN, onValues);
-      });
+  chrome.app.window.create(url, opt_options,
+    function(/** chrome.app.window.AppWindow= */ appWindow) {
+      if (!appWindow) {
+        deferred.reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        deferred.resolve(appWindow.id);
+      }
+    });
+  return deferred.promise();
+}
+
+remoting.V2AppLauncher.prototype.launch = function(opt_launchArgs) {
+  var deferred = new base.Deferred();
+  var START_FULLSCREEN = 'start-fullscreen';
+
+  /** @param {Object} values */
+  var onValues = function(values) {
+    /** @type {string} */
+    var state = values[START_FULLSCREEN] ? 'fullscreen' : 'normal';
+    createWindow_({
+        'width': 800,
+        'height': 634,
+        'frame': 'none',
+        'id': String(getNextWindowId()),
+        'state': state
+    }, opt_launchArgs).then(
+      deferred.resolve.bind(deferred),
+      deferred.reject.bind(deferred)
+    );
+  };
+  chrome.storage.local.get(START_FULLSCREEN, onValues);
+  return deferred.promise();
 };
 
 remoting.V2AppLauncher.prototype.close = function(id) {
@@ -161,20 +159,19 @@ remoting.V2AppLauncher.prototype.close = function(id) {
 };
 
 /**
- * @return {number} the next available window id.
+ * @return {number} The first available window id. Since Chrome remembers
+ *     properties such as size and position for app windows, it is better
+ *     to reuse window ids rather than allocating new ones.
  */
 function getNextWindowId() {
   var appWindows = chrome.app.window.getAll();
-  var lastId = /** @type(number) */ (0);
-  appWindows.forEach(function(appWindow) {
-    base.debug.assert(Number.isInteger(appWindow.id),
-                      "Window Id should be an integer");
-    var id = parseInt(appWindow.id, 10);
-    if (lastId <= id) {
-      lastId = id;
+  var result = 1;
+  for (; result <= appWindows.length; ++result) {
+    if (!chrome.app.window.get(String(result))) {
+      break;
     }
-  });
-  return ++lastId;
+  }
+  return result;
 }
 
 })();

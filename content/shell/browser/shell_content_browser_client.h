@@ -44,6 +44,7 @@ class ShellContentBrowserClient : public ContentBrowserClient {
       ProtocolHandlerMap* protocol_handlers,
       URLRequestInterceptorScopedVector request_interceptors) override;
   bool IsHandledURL(const GURL& url) override;
+  bool IsNPAPIEnabled() override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
   void OverrideWebkitPrefs(RenderViewHost* render_view_host,
@@ -71,12 +72,18 @@ class ShellContentBrowserClient : public ContentBrowserClient {
                const OpenURLParams& params,
                const base::Callback<void(WebContents*)>& callback) override;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_ANDROID)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      FileDescriptorInfo* mappings) override;
-#endif
+      content::FileDescriptorInfo* mappings,
+      std::map<int, base::MemoryMappedFile::Region>* regions) override;
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+  void GetAdditionalMappedFilesForChildProcess(
+      const base::CommandLine& command_line,
+      int child_process_id,
+      content::FileDescriptorInfo* mappings) override;
+#endif  // defined(OS_ANDROID)
 #if defined(OS_WIN)
   void PreSpawnRenderer(sandbox::TargetPolicy* policy, bool* success) override;
 #endif
@@ -102,11 +109,6 @@ class ShellContentBrowserClient : public ContentBrowserClient {
 
   scoped_ptr<ShellResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  base::ScopedFD v8_natives_fd_;
-  base::ScopedFD v8_snapshot_fd_;
-#endif
 
   base::Closure select_client_certificate_callback_;
 

@@ -14,7 +14,6 @@
 #include "ui/views/window/dialog_delegate.h"
 
 typedef std::vector<base::string16> PermissionDetails;
-class ExtensionInstallPromptShowParams;
 class Profile;
 
 namespace content {
@@ -32,21 +31,8 @@ class ResourceBundle;
 namespace views {
 class GridLayout;
 class ImageButton;
-class Label;
 class Link;
 }
-
-// A custom scrollable view implementation for the dialog.
-class CustomScrollableView : public views::View {
- public:
-  CustomScrollableView();
-  ~CustomScrollableView() override;
-
- private:
-  void Layout() override;
-
-  DISALLOW_COPY_AND_ASSIGN(CustomScrollableView);
-};
 
 // Implements the extension installation dialog for TOOLKIT_VIEWS.
 class ExtensionInstallDialogView : public views::DialogDelegateView,
@@ -63,9 +49,6 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   // the contents of the DialogView.
   const views::ScrollView* scroll_view() const { return scroll_view_; }
 
-  // Called when one of the child elements has expanded/collapsed.
-  void ContentsChanged();
-
  private:
   // views::DialogDelegateView:
   int GetDialogButtons() const override;
@@ -74,7 +57,6 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   bool Cancel() override;
   bool Accept() override;
   ui::ModalType GetModalType() const override;
-  base::string16 GetWindowTitle() const override;
   void Layout() override;
   gfx::Size GetPreferredSize() const override;
 
@@ -92,18 +74,12 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
                       ExtensionInstallPrompt::PermissionsType perm_type);
 
   // Creates a layout consisting of dialog header, extension name and icon.
-  views::GridLayout* CreateLayout(
-      views::View* parent,
-      int left_column_width,
-      int column_set_id,
-      bool single_detail_row) const;
-
-  bool is_inline_install() const {
-    return prompt_->type() == ExtensionInstallPrompt::INLINE_INSTALL_PROMPT;
-  }
+  views::GridLayout* CreateLayout(int left_column_width, int column_set_id);
 
   bool is_bundle_install() const {
-    return prompt_->type() == ExtensionInstallPrompt::BUNDLE_INSTALL_PROMPT;
+    return prompt_->type() == ExtensionInstallPrompt::BUNDLE_INSTALL_PROMPT ||
+           prompt_->type() ==
+               ExtensionInstallPrompt::DELEGATED_BUNDLE_PERMISSIONS_PROMPT;
   }
 
   bool is_external_install() const {
@@ -118,12 +94,14 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   ExtensionInstallPrompt::Delegate* delegate_;
   scoped_refptr<ExtensionInstallPrompt::Prompt> prompt_;
 
+  // The container view that contains all children (heading, icon, webstore
+  // data, and the scroll view with permissions etc.), excluding the buttons,
+  // which are added automatically by the dialog system.
+  View* container_;
+
   // The scroll view containing all the details for the dialog (including all
   // collapsible/expandable sections).
   views::ScrollView* scroll_view_;
-
-  // The container view for the scroll view.
-  CustomScrollableView* scrollable_;
 
   // The preferred size of the dialog.
   gfx::Size dialog_size_;
@@ -207,6 +185,9 @@ class ExpandableContainerView : public views::View,
   // Expand/Collapse the detail section for this ExpandableContainerView.
   void ToggleDetailLevel();
 
+  // Updates |arrow_toggle_| according to the given state.
+  void UpdateArrowToggle(bool expanded);
+
   // The dialog that owns |this|. It's also an ancestor in the View hierarchy.
   ExtensionInstallDialogView* owner_;
 
@@ -228,10 +209,5 @@ class ExpandableContainerView : public views::View,
 
   DISALLOW_COPY_AND_ASSIGN(ExpandableContainerView);
 };
-
-void ShowExtensionInstallDialogImpl(
-    ExtensionInstallPromptShowParams* show_params,
-    ExtensionInstallPrompt::Delegate* delegate,
-    scoped_refptr<ExtensionInstallPrompt::Prompt> prompt);
 
 #endif  // CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_INSTALL_DIALOG_VIEW_H_

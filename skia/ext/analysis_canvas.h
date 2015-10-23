@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkDrawPictureCallback.h"
+#include "third_party/skia/include/core/SkPicture.h"
 
 namespace skia {
 
@@ -15,7 +15,7 @@ namespace skia {
 // (specified as a clip rectangle) of an SkPicture as the picture is
 // played back through it.
 // To use: play a picture into the canvas, and then check result.
-class SK_API AnalysisCanvas : public SkCanvas, public SkDrawPictureCallback {
+class SK_API AnalysisCanvas : public SkCanvas, public SkPicture::AbortCallback {
  public:
   AnalysisCanvas(int width, int height);
   ~AnalysisCanvas() override;
@@ -26,8 +26,8 @@ class SK_API AnalysisCanvas : public SkCanvas, public SkDrawPictureCallback {
   void SetForceNotSolid(bool flag);
   void SetForceNotTransparent(bool flag);
 
-  // SkDrawPictureCallback override.
-  bool abortDrawing() override;
+  // SkPicture::AbortCallback override.
+  bool abort() override;
 
   // SkCanvas overrides.
   void onDrawPaint(const SkPaint& paint) override;
@@ -47,7 +47,7 @@ class SK_API AnalysisCanvas : public SkCanvas, public SkDrawPictureCallback {
                         const SkRect* src,
                         const SkRect& dst,
                         const SkPaint* paint,
-                        DrawBitmapRectFlags flags) override;
+                        SrcRectConstraint) override;
   void onDrawBitmapNine(const SkBitmap& bitmap,
                         const SkIRect& center,
                         const SkRect& dst,
@@ -57,9 +57,10 @@ class SK_API AnalysisCanvas : public SkCanvas, public SkDrawPictureCallback {
                     SkScalar top,
                     const SkPaint* paint = NULL) override;
   void onDrawImageRect(const SkImage*,
-                        const SkRect* src,
-                        const SkRect& dst,
-                        const SkPaint* paint) override;
+                       const SkRect* src,
+                       const SkRect& dst,
+                       const SkPaint* paint,
+                       SrcRectConstraint) override;
   void onDrawSprite(const SkBitmap&,
                     int left,
                     int top,

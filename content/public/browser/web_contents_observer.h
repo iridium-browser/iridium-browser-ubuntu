@@ -10,6 +10,7 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/common/frame_navigate_params.h"
+#include "content/public/common/security_style.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -19,6 +20,7 @@
 namespace content {
 
 class NavigationEntry;
+class NavigationHandle;
 class RenderFrameHost;
 class RenderViewHost;
 class WebContents;
@@ -31,6 +33,7 @@ struct LoadFromMemoryCacheDetails;
 struct Referrer;
 struct ResourceRedirectDetails;
 struct ResourceRequestDetails;
+struct SecurityStyleExplanations;
 
 // An observer API implemented by classes which are interested in various page
 // load events from WebContents.  They also get a chance to filter IPC messages.
@@ -95,13 +98,16 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // just swapped out.
   virtual void RenderViewDeleted(RenderViewHost* render_view_host) {}
 
-  // This method is invoked when the process for the current RenderView crashes.
-  // The WebContents continues to use the RenderViewHost, e.g. when the user
-  // reloads the current page. When the RenderViewHost itself is deleted, the
-  // RenderViewDeleted method will be invoked.
+  // This method is invoked when the process for the current main
+  // RenderFrameHost exits (usually by crashing, though possibly by other
+  // means). The WebContents continues to use the RenderFrameHost, e.g. when the
+  // user reloads the current page. When the RenderFrameHost itself is deleted,
+  // the RenderFrameDeleted method will be invoked.
   //
-  // Note that this is equivalent to
-  // RenderProcessHostObserver::RenderProcessExited().
+  // Note that this is triggered upstream through
+  // RenderProcessHostObserver::RenderProcessExited(); for code that doesn't
+  // otherwise need to be a WebContentsObserver, that API is probably a better
+  // choice.
   virtual void RenderProcessGone(base::TerminationStatus status) {}
 
   // This method is invoked when a WebContents swaps its visible RenderViewHost
@@ -110,6 +116,39 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // down.
   virtual void RenderViewHostChanged(RenderViewHost* old_host,
                                      RenderViewHost* new_host) {}
+
+  // Navigation related events ------------------------------------------------
+
+  // Called when a navigation started in the WebContents. |navigation_handle|
+  // is unique to a specific navigation. The same |navigation_handle| will be
+  // provided on subsequent calls to DidRedirect/Commit/FinishNavigation
+  // related to this navigation.
+  //
+  // Note that this is fired by navigations in any frame of the WebContents,
+  // not just the main frame.
+  //
+  // Note that more than one navigation can be ongoing in the same frame at the
+  // same time (including the main frame). Each will get its own
+  // NavigationHandle.
+  //
+  // Note that there is no guarantee that DidFinishNavigation will be called
+  // for any particular navigation before DidStartNavigation is called on the
+  // next.
+  virtual void DidStartNavigation(NavigationHandle* navigation_handle) {}
+
+  // Called when a navigation encountered a server redirect.
+  virtual void DidRedirectNavigation(NavigationHandle* navigation_handle) {}
+
+  // Called when a navigation was committed.
+  virtual void DidCommitNavigation(NavigationHandle* navigation_handle) {}
+
+  // Called when a navigation stopped in the WebContents. This happens when a
+  // navigation is either aborted, replaced by a new one, or the document load
+  // finishes. Note that |navigation_handle| will be destroyed at the end of
+  // this call, so do not keep a reference to it afterward.
+  virtual void DidFinishNavigation(NavigationHandle* navigation_handle) {}
+
+  // ---------------------------------------------------------------------------
 
   // This method is invoked after the WebContents decides which RenderFrameHost
   // to use for the next browser-initiated navigation, but before the navigation
@@ -161,7 +200,8 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
       RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       int error_code,
-      const base::string16& error_description) {}
+      const base::string16& error_description,
+      bool was_ignored_by_handler) {}
 
   // If the provisional load corresponded to the main frame, this method is
   // invoked in addition to DidCommitProvisionalLoadForFrame.
@@ -175,6 +215,14 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
       RenderFrameHost* render_frame_host,
       const LoadCommittedDetails& details,
       const FrameNavigateParams& params) {}
+
+  // This method is invoked when the SecurityStyle of the WebContents changes.
+  // |security_style| is the new SecurityStyle. |security_style_explanations|
+  // contains human-readable strings explaining why the SecurityStyle of the
+  // page has been downgraded.
+  virtual void SecurityStyleChanged(
+      SecurityStyle security_style,
+      const SecurityStyleExplanations& security_style_explanations) {}
 
   // This method is invoked once the window.document object of the main frame
   // was created.
@@ -203,7 +251,8 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   virtual void DidFailLoad(RenderFrameHost* render_frame_host,
                            const GURL& validated_url,
                            int error_code,
-                           const base::string16& error_description) {}
+                           const base::string16& error_description,
+                           bool was_ignored_by_handler) {}
 
   // This method is invoked when content was loaded from an in-memory cache.
   virtual void DidLoadResourceFromMemoryCache(
@@ -278,6 +327,11 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   virtual void AppCacheAccessed(const GURL& manifest_url,
                                 bool blocked_by_policy) {}
 
+  // These methods are invoked when a Pepper plugin instance is created/deleted
+  // in the DOM.
+  virtual void PepperInstanceCreated() {}
+  virtual void PepperInstanceDeleted() {}
+
   // Notification that a plugin has crashed.
   // |plugin_pid| is the process ID identifying the plugin process. Note that
   // this ID is supplied by the renderer process, so should not be trusted.
@@ -348,6 +402,10 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
 
   // Invoked when media is paused.
   virtual void MediaPaused() {}
+
+  // Invoked when media session has changed its state.
+  virtual void MediaSessionStateChanged(bool is_controllable,
+                                        bool is_suspended) {}
 
   // Invoked if an IPC message is coming from a specific RenderFrameHost.
   virtual bool OnMessageReceived(const IPC::Message& message,

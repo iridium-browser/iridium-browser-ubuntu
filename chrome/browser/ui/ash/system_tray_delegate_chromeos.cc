@@ -58,8 +58,6 @@
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/profiles/multiprofiles_intro_dialog.h"
@@ -71,6 +69,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
+#include "chrome/browser/ui/ash/cast_config_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/system_tray_delegate_utils.h"
@@ -160,17 +159,12 @@ gfx::NativeWindow GetNativeWindowByStatus(ash::user::LoginStatus login_status,
                                   container_id);
 }
 
-void BluetoothPowerFailure() {
-  // TODO(sad): Show an error bubble?
-}
-
 void BluetoothSetDiscoveringError() {
   LOG(ERROR) << "BluetoothSetDiscovering failed.";
 }
 
 void BluetoothDeviceConnectError(
     device::BluetoothDevice::ConnectErrorCode error_code) {
-  // TODO(sad): Do something?
 }
 
 void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
@@ -195,12 +189,9 @@ SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
       have_session_length_limit_(false),
       should_run_bluetooth_discovery_(false),
       session_started_(false),
+      cast_config_delegate_(new CastConfigDelegateChromeos()),
       networking_config_delegate_(new NetworkingConfigDelegateChromeos()),
       volume_control_delegate_(new VolumeController()),
-      device_settings_observer_(CrosSettings::Get()->AddSettingsObserver(
-          kSystemUse24HourClock,
-          base::Bind(&SystemTrayDelegateChromeOS::UpdateClockType,
-                     base::Unretained(this)))),
       vpn_delegate_(new VPNDelegateChromeOS),
       weak_ptr_factory_(this) {
   // Register notifications on construction so that events such as
@@ -223,8 +214,6 @@ SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
   registrar_->Add(this,
                   chrome::NOTIFICATION_PROFILE_DESTROYED,
                   content::NotificationService::AllSources());
-  registrar_->Add(this, chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
-                  content::NotificationService::AllSources());
 
   AccessibilityManager* accessibility_manager = AccessibilityManager::Get();
   CHECK(accessibility_manager);
@@ -242,7 +231,10 @@ void SystemTrayDelegateChromeOS::Initialize() {
 
   input_method::InputMethodManager::Get()->AddObserver(this);
   ui::ime::InputMethodMenuManager::GetInstance()->AddObserver(this);
-  UpdateClockType();
+
+  g_browser_process->platform_part()->GetSystemClock()->AddObserver(this);
+
+  OnSystemClockChanged(g_browser_process->platform_part()->GetSystemClock());
 
   device::BluetoothAdapterFactory::GetAdapter(
       base::Bind(&SystemTrayDelegateChromeOS::InitializeOnAdapterReady,
@@ -251,9 +243,6 @@ void SystemTrayDelegateChromeOS::Initialize() {
   ash::Shell::GetInstance()->session_state_delegate()->AddSessionStateObserver(
       this);
 
-  if (LoginState::IsInitialized())
-    LoginState::Get()->AddObserver(this);
-
   if (CrasAudioHandler::IsInitialized())
     CrasAudioHandler::Get()->AddAudioObserver(this);
 
@@ -261,7 +250,6 @@ void SystemTrayDelegateChromeOS::Initialize() {
 }
 
 void SystemTrayDelegateChromeOS::Shutdown() {
-  device_settings_observer_.reset();
 }
 
 void SystemTrayDelegateChromeOS::InitializeOnAdapterReady(
@@ -305,6 +293,7 @@ SystemTrayDelegateChromeOS::~SystemTrayDelegateChromeOS() {
   // Unregister a11y status subscription.
   accessibility_subscription_.reset();
 
+  g_browser_process->platform_part()->GetSystemClock()->RemoveObserver(this);
   DBusThreadManager::Get()->GetSessionManagerClient()->RemoveObserver(this);
   input_method::InputMethodManager::Get()->RemoveObserver(this);
   ui::ime::InputMethodMenuManager::GetInstance()->RemoveObserver(this);
@@ -312,7 +301,6 @@ SystemTrayDelegateChromeOS::~SystemTrayDelegateChromeOS() {
   ash::Shell::GetInstance()
       ->session_state_delegate()
       ->RemoveSessionStateObserver(this);
-  LoginState::Get()->RemoveObserver(this);
 
   if (CrasAudioHandler::IsInitialized())
     CrasAudioHandler::Get()->RemoveAudioObserver(this);
@@ -466,10 +454,6 @@ void SystemTrayDelegateChromeOS::ShowNetworkSettingsForGuid(
   ShowSettingsSubPageForActiveUser(page);
 }
 
-void SystemTrayDelegateChromeOS::ShowBluetoothSettings() {
-  // TODO(sad): Make this work.
-}
-
 void SystemTrayDelegateChromeOS::ShowDisplaySettings() {
   // TODO(michaelpg): Allow display settings to be shown when they are updated
   // to work for 3+ displays. See issue 467195.
@@ -502,12 +486,10 @@ bool SystemTrayDelegateChromeOS::ShouldShowDisplayNotification() {
     return true;
 
   GURL visible_url = active_contents->GetLastCommittedURL();
-  GURL display_settings_url =
-      chrome::GetSettingsUrl(kDisplaySettingsSubPageName);
-  GURL display_overscan_url =
-      chrome::GetSettingsUrl(kDisplayOverscanSettingsSubPageName);
-  return (visible_url != display_settings_url &&
-          visible_url != display_overscan_url);
+  return !(chrome::IsSettingsSubPage(visible_url,
+                                     kDisplaySettingsSubPageName) ||
+           chrome::IsSettingsSubPage(visible_url,
+                                     kDisplayOverscanSettingsSubPageName));
 }
 
 void SystemTrayDelegateChromeOS::ShowIMESettings() {
@@ -758,7 +740,7 @@ void SystemTrayDelegateChromeOS::ManageBluetoothDevices() {
 void SystemTrayDelegateChromeOS::ToggleBluetooth() {
   bluetooth_adapter_->SetPowered(!bluetooth_adapter_->IsPowered(),
                                  base::Bind(&base::DoNothing),
-                                 base::Bind(&BluetoothPowerFailure));
+                                 base::Bind(&base::DoNothing));
 }
 
 void SystemTrayDelegateChromeOS::ShowOtherNetworkDialog(
@@ -786,6 +768,11 @@ bool SystemTrayDelegateChromeOS::GetBluetoothDiscovering() {
 void SystemTrayDelegateChromeOS::ChangeProxySettings() {
   CHECK(GetUserLoginStatus() == ash::user::LOGGED_IN_NONE);
   LoginDisplayHostImpl::default_host()->OpenProxySettings();
+}
+
+ash::CastConfigDelegate* SystemTrayDelegateChromeOS::GetCastConfigDelegate()
+    const {
+  return cast_config_delegate_.get();
 }
 
 ash::NetworkingConfigDelegate*
@@ -923,10 +910,6 @@ void SystemTrayDelegateChromeOS::SetProfile(Profile* profile) {
   user_pref_registrar_.reset(new PrefChangeRegistrar);
   user_pref_registrar_->Init(prefs);
   user_pref_registrar_->Add(
-      prefs::kUse24HourClock,
-      base::Bind(&SystemTrayDelegateChromeOS::UpdateClockType,
-                 base::Unretained(this)));
-  user_pref_registrar_->Add(
       prefs::kLanguageRemapSearchKeyTo,
       base::Bind(&SystemTrayDelegateChromeOS::OnLanguageRemapSearchKeyToChanged,
                  base::Unretained(this)));
@@ -975,62 +958,16 @@ bool SystemTrayDelegateChromeOS::UnsetProfile(Profile* profile) {
 }
 
 bool SystemTrayDelegateChromeOS::GetShouldUse24HourClockForTesting() const {
-  return ShouldUse24HourClock();
+  return g_browser_process->platform_part()
+      ->GetSystemClock()
+      ->ShouldUse24HourClock();
 }
 
-bool SystemTrayDelegateChromeOS::ShouldUse24HourClock() const {
-  // On login screen and in guest mode owner default is used for
-  // kUse24HourClock preference.
-  const ash::user::LoginStatus status = GetUserLoginStatus();
-  const CrosSettings* const cros_settings = CrosSettings::Get();
-  bool system_use_24_hour_clock = true;
-  const bool system_value_found = cros_settings->GetBoolean(
-      kSystemUse24HourClock, &system_use_24_hour_clock);
-
-  if ((status == ash::user::LOGGED_IN_NONE) || !user_pref_registrar_)
-    return (system_value_found
-                ? system_use_24_hour_clock
-                : (base::GetHourClockType() == base::k24HourClock));
-
-  const PrefService::Preference* user_pref =
-      user_pref_registrar_->prefs()->FindPreference(prefs::kUse24HourClock);
-  if (status == ash::user::LOGGED_IN_GUEST && user_pref->IsDefaultValue())
-    return (system_value_found
-                ? system_use_24_hour_clock
-                : (base::GetHourClockType() == base::k24HourClock));
-
-  user_manager::User* active_user =
-      user_manager::UserManager::Get()->GetActiveUser();
-  if (active_user) {
-    Profile* user_profile = ProfileHelper::Get()->GetProfileByUser(active_user);
-    if (user_profile) {
-      user_pref =
-          user_profile->GetPrefs()->FindPreference(prefs::kUse24HourClock);
-    }
-  }
-
-  bool use_24_hour_clock = true;
-  user_pref->GetValue()->GetAsBoolean(&use_24_hour_clock);
-  return use_24_hour_clock;
-}
-
-void SystemTrayDelegateChromeOS::UpdateClockType() {
-  const bool use_24_hour_clock = ShouldUse24HourClock();
+void SystemTrayDelegateChromeOS::OnSystemClockChanged(
+    system::SystemClock* system_clock) {
+  const bool use_24_hour_clock = system_clock->ShouldUse24HourClock();
   clock_type_ = use_24_hour_clock ? base::k24HourClock : base::k12HourClock;
   GetSystemTrayNotifier()->NotifyDateFormatChanged();
-  // This also works for enterprise-managed devices because they never have
-  // local owner.
-  if (user_manager::UserManager::Get()->IsCurrentUserOwner()) {
-    user_manager::User* const user =
-        user_manager::UserManager::Get()->GetActiveUser();
-    CHECK(user);
-    Profile* const profile = ProfileHelper::Get()->GetProfileByUser(user);
-    CHECK(profile);
-    OwnerSettingsServiceChromeOS* const service =
-        OwnerSettingsServiceChromeOSFactory::GetForBrowserContext(profile);
-    CHECK(service);
-    service->SetBoolean(kSystemUse24HourClock, use_24_hour_clock);
-  }
 }
 
 void SystemTrayDelegateChromeOS::UpdateShowLogoutButtonInTray() {
@@ -1119,30 +1056,6 @@ void SystemTrayDelegateChromeOS::NotifyIfLastWindowClosed() {
   GetSystemTrayNotifier()->NotifyLastWindowClosed();
 }
 
-// LoginState::Observer overrides.
-void SystemTrayDelegateChromeOS::LoggedInStateChanged() {
-  // It apparently sometimes takes a while after login before the current user
-  // is recognized as the owner. Make sure that the system-wide clock setting
-  // is updated when the recognition eventually happens
-  // (http://crbug.com/278601).
-  //
-  // Note that it isn't safe to blindly call UpdateClockType() from this
-  // method, as LoggedInStateChanged() is also called before the logged-in
-  // user's profile has actually been loaded (http://crbug.com/317745). The
-  // system tray's time format is updated at login via SetProfile().
-  if (user_manager::UserManager::Get()->IsCurrentUserOwner()) {
-    user_manager::User* const user =
-        user_manager::UserManager::Get()->GetActiveUser();
-    CHECK(user);
-    Profile* const profile = ProfileHelper::Get()->GetProfileByUser(user);
-    CHECK(profile);
-    OwnerSettingsServiceChromeOS* const service =
-        OwnerSettingsServiceChromeOSFactory::GetForBrowserContext(profile);
-    CHECK(service);
-    service->SetBoolean(kSystemUse24HourClock, ShouldUse24HourClock());
-  }
-}
-
 // Overridden from SessionManagerClient::Observer.
 void SystemTrayDelegateChromeOS::ScreenIsLocked() {
   screen_locked_ = true;
@@ -1167,10 +1080,6 @@ void SystemTrayDelegateChromeOS::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED: {
-      UpdateClockType();
-      break;
-    }
     case chrome::NOTIFICATION_UPGRADE_RECOMMENDED: {
       ash::UpdateInfo info;
       GetUpdateInfo(content::Source<UpgradeDetector>(source).ptr(), &info);
@@ -1250,8 +1159,9 @@ void SystemTrayDelegateChromeOS::OnOutputNodeVolumeChanged(uint64_t node_id,
   GetSystemTrayNotifier()->NotifyAudioOutputVolumeChanged(node_id, volume);
 }
 
-void SystemTrayDelegateChromeOS::OnOutputMuteChanged(bool mute_on) {
-  GetSystemTrayNotifier()->NotifyAudioOutputMuteChanged(mute_on);
+void SystemTrayDelegateChromeOS::OnOutputMuteChanged(bool mute_on,
+                                                     bool system_adjust) {
+  GetSystemTrayNotifier()->NotifyAudioOutputMuteChanged(mute_on, system_adjust);
 }
 
 void SystemTrayDelegateChromeOS::OnInputNodeGainChanged(uint64_t /* node_id */,
@@ -1349,7 +1259,6 @@ void SystemTrayDelegateChromeOS::UserAddedToSession(
 
 void SystemTrayDelegateChromeOS::ActiveUserChanged(
     const std::string& /* user_id */) {
-  UpdateClockType();
 }
 
 // Overridden from chrome::BrowserListObserver.

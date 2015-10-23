@@ -33,12 +33,6 @@
 
 namespace blink {
 
-SandboxFlags parseSandboxPolicy(const String& policy, String& invalidTokensErrorMessage)
-{
-    SpaceSplitString policyTokens(AtomicString(policy), SpaceSplitString::ShouldNotFoldCase);
-    return parseSandboxPolicy(policyTokens, invalidTokensErrorMessage);
-}
-
 SandboxFlags parseSandboxPolicy(const SpaceSplitString& policy, String& invalidTokensErrorMessage)
 {
     // http://www.w3.org/TR/html5/the-iframe-element.html#attr-iframe-sandbox
@@ -66,8 +60,10 @@ SandboxFlags parseSandboxPolicy(const SpaceSplitString& policy, String& invalidT
             flags &= ~SandboxPointerLock;
         } else if (equalIgnoringCase(sandboxToken, "allow-orientation-lock")) {
             flags &= ~SandboxOrientationLock;
-        } else if (equalIgnoringCase(sandboxToken, "allow-unsandboxed-auxiliary") && RuntimeEnabledFeatures::unsandboxedAuxiliaryEnabled()) {
+        } else if (equalIgnoringCase(sandboxToken, "allow-popups-to-escape-sandbox") && RuntimeEnabledFeatures::unsandboxedAuxiliaryEnabled()) {
             flags &= ~SandboxPropagatesToAuxiliaryBrowsingContexts;
+        } else if (equalIgnoringCase(sandboxToken, "allow-modals") && RuntimeEnabledFeatures::sandboxBlocksModalsEnabled()) {
+            flags &= ~SandboxModals;
         } else {
             if (numberOfTokenErrors)
                 tokenErrors.appendLiteral(", '");

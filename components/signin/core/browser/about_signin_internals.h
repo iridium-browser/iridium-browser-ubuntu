@@ -20,6 +20,10 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
+
 class AccountTrackerService;
 class GaiaAuthFetcher;
 class ProfileOAuth2TokenService;
@@ -56,6 +60,9 @@ class AboutSigninInternals
                        GaiaCookieManagerService* cookie_manager_service);
   ~AboutSigninInternals() override;
 
+  // Registers the preferences used by AboutSigninInternals.
+  static void RegisterPrefs(user_prefs::PrefRegistrySyncable* user_prefs);
+
   // Each instance of SigninInternalsUI adds itself as an observer to be
   // notified of all updates that AboutSigninInternals receives.
   void AddSigninObserver(Observer* observer);
@@ -90,7 +97,7 @@ class AboutSigninInternals
 
   // GaiaCookieManagerService::Observer implementations.
   void OnGaiaAccountsInCookieUpdated(
-      const std::vector<std::pair<std::string, bool> >& gaia_accounts,
+      const std::vector<gaia::ListedAccount>& gaia_accounts,
       const GoogleServiceAuthError& error) override;
 
  private:
@@ -210,7 +217,7 @@ class AboutSigninInternals
   // Most of the values are mirrored in the prefs for persistence.
   SigninStatus signin_status_;
 
-  ObserverList<Observer> signin_observers_;
+  base::ObserverList<Observer> signin_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(AboutSigninInternals);
 };

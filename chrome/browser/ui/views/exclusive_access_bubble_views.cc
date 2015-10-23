@@ -131,9 +131,15 @@ ExclusiveAccessBubbleViews::ExclusiveAccessView::ExclusiveAccessView(
       message_label_(nullptr),
       button_view_(nullptr),
       browser_fullscreen_exit_accelerator_(accelerator) {
+  views::BubbleBorder::Shadow shadow_type = views::BubbleBorder::BIG_SHADOW;
+#if defined(OS_CHROMEOS)
+  // Use a smaller shadow on ChromeOS as the shadow assets can overlap
+  // each other in a fullscreen notification bubble. crbug.com/462983.
+  shadow_type = views::BubbleBorder::SMALL_SHADOW;
+#endif
   scoped_ptr<views::BubbleBorder> bubble_border(
       new views::BubbleBorder(views::BubbleBorder::NONE,
-                              views::BubbleBorder::BIG_SHADOW, SK_ColorWHITE));
+                              shadow_type, SK_ColorWHITE));
   set_background(new views::BubbleBackground(bubble_border.get()));
   SetBorder(bubble_border.Pass());
   SetFocusable(false);
@@ -266,7 +272,11 @@ ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
       popup_(nullptr),
       animation_(new gfx::SlideAnimation(this)),
       animated_attribute_(ANIMATED_ATTRIBUTE_BOUNDS) {
-  animation_->Reset(1);
+  // With the simplified fullscreen UI flag, initially hide the bubble;
+  // otherwise, initially show it.
+  double initial_value =
+      ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled() ? 0 : 1;
+  animation_->Reset(initial_value);
 
   // Create the contents view.
   ui::Accelerator accelerator(ui::VKEY_UNKNOWN, ui::EF_NONE);
@@ -287,17 +297,18 @@ ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent =
       bubble_view_context_->GetBubbleAssociatedWidget()->GetNativeView();
-  params.bounds = GetPopupRect(false);
   popup_->Init(params);
-  gfx::Size size = GetPopupRect(true).size();
   popup_->SetContentsView(view_);
+  gfx::Size size = GetPopupRect(true).size();
+  popup_->SetBounds(GetPopupRect(false));
   // We set layout manager to nullptr to prevent the widget from sizing its
   // contents to the same size as itself. This prevents the widget contents from
   // shrinking while we animate the height of the popup to give the impression
   // that it is sliding off the top of the screen.
   popup_->GetRootView()->SetLayoutManager(nullptr);
   view_->SetBounds(0, 0, size.width(), size.height());
-  popup_->ShowInactive();  // This does not activate the popup.
+  if (!ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled())
+    popup_->ShowInactive();  // This does not activate the popup.
 
   popup_->AddObserver(this);
 

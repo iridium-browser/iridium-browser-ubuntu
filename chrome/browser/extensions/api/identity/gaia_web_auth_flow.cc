@@ -52,10 +52,10 @@ GaiaWebAuthFlow::GaiaWebAuthFlow(Delegate* delegate,
 
   std::vector<std::string> scopes(token_key->scopes.begin(),
                                   token_key->scopes.end());
-  std::vector<std::string> client_id_parts;
-  base::SplitString(oauth2_client_id, '.', &client_id_parts);
+  std::vector<std::string> client_id_parts = base::SplitString(
+      oauth2_client_id, ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   std::reverse(client_id_parts.begin(), client_id_parts.end());
-  redirect_scheme_ = JoinString(client_id_parts, '.');
+  redirect_scheme_ = base::JoinString(client_id_parts, ".");
   std::string signin_scoped_device_id;
   // profile_ can be nullptr in unittests.
   SigninClient* signin_client =
@@ -69,7 +69,7 @@ GaiaWebAuthFlow::GaiaWebAuthFlow(Delegate* delegate,
   std::string oauth2_authorize_params = base::StringPrintf(
       kOAuth2AuthorizeFormat,
       oauth2_client_id.c_str(),
-      net::EscapeUrlEncodedData(JoinString(scopes, ' '), true).c_str(),
+      net::EscapeUrlEncodedData(base::JoinString(scopes, " "), true).c_str(),
       token_key->extension_id.c_str(),
       redirect_scheme_.c_str(),
       token_key->extension_id.c_str(),
@@ -179,7 +179,8 @@ void GaiaWebAuthFlow::OnAuthFlowURLChange(const GURL& url) {
   // interpreted as a path, including the fragment.
 
   if (url.scheme() == redirect_scheme_ && !url.has_host() && !url.has_port() &&
-      StartsWithASCII(url.GetContent(), redirect_path_prefix_, true)) {
+      base::StartsWith(url.GetContent(), redirect_path_prefix_,
+                       base::CompareCase::SENSITIVE)) {
     web_flow_.release()->DetachDelegateAndDelete();
 
     std::string fragment = url.GetContent().substr(
@@ -223,7 +224,7 @@ void GaiaWebAuthFlow::OnAuthFlowTitleChange(const std::string& title) {
   const char kRedirectPrefix[] = "Loading ";
   std::string prefix(kRedirectPrefix);
 
-  if (StartsWithASCII(title, prefix, true)) {
+  if (base::StartsWith(title, prefix, base::CompareCase::SENSITIVE)) {
     GURL url(title.substr(prefix.length(), std::string::npos));
     if (url.is_valid())
       OnAuthFlowURLChange(url);

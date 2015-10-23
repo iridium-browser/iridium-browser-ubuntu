@@ -40,15 +40,11 @@ remoting.DnsBlackholeChecker = function(signalStrategy) {
 
   /** @private {?remoting.Xhr} */
   this.xhr_ = null;
-};
 
-/**
- * @const
- * @private
- */
-remoting.DnsBlackholeChecker.URL_TO_REQUEST_ =
-    "https://chromoting-client.talkgadget.google.com/talkgadget/oauth/" +
-    "chrome-remote-desktop-client";
+  /** @const @private */
+  this.url_ =
+      remoting.settings.TALK_GADGET_URL + '/oauth/chrome-remote-desktop-client';
+};
 
 /**
  * @param {?function(remoting.SignalStrategy.State):void} onStateChangedCallback
@@ -81,13 +77,14 @@ remoting.DnsBlackholeChecker.prototype.getType = function() {
 remoting.DnsBlackholeChecker.prototype.connect = function(server,
                                                           username,
                                                           authToken) {
-  base.debug.assert(this.onStateChangedCallback_ != null);
+  console.assert(this.onStateChangedCallback_ != null,
+                 'No state change callback registered.');
 
   this.signalStrategy_.connect(server, username, authToken);
 
   this.xhr_ = new remoting.Xhr({
     method: 'GET',
-    url: remoting.DnsBlackholeChecker.URL_TO_REQUEST_
+    url: this.url_
   });
   this.xhr_.start().then(this.onHttpRequestDone_.bind(this));
 };
@@ -105,7 +102,8 @@ remoting.DnsBlackholeChecker.prototype.getError = function() {
 };
 
 remoting.DnsBlackholeChecker.prototype.getJid = function() {
-  base.debug.assert(this.state_ == remoting.SignalStrategy.State.CONNECTED);
+  console.assert(this.state_ == remoting.SignalStrategy.State.CONNECTED,
+                'getJid() called in state ' + this.state_ + '.');
   return this.signalStrategy_.getJid();
 };
 
@@ -115,18 +113,10 @@ remoting.DnsBlackholeChecker.prototype.dispose = function() {
   this.setState_(remoting.SignalStrategy.State.CLOSED);
 };
 
-/**
- * @param {remoting.LogToServer} logToServer The LogToServer instance for the
- *     connection.
- */
-remoting.DnsBlackholeChecker.prototype.sendConnectionSetupResults = function(
-    logToServer) {
-  this.signalStrategy_.sendConnectionSetupResults(logToServer)
-};
-
 /** @param {string} message */
 remoting.DnsBlackholeChecker.prototype.sendMessage = function(message) {
-  base.debug.assert(this.state_ == remoting.SignalStrategy.State.CONNECTED);
+  console.assert(this.state_ == remoting.SignalStrategy.State.CONNECTED,
+                'sendMessage() called in state ' + this.state_ + '.');
   this.signalStrategy_.sendMessage(message);
 };
 

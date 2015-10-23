@@ -83,7 +83,6 @@
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/ui_base_switches_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
@@ -110,9 +109,6 @@ const char kLoginURL[] = "chrome://oobe/login";
 
 // URL which corresponds to the OOBE WebUI.
 const char kOobeURL[] = "chrome://oobe/oobe";
-
-// URL which corresponds to the new implementation of OOBE WebUI.
-const char kNewOobeURL[] = "chrome://oobe-md/";
 
 // URL which corresponds to the user adding WebUI.
 const char kUserAddingURL[] = "chrome://oobe/user-adding";
@@ -275,7 +271,6 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
       startup_sound_played_(false),
       startup_sound_honors_spoken_feedback_(false),
       is_observing_keyboard_(false),
-      is_new_oobe_(false),
       pointer_factory_(this),
       animation_weak_ptr_factory_(this) {
   DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
@@ -502,10 +497,8 @@ void LoginDisplayHostImpl::StartWizard(const std::string& first_screen_name) {
   }
   VLOG(1) << "Login WebUI >> wizard";
 
-  if (!login_window_) {
-    is_new_oobe_ = StartupUtils::IsNewOobeActivated();
-    LoadURL(is_new_oobe_ ? GURL(kNewOobeURL) : GURL(kOobeURL));
-  }
+  if (!login_window_)
+    LoadURL(GURL(kOobeURL));
 
   DVLOG(1) << "Starting wizard, first_screen_name: " << first_screen_name;
   // Create and show the wizard.
@@ -514,9 +507,6 @@ void LoginDisplayHostImpl::StartWizard(const std::string& first_screen_name) {
   // is done before new controller creation.
   wizard_controller_.reset();
   wizard_controller_.reset(CreateWizardController());
-
-  if (is_new_oobe_)
-    return;
 
   oobe_progress_bar_visible_ = !StartupUtils::IsDeviceRegistered();
   SetOobeProgressBarVisible(oobe_progress_bar_visible_);
@@ -868,16 +858,12 @@ void LoginDisplayHostImpl::OnKeyboardBoundsChanging(
     const gfx::Rect& new_bounds) {
   if (new_bounds.IsEmpty()) {
     // Keyboard has been hidden.
-    if (GetOobeUI()) {
+    if (GetOobeUI())
       GetOobeUI()->GetCoreOobeActor()->ShowControlBar(true);
-      GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(false, new_bounds);
-    }
   } else if (!new_bounds.IsEmpty()) {
     // Keyboard has been shown.
-    if (GetOobeUI()) {
+    if (GetOobeUI())
       GetOobeUI()->GetCoreOobeActor()->ShowControlBar(false);
-      GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(true, new_bounds);
-    }
   }
 }
 
@@ -973,8 +959,6 @@ void LoginDisplayHostImpl::ShowWebUI() {
   VLOG(1) << "Login WebUI >> Show already initialized UI";
   login_window_->Show();
   login_view_->GetWebContents()->Focus();
-  if (::switches::IsTextInputFocusManagerEnabled())
-    login_view_->RequestFocus();
   login_view_->SetStatusAreaVisible(status_area_saved_visibility_);
   login_view_->OnPostponedShow();
 

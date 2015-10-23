@@ -17,28 +17,26 @@ namespace blink {
 
 void SuspendableScriptExecutor::createAndRun(LocalFrame* frame, int worldID, const WillBeHeapVector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
 {
-    RefPtrWillBeRawPtr<SuspendableScriptExecutor> executor = adoptRefWillBeNoop(new SuspendableScriptExecutor(frame, worldID, sources, extensionGroup, userGesture, callback));
-    executor->ref();
+    SuspendableScriptExecutor* executor = new SuspendableScriptExecutor(frame, worldID, sources, extensionGroup, userGesture, callback);
     executor->run();
 }
 
 void SuspendableScriptExecutor::contextDestroyed()
 {
-    // this method can only be called if the script was not called in run()
-    // and context remained suspend (method resume has never called)
     SuspendableTimer::contextDestroyed();
     m_callback->completed(Vector<v8::Local<v8::Value>>());
-    deref();
+    dispose();
 }
 
 SuspendableScriptExecutor::SuspendableScriptExecutor(LocalFrame* frame, int worldID, const WillBeHeapVector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
     : SuspendableTimer(frame->document())
     , m_frame(frame)
-    , m_worldID(worldID)
     , m_sources(sources)
+    , m_callback(callback)
+    , m_keepAlive(this)
+    , m_worldID(worldID)
     , m_extensionGroup(extensionGroup)
     , m_userGesture(userGesture)
-    , m_callback(callback)
 {
 }
 
@@ -80,16 +78,28 @@ void SuspendableScriptExecutor::executeAndDestroySelf()
         v8::Local<v8::Value> scriptValue = m_frame->script().executeScriptInMainWorldAndReturnValue(m_sources.first());
         results.append(scriptValue);
     }
+
+    // The script may have removed the frame, in which case contextDestroyed()
+    // will have handled the disposal/callback.
+    if (!m_frame->client())
+        return;
+
     m_callback->completed(results);
-    deref();
+    dispose();
+}
+
+void SuspendableScriptExecutor::dispose()
+{
+    // Remove object as a ContextLifecycleObserver.
+    ActiveDOMObject::clearContext();
+    m_keepAlive.clear();
+    stop();
 }
 
 DEFINE_TRACE(SuspendableScriptExecutor)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_frame);
     visitor->trace(m_sources);
-#endif
     SuspendableTimer::trace(visitor);
 }
 

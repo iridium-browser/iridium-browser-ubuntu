@@ -43,8 +43,8 @@ public:
 
     static IDBFactory* indexedDB(DOMWindow&);
 
-    virtual void willDestroyGlobalObjectInFrame() override;
-    virtual void willDetachGlobalObjectFromFrame() override;
+    void willDestroyGlobalObjectInFrame() override;
+    void willDetachGlobalObjectFromFrame() override;
 
     DECLARE_TRACE();
 
@@ -54,7 +54,7 @@ private:
     IDBFactory* indexedDB();
     static const char* supplementName();
 
-    LocalDOMWindow& m_window;
+    RawPtrWillBeMember<LocalDOMWindow> m_window;
     PersistentWillBeMember<IDBFactory> m_idbFactory;
 };
 

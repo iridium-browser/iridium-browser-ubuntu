@@ -38,29 +38,33 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
                            public VideoRenderCallback {
  public:
   VideoReceiveStream(int num_cpu_cores,
-                     int base_channel_id,
                      ChannelGroup* channel_group,
                      int channel_id,
                      const VideoReceiveStream::Config& config,
                      newapi::Transport* transport,
                      webrtc::VoiceEngine* voice_engine);
-  virtual ~VideoReceiveStream();
+  ~VideoReceiveStream() override;
 
+  // webrtc::ReceiveStream implementation.
   void Start() override;
   void Stop() override;
-  Stats GetStats() const override;
+  void SignalNetworkState(NetworkState state) override;
+  bool DeliverRtcp(const uint8_t* packet, size_t length) override;
+  bool DeliverRtp(const uint8_t* packet, size_t length) override;
+
+  // webrtc::VideoReceiveStream implementation.
+  webrtc::VideoReceiveStream::Stats GetStats() const override;
 
   // Overrides I420FrameCallback.
-  void FrameCallback(I420VideoFrame* video_frame) override;
+  void FrameCallback(VideoFrame* video_frame) override;
 
   // Overrides VideoRenderCallback.
   int RenderFrame(const uint32_t /*stream_id*/,
-                  const I420VideoFrame& video_frame) override;
+                  const VideoFrame& video_frame) override;
 
-  void SignalNetworkState(Call::NetworkState state);
+  const Config& config() const { return config_; }
 
-  bool DeliverRtcp(const uint8_t* packet, size_t length);
-  bool DeliverRtp(const uint8_t* packet, size_t length);
+  void SetSyncChannel(VoiceEngine* voice_engine, int audio_channel_id);
 
  private:
   void SetRtcpMode(newapi::RtcpMode mode);
@@ -75,8 +79,6 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
 
   ViEChannel* vie_channel_;
   rtc::scoped_ptr<IncomingVideoStream> incoming_video_stream_;
-
-  VoEVideoSync* voe_sync_interface_;
 
   rtc::scoped_ptr<ReceiveStatisticsProxy> stats_proxy_;
 };

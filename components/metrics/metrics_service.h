@@ -30,14 +30,12 @@
 #include "components/metrics/net/network_metrics_provider.h"
 #include "components/variations/active_field_trials.h"
 
-class MetricsServiceAccessor;
 class PrefService;
 class PrefRegistrySimple;
 
 namespace base {
 class DictionaryValue;
 class HistogramSamples;
-class MessageLoopProxy;
 class PrefService;
 }
 
@@ -53,6 +51,7 @@ namespace metrics {
 
 class MetricsLogUploader;
 class MetricsReportingScheduler;
+class MetricsServiceAccessor;
 class MetricsServiceClient;
 class MetricsStateManager;
 
@@ -124,10 +123,6 @@ class MetricsService : public base::HistogramFlattener {
   // are turned on.
   void Start();
 
-  // If metrics reporting is enabled, starts the metrics service. Returns
-  // whether the metrics service was started.
-  bool StartIfMetricsReportingEnabled();
-
   // Starts the metrics system in a special test-only mode. Metrics won't ever
   // be uploaded or persisted in this mode, but metrics will be recorded in
   // memory.
@@ -154,6 +149,9 @@ class MetricsService : public base::HistogramFlattener {
   // Returns the date at which the current metrics client ID was created as
   // an int64 containing seconds since the epoch.
   int64 GetMetricsReportingEnabledDate();
+
+  // Returns true if the last session exited cleanly.
+  bool WasLastShutdownClean() const;
 
   // Returns the preferred entropy provider used to seed persistent activities
   // based on whether or not metrics reporting will be permitted on this client.
@@ -269,7 +267,14 @@ class MetricsService : public base::HistogramFlattener {
     NEED_TO_SHUTDOWN = ~CLEANLY_SHUTDOWN
   };
 
-  friend class ::MetricsServiceAccessor;
+  // The current state of recording for the MetricsService. The state is UNSET
+  // until set to something else, at which point it remains INACTIVE or ACTIVE
+  // for the lifetime of the object.
+  enum RecordingState {
+    INACTIVE,
+    ACTIVE,
+    UNSET
+  };
 
   typedef std::vector<SyntheticTrialGroup> SyntheticTrialGroups;
 
@@ -407,6 +412,10 @@ class MetricsService : public base::HistogramFlattener {
   // i.e., histograms with the |kUmaStabilityHistogramFlag| flag set.
   void RecordCurrentStabilityHistograms();
 
+  // Skips staged upload and discards the log. Used in case of unsuccessful
+  // upload or intentional sampling of logs.
+  void SkipAndDiscardUpload();
+
   // Manager for the various in-flight logs.
   MetricsLogManager log_manager_;
 
@@ -433,7 +442,7 @@ class MetricsService : public base::HistogramFlattener {
   // Indicate whether recording and reporting are currently happening.
   // These should not be set directly, but by calling SetRecording and
   // SetReporting.
-  bool recording_active_;
+  RecordingState recording_state_;
   bool reporting_active_;
 
   // Indicate whether test mode is enabled, where the initial log should never
@@ -475,7 +484,7 @@ class MetricsService : public base::HistogramFlattener {
   SyntheticTrialGroups synthetic_trial_groups_;
 
   // List of observers of |synthetic_trial_groups_| changes.
-  ObserverList<SyntheticTrialObserver> synthetic_trial_observer_list_;
+  base::ObserverList<SyntheticTrialObserver> synthetic_trial_observer_list_;
 
   // Execution phase the browser is in.
   static ExecutionPhase execution_phase_;

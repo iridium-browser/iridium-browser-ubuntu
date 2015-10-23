@@ -27,7 +27,8 @@ class CC_EXPORT DisplayListRasterSource : public RasterSource {
 
   // RasterSource overrides.
   void PlaybackToCanvas(SkCanvas* canvas,
-                        const gfx::Rect& canvas_rect,
+                        const gfx::Rect& canvas_bitmap_rect,
+                        const gfx::Rect& canvas_playback_rect,
                         float contents_scale) const override;
   void PlaybackToSharedCanvas(SkCanvas* canvas,
                               const gfx::Rect& canvas_rect,
@@ -39,9 +40,10 @@ class CC_EXPORT DisplayListRasterSource : public RasterSource {
   bool IsSolidColor() const override;
   SkColor GetSolidColor() const override;
   gfx::Size GetSize() const override;
-  void GatherPixelRefs(const gfx::Rect& content_rect,
-                       float contents_scale,
-                       std::vector<SkPixelRef*>* pixel_refs) const override;
+  void GatherPixelRefs(
+      const gfx::Rect& content_rect,
+      float contents_scale,
+      std::vector<skia::PositionPixelRef>* pixel_refs) const override;
   bool CoversRect(const gfx::Rect& content_rect,
                   float contents_scale) const override;
   bool HasRecordings() const override;
@@ -65,6 +67,7 @@ class CC_EXPORT DisplayListRasterSource : public RasterSource {
   // These members are const as this raster source may be in use on another
   // thread and so should not be touched after construction.
   const scoped_refptr<DisplayItemList> display_list_;
+  const size_t painter_reported_memory_usage_;
   const SkColor background_color_;
   const bool requires_clear_;
   const bool can_use_lcd_text_;
@@ -80,14 +83,15 @@ class CC_EXPORT DisplayListRasterSource : public RasterSource {
 
  private:
   // Called when analyzing a tile. We can use AnalysisCanvas as
-  // SkDrawPictureCallback, which allows us to early out from analysis.
+  // SkPicture::AbortCallback, which allows us to early out from analysis.
   void RasterForAnalysis(skia::AnalysisCanvas* canvas,
                          const gfx::Rect& canvas_rect,
                          float contents_scale) const;
 
   void RasterCommon(SkCanvas* canvas,
-                    SkDrawPictureCallback* callback,
-                    const gfx::Rect& canvas_rect,
+                    SkPicture::AbortCallback* callback,
+                    const gfx::Rect& canvas_bitmap_rect,
+                    const gfx::Rect& canvas_playback_rect,
                     float contents_scale) const;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayListRasterSource);

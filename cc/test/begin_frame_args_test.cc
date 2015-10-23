@@ -6,13 +6,12 @@
 
 #include "base/time/time.h"
 #include "cc/output/begin_frame_args.h"
-#include "ui/gfx/frame_time.h"
 
 namespace cc {
 
 BeginFrameArgs CreateBeginFrameArgsForTesting(
     BeginFrameArgs::CreationLocation location) {
-  return CreateBeginFrameArgsForTesting(location, gfx::FrameTime::Now());
+  return CreateBeginFrameArgsForTesting(location, base::TimeTicks::Now());
 }
 
 BeginFrameArgs CreateBeginFrameArgsForTesting(
@@ -20,7 +19,8 @@ BeginFrameArgs CreateBeginFrameArgsForTesting(
     base::TimeTicks frame_time) {
   return BeginFrameArgs::Create(
       location, frame_time,
-      frame_time + (BeginFrameArgs::DefaultInterval() / 2),
+      frame_time + BeginFrameArgs::DefaultInterval() -
+          BeginFrameArgs::DefaultEstimatedParentDrawTime(),
       BeginFrameArgs::DefaultInterval(), BeginFrameArgs::NORMAL);
 }
 
@@ -49,7 +49,7 @@ BeginFrameArgs CreateBeginFrameArgsForTesting(
 
 BeginFrameArgs CreateExpiredBeginFrameArgsForTesting(
     BeginFrameArgs::CreationLocation location) {
-  base::TimeTicks now = gfx::FrameTime::Now();
+  base::TimeTicks now = base::TimeTicks::Now();
   return BeginFrameArgs::Create(
       location, now, now - BeginFrameArgs::DefaultInterval(),
       BeginFrameArgs::DefaultInterval(), BeginFrameArgs::NORMAL);
@@ -57,17 +57,18 @@ BeginFrameArgs CreateExpiredBeginFrameArgsForTesting(
 
 BeginFrameArgs CreateBeginFrameArgsForTesting(
     BeginFrameArgs::CreationLocation location,
-    scoped_refptr<TestNowSource> now_src) {
-  base::TimeTicks now = now_src->Now();
+    base::SimpleTestTickClock* now_src) {
+  base::TimeTicks now = now_src->NowTicks();
   return BeginFrameArgs::Create(
-      location, now, now + (BeginFrameArgs::DefaultInterval() / 2),
+      location, now, now + BeginFrameArgs::DefaultInterval() -
+                         BeginFrameArgs::DefaultEstimatedParentDrawTime(),
       BeginFrameArgs::DefaultInterval(), BeginFrameArgs::NORMAL);
 }
 
 BeginFrameArgs CreateExpiredBeginFrameArgsForTesting(
     BeginFrameArgs::CreationLocation location,
-    scoped_refptr<TestNowSource> now_src) {
-  base::TimeTicks now = now_src->Now();
+    base::SimpleTestTickClock* now_src) {
+  base::TimeTicks now = now_src->NowTicks();
   return BeginFrameArgs::Create(
       location, now, now - BeginFrameArgs::DefaultInterval(),
       BeginFrameArgs::DefaultInterval(), BeginFrameArgs::NORMAL);

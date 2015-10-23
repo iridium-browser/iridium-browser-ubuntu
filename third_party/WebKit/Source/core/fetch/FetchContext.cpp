@@ -36,7 +36,7 @@ namespace blink {
 
 FetchContext& FetchContext::nullInstance()
 {
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<FetchContext>, instance, (adoptPtrWillBeNoop(new FetchContext)));
+    DEFINE_STATIC_LOCAL(Persistent<FetchContext>, instance, (new FetchContext));
     return *instance;
 }
 
@@ -66,7 +66,7 @@ void FetchContext::dispatchWillSendRequest(unsigned long, ResourceRequest&, cons
 {
 }
 
-void FetchContext::dispatchDidLoadResourceFromMemoryCache(const ResourceRequest&, const ResourceResponse&)
+void FetchContext::dispatchDidLoadResourceFromMemoryCache(const Resource*)
 {
 }
 
@@ -90,14 +90,6 @@ void FetchContext::dispatchDidFail(unsigned long, const ResourceError&, bool)
 {
 }
 
-void FetchContext::sendRemainingDelegateMessages(unsigned long, const ResourceResponse&, int)
-{
-}
-
-void FetchContext::dispatchWillRequestResource(FetchRequest*)
-{
-}
-
 void FetchContext::willStartLoadingResource(ResourceRequest&)
 {
 }
@@ -106,7 +98,7 @@ void FetchContext::didLoadResource()
 {
 }
 
-void FetchContext::addResourceTiming(ResourceTimingInfo*, bool)
+void FetchContext::addResourceTiming(const ResourceTimingInfo&)
 {
 }
 

@@ -189,6 +189,9 @@
 #define UMA_HISTOGRAM_COUNTS_100(name, sample) UMA_HISTOGRAM_CUSTOM_COUNTS( \
     name, sample, 1, 100, 50)
 
+#define UMA_HISTOGRAM_COUNTS_1000(name, sample) UMA_HISTOGRAM_CUSTOM_COUNTS( \
+    name, sample, 1, 1000, 50)
+
 #define UMA_HISTOGRAM_COUNTS_10000(name, sample) UMA_HISTOGRAM_CUSTOM_COUNTS( \
     name, sample, 1, 10000, 50)
 
@@ -202,6 +205,9 @@
 
 #define UMA_HISTOGRAM_MEMORY_MB(name, sample) UMA_HISTOGRAM_CUSTOM_COUNTS( \
     name, sample, 1, 1000, 50)
+
+#define UMA_HISTOGRAM_MEMORY_LARGE_MB(name, sample) \
+    UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, 1, 64000, 100)
 
 #define UMA_HISTOGRAM_PERCENTAGE(name, under_one_hundred) \
     UMA_HISTOGRAM_ENUMERATION(name, under_one_hundred, 101)

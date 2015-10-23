@@ -6,8 +6,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/strings/string_split.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -51,7 +49,7 @@ class DeviceManagementServiceTestBase : public testing::Test {
  protected:
   DeviceManagementServiceTestBase() {
     request_context_ =
-        new net::TestURLRequestContextGetter(loop_.message_loop_proxy());
+        new net::TestURLRequestContextGetter(loop_.task_runner());
     ResetService();
     InitializeService();
   }
@@ -152,11 +150,11 @@ class DeviceManagementServiceTestBase : public testing::Test {
   }
 
   void SendResponse(net::TestURLFetcher* fetcher,
-                    const net::URLRequestStatus request_status,
+                    net::Error error,
                     int http_status,
                     const std::string& response) {
     fetcher->set_url(GURL(kServiceUrl));
-    fetcher->set_status(request_status);
+    fetcher->set_status(net::URLRequestStatus::FromError(error));
     fetcher->set_response_code(http_status);
     fetcher->SetResponseString(response);
     fetcher->delegate()->OnURLFetchComplete(fetcher);
@@ -175,23 +173,23 @@ class DeviceManagementServiceTestBase : public testing::Test {
 
 struct FailedRequestParams {
   FailedRequestParams(DeviceManagementStatus expected_status,
-                      net::URLRequestStatus::Status request_status,
+                      net::Error error,
                       int http_status,
                       const std::string& response)
       : expected_status_(expected_status),
-        request_status_(request_status, 0),
+        error_(error),
         http_status_(http_status),
         response_(response) {}
 
   DeviceManagementStatus expected_status_;
-  net::URLRequestStatus request_status_;
+  net::Error error_;
   int http_status_;
   std::string response_;
 };
 
 void PrintTo(const FailedRequestParams& params, std::ostream* os) {
   *os << "FailedRequestParams " << params.expected_status_
-      << " " << params.request_status_.status()
+      << " " << params.error_
       << " " << params.http_status_;
 }
 
@@ -209,7 +207,7 @@ TEST_P(DeviceManagementServiceFailedRequestTest, RegisterRequest) {
   net::TestURLFetcher* fetcher = GetFetcher();
   ASSERT_TRUE(fetcher);
 
-  SendResponse(fetcher, GetParam().request_status_, GetParam().http_status_,
+  SendResponse(fetcher, GetParam().error_, GetParam().http_status_,
                GetParam().response_);
 }
 
@@ -221,7 +219,7 @@ TEST_P(DeviceManagementServiceFailedRequestTest, ApiAuthCodeFetchRequest) {
   net::TestURLFetcher* fetcher = GetFetcher();
   ASSERT_TRUE(fetcher);
 
-  SendResponse(fetcher, GetParam().request_status_, GetParam().http_status_,
+  SendResponse(fetcher, GetParam().error_, GetParam().http_status_,
                GetParam().response_);
 }
 
@@ -232,7 +230,7 @@ TEST_P(DeviceManagementServiceFailedRequestTest, UnregisterRequest) {
   net::TestURLFetcher* fetcher = GetFetcher();
   ASSERT_TRUE(fetcher);
 
-  SendResponse(fetcher, GetParam().request_status_, GetParam().http_status_,
+  SendResponse(fetcher, GetParam().error_, GetParam().http_status_,
                GetParam().response_);
 }
 
@@ -243,7 +241,7 @@ TEST_P(DeviceManagementServiceFailedRequestTest, PolicyRequest) {
   net::TestURLFetcher* fetcher = GetFetcher();
   ASSERT_TRUE(fetcher);
 
-  SendResponse(fetcher, GetParam().request_status_, GetParam().http_status_,
+  SendResponse(fetcher, GetParam().error_, GetParam().http_status_,
                GetParam().response_);
 }
 
@@ -254,7 +252,7 @@ TEST_P(DeviceManagementServiceFailedRequestTest, AutoEnrollmentRequest) {
   net::TestURLFetcher* fetcher = GetFetcher();
   ASSERT_TRUE(fetcher);
 
-  SendResponse(fetcher, GetParam().request_status_, GetParam().http_status_,
+  SendResponse(fetcher, GetParam().error_, GetParam().http_status_,
                GetParam().response_);
 }
 
@@ -264,62 +262,62 @@ INSTANTIATE_TEST_CASE_P(
     testing::Values(
         FailedRequestParams(
             DM_STATUS_REQUEST_FAILED,
-            net::URLRequestStatus::FAILED,
+            net::ERR_FAILED,
             200,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_HTTP_STATUS_ERROR,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             666,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_RESPONSE_DECODING_ERROR,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             200,
             PROTO_STRING("Not a protobuf.")),
         FailedRequestParams(
             DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             403,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_SERVICE_INVALID_SERIAL_NUMBER,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             405,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_SERVICE_DEVICE_ID_CONFLICT,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             409,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_SERVICE_DEVICE_NOT_FOUND,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             410,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             401,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_REQUEST_INVALID,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             400,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_TEMPORARY_UNAVAILABLE,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             404,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_SERVICE_ACTIVATION_PENDING,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             412,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DM_STATUS_SERVICE_MISSING_LICENSES,
-            net::URLRequestStatus::SUCCESS,
+            net::OK,
             402,
             PROTO_STRING(kResponseEmpty))));
 
@@ -338,7 +336,7 @@ class QueryParams {
           net::UnescapeRule::NORMAL |
           net::UnescapeRule::SPACES |
           net::UnescapeRule::URL_SPECIAL_CHARS |
-          net::UnescapeRule::CONTROL_CHARS |
+          net::UnescapeRule::SPOOFING_AND_CONTROL_CHARS |
           net::UnescapeRule::REPLACE_PLUS_WITH_SPACE));
       if (unescaped_name == name) {
         if (found)
@@ -349,7 +347,7 @@ class QueryParams {
             net::UnescapeRule::NORMAL |
             net::UnescapeRule::SPACES |
             net::UnescapeRule::URL_SPECIAL_CHARS |
-            net::UnescapeRule::CONTROL_CHARS |
+            net::UnescapeRule::SPOOFING_AND_CONTROL_CHARS |
             net::UnescapeRule::REPLACE_PLUS_WITH_SPACE));
         if (unescaped_value != expected_value)
           return false;
@@ -415,8 +413,7 @@ TEST_F(DeviceManagementServiceTest, RegisterRequest) {
   // Generate the response.
   std::string response_data;
   ASSERT_TRUE(expected_response.SerializeToString(&response_data));
-  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
-  SendResponse(fetcher, status, 200, response_data);
+  SendResponse(fetcher, net::OK, 200, response_data);
 }
 
 TEST_F(DeviceManagementServiceTest, ApiAuthCodeFetchRequest) {
@@ -442,8 +439,7 @@ TEST_F(DeviceManagementServiceTest, ApiAuthCodeFetchRequest) {
   // Generate the response.
   std::string response_data;
   ASSERT_TRUE(expected_response.SerializeToString(&response_data));
-  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
-  SendResponse(fetcher, status, 200, response_data);
+  SendResponse(fetcher, net::OK, 200, response_data);
 }
 
 TEST_F(DeviceManagementServiceTest, UnregisterRequest) {
@@ -475,8 +471,7 @@ TEST_F(DeviceManagementServiceTest, UnregisterRequest) {
   // Generate the response.
   std::string response_data;
   ASSERT_TRUE(expected_response.SerializeToString(&response_data));
-  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
-  SendResponse(fetcher, status, 200, response_data);
+  SendResponse(fetcher, net::OK, 200, response_data);
 }
 
 TEST_F(DeviceManagementServiceTest, CancelRegisterRequest) {
@@ -549,8 +544,7 @@ TEST_F(DeviceManagementServiceTest, JobQueueing) {
   // Check that the request is processed as expected.
   std::string response_data;
   ASSERT_TRUE(expected_response.SerializeToString(&response_data));
-  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
-  SendResponse(fetcher, status, 200, response_data);
+  SendResponse(fetcher, net::OK, 200, response_data);
 }
 
 TEST_F(DeviceManagementServiceTest, CancelRequestAfterShutdown) {
@@ -580,8 +574,7 @@ TEST_F(DeviceManagementServiceTest, CancelDuringCallback) {
   EXPECT_CALL(*this, OnJobRetry(_)).Times(0);
 
   // Generate a callback.
-  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
-  SendResponse(fetcher, status, 500, std::string());
+  SendResponse(fetcher, net::OK, 500, std::string());
 
   // Job should have been reset.
   EXPECT_FALSE(request_job.get());
@@ -600,9 +593,7 @@ TEST_F(DeviceManagementServiceTest, RetryOnProxyError) {
   const std::string upload_data(fetcher->upload_data());
 
   // Generate a callback with a proxy failure.
-  net::URLRequestStatus status(net::URLRequestStatus::FAILED,
-                               net::ERR_PROXY_CONNECTION_FAILED);
-  SendResponse(fetcher, status, 200, std::string());
+  SendResponse(fetcher, net::ERR_PROXY_CONNECTION_FAILED, 200, std::string());
 
   // Verify that a new URLFetcher was started that bypasses the proxy.
   fetcher = GetFetcher();
@@ -631,8 +622,7 @@ TEST_F(DeviceManagementServiceTest, RetryOnBadResponseFromProxy) {
 
   // Generate a callback with a valid http response, that was generated by
   // a bad/wrong proxy.
-  net::URLRequestStatus status;
-  SendResponse(fetcher, status, 200, std::string());
+  SendResponse(fetcher, net::OK, 200, std::string());
 
   // Verify that a new URLFetcher was started that bypasses the proxy.
   fetcher = GetFetcher();

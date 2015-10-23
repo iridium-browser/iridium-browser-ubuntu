@@ -12,17 +12,11 @@
 #include "OSWindow.h"
 #include "common/debug.h"
 
-#ifdef _WIN32
-#elif __linux__
-#else
-#error unsupported OS.
-#endif
-
 EGLPlatformParameters::EGLPlatformParameters()
     : renderer(EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE),
       majorVersion(EGL_DONT_CARE),
       minorVersion(EGL_DONT_CARE),
-      deviceType(EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE)
+      deviceType(EGL_DONT_CARE)
 {
 }
 
@@ -30,8 +24,13 @@ EGLPlatformParameters::EGLPlatformParameters(EGLint renderer)
     : renderer(renderer),
       majorVersion(EGL_DONT_CARE),
       minorVersion(EGL_DONT_CARE),
-      deviceType(EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE)
+      deviceType(EGL_DONT_CARE)
 {
+    if (renderer == EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE ||
+        renderer == EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE)
+    {
+        deviceType = EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE;
+    }
 }
 
 EGLPlatformParameters::EGLPlatformParameters(EGLint renderer, EGLint majorVersion, EGLint minorVersion, EGLint useWarp)
@@ -42,15 +41,40 @@ EGLPlatformParameters::EGLPlatformParameters(EGLint renderer, EGLint majorVersio
 {
 }
 
+bool operator<(const EGLPlatformParameters &a, const EGLPlatformParameters &b)
+{
+    if (a.renderer != b.renderer)
+    {
+        return a.renderer < b.renderer;
+    }
 
-EGLWindow::EGLWindow(size_t width, size_t height, EGLint glesMajorVersion, const EGLPlatformParameters &platform)
-    : mSurface(EGL_NO_SURFACE),
+    if (a.majorVersion != b.majorVersion)
+    {
+        return a.majorVersion < b.majorVersion;
+    }
+
+    if (a.minorVersion != b.minorVersion)
+    {
+        return a.minorVersion < b.minorVersion;
+    }
+
+    return a.deviceType < b.deviceType;
+}
+
+bool operator==(const EGLPlatformParameters &a, const EGLPlatformParameters &b)
+{
+    return (a.renderer == b.renderer) &&
+           (a.majorVersion == b.majorVersion) &&
+           (a.minorVersion == b.minorVersion) &&
+           (a.deviceType == b.deviceType);
+}
+
+EGLWindow::EGLWindow(EGLint glesMajorVersion, const EGLPlatformParameters &platform)
+    : mDisplay(EGL_NO_DISPLAY),
+      mSurface(EGL_NO_SURFACE),
       mContext(EGL_NO_CONTEXT),
-      mDisplay(EGL_NO_DISPLAY),
       mClientVersion(glesMajorVersion),
       mPlatform(platform),
-      mWidth(width),
-      mHeight(height),
       mRedBits(-1),
       mGreenBits(-1),
       mBlueBits(-1),
@@ -108,14 +132,14 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
     displayAttributes.push_back(EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE);
     displayAttributes.push_back(mPlatform.minorVersion);
 
-    if (mPlatform.renderer == EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE || mPlatform.renderer == EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE)
+    if (mPlatform.deviceType != EGL_DONT_CARE)
     {
         displayAttributes.push_back(EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE);
         displayAttributes.push_back(mPlatform.deviceType);
     }
     displayAttributes.push_back(EGL_NONE);
 
-    mDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE, osWindow->getNativeDisplay(), displayAttributes.data());
+    mDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE, osWindow->getNativeDisplay(), &displayAttributes[0]);
     if (mDisplay == EGL_NO_DISPLAY)
     {
         destroyGL();
@@ -123,7 +147,7 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
     }
 
     EGLint majorVersion, minorVersion;
-    if (!eglInitialize(mDisplay, &majorVersion, &minorVersion))
+    if (eglInitialize(mDisplay, &majorVersion, &minorVersion) == EGL_FALSE)
     {
         destroyGL();
         return false;
@@ -158,7 +182,7 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
     eglGetConfigAttrib(mDisplay, mConfig, EGL_RED_SIZE, &mRedBits);
     eglGetConfigAttrib(mDisplay, mConfig, EGL_GREEN_SIZE, &mGreenBits);
     eglGetConfigAttrib(mDisplay, mConfig, EGL_BLUE_SIZE, &mBlueBits);
-    eglGetConfigAttrib(mDisplay, mConfig, EGL_ALPHA_SIZE, &mBlueBits);
+    eglGetConfigAttrib(mDisplay, mConfig, EGL_ALPHA_SIZE, &mAlphaBits);
     eglGetConfigAttrib(mDisplay, mConfig, EGL_DEPTH_SIZE, &mDepthBits);
     eglGetConfigAttrib(mDisplay, mConfig, EGL_STENCIL_SIZE, &mStencilBits);
 
@@ -236,4 +260,37 @@ bool EGLWindow::isGLInitialized() const
     return mSurface != EGL_NO_SURFACE &&
            mContext != EGL_NO_CONTEXT &&
            mDisplay != EGL_NO_DISPLAY;
+}
+
+// Find an EGLConfig that is an exact match for the specified attributes. EGL_FALSE is returned if
+// the EGLConfig is found.  This indicates that the EGLConfig is not supported.
+EGLBoolean EGLWindow::FindEGLConfig(EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *config)
+{
+    EGLint numConfigs = 0;
+    eglGetConfigs(dpy, nullptr, 0, &numConfigs);
+    std::vector<EGLConfig> allConfigs(numConfigs);
+    eglGetConfigs(dpy, allConfigs.data(), static_cast<EGLint>(allConfigs.size()), &numConfigs);
+
+    for (size_t i = 0; i < allConfigs.size(); i++)
+    {
+        bool matchFound = true;
+        for (const EGLint *curAttrib = attrib_list; curAttrib[0] != EGL_NONE; curAttrib += 2)
+        {
+            EGLint actualValue = EGL_DONT_CARE;
+            eglGetConfigAttrib(dpy, allConfigs[i], curAttrib[0], &actualValue);
+            if (curAttrib[1] != actualValue)
+            {
+                matchFound = false;
+                break;
+            }
+        }
+
+        if (matchFound)
+        {
+            *config = allConfigs[i];
+            return EGL_TRUE;
+        }
+    }
+
+    return EGL_FALSE;
 }

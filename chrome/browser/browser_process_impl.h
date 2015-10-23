@@ -139,6 +139,7 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
   network_time::NetworkTimeTracker* network_time_tracker() override;
   gcm::GCMDriver* gcm_driver() override;
+  memory::OomPriorityManager* GetOomPriorityManager() override;
   ShellIntegration::DefaultWebClientState CachedDefaultWebClientState()
       override;
 
@@ -310,6 +311,12 @@ class BrowserProcessImpl : public BrowserProcess,
 
 #if !defined(OS_ANDROID)
   scoped_ptr<ChromeDeviceClient> device_client_;
+#endif
+
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+  // Any change to this #ifdef must be reflected as well in
+  // chrome/browser/memory/oom_priority_manager_browsertest.cc
+  scoped_ptr<memory::OomPriorityManager> oom_priority_manager_;
 #endif
 
   ShellIntegration::DefaultWebClientState cached_default_web_client_state_;

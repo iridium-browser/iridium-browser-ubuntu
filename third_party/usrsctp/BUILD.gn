@@ -84,8 +84,16 @@ static_library("usrsctp") {
     # "SCTP_DEBUG", # Uncomment for SCTP debugging.
   ]
 
+  config("usrsctp_warnings") {
+    if (is_clang) {
+      # atomic_init in user_atomic.h is a static function in a header.
+      cflags = [ "-Wno-unused-function" ]
+    }
+  }
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
+  configs += [ "//build/config/compiler:no_incompatible_pointer_warnings" ]
+  configs += [ ":usrsctp_warnings" ]
 
   public_configs = [ ":usrsctp_config" ]
 
@@ -116,17 +124,9 @@ static_library("usrsctp") {
       "WINVER=0x0502",
       "_WIN32_WINNT=0x0502",
     ]
+    configs -= [ "//build/config/win:winver" ]
   } else {
     defines += [ "NON_WINDOWS_DEFINE" ]
-  }
-
-  if (is_clang) {
-    cflags = [ "-Wno-incompatible-pointer-types" ]
-  } else if (target_cpu == "mipsel") {
-    # mipsel is still using gcc (4.9),
-    # which does not support "-Wno-incompatible-pointer-types"
-    # so let's disable all warnings for this module.
-    cflags = [ "-w" ]
   }
 
   deps = [

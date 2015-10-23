@@ -28,15 +28,9 @@ bool FakeProxy::BeginMainFrameRequested() const { return false; }
 
 bool FakeProxy::CommitRequested() const { return false; }
 
-size_t FakeProxy::MaxPartialTextureUpdates() const {
-  return max_partial_texture_updates_;
+bool FakeProxy::SupportsImplScrolling() const {
+  return true;
 }
-
-void FakeProxy::SetMaxPartialTextureUpdates(size_t max) {
-  max_partial_texture_updates_ = max;
-}
-
-bool FakeProxy::SupportsImplScrolling() const { return false; }
 
 bool FakeProxy::MainFrameWillHappenForTesting() {
   return false;

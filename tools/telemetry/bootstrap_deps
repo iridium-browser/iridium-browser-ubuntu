@@ -10,19 +10,5 @@
 
 deps = {
     "src/tools/telemetry": "",
-    "src/build/android": "",
-    "src/build/util": "",
-    "src/chrome/test/data/extensions/profiles": "",
-    "src/chrome/test/data/perf/canvas_bench": "",
-    "src/third_party/android_testrunner": "",
-    "src/third_party/android_tools/sdk/platform-tools": "",
-    "src/third_party/chromite/ssh_keys": "",
-    "src/third_party/flot/jquery.flot.min.js": "",
-    "src/third_party/WebKit/PerformanceTests/resources/jquery.tablesorter.min.js": "",
-    "src/third_party/WebKit/PerformanceTests/resources/statistics.js": "",
-    "src/third_party/webpagereplay": "",
-    "src/third_party/trace-viewer": "",
-    "src/third_party/typ": "",
-    "src/tools/crx_id": "",
-    "src/tools/perf/unit-info.json": "",
+    "src/third_party/catapult": "",
 }

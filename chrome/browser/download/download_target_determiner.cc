@@ -4,9 +4,12 @@
 
 #include "chrome/browser/download/download_target_determiner.h"
 
+#include "base/location.h"
 #include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_crx_util.h"
@@ -34,10 +37,6 @@
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/webplugininfo.h"
-#endif
-
-#if defined(OS_ANDROID)
-#include "content/public/browser/android/download_controller_android.h"
 #endif
 
 #if defined(OS_WIN)
@@ -87,7 +86,7 @@ DownloadTargetDeterminer::DownloadTargetDeterminer(
     DownloadPrefs* download_prefs,
     DownloadTargetDeterminerDelegate* delegate,
     const CompletionCallback& callback)
-    : next_state_(STATE_PROMPT_USER_FOR_PERMISSION),
+    : next_state_(STATE_GENERATE_TARGET_PATH),
       should_prompt_(false),
       should_notify_extensions_(false),
       create_target_directory_(false),
@@ -126,9 +125,6 @@ void DownloadTargetDeterminer::DoLoop() {
     next_state_ = STATE_NONE;
 
     switch (current_state) {
-      case STATE_PROMPT_USER_FOR_PERMISSION:
-        result = DoPromptUserForPermission();
-        break;
       case STATE_GENERATE_TARGET_PATH:
         result = DoGenerateTargetPath();
         break;
@@ -174,35 +170,6 @@ void DownloadTargetDeterminer::DoLoop() {
   if (result == COMPLETE)
     ScheduleCallbackAndDeleteSelf();
 }
-
-DownloadTargetDeterminer::Result
-    DownloadTargetDeterminer::DoPromptUserForPermission() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  next_state_ = STATE_GENERATE_TARGET_PATH;
-#if defined(OS_ANDROID)
-  content::WebContents* web_contents = download_->GetWebContents();
-  content::DownloadControllerAndroid::Get()->AcquireFileAccessPermission(
-      web_contents,
-      base::Bind(&DownloadTargetDeterminer::PromptUserForPermissionDone,
-                 weak_ptr_factory_.GetWeakPtr()));
-  return QUIT_DOLOOP;
-#else
-  return CONTINUE;
-#endif
-}
-
-#if defined(OS_ANDROID)
-void DownloadTargetDeterminer::PromptUserForPermissionDone(bool granted) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK_EQ(STATE_GENERATE_TARGET_PATH, next_state_);
-  if (!granted) {
-    CancelOnFailureAndDeleteSelf();
-    return;
-  }
-
-  DoLoop();
-}
-#endif
 
 DownloadTargetDeterminer::Result
     DownloadTargetDeterminer::DoGenerateTargetPath() {
@@ -769,7 +736,7 @@ void DownloadTargetDeterminer::ScheduleCallbackAndDeleteSelf() {
   target_info->mime_type = mime_type_;
   target_info->is_filetype_handled_safely = is_filetype_handled_safely_;
 
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(completion_callback_, base::Passed(&target_info)));
   completion_callback_.Reset();
   delete this;

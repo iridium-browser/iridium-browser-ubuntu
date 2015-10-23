@@ -13,7 +13,6 @@
 #include "cc/output/gl_renderer_draw_cache.h"
 #include "cc/output/program_binding.h"
 #include "cc/output/renderer.h"
-#include "cc/quads/checkerboard_draw_quad.h"
 #include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/io_surface_draw_quad.h"
 #include "cc/quads/render_pass_draw_quad.h"
@@ -122,9 +121,9 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   void FinishDrawingQuadList() override;
 
   // Returns true if quad requires antialiasing and false otherwise.
-  static bool ShouldAntialiasQuad(const gfx::Transform& device_transform,
-                                  const DrawQuad* quad,
-                                  bool force_antialiasing);
+  static bool ShouldAntialiasQuad(const gfx::QuadF& device_layer_quad,
+                                  bool clipped,
+                                  bool force_aa);
 
   // Inflate the quad and fill edge array for fragment shader.
   // |local_quad| is set to inflated quad. |edge| array is filled with
@@ -132,7 +131,14 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   static void SetupQuadForClippingAndAntialiasing(
       const gfx::Transform& device_transform,
       const DrawQuad* quad,
-      bool use_aa,
+      const gfx::QuadF* device_layer_quad,
+      const gfx::QuadF* clip_region,
+      gfx::QuadF* local_quad,
+      float edge[24]);
+  static void SetupRenderPassQuadForClippingAndAntialiasing(
+      const gfx::Transform& device_transform,
+      const RenderPassDrawQuad* quad,
+      const gfx::QuadF* device_layer_quad,
       const gfx::QuadF* clip_region,
       gfx::QuadF* local_quad,
       float edge[24]);
@@ -147,9 +153,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   void ClearFramebuffer(DrawingFrame* frame);
   void SetViewport();
 
-  void DrawCheckerboardQuad(const DrawingFrame* frame,
-                            const CheckerboardDrawQuad* quad,
-                            const gfx::QuadF* clip_region);
   void DrawDebugBorderQuad(const DrawingFrame* frame,
                            const DebugBorderDrawQuad* quad);
   static bool IsDefaultBlendMode(SkXfermode::Mode blend_mode) {
@@ -198,16 +201,17 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
                     const gfx::QuadF* clip_region);
   void DrawContentQuad(const DrawingFrame* frame,
                        const ContentDrawQuadBase* quad,
-                       ResourceProvider::ResourceId resource_id,
+                       ResourceId resource_id,
                        const gfx::QuadF* clip_region);
   void DrawContentQuadAA(const DrawingFrame* frame,
                          const ContentDrawQuadBase* quad,
-                         ResourceProvider::ResourceId resource_id,
+                         ResourceId resource_id,
                          const gfx::Transform& device_transform,
+                         const gfx::QuadF& aa_quad,
                          const gfx::QuadF* clip_region);
   void DrawContentQuadNoAA(const DrawingFrame* frame,
                            const ContentDrawQuadBase* quad,
-                           ResourceProvider::ResourceId resource_id,
+                           ResourceId resource_id,
                            const gfx::QuadF* clip_region);
   void DrawYUVVideoQuad(const DrawingFrame* frame,
                         const YUVVideoDrawQuad* quad,
@@ -260,6 +264,7 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       OverlayResourceLockList;
   OverlayResourceLockList pending_overlay_resources_;
   OverlayResourceLockList in_use_overlay_resources_;
+  OverlayResourceLockList previous_swap_overlay_resources_;
 
   RendererCapabilitiesImpl capabilities_;
 
@@ -286,8 +291,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       TileProgramSwizzle;
   typedef ProgramBinding<VertexShaderTile, FragmentShaderRGBATexSwizzleOpaque>
       TileProgramSwizzleOpaque;
-  typedef ProgramBinding<VertexShaderPosTex, FragmentShaderCheckerboard>
-      TileCheckerboardProgram;
 
   // Texture shaders.
   typedef ProgramBinding<VertexShaderPosTexTransform,
@@ -353,8 +356,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       TexCoordPrecision precision, SamplerType sampler);
   const TileProgramSwizzleAA* GetTileProgramSwizzleAA(
       TexCoordPrecision precision, SamplerType sampler);
-
-  const TileCheckerboardProgram* GetTileCheckerboardProgram();
 
   const RenderPassProgram* GetRenderPassProgram(TexCoordPrecision precision,
                                                 BlendMode blend_mode);
@@ -425,8 +426,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
                                    1][LAST_SAMPLER_TYPE + 1];
   TileProgramSwizzleAA tile_program_swizzle_aa_[LAST_TEX_COORD_PRECISION +
                                                 1][LAST_SAMPLER_TYPE + 1];
-
-  TileCheckerboardProgram tile_checkerboard_program_;
 
   TextureProgram
       texture_program_[LAST_TEX_COORD_PRECISION + 1][LAST_SAMPLER_TYPE + 1];
@@ -515,7 +514,7 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   bool use_blend_equation_advanced_coherent_;
 
   SkBitmap on_demand_tile_raster_bitmap_;
-  ResourceProvider::ResourceId on_demand_tile_raster_resource_id_;
+  ResourceId on_demand_tile_raster_resource_id_;
   BoundGeometry bound_geometry_;
   DISALLOW_COPY_AND_ASSIGN(GLRenderer);
 };

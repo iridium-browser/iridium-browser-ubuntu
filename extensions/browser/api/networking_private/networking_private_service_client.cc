@@ -7,6 +7,7 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/sequenced_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "components/onc/onc_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -56,7 +57,7 @@ NetworkingPrivateServiceClient::NetworkingPrivateServiceClient(
       base::Bind(
           &WiFiService::SetEventObservers,
           base::Unretained(wifi_service_.get()),
-          base::MessageLoopProxy::current(),
+          base::ThreadTaskRunnerHandle::Get(),
           base::Bind(
               &NetworkingPrivateServiceClient::OnNetworksChangedEventOnUIThread,
               weak_factory_.GetWeakPtr()),
@@ -310,6 +311,25 @@ void NetworkingPrivateServiceClient::GetCaptivePortalStatus(
   failure_callback.Run(networking_private::kErrorNotSupported);
 }
 
+void NetworkingPrivateServiceClient::UnlockCellularSim(
+    const std::string& guid,
+    const std::string& pin,
+    const std::string& puk,
+    const VoidCallback& success_callback,
+    const FailureCallback& failure_callback) {
+  failure_callback.Run(networking_private::kErrorNotSupported);
+}
+
+void NetworkingPrivateServiceClient::SetCellularSimState(
+    const std::string& guid,
+    bool require_pin,
+    const std::string& current_pin,
+    const std::string& new_pin,
+    const VoidCallback& success_callback,
+    const FailureCallback& failure_callback) {
+  failure_callback.Run(networking_private::kErrorNotSupported);
+}
+
 scoped_ptr<base::ListValue>
 NetworkingPrivateServiceClient::GetEnabledNetworkTypes() {
   scoped_ptr<base::ListValue> network_list;
@@ -320,10 +340,10 @@ NetworkingPrivateServiceClient::GetEnabledNetworkTypes() {
 scoped_ptr<NetworkingPrivateDelegate::DeviceStateList>
 NetworkingPrivateServiceClient::GetDeviceStateList() {
   scoped_ptr<DeviceStateList> device_state_list(new DeviceStateList);
-  scoped_ptr<core_api::networking_private::DeviceStateProperties> properties(
-      new core_api::networking_private::DeviceStateProperties);
-  properties->type = core_api::networking_private::NETWORK_TYPE_WIFI;
-  properties->state = core_api::networking_private::DEVICE_STATE_TYPE_ENABLED;
+  scoped_ptr<api::networking_private::DeviceStateProperties> properties(
+      new api::networking_private::DeviceStateProperties);
+  properties->type = api::networking_private::NETWORK_TYPE_WIFI;
+  properties->state = api::networking_private::DEVICE_STATE_TYPE_ENABLED;
   device_state_list->push_back(properties.Pass());
   return device_state_list.Pass();
 }

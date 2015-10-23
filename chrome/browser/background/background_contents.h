@@ -110,7 +110,7 @@ class BackgroundContents : public extensions::DeferredStartRenderHost,
   Profile* profile_;
   scoped_ptr<content::WebContents> web_contents_;
   content::NotificationRegistrar registrar_;
-  ObserverList<extensions::DeferredStartRenderHostObserver>
+  base::ObserverList<extensions::DeferredStartRenderHostObserver>
       deferred_start_render_host_observer_list_;
 
   // The initial URL to load.
@@ -125,7 +125,7 @@ struct BackgroundContentsOpenedDetails {
   BackgroundContents* contents;
 
   // The name of the parent frame for these contents.
-  const base::string16& frame_name;
+  const std::string& frame_name;
 
   // The ID of the parent application (if any).
   const base::string16& application_id;

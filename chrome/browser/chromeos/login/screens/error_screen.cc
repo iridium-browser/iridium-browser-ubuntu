@@ -126,6 +126,8 @@ void ErrorScreen::OnUserAction(const std::string& action_id) {
     OnLocalStateErrorPowerwashButtonClicked();
   else if (action_id == kUserActionRebootButtonClicked)
     OnRebootButtonClicked();
+  else if (action_id == kUserActionConnectRequested)
+    OnConnectRequested();
   else
     BaseScreen::OnUserAction(action_id);
 }
@@ -227,13 +229,9 @@ void ErrorScreen::OnOffTheRecordAuthSuccess() {
   const base::CommandLine& browser_command_line =
       *base::CommandLine::ForCurrentProcess();
   base::CommandLine command_line(browser_command_line.GetProgram());
-  std::string cmd_line_str =
-      GetOffTheRecordCommandLine(GURL(),
-                                 StartupUtils::IsOobeCompleted(),
-                                 browser_command_line,
-                                 &command_line);
-
-  RestartChrome(cmd_line_str);
+  GetOffTheRecordCommandLine(GURL(), StartupUtils::IsOobeCompleted(),
+                             browser_command_line, &command_line);
+  RestartChrome(command_line);
 }
 
 void ErrorScreen::OnPasswordChangeDetected() {
@@ -248,8 +246,9 @@ void ErrorScreen::PolicyLoadFailed() {
   LOG(FATAL);
 }
 
-void ErrorScreen::OnOnlineChecked(const std::string& username, bool success) {
-  LOG(FATAL);
+ErrorScreen::ConnectRequestCallbackSubscription
+ErrorScreen::RegisterConnectRequestCallback(const base::Closure& callback) {
+  return connect_request_callbacks_.Add(callback);
 }
 
 void ErrorScreen::DefaultHideCallback() {
@@ -303,6 +302,10 @@ void ErrorScreen::OnLocalStateErrorPowerwashButtonClicked() {
 
 void ErrorScreen::OnRebootButtonClicked() {
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
+}
+
+void ErrorScreen::OnConnectRequested() {
+  connect_request_callbacks_.Notify();
 }
 
 void ErrorScreen::StartGuestSessionAfterOwnershipCheck(

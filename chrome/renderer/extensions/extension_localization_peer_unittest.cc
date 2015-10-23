@@ -7,6 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/renderer/extensions/extension_localization_peer.h"
+#include "content/public/child/fixed_received_data.h"
 #include "extensions/common/message_bundle.h"
 #include "ipc/ipc_sender.h"
 #include "ipc/ipc_sync_message.h"
@@ -15,6 +16,8 @@
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace {
 
 using testing::_;
 using testing::DoAll;
@@ -62,9 +65,14 @@ class MockRequestPeer : public content::RequestPeer {
   MOCK_METHOD1(OnReceivedResponse,
                void(const content::ResourceResponseInfo& info));
   MOCK_METHOD2(OnDownloadedData, void(int len, int encoded_data_length));
-  MOCK_METHOD3(OnReceivedData, void(const char* data,
-                                    int data_length,
-                                    int encoded_data_length));
+  void OnReceivedData(scoped_ptr<RequestPeer::ReceivedData> data) override {
+    OnReceivedDataInternal(data->payload(), data->length(),
+                           data->encoded_length());
+  }
+  MOCK_METHOD3(OnReceivedDataInternal,
+               void(const char* data,
+                    int data_length,
+                    int encoded_data_length));
   MOCK_METHOD6(OnCompletedRequest, void(
       int error_code,
       bool was_ignored_by_handler,
@@ -73,9 +81,7 @@ class MockRequestPeer : public content::RequestPeer {
       const base::TimeTicks& completion_time,
       int64_t total_transfer_size));
   void OnReceivedCompletedResponse(const content::ResourceResponseInfo& info,
-                                   const char* data,
-                                   int data_length,
-                                   int encoded_data_length,
+                                   scoped_ptr<RequestPeer::ReceivedData> data,
                                    int error_code,
                                    bool was_ignored_by_handler,
                                    bool stale_copy_in_cache,
@@ -84,9 +90,9 @@ class MockRequestPeer : public content::RequestPeer {
                                    int64_t total_transfer_size) override {
     if (data) {
       OnReceivedCompletedResponseInternal(
-          info, data, data_length, encoded_data_length, error_code,
-          was_ignored_by_handler, stale_copy_in_cache, security_info,
-          completion_time, total_transfer_size);
+          info, data->payload(), data->length(), data->encoded_length(),
+          error_code, was_ignored_by_handler, stale_copy_in_cache,
+          security_info, completion_time, total_transfer_size);
     } else {
       OnReceivedCompletedResponseInternal(info, nullptr, 0, 0, error_code,
                                           was_ignored_by_handler,
@@ -109,6 +115,8 @@ class MockRequestPeer : public content::RequestPeer {
  private:
   DISALLOW_COPY_AND_ASSIGN(MockRequestPeer);
 };
+
+}  // namespace
 
 class ExtensionLocalizationPeerTest : public testing::Test {
  protected:
@@ -158,11 +166,13 @@ TEST_F(ExtensionLocalizationPeerTest, OnReceivedData) {
   EXPECT_TRUE(GetData(filter_peer_.get()).empty());
 
   const std::string data_chunk("12345");
-  filter_peer_->OnReceivedData(data_chunk.c_str(), data_chunk.length(), -1);
+  filter_peer_->OnReceivedData(make_scoped_ptr(new content::FixedReceivedData(
+      data_chunk.data(), data_chunk.length(), -1)));
 
   EXPECT_EQ(data_chunk, GetData(filter_peer_.get()));
 
-  filter_peer_->OnReceivedData(data_chunk.c_str(), data_chunk.length(), -1);
+  filter_peer_->OnReceivedData(make_scoped_ptr(new content::FixedReceivedData(
+      data_chunk.data(), data_chunk.length(), -1)));
   EXPECT_EQ(data_chunk + data_chunk, GetData(filter_peer_.get()));
 }
 
@@ -184,12 +194,12 @@ TEST_F(ExtensionLocalizationPeerTest, OnCompletedRequestEmptyData) {
   // It will self-delete once it exits OnCompletedRequest.
   ExtensionLocalizationPeer* filter_peer = filter_peer_.release();
 
-  EXPECT_CALL(*original_peer_, OnReceivedData(_, _, _)).Times(0);
+  EXPECT_CALL(*original_peer_, OnReceivedDataInternal(_, _, _)).Times(0);
   EXPECT_CALL(*sender_, Send(_)).Times(0);
 
   EXPECT_CALL(*original_peer_, OnReceivedCompletedResponseInternal(
-                                   _, StrEq(""), 0, -1, net::OK, false, false,
-                                   "", base::TimeTicks(), -1));
+                                   _, nullptr, 0, 0, net::OK, false, false, "",
+                                   base::TimeTicks(), -1));
 
   filter_peer->OnCompletedRequest(
       net::OK, false, false, std::string(), base::TimeTicks(), -1);
@@ -265,7 +275,6 @@ TEST_F(ExtensionLocalizationPeerTest, OnCompletedRequestReplaceMessagesFails) {
   // We already have messages in memory, Send will be skipped.
   EXPECT_CALL(*sender_, Send(_)).Times(0);
 
-  // __MSG_missing_message__ is missing, so message stays the same.
   EXPECT_CALL(*original_peer_,
               OnReceivedCompletedResponseInternal(
                   _, StrEq(message.c_str()), message.size(), -1, net::OK, false,

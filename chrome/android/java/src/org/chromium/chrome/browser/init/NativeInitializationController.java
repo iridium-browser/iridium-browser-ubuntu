@@ -80,7 +80,7 @@ class NativeInitializationController {
                 try {
                     LibraryLoader libraryLoader =
                             LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER);
-                    libraryLoader.ensureInitialized(mContext.getApplicationContext(), true);
+                    libraryLoader.ensureInitialized(mContext.getApplicationContext());
                     // The prefetch is done after the library load for two reasons:
                     // - It is easier to know the library location after it has
                     //   been loaded.
@@ -91,7 +91,7 @@ class NativeInitializationController {
                     //   generally startup on some devices, most likely by
                     //   competing for IO.
                     // For experimental results, see http://crbug.com/460438.
-                    libraryLoader.asyncPrefetchLibrariesToMemory(mContext);
+                    libraryLoader.asyncPrefetchLibrariesToMemory();
                 } catch (ProcessInitException e) {
                     Log.e(TAG, "Unable to load native library.", e);
                     mActivityDelegate.onStartupFailure();

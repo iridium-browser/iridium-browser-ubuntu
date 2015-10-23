@@ -88,9 +88,6 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
   // Returns 0 when it does not have an estimate.
   virtual QuicBandwidth BandwidthEstimate() const = 0;
 
-  // Returns true if the current bandwidth estimate is reliable.
-  virtual bool HasReliableBandwidthEstimate() const = 0;
-
   // Get the send algorithm specific retransmission delay, called RTO in TCP,
   // Note 1: the caller is responsible for sanity checking this value.
   // Note 2: this will return zero if we don't have enough data for an estimate.
@@ -117,8 +114,7 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
 
   // Called by the Session when we get a bandwidth estimate from the client.
   // Uses the max bandwidth in the params if |max_bandwidth_resumption| is true.
-  // Returns true if initial connection state is changed as a result.
-  virtual bool ResumeConnectionState(
+  virtual void ResumeConnectionState(
       const CachedNetworkParameters& cached_network_params,
       bool max_bandwidth_resumption) = 0;
 };

@@ -4,11 +4,9 @@
 
 package org.chromium.android_webview;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
-
-import java.lang.Runnable;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 /**
  * Implementations of various static methods, and also a home for static
@@ -78,13 +76,6 @@ public class AwContentsStatics {
         nativeSetRecordFullDocument(recordFullDocument);
     }
 
-    /*
-     * Register the signal handler that prints out the version code upon crash.
-     */
-    public static void registerCrashHandler(String version) {
-        nativeRegisterCrashHandler(version);
-    }
-
     public static void setLegacyCacheRemovalDelayForTest(long timeoutMs) {
         nativeSetLegacyCacheRemovalDelayForTest(timeoutMs);
     }
@@ -101,7 +92,6 @@ public class AwContentsStatics {
     private static native void nativeSetDataReductionProxyEnabled(boolean enabled);
     private static native String nativeGetUnreachableWebDataUrl();
     private static native void nativeSetRecordFullDocument(boolean recordFullDocument);
-    private static native void nativeRegisterCrashHandler(String version);
     private static native void nativeSetLegacyCacheRemovalDelayForTest(long timeoutMs);
     private static native String nativeGetProductVersion();
 }

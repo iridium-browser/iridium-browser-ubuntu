@@ -15,11 +15,12 @@
 #include "chrome/browser/ui/website_settings/permission_bubble_view.h"
 #include "content/public/browser/web_contents.h"
 
+class Browser;
 @class PermissionBubbleController;
 
 class PermissionBubbleCocoa : public PermissionBubbleView {
  public:
-  explicit PermissionBubbleCocoa(NSWindow* parent_window);
+  explicit PermissionBubbleCocoa(Browser* browser);
   ~PermissionBubbleCocoa() override;
 
   // PermissionBubbleView interface.
@@ -29,37 +30,26 @@ class PermissionBubbleCocoa : public PermissionBubbleView {
   bool IsVisible() override;
   void SetDelegate(Delegate* delegate) override;
   bool CanAcceptRequestUpdate() override;
+  void UpdateAnchorPosition() override;
+  gfx::NativeWindow GetNativeWindow() override;
 
   // Called when |bubbleController_| is closing.
   void OnBubbleClosing();
-
-  // Returns the point, in screen coordinates, to which the bubble's arrow
-  // should point.
-  NSPoint GetAnchorPoint();
-
-  // Returns the NSWindow containing the bubble.
-  NSWindow* window();
-
-  // Change the parent window to be used the next time the bubble is shown.
-  void SwitchParentWindow(NSWindow* parent);
-
-  info_bubble::BubbleArrowLocation GetArrowLocation();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(PermissionBubbleBrowserTest,
                            HasLocationBarByDefault);
   FRIEND_TEST_ALL_PREFIXES(PermissionBubbleBrowserTest,
                            FullscreenHasLocationBar);
-  FRIEND_TEST_ALL_PREFIXES(PermissionBubbleAppBrowserTest, AppHasNoLocationBar);
+  FRIEND_TEST_ALL_PREFIXES(PermissionBubbleBrowserTest, AppHasNoLocationBar);
   FRIEND_TEST_ALL_PREFIXES(PermissionBubbleKioskBrowserTest,
                            KioskHasNoLocationBar);
 
-  NSWindow* parent_window_;  // Weak.
+  Browser* browser_;    // Weak.
   Delegate* delegate_;  // Weak.
 
   // Cocoa-side UI controller for the bubble.  Weak, as it will close itself.
   PermissionBubbleController* bubbleController_;
-  virtual bool HasLocationBar();
 
   DISALLOW_COPY_AND_ASSIGN(PermissionBubbleCocoa);
 };

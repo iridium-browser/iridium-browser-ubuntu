@@ -26,6 +26,7 @@
         '../resources/ui_resources.gyp:ui_resources',
         '../strings/ui_strings.gyp:ui_strings',
         '../../third_party/icu/icu.gyp:icuuc',
+        'resources/app_list_resources.gyp:app_list_resources',
       ],
       'defines': [
         'APP_LIST_IMPLEMENTATION',
@@ -148,6 +149,8 @@
         'views/folder_header_view.cc',
         'views/folder_header_view.h',
         'views/folder_header_view_delegate.h',
+        'views/image_shadow_animator.cc',
+        'views/image_shadow_animator.h',
         'views/page_switcher.cc',
         'views/page_switcher.h',
         'views/progress_bar_view.cc',
@@ -193,6 +196,9 @@
             '../events/events.gyp:events',
             '../views/views.gyp:views',
           ],
+          'export_dependent_settings': [
+              '../views/views.gyp:views',
+          ],
         }, {  # toolkit_views==0
           'sources/': [
             ['exclude', 'views/'],
@@ -224,7 +230,6 @@
         '../../base/base.gyp:base',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
-        '../resources/ui_resources.gyp:ui_resources',
         'app_list',
       ],
       'sources': [
@@ -277,6 +282,7 @@
         'views/app_list_view_unittest.cc',
         'views/apps_grid_view_unittest.cc',
         'views/folder_header_view_unittest.cc',
+        'views/image_shadow_animator_unittest.cc',
         'views/search_box_view_unittest.cc',
         'views/search_result_list_view_unittest.cc',
         'views/search_result_page_view_unittest.cc',

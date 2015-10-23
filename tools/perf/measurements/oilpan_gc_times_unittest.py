@@ -5,12 +5,12 @@
 from measurements import oilpan_gc_times
 
 from telemetry.core import util
-from telemetry.results import page_test_results
+from telemetry.internal.results import page_test_results
+from telemetry.page import page as page_module
+from telemetry.testing import options_for_unittests
+from telemetry.testing import page_test_test_case
 from telemetry.timeline import model
 from telemetry.timeline import slice as slice_data
-from telemetry.unittest_util import options_for_unittests
-from telemetry.unittest_util import page_test_test_case
-from telemetry.page import page as page_module
 
 util.AddDirToPythonPath(util.GetTelemetryDir(), 'third_party', 'mock')
 import mock  # pylint: disable=import-error
@@ -79,6 +79,8 @@ class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
   _KEY_COMPLETE_SWEEP = 'ThreadState::completeSweep'
   _KEY_COALESCE = 'ThreadHeap::coalesce'
   _KEY_MEASURE = 'BlinkGCTimeMeasurement'
+  # Do not add 'forced' in reasons to measure.
+  _GC_REASONS = ['precise', 'conservative', 'idle']
 
   def setUp(self):
     self._options = options_for_unittests.GetCopy()
@@ -156,31 +158,35 @@ class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
                                        'oilpan_idle_complete_sweep')))
 
   def testForSmoothness(self):
-    ps = self.CreatePageSetFromFileInUnittestDataDir('create_many_objects.html')
+    ps = self.CreateStorySetFromFileInUnittestDataDir(
+        'create_many_objects.html')
     measurement = oilpan_gc_times.OilpanGCTimesForSmoothness()
     results = self.RunMeasurement(measurement, ps, options=self._options)
     self.assertEquals(0, len(results.failures))
 
-    precise = results.FindAllPageSpecificValuesNamed('oilpan_precise_mark')
-    conservative = results.FindAllPageSpecificValuesNamed(
-        'oilpan_conservative_mark')
-    self.assertLess(0, len(precise) + len(conservative))
+    gc_events = []
+    for gc_reason in self._GC_REASONS:
+      label = 'oilpan_%s_mark' % gc_reason
+      gc_events.extend(results.FindAllPageSpecificValuesNamed(label))
+    self.assertLess(0, len(gc_events))
 
   def testForBlinkPerf(self):
-    ps = self.CreatePageSetFromFileInUnittestDataDir('create_many_objects.html')
+    ps = self.CreateStorySetFromFileInUnittestDataDir(
+        'create_many_objects.html')
     measurement = oilpan_gc_times.OilpanGCTimesForBlinkPerf()
     results = self.RunMeasurement(measurement, ps, options=self._options)
     self.assertEquals(0, len(results.failures))
 
-    precise = results.FindAllPageSpecificValuesNamed('oilpan_precise_mark')
-    conservative = results.FindAllPageSpecificValuesNamed(
-        'oilpan_conservative_mark')
-    self.assertLess(0, len(precise) + len(conservative))
+    gc_events = []
+    for gc_reason in self._GC_REASONS:
+      label = 'oilpan_%s_mark' % gc_reason
+      gc_events.extend(results.FindAllPageSpecificValuesNamed(label))
+    self.assertLess(0, len(gc_events))
 
   def _GenerateDataForEmptyPageSet(self):
     page_set = self.CreateEmptyPageSet()
     page = TestOilpanGCTimesPage(page_set)
-    page_set.AddUserStory(page)
+    page_set.AddStory(page)
 
     data = OilpanGCTimesTestData('CrRendererMain')
     # Pretend we are about to run the tests to silence lower level asserts.

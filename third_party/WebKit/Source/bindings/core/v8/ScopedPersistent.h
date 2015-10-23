@@ -31,6 +31,7 @@
 #ifndef ScopedPersistent_h
 #define ScopedPersistent_h
 
+#include "wtf/FastAllocBase.h"
 #include "wtf/Noncopyable.h"
 #include <v8.h>
 
@@ -38,6 +39,7 @@ namespace blink {
 
 template<typename T>
 class ScopedPersistent {
+    WTF_MAKE_FAST_ALLOCATED(ScopedPersistent);
     WTF_MAKE_NONCOPYABLE(ScopedPersistent);
 public:
     ScopedPersistent() { }
@@ -82,6 +84,11 @@ public:
     void clear()
     {
         m_handle.Reset();
+    }
+
+    void setReference(const v8::Persistent<v8::Object>& parent, v8::Isolate* isolate)
+    {
+        isolate->SetReference(parent, m_handle);
     }
 
     bool operator==(const ScopedPersistent<T>& other)

@@ -6,6 +6,8 @@
 
 #include <math.h>
 
+#include "base/i18n/icu_encoding_detection.h"
+#include "base/i18n/icu_string_conversions.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -16,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "gin/public/gin_embedders.h"
 #include "pdf/draw_utils.h"
 #include "pdf/pdfium/pdfium_api_string_buffer_adapter.h"
 #include "pdf/pdfium/pdfium_mem_buffer_file_read.h"
@@ -43,6 +46,7 @@
 #include "third_party/pdfium/public/fpdf_sysfontinfo.h"
 #include "third_party/pdfium/public/fpdf_transformpage.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "v8/include/v8.h"
 
 using printing::ConvertUnit;
 using printing::ConvertUnitDouble;
@@ -223,10 +227,22 @@ void* MapFont(struct _FPDF_SYSFONTINFO*, int weight, int italic,
   }
 
   if (i == arraysize(PDFFontSubstitutions)) {
-    // TODO(kochi): Pass the face in UTF-8. If face is not encoded in UTF-8,
-    // convert to UTF-8 before passing.
-    description.set_face(face);
+    // Convert to UTF-8 before calling set_face().
+    std::string face_utf8;
+    if (base::IsStringUTF8(face)) {
+      face_utf8 = face;
+    } else {
+      std::string encoding;
+      if (base::DetectEncoding(face, &encoding)) {
+        // ConvertToUtf8AndNormalize() clears |face_utf8| on failure.
+        base::ConvertToUtf8AndNormalize(face, encoding, &face_utf8);
+      }
+    }
 
+    if (face_utf8.empty())
+      return nullptr;
+
+    description.set_face(face_utf8);
     description.set_weight(WeightToBrowserFontTrustedWeight(weight));
     description.set_italic(italic > 0);
   }
@@ -458,7 +474,7 @@ void FormatStringWithHyphens(base::string16* text) {
       current_hyphen_position = HyphenPosition();
       current_hyphen_position.position = i;
       current_hyphen_position_is_valid = true;
-    } else if (IsWhitespace(current_char)) {
+    } else if (base::IsUnicodeWhitespace(current_char)) {
       if (current_hyphen_position_is_valid) {
         if (current_char != L'\r' && current_char != L'\n')
           current_hyphen_position.next_whitespace_position = i;
@@ -485,7 +501,7 @@ void FormatStringWithHyphens(base::string16* text) {
   // Adobe Reader also get rid of trailing spaces right before a CRLF.
   static const base::char16 kSpaceCrCn[] = {L' ', L'\r', L'\n', L'\0'};
   static const base::char16 kCrCn[] = {L'\r', L'\n', L'\0'};
-  ReplaceSubstringsAfterOffset(text, 0, kSpaceCrCn, kCrCn);
+  base::ReplaceSubstringsAfterOffset(text, 0, kSpaceCrCn, kCrCn);
 }
 
 // Replace CR/LF with just LF on POSIX.
@@ -578,6 +594,7 @@ PDFiumEngine::PDFiumEngine(PDFEngine::Client* client)
       last_page_to_search_(-1),
       last_character_index_to_search_(-1),
       permissions_(0),
+      permissions_handler_revision_(-1),
       fpdf_availability_(NULL),
       next_timer_id_(0),
       last_page_mouse_down_(-1),
@@ -640,7 +657,7 @@ PDFiumEngine::PDFiumEngine(PDFEngine::Client* client)
   FPDF_FORMFILLINFO::FFI_GotoURL = Form_GotoURL;
   FPDF_FORMFILLINFO::FFI_GetLanguage = Form_GetLanguage;
 #endif  // PDF_USE_XFA
-  IPDF_JSPLATFORM::version = 1;
+  IPDF_JSPLATFORM::version = 2;
   IPDF_JSPLATFORM::app_alert = Form_Alert;
   IPDF_JSPLATFORM::app_beep = Form_Beep;
   IPDF_JSPLATFORM::app_response = Form_Response;
@@ -650,6 +667,8 @@ PDFiumEngine::PDFiumEngine(PDFEngine::Client* client)
   IPDF_JSPLATFORM::Doc_submitForm = Form_SubmitForm;
   IPDF_JSPLATFORM::Doc_gotoPage = Form_GotoPage;
   IPDF_JSPLATFORM::Field_browse = Form_Browse;
+  IPDF_JSPLATFORM::m_isolate = v8::Isolate::GetCurrent();
+  IPDF_JSPLATFORM::m_v8EmbedderSlot = gin::kEmbedderPDFium;
 
   IFSDK_PAUSE::version = 1;
   IFSDK_PAUSE::user = NULL;
@@ -662,8 +681,16 @@ PDFiumEngine::~PDFiumEngine() {
 
   if (doc_) {
     FORM_DoDocumentAAction(form_, FPDFDOC_AACTION_WC);
+
+#ifdef PDF_USE_XFA
+    // XFA may require |form_| to outlive |doc_|, so shut down in that order.
     FPDF_CloseDocument(doc_);
     FPDFDOC_ExitFormFillEnvironment(form_);
+#else
+    // Normally |doc_| should outlive |form_|.
+    FPDFDOC_ExitFormFillEnvironment(form_);
+    FPDF_CloseDocument(doc_);
+#endif
   }
   FPDFAvail_Destroy(fpdf_availability_);
 
@@ -927,8 +954,8 @@ FPDF_FILEHANDLER* PDFiumEngine::Form_OpenFile(FPDF_FORMFILLINFO* param,
     url_str =
         base::UTF16ToUTF8(reinterpret_cast<const base::char16*>(url));
   }
-  //  TODO: need to implement open file from the url
-  //  Use a file path for the ease of testing
+  // TODO: need to implement open file from the url
+  // Use a file path for the ease of testing
   FILE* file = fopen(XFA_TESTFILE("tem.txt"), mode);
   FPDF_FILE* file_wrapper = new FPDF_FILE;
   file_wrapper->file = file;
@@ -978,17 +1005,11 @@ void PDFiumEngine::AddSegment(FX_DOWNLOADHINTS* param,
   return download_hints->loader->RequestData(offset, size);
 }
 
-bool PDFiumEngine::New(const char* url) {
-  url_ = url;
-  headers_ = std::string();
-  return true;
-}
-
 bool PDFiumEngine::New(const char* url,
                        const char* headers) {
   url_ = url;
   if (!headers)
-    headers_ = std::string();
+    headers_.clear();
   else
     headers_ = headers;
   return true;
@@ -1050,6 +1071,15 @@ void PDFiumEngine::Paint(const pp::Rect& rect,
     if (dirty_in_screen.IsEmpty())
       continue;
 
+    // Compute the leftover dirty region. The first page may have blank space
+    // above it, in which case we also need to subtract that space from the
+    // dirty region.
+    if (i == 0) {
+      pp::Rect blank_space_in_screen = dirty_in_screen;
+      blank_space_in_screen.set_y(0);
+      blank_space_in_screen.set_height(dirty_in_screen.y());
+      leftover = leftover.Subtract(blank_space_in_screen);
+    }
     leftover = leftover.Subtract(dirty_in_screen);
 
     if (pages_[index]->available()) {
@@ -1229,7 +1259,7 @@ void PDFiumEngine::FinishLoadingDocument() {
     FORM_DoPageAAction(new_page, form_, FPDFPAGE_AACTION_OPEN);
   }
 
-  if (doc_) // This can only happen if loading |doc_| fails.
+  if (doc_)  // This can only happen if loading |doc_| fails.
     client_->DocumentLoadComplete(pages_.size());
 }
 
@@ -1989,8 +2019,8 @@ void PDFiumEngine::StartFind(const char* text, bool case_sensitive) {
 
   if (pages_[current_page]->available()) {
     base::string16 str = base::UTF8ToUTF16(text);
-    // Don't use PDFium to search for now, since it doesn't support unicode text.
-    // Leave the code for now to avoid bit-rot, in case it's fixed later.
+    // Don't use PDFium to search for now, since it doesn't support unicode
+    // text. Leave the code for now to avoid bit-rot, in case it's fixed later.
     if (0) {
       SearchUsingPDFium(
           str, case_sensitive, first_search, character_to_start_searching_from,
@@ -2316,16 +2346,32 @@ bool PDFiumEngine::IsSelecting() {
 }
 
 bool PDFiumEngine::HasPermission(DocumentPermission permission) const {
+  // PDF 1.7 spec, section 3.5.2 says: "If the revision number is 2 or greater,
+  // the operations to which user access can be controlled are as follows: ..."
+  //
+  // Thus for revision numbers less than 2, permissions are ignored and this
+  // always returns true.
+  if (permissions_handler_revision_ < 2)
+    return true;
+
+  // Handle high quality printing permission separately for security handler
+  // revision 3+. See table 3.20 in the PDF 1.7 spec.
+  if (permission == PERMISSION_PRINT_HIGH_QUALITY &&
+      permissions_handler_revision_ >= 3) {
+    return (permissions_ & kPDFPermissionPrintLowQualityMask) != 0 &&
+           (permissions_ & kPDFPermissionPrintHighQualityMask) != 0;
+  }
+
   switch (permission) {
     case PERMISSION_COPY:
       return (permissions_ & kPDFPermissionCopyMask) != 0;
     case PERMISSION_COPY_ACCESSIBLE:
       return (permissions_ & kPDFPermissionCopyAccessibleMask) != 0;
     case PERMISSION_PRINT_LOW_QUALITY:
-      return (permissions_ & kPDFPermissionPrintLowQualityMask) != 0;
     case PERMISSION_PRINT_HIGH_QUALITY:
-      return (permissions_ & kPDFPermissionPrintLowQualityMask) != 0 &&
-             (permissions_ & kPDFPermissionPrintHighQualityMask) != 0;
+      // With security handler revision 2 rules, check the same bit for high
+      // and low quality. See table 3.20 in the PDF 1.7 spec.
+      return (permissions_ & kPDFPermissionPrintLowQualityMask) != 0;
     default:
       return true;
   }
@@ -2434,7 +2480,7 @@ std::string PDFiumEngine::GetPageAsJSON(int index) {
   scoped_ptr<base::Value> node(
       pages_[index]->GetAccessibleContentAsValue(current_rotation_));
   std::string page_json;
-  base::JSONWriter::Write(node.get(), &page_json);
+  base::JSONWriter::Write(*node, &page_json);
   return page_json;
 }
 
@@ -2469,7 +2515,7 @@ bool PDFiumEngine::GetPageSizeAndUniformity(pp::Size* size) {
 }
 
 void PDFiumEngine::AppendBlankPages(int num_pages) {
-  DCHECK(num_pages != 0);
+  DCHECK_NE(num_pages, 0);
 
   if (!doc_)
     return;
@@ -2614,6 +2660,7 @@ void PDFiumEngine::ContinueLoadingDocument(
     client_->DocumentHasUnsupportedFeature("Bookmarks");
 
   permissions_ = FPDF_GetDocPermissions(doc_);
+  permissions_handler_revision_ = FPDF_GetSecurityHandlerRevision(doc_);
 
   if (!form_) {
     // Only returns 0 when data isn't available.  If form data is downloaded, or
@@ -3887,11 +3934,11 @@ bool PDFiumEngineExports::RenderPDFPageToDC(const void* pdf_buffer,
   base::string16 creator;
   size_t buffer_bytes = FPDF_GetMetaText(doc, "Creator", NULL, 0);
   if (buffer_bytes > 1) {
-    FPDF_GetMetaText(
-        doc, "Creator", WriteInto(&creator, buffer_bytes + 1), buffer_bytes);
+    FPDF_GetMetaText(doc, "Creator",
+                     base::WriteInto(&creator, buffer_bytes + 1), buffer_bytes);
   }
   bool use_bitmap = false;
-  if (StartsWith(creator, L"cairo", false))
+  if (base::StartsWith(creator, L"cairo", base::CompareCase::INSENSITIVE_ASCII))
     use_bitmap = true;
 
   // Another temporary hack. Some PDFs seems to render very slowly if

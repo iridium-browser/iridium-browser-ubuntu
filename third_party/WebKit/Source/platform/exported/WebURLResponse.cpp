@@ -49,7 +49,7 @@ class ExtraDataContainer : public ResourceResponse::ExtraData {
 public:
     static PassRefPtr<ExtraDataContainer> create(WebURLResponse::ExtraData* extraData) { return adoptRef(new ExtraDataContainer(extraData)); }
 
-    virtual ~ExtraDataContainer() { }
+    ~ExtraDataContainer() override {}
 
     WebURLResponse::ExtraData* extraData() const { return m_extraData.get(); }
 
@@ -303,6 +303,21 @@ WebCString WebURLResponse::securityInfo() const
 void WebURLResponse::setSecurityInfo(const WebCString& securityInfo)
 {
     m_private->m_resourceResponse->setSecurityInfo(securityInfo);
+}
+
+WebURLResponse::SecurityStyle WebURLResponse::securityStyle() const
+{
+    return static_cast<SecurityStyle>(m_private->m_resourceResponse->securityStyle());
+}
+
+void WebURLResponse::setSecurityStyle(SecurityStyle securityStyle)
+{
+    m_private->m_resourceResponse->setSecurityStyle(static_cast<ResourceResponse::SecurityStyle>(securityStyle));
+}
+
+void WebURLResponse::setSecurityDetails(const WebString& protocol, const WebString& keyExchange, const WebString& cipher, const WebString& mac, int certId)
+{
+    m_private->m_resourceResponse->setSecurityDetails(protocol, keyExchange, cipher, mac, certId);
 }
 
 ResourceResponse& WebURLResponse::toMutableResourceResponse()

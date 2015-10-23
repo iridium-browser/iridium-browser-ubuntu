@@ -45,17 +45,17 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
   void OnDestruct() const override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
-  // Register methods on IO thread ---------------------------------------------
+  // Subscribe methods on IO thread --------------------------------------------
 
-  void OnRegisterFromDocument(int render_frame_id,
-                              int request_id,
-                              const std::string& sender_id,
-                              bool user_visible,
-                              int64_t service_worker_registration_id);
+  void OnSubscribeFromDocument(int render_frame_id,
+                               int request_id,
+                               const std::string& sender_id,
+                               bool user_visible,
+                               int64_t service_worker_registration_id);
 
-  void OnRegisterFromWorker(int request_id,
-                            int64_t service_worker_registration_id,
-                            bool user_visible);
+  void OnSubscribeFromWorker(int request_id,
+                             int64_t service_worker_registration_id,
+                             bool user_visible);
 
   void DidPersistSenderId(const RegisterData& data,
                           const std::string& sender_id,
@@ -73,17 +73,24 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
       const std::string& push_registration_id,
       ServiceWorkerStatusCode service_worker_status);
 
+  void DidGetEncryptionKeys(const RegisterData& data,
+                            const std::string& push_registration_id,
+                            bool success,
+                            const std::vector<uint8_t>& curve25519dh);
+
   void DidGetSenderIdFromStorage(const RegisterData& data,
                                  const std::string& sender_id,
                                  ServiceWorkerStatusCode service_worker_status);
 
   // Called via PostTask from UI thread.
   void PersistRegistrationOnIO(const RegisterData& data,
-                               const std::string& push_registration_id);
+                               const std::string& push_registration_id,
+                               const std::vector<uint8_t>& curve25519dh);
 
   void DidPersistRegistrationOnIO(
       const RegisterData& data,
       const std::string& push_registration_id,
+      const std::vector<uint8_t>& curve25519dh,
       ServiceWorkerStatusCode service_worker_status);
 
   // Called both from IO thread, and via PostTask from UI thread.
@@ -92,20 +99,21 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
   // Called both from IO thread, and via PostTask from UI thread.
   void SendRegisterSuccess(const RegisterData& data,
                            PushRegistrationStatus status,
-                           const std::string& push_registration_id);
+                           const std::string& push_registration_id,
+                           const std::vector<uint8_t>& curve25519dh);
 
-  // Unregister methods on IO thread -------------------------------------------
+  // Unsubscribe methods on IO thread ------------------------------------------
 
-  void OnUnregister(int request_id, int64_t service_worker_registration_id);
+  void OnUnsubscribe(int request_id, int64_t service_worker_registration_id);
 
-  void UnregisterHavingGottenPushRegistrationId(
+  void UnsubscribeHavingGottenPushSubscriptionId(
       int request_id,
       int64_t service_worker_registration_id,
       const GURL& requesting_origin,
-      const std::string& push_registration_id,
+      const std::string& push_subscription_id,
       ServiceWorkerStatusCode service_worker_status);
 
-  void UnregisterHavingGottenSenderId(
+  void UnsubscribeHavingGottenSenderId(
       int request_id,
       int64_t service_worker_registration_id,
       const GURL& requesting_origin,
@@ -131,6 +139,7 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
                          int64_t service_worker_registration_id);
 
   void DidGetRegistration(int request_id,
+                          int64_t service_worker_registration_id,
                           const std::string& push_registration_id,
                           ServiceWorkerStatusCode status);
 
@@ -139,6 +148,11 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
   void OnGetPermissionStatus(int request_id,
                              int64_t service_worker_registration_id,
                              bool user_visible);
+
+  void DidGetRegistrationKeys(int request_id,
+                              const GURL& endpoint,
+                              bool success,
+                              const std::vector<uint8_t>& curve25519dh);
 
   // Helper methods on IO thread -----------------------------------------------
 
@@ -151,7 +165,7 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
 
   // Empty if no PushMessagingService was available when constructed.
-  GURL push_endpoint_;
+  GURL push_endpoint_base_;
 
   base::WeakPtrFactory<PushMessagingMessageFilter> weak_factory_io_to_io_;
 

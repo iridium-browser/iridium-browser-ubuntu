@@ -64,15 +64,15 @@ public:
     virtual void close() = 0;
     virtual bool isClosed() const = 0;
     virtual double duration() const = 0;
-    virtual PassRefPtrWillBeRawPtr<TimeRanges> buffered() const = 0;
-    virtual PassRefPtrWillBeRawPtr<TimeRanges> seekable() const = 0;
+    virtual TimeRanges* buffered() const = 0;
+    virtual TimeRanges* seekable() const = 0;
 #if !ENABLE(OILPAN)
     virtual void refHTMLMediaSource() = 0;
     virtual void derefHTMLMediaSource() = 0;
 #endif
 
     // URLRegistrable
-    virtual URLRegistry& registry() const override { return *s_registry; }
+    URLRegistry& registry() const override { return *s_registry; }
 
 private:
     static URLRegistry* s_registry;

@@ -134,12 +134,6 @@ void crazy_context_get_java_vm(crazy_context_t* context,
                                void** java_vm,
                                int* minimum_jni_version);
 
-// Set the flag whether the fallback due to lack of support for mapping the
-// APK file with executable permission is enabled.
-void crazy_context_set_no_map_exec_support_fallback_enabled(
-    crazy_context_t* context,
-    bool no_map_exec_support_fallback_enabled) _CRAZY_PUBLIC;
-
 // Destroy a given context object.
 void crazy_context_destroy(crazy_context_t* context) _CRAZY_PUBLIC;
 
@@ -273,14 +267,6 @@ crazy_status_t crazy_library_get_info(crazy_library_t* library,
                                       crazy_context_t* context,
                                       crazy_library_info_t* info);
 
-// Checks whether the system can support RELRO section sharing. This is
-// mainly due to the fact that old Android kernel images have a bug in their
-// implementation of Ashmem region mapping protection.
-// If this function returns CRAZY_STATUS_FAILURE, then calls to
-// crazy_library_enable_relro_sharing() will return a failure to prevent
-// the exploitation of this security issue in your code.
-crazy_status_t crazy_system_can_share_relro(void);
-
 // Create an ashmem region containing a copy of the RELRO section for a given
 // |library|. This can be used with crazy_library_use_shared_relro().
 // |load_address| can be specified as non-0 to ensure that the content of the
@@ -355,20 +341,6 @@ crazy_status_t crazy_linker_find_symbol(const char* symbol_name,
 crazy_status_t crazy_library_find_from_address(
     void* address,
     crazy_library_t** library) _CRAZY_PUBLIC;
-
-// Return the full path of |lib_name| in the zip file
-// (lib/<abi>/crazy.<lib_name>). The result is returned in
-// |buffer[0..buffer_size - 1]|. If |buffer_size| is too small,
-// CRAZY_STATUS_FAILURE is returned.
-crazy_status_t crazy_library_file_path_in_zip_file(const char* lib_name,
-                                                   char* buffer,
-                                                   size_t buffer_size)
-    _CRAZY_PUBLIC;
-
-// Check whether |lib_name| is page aligned and uncompressed in |zipfile_name|.
-crazy_status_t crazy_linker_check_library_is_mappable_in_zip_file(
-    const char* zipfile_name,
-    const char* lib_name) _CRAZY_PUBLIC;
 
 // Close a library. This decrements its reference count. If it reaches
 // zero, the library be unloaded from the process.

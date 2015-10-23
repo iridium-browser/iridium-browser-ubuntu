@@ -237,7 +237,7 @@ PassRefPtrWillBeRawPtr<Node> Text::cloneNode(bool /*deep*/)
     return cloneWithData(data());
 }
 
-static inline bool canHaveWhitespaceChildren(const LayoutObject& parent)
+static inline bool canHaveWhitespaceChildren(const LayoutObject& parent, Text* text)
 {
     // <button> should allow whitespace even though LayoutFlexibleBox doesn't.
     if (parent.isLayoutButton())
@@ -249,8 +249,9 @@ static inline bool canHaveWhitespaceChildren(const LayoutObject& parent)
         || parent.isSVGRoot()
         || parent.isSVGContainer()
         || parent.isSVGImage()
-        || parent.isSVGShape())
+        || parent.isSVGShape()) {
         return false;
+    }
     return true;
 }
 
@@ -271,10 +272,15 @@ bool Text::textLayoutObjectIsNeeded(const ComputedStyle& style, const LayoutObje
     if (!containsOnlyWhitespace())
         return true;
 
-    if (!canHaveWhitespaceChildren(parent))
+    if (!canHaveWhitespaceChildren(parent, this))
         return false;
 
-    if (style.preserveNewline()) // pre/pre-wrap/pre-line always make layoutObjects.
+    // pre-wrap in SVG never makes layoutObject.
+    if (style.whiteSpace() == PRE_WRAP && parent.isSVG())
+        return false;
+
+    // pre/pre-wrap/pre-line always make layoutObjects.
+    if (style.preserveNewline())
         return true;
 
     // childNeedsDistributionRecalc() here is rare, only happens JS calling surroundContents() etc. from DOMNodeInsertedIntoDocument etc.
@@ -287,7 +293,7 @@ bool Text::textLayoutObjectIsNeeded(const ComputedStyle& style, const LayoutObje
 
     if (parent.isLayoutInline()) {
         // <span><div/> <div/></span>
-        if (prev && !prev->isInline())
+        if (prev && !prev->isInline() && !prev->isOutOfFlowPositioned())
             return false;
     } else {
         if (parent.isLayoutBlock() && !parent.childrenInline() && (!prev || !prev->isInline()))
@@ -300,10 +306,11 @@ bool Text::textLayoutObjectIsNeeded(const ComputedStyle& style, const LayoutObje
         LayoutObject* first = parent.slowFirstChild();
         while (first && first->isFloatingOrOutOfFlowPositioned() && maxSiblingsToVisit--)
             first = first->nextSibling();
-        if (!first || first == layoutObject() || LayoutTreeBuilderTraversal::nextSiblingLayoutObject(*this) == first)
+        if (!first || first == layoutObject() || LayoutTreeBuilderTraversal::nextSiblingLayoutObject(*this) == first) {
             // Whitespace at the start of a block just goes away.  Don't even
             // make a layout object for this text.
             return false;
+        }
     }
     return true;
 }

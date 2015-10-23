@@ -59,6 +59,13 @@
 
 namespace blink {
 
+static void finishPingRequestInitialization(ResourceRequest& request, LocalFrame* frame)
+{
+    request.setRequestContext(WebURLRequest::RequestContextPing);
+    frame->document()->fetcher()->context().addAdditionalRequestHeaders(request, FetchSubresource);
+    frame->document()->fetcher()->context().setFirstPartyForCookies(request);
+}
+
 void PingLoader::loadImage(LocalFrame* frame, const KURL& url)
 {
     if (!frame->document()->securityOrigin()->canDisplay(url)) {
@@ -67,10 +74,8 @@ void PingLoader::loadImage(LocalFrame* frame, const KURL& url)
     }
 
     ResourceRequest request(url);
-    request.setRequestContext(WebURLRequest::RequestContextPing);
     request.setHTTPHeaderField("Cache-Control", "max-age=0");
-    frame->document()->fetcher()->context().addAdditionalRequestHeaders(request, FetchSubresource);
-    frame->document()->fetcher()->context().setFirstPartyForCookies(request);
+    finishPingRequestInitialization(request, frame);
 
     FetchInitiatorInfo initiatorInfo;
     initiatorInfo.name = FetchInitiatorTypeNames::ping;
@@ -81,13 +86,11 @@ void PingLoader::loadImage(LocalFrame* frame, const KURL& url)
 void PingLoader::sendLinkAuditPing(LocalFrame* frame, const KURL& pingURL, const KURL& destinationURL)
 {
     ResourceRequest request(pingURL);
-    request.setRequestContext(WebURLRequest::RequestContextPing);
     request.setHTTPMethod("POST");
     request.setHTTPContentType("text/ping");
     request.setHTTPBody(FormData::create("PING"));
     request.setHTTPHeaderField("Cache-Control", "max-age=0");
-    frame->document()->fetcher()->context().addAdditionalRequestHeaders(request, FetchSubresource);
-    frame->document()->fetcher()->context().setFirstPartyForCookies(request);
+    finishPingRequestInitialization(request, frame);
 
     RefPtr<SecurityOrigin> pingOrigin = SecurityOrigin::create(pingURL);
     // addAdditionalRequestHeaders() will have added a referrer for same origin requests,
@@ -110,12 +113,10 @@ void PingLoader::sendLinkAuditPing(LocalFrame* frame, const KURL& pingURL, const
 void PingLoader::sendViolationReport(LocalFrame* frame, const KURL& reportURL, PassRefPtr<FormData> report, ViolationReportType type)
 {
     ResourceRequest request(reportURL);
-    request.setRequestContext(WebURLRequest::RequestContextPing);
     request.setHTTPMethod("POST");
     request.setHTTPContentType(type == ContentSecurityPolicyViolationReport ? "application/csp-report" : "application/json");
     request.setHTTPBody(report);
-    frame->document()->fetcher()->context().addAdditionalRequestHeaders(request, FetchSubresource);
-    frame->document()->fetcher()->context().setFirstPartyForCookies(request);
+    finishPingRequestInitialization(request, frame);
 
     FetchInitiatorInfo initiatorInfo;
     initiatorInfo.name = FetchInitiatorTypeNames::violationreport;
@@ -140,7 +141,7 @@ PingLoader::PingLoader(LocalFrame* frame, ResourceRequest& request, const FetchI
 {
     frame->loader().client()->didDispatchPingLoader(request.url());
 
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceSendRequest", TRACE_EVENT_SCOPE_THREAD, "data", InspectorSendRequestEvent::data(m_identifier, frame, request));
+    TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceSendRequest", TRACE_EVENT_SCOPE_THREAD, "data", InspectorSendRequestEvent::data(m_identifier, frame, request));
     InspectorInstrumentation::willSendRequest(frame, m_identifier, frame->loader().documentLoader(), request, ResourceResponse(), initiatorInfo);
 
     m_loader = adoptPtr(Platform::current()->createURLLoader());
@@ -172,7 +173,7 @@ void PingLoader::dispose()
 void PingLoader::didReceiveResponse(WebURLLoader*, const WebURLResponse& response)
 {
     if (Page* page = this->page()) {
-        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
+        TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
         const ResourceResponse& resourceResponse = response.toResourceResponse();
         InspectorInstrumentation::didReceiveResourceResponse(page->deprecatedLocalMainFrame(), m_identifier, 0, resourceResponse, 0);
         didFailLoading(page);
@@ -183,7 +184,7 @@ void PingLoader::didReceiveResponse(WebURLLoader*, const WebURLResponse& respons
 void PingLoader::didReceiveData(WebURLLoader*, const char*, int, int)
 {
     if (Page* page = this->page()) {
-        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
+        TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
         didFailLoading(page);
     }
     dispose();
@@ -192,7 +193,7 @@ void PingLoader::didReceiveData(WebURLLoader*, const char*, int, int)
 void PingLoader::didFinishLoading(WebURLLoader*, double, int64_t)
 {
     if (Page* page = this->page()) {
-        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
+        TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
         didFailLoading(page);
     }
     dispose();
@@ -201,7 +202,7 @@ void PingLoader::didFinishLoading(WebURLLoader*, double, int64_t)
 void PingLoader::didFail(WebURLLoader*, const WebURLError& resourceError)
 {
     if (Page* page = this->page()) {
-        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
+        TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
         didFailLoading(page);
     }
     dispose();
@@ -210,7 +211,7 @@ void PingLoader::didFail(WebURLLoader*, const WebURLError& resourceError)
 void PingLoader::timeout(Timer<PingLoader>*)
 {
     if (Page* page = this->page()) {
-        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
+        TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data", InspectorResourceFinishEvent::data(m_identifier, 0, true));
         didFailLoading(page);
     }
     dispose();

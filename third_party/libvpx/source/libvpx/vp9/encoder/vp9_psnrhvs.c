@@ -16,6 +16,7 @@
 
 #include "./vpx_config.h"
 #include "./vp9_rtcd.h"
+#include "./vpx_dsp_rtcd.h"
 #include "vp9/encoder/vp9_ssim.h"
 
 #if !defined(M_PI)
@@ -25,7 +26,7 @@
 
 void od_bin_fdct8x8(tran_low_t *y, int ystride, const int16_t *x, int xstride) {
   (void) xstride;
-  vp9_fdct8x8_c(x, y, ystride);
+  vpx_fdct8x8(x, y, ystride);
 }
 
 /* Normalized inverse quantization matrix for 8x8 DCT at the point of

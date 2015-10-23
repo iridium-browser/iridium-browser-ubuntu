@@ -28,14 +28,12 @@
 #include "core/css/CSSValue.h"
 
 #include "core/css/CSSBorderImageSliceValue.h"
-#include "core/css/CSSCalculationValue.h"
 #include "core/css/CSSCanvasValue.h"
 #include "core/css/CSSContentDistributionValue.h"
 #include "core/css/CSSCrossfadeValue.h"
 #include "core/css/CSSCursorImageValue.h"
 #include "core/css/CSSFontFaceSrcValue.h"
 #include "core/css/CSSFontFeatureValue.h"
-#include "core/css/CSSFontValue.h"
 #include "core/css/CSSFunctionValue.h"
 #include "core/css/CSSGradientValue.h"
 #include "core/css/CSSGridLineNamesValue.h"
@@ -57,8 +55,7 @@
 
 namespace blink {
 
-struct SameSizeAsCSSValue : public RefCountedWillBeGarbageCollectedFinalized<SameSizeAsCSSValue>
-{
+struct SameSizeAsCSSValue : public RefCountedWillBeGarbageCollectedFinalized<SameSizeAsCSSValue> {
     uint32_t bitfields;
 };
 
@@ -101,8 +98,6 @@ bool CSSValue::equals(const CSSValue& other) const
             return compareCSSValues<CSSCanvasValue>(*this, other);
         case CursorImageClass:
             return compareCSSValues<CSSCursorImageValue>(*this, other);
-        case FontClass:
-            return compareCSSValues<CSSFontValue>(*this, other);
         case FontFaceSrcClass:
             return compareCSSValues<CSSFontFaceSrcValue>(*this, other);
         case FontFeatureClass:
@@ -145,8 +140,6 @@ bool CSSValue::equals(const CSSValue& other) const
             return compareCSSValues<CSSValueList>(*this, other);
         case LineBoxContainClass:
             return compareCSSValues<CSSLineBoxContainValue>(*this, other);
-        case CalculationClass:
-            return compareCSSValues<CSSCalcValue>(*this, other);
         case ImageSetClass:
             return compareCSSValues<CSSImageSetValue>(*this, other);
         case CSSSVGDocumentClass:
@@ -170,8 +163,6 @@ String CSSValue::cssText() const
         return toCSSCanvasValue(this)->customCSSText();
     case CursorImageClass:
         return toCSSCursorImageValue(this)->customCSSText();
-    case FontClass:
-        return toCSSFontValue(this)->customCSSText();
     case FontFaceSrcClass:
         return toCSSFontFaceSrcValue(this)->customCSSText();
     case FontFeatureClass:
@@ -214,8 +205,6 @@ String CSSValue::cssText() const
         return toCSSValueList(this)->customCSSText();
     case LineBoxContainClass:
         return toCSSLineBoxContainValue(this)->customCSSText();
-    case CalculationClass:
-        return toCSSCalcValue(this)->customCSSText();
     case ImageSetClass:
         return toCSSImageSetValue(this)->customCSSText();
     case CSSSVGDocumentClass:
@@ -238,9 +227,6 @@ void CSSValue::destroy()
         return;
     case CursorImageClass:
         delete toCSSCursorImageValue(this);
-        return;
-    case FontClass:
-        delete toCSSFontValue(this);
         return;
     case FontFaceSrcClass:
         delete toCSSFontFaceSrcValue(this);
@@ -305,9 +291,6 @@ void CSSValue::destroy()
     case LineBoxContainClass:
         delete toCSSLineBoxContainValue(this);
         return;
-    case CalculationClass:
-        delete toCSSCalcValue(this);
-        return;
     case ImageSetClass:
         delete toCSSImageSetValue(this);
         return;
@@ -332,9 +315,6 @@ void CSSValue::finalizeGarbageCollectedObject()
         return;
     case CursorImageClass:
         toCSSCursorImageValue(this)->~CSSCursorImageValue();
-        return;
-    case FontClass:
-        toCSSFontValue(this)->~CSSFontValue();
         return;
     case FontFaceSrcClass:
         toCSSFontFaceSrcValue(this)->~CSSFontFaceSrcValue();
@@ -399,9 +379,6 @@ void CSSValue::finalizeGarbageCollectedObject()
     case LineBoxContainClass:
         toCSSLineBoxContainValue(this)->~CSSLineBoxContainValue();
         return;
-    case CalculationClass:
-        toCSSCalcValue(this)->~CSSCalcValue();
-        return;
     case ImageSetClass:
         toCSSImageSetValue(this)->~CSSImageSetValue();
         return;
@@ -426,9 +403,6 @@ DEFINE_TRACE(CSSValue)
         return;
     case CursorImageClass:
         toCSSCursorImageValue(this)->traceAfterDispatch(visitor);
-        return;
-    case FontClass:
-        toCSSFontValue(this)->traceAfterDispatch(visitor);
         return;
     case FontFaceSrcClass:
         toCSSFontFaceSrcValue(this)->traceAfterDispatch(visitor);
@@ -492,9 +466,6 @@ DEFINE_TRACE(CSSValue)
         return;
     case LineBoxContainClass:
         toCSSLineBoxContainValue(this)->traceAfterDispatch(visitor);
-        return;
-    case CalculationClass:
-        toCSSCalcValue(this)->traceAfterDispatch(visitor);
         return;
     case ImageSetClass:
         toCSSImageSetValue(this)->traceAfterDispatch(visitor);

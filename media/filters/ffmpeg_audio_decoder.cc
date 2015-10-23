@@ -126,20 +126,18 @@ static int GetAudioBuffer(struct AVCodecContext* s, AVFrame* frame, int flags) {
 
 FFmpegAudioDecoder::FFmpegAudioDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    const LogCB& log_cb)
+    const scoped_refptr<MediaLog>& media_log)
     : task_runner_(task_runner),
       state_(kUninitialized),
       av_sample_format_(0),
-      log_cb_(log_cb) {
+      media_log_(media_log) {
 }
 
 FFmpegAudioDecoder::~FFmpegAudioDecoder() {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  if (state_ != kUninitialized) {
+  if (state_ != kUninitialized)
     ReleaseFFmpegResources();
-    ResetTimestampState();
-  }
 }
 
 std::string FFmpegAudioDecoder::GetDisplayName() const {
@@ -147,7 +145,7 @@ std::string FFmpegAudioDecoder::GetDisplayName() const {
 }
 
 void FFmpegAudioDecoder::Initialize(const AudioDecoderConfig& config,
-                                    const PipelineStatusCB& status_cb,
+                                    const InitCB& init_cb,
                                     const OutputCB& output_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!config.is_encrypted());
@@ -155,17 +153,17 @@ void FFmpegAudioDecoder::Initialize(const AudioDecoderConfig& config,
   FFmpegGlue::InitializeFFmpeg();
 
   config_ = config;
-  PipelineStatusCB initialize_cb = BindToCurrentLoop(status_cb);
+  InitCB bound_init_cb = BindToCurrentLoop(init_cb);
 
   if (!config.IsValidConfig() || !ConfigureDecoder()) {
-    initialize_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
+    bound_init_cb.Run(false);
     return;
   }
 
   // Success!
   output_cb_ = BindToCurrentLoop(output_cb);
   state_ = kNormal;
-  initialize_cb.Run(PIPELINE_OK);
+  bound_init_cb.Run(true);
 }
 
 void FFmpegAudioDecoder::Decode(const scoped_refptr<DecoderBuffer>& buffer,
@@ -262,7 +260,7 @@ bool FFmpegAudioDecoder::FFmpegDecode(
           << "This is quite possibly a bug in the audio decoder not handling "
           << "end of stream AVPackets correctly.";
 
-      MEDIA_LOG(DEBUG, log_cb_)
+      MEDIA_LOG(DEBUG, media_log_)
           << "Dropping audio frame which failed decode with timestamp: "
           << buffer->timestamp().InMicroseconds()
           << " us, duration: " << buffer->duration().InMicroseconds()
@@ -292,9 +290,10 @@ bool FFmpegAudioDecoder::FFmpegDecode(
 
         if (config_.codec() == kCodecAAC &&
             av_frame_->sample_rate == 2 * config_.samples_per_second()) {
-          MEDIA_LOG(DEBUG, log_cb_) << "Implicit HE-AAC signalling is being"
-                                    << " used. Please use mp4a.40.5 instead of"
-                                    << " mp4a.40.2 in the mimetype.";
+          MEDIA_LOG(DEBUG, media_log_)
+              << "Implicit HE-AAC signalling is being"
+              << " used. Please use mp4a.40.5 instead of"
+              << " mp4a.40.2 in the mimetype.";
         }
         // This is an unrecoverable error, so bail out.
         av_frame_unref(av_frame_.get());
@@ -370,8 +369,6 @@ bool FFmpegAudioDecoder::ConfigureDecoder() {
 
   // Success!
   av_frame_.reset(av_frame_alloc());
-  discard_helper_.reset(new AudioDiscardHelper(config_.samples_per_second(),
-                                               config_.codec_delay()));
   av_sample_format_ = codec_context_->sample_fmt;
 
   if (codec_context_->channels !=
@@ -390,6 +387,8 @@ bool FFmpegAudioDecoder::ConfigureDecoder() {
 }
 
 void FFmpegAudioDecoder::ResetTimestampState() {
+  discard_helper_.reset(new AudioDiscardHelper(config_.samples_per_second(),
+                                               config_.codec_delay()));
   discard_helper_->Reset(config_.codec_delay());
 }
 

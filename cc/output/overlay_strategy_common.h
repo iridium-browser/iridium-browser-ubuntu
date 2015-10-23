@@ -10,38 +10,65 @@
 #include "cc/output/overlay_processor.h"
 
 namespace cc {
+class IOSurfaceDrawQuad;
+class OverlayCandidate;
 class OverlayCandidateValidator;
 class StreamVideoDrawQuad;
 class TextureDrawQuad;
-class OverlayCandidate;
+
+enum OverlayResult {
+  DID_NOT_CREATE_OVERLAY,
+  CREATED_OVERLAY_STOP_LOOKING,
+  CREATED_OVERLAY_KEEP_LOOKING,
+};
+
+class CC_EXPORT OverlayStrategyCommonDelegate {
+ public:
+  virtual ~OverlayStrategyCommonDelegate() {}
+
+  // Check if |candidate| can be promoted into an overlay. If so, add it to
+  // |candidate_list| and update the quads in |render_passes_in_draw_order|
+  // as necessary. When returning CREATED_OVERLAY_KEEP_LOOKING, |iter| is
+  // updated to point to the next quad to evaluate.
+  virtual OverlayResult TryOverlay(
+      OverlayCandidateValidator* capability_checker,
+      RenderPassList* render_passes_in_draw_order,
+      OverlayCandidateList* candidate_list,
+      const OverlayCandidate& candidate,
+      QuadList::Iterator* iter,
+      float device_scale_factor) = 0;
+};
 
 class CC_EXPORT OverlayStrategyCommon : public OverlayProcessor::Strategy {
  public:
-  OverlayStrategyCommon(OverlayCandidateValidator* capability_checker,
-                        ResourceProvider* resource_provider);
+  explicit OverlayStrategyCommon(OverlayCandidateValidator* capability_checker,
+                                 OverlayStrategyCommonDelegate* delegate);
   ~OverlayStrategyCommon() override;
 
- protected:
-  bool GetCandidateQuadInfo(const DrawQuad& draw_quad,
-                            OverlayCandidate* quad_info);
+  bool Attempt(RenderPassList* render_passes_in_draw_order,
+               OverlayCandidateList* candidate_list,
+               float device_scale_factor) override;
 
   // Returns true if |draw_quad| will not block quads underneath from becoming
   // an overlay.
-  bool IsInvisibleQuad(const DrawQuad* draw_quad);
+  static bool IsInvisibleQuad(const DrawQuad* draw_quad);
 
+ protected:
   // Returns true if |draw_quad| is of a known quad type and contains an
   // overlayable resource.
-  bool IsOverlayQuad(const DrawQuad* draw_quad);
-
+  bool GetCandidateQuadInfo(const DrawQuad& draw_quad,
+                            OverlayCandidate* quad_info);
   bool GetTextureQuadInfo(const TextureDrawQuad& quad,
                           OverlayCandidate* quad_info);
   bool GetVideoQuadInfo(const StreamVideoDrawQuad& quad,
                         OverlayCandidate* quad_info);
-
-  OverlayCandidateValidator* capability_checker_;
-  ResourceProvider* resource_provider_;
+  bool GetIOSurfaceQuadInfo(const IOSurfaceDrawQuad& quad,
+                            OverlayCandidate* quad_info);
 
  private:
+  OverlayCandidateValidator* capability_checker_;
+  scoped_ptr<OverlayStrategyCommonDelegate> delegate_;
+
   DISALLOW_COPY_AND_ASSIGN(OverlayStrategyCommon);
 };
 }  // namespace cc

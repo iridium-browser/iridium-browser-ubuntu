@@ -11,6 +11,7 @@
 #include "SkBlitter.h"
 #include "SkDraw.h"
 #include "SkCachedData.h"
+#include "SkPath.h"
 #include "SkRasterClip.h"
 #include "SkRRect.h"
 #include "SkTypes.h"
@@ -315,7 +316,8 @@ bool SkMaskFilter::canFilterMaskGPU(const SkRect& devBounds,
     return false;
 }
 
- bool SkMaskFilter::directFilterMaskGPU(GrContext* context,
+ bool SkMaskFilter::directFilterMaskGPU(GrTextureProvider* texProvider,
+                                        GrDrawContext* drawContext,
                                         GrRenderTarget* rt,
                                         GrPaint* grp,
                                         const GrClip&,
@@ -326,7 +328,8 @@ bool SkMaskFilter::canFilterMaskGPU(const SkRect& devBounds,
 }
 
 
-bool SkMaskFilter::directFilterRRectMaskGPU(GrContext* context,
+bool SkMaskFilter::directFilterRRectMaskGPU(GrTextureProvider* texProvider,
+                                            GrDrawContext* drawContext,
                                             GrRenderTarget* rt,
                                             GrPaint* grp,
                                             const GrClip&,

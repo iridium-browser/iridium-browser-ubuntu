@@ -38,6 +38,10 @@ class ASH_EXPORT AshRemoteWindowTreeHostWin
   gfx::Transform GetInverseRootTransform() const override;
   void UpdateRootWindowSize(const gfx::Size& host_size) override;
 
+  // ui::internal::InputMethodDelegate:
+  ui::EventDispatchDetails DispatchKeyEventPostIME(
+      ui::KeyEvent* event) override;
+
   TransformerHelper transformer_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(AshRemoteWindowTreeHostWin);

@@ -6,12 +6,12 @@ package org.chromium.chrome.browser;
 
 import android.util.Pair;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.chrome.browser.enhancedbookmarks.BookmarkMatch;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.bookmarks.BookmarkId;
-import org.chromium.components.bookmarks.BookmarkMatch;
 import org.chromium.components.bookmarks.BookmarkType;
 
 import java.util.ArrayList;
@@ -208,6 +208,7 @@ public class BookmarksBridge {
 
     /**
      * @return A BookmarkItem instance for the given BookmarkId.
+     *         <code>null</code> if it doesn't exist.
      */
     public BookmarkItem getBookmarkById(BookmarkId id) {
         assert mIsNativeBookmarkModelLoaded;
@@ -257,6 +258,7 @@ public class BookmarksBridge {
      * The result list will be sorted alphabetically by title. "mobile", "other",
      * root node, managed folder, partner folder are NOT included as results.
      */
+    @VisibleForTesting
     public void getAllFoldersWithDepths(List<BookmarkId> folderList,
             List<Integer> depthList) {
         assert mIsNativeBookmarkModelLoaded;
@@ -391,6 +393,7 @@ public class BookmarksBridge {
         return bookmarkMatches;
     }
 
+
     /**
      * Set title of the given bookmark.
      */
@@ -404,6 +407,7 @@ public class BookmarksBridge {
      */
     public void setBookmarkUrl(BookmarkId id, String url) {
         assert mIsNativeBookmarkModelLoaded;
+        assert id.getType() == BookmarkType.NORMAL;
         nativeSetBookmarkUrl(mNativeBookmarksBridge, id.getId(), id.getType(), url);
     }
 
@@ -447,18 +451,13 @@ public class BookmarksBridge {
     }
 
     /**
-     * Fetches the number of bookmarks in the given folder.
-     *
-     * @param folderId The parent folder id.
-     * @return The number of bookmarks in the given folder or 0 if the bookmark model has not been
-     *         loaded.
+     * Check whether the given folder should be visible. This is for top permanent folders that we
+     * want to hide when there is no child.
+     * @return Whether the given folder should be visible.
      */
-    public int getBookmarkCountForFolder(BookmarkId folderId) {
-        if (!mIsNativeBookmarkModelLoaded) {
-            return 0;
-        }
-
-        return nativeGetBookmarkCountForFolder(mNativeBookmarksBridge, folderId);
+    public boolean isFolderVisible(BookmarkId id) {
+        assert mIsNativeBookmarkModelLoaded;
+        return nativeIsFolderVisible(mNativeBookmarksBridge, id.getId(), id.getType());
     }
 
     /**
@@ -559,26 +558,32 @@ public class BookmarksBridge {
         nativeEndGroupingUndos(mNativeBookmarksBridge);
     }
 
-    public static boolean isEditBookmarksEnabled(Profile profile) {
-        return nativeIsEditBookmarksEnabled(profile);
+    public boolean isEditBookmarksEnabled() {
+        return nativeIsEditBookmarksEnabled(mNativeBookmarksBridge);
     }
 
-    // TODO(ianwen): Remove this method after rolling.
-    public static boolean isEditBookmarksEnabled() {
-        return true;
+    public static boolean isEnhancedBookmarksEnabled() {
+        return nativeIsEnhancedBookmarksFeatureEnabled();
     }
 
-    public static boolean isEnhancedBookmarksEnabled(Profile profile) {
-        return nativeIsEnhancedBookmarksFeatureEnabled(profile);
+    /**
+     * Notifies the observer that bookmark model has been loaded.
+     */
+    protected void notifyBookmarkModelLoaded() {
+        // Call isBookmarkModelLoaded() to do the check since it could be overridden by the child
+        // class to add the addition logic.
+        if (isBookmarkModelLoaded()) {
+            for (BookmarkModelObserver observer : mObservers) {
+                observer.bookmarkModelLoaded();
+            }
+        }
     }
 
     @CalledByNative
     private void bookmarkModelLoaded() {
         mIsNativeBookmarkModelLoaded = true;
 
-        for (BookmarkModelObserver observer : mObservers) {
-            observer.bookmarkModelLoaded();
-        }
+        notifyBookmarkModelLoaded();
 
         if (!mDelayedBookmarkCallbacks.isEmpty()) {
             for (int i = 0; i < mDelayedBookmarkCallbacks.size(); i++) {
@@ -684,6 +689,13 @@ public class BookmarksBridge {
     }
 
     @CalledByNative
+    private static void addToBookmarkIdListWithDepth(List<BookmarkId> folderList, long id,
+            int type, List<Integer> depthList, int depth) {
+        folderList.add(new BookmarkId(id, type));
+        depthList.add(depth);
+    }
+
+    @CalledByNative
     private static void addToBookmarkMatchList(List<BookmarkMatch> bookmarkMatchList,
             long id, int type, int[] titleMatchStartPositions,
             int[] titleMatchEndPositions, int[] urlMatchStartPositions,
@@ -701,12 +713,6 @@ public class BookmarksBridge {
         return pairList;
     }
 
-    @CalledByNative
-    private static void addToBookmarkIdListWithDepth(List<BookmarkId> folderList, long id,
-            int type, List<Integer> depthList, int depth) {
-        folderList.add(new BookmarkId(id, type));
-        depthList.add(depth);
-    }
 
     private native BookmarkItem nativeGetBookmarkByID(long nativeBookmarksBridge, long id,
             int type);
@@ -736,8 +742,7 @@ public class BookmarksBridge {
     private native void nativeGetBookmarksForFolder(long nativeBookmarksBridge,
             BookmarkId folderId, BookmarksCallback callback,
             List<BookmarkItem> bookmarksList);
-    private native int nativeGetBookmarkCountForFolder(long nativeBookmarksBridge,
-            BookmarkId folderId);
+    private native boolean nativeIsFolderVisible(long nativeBookmarksBridge, long id, int type);
     private native void nativeGetCurrentFolderHierarchy(long nativeBookmarksBridge,
             BookmarkId folderId, BookmarksCallback callback,
             List<BookmarkItem> bookmarksList);
@@ -746,20 +751,19 @@ public class BookmarksBridge {
     private native void nativeDeleteBookmark(long nativeBookmarksBridge, BookmarkId bookmarkId);
     private native void nativeMoveBookmark(long nativeBookmarksBridge, BookmarkId bookmarkId,
             BookmarkId newParentId, int index);
-    private native void nativeSearchBookmarks(long nativeBookmarksBridge,
-            List<BookmarkMatch> bookmarkMatches, String query, int maxNumber);
     private native BookmarkId nativeAddBookmark(long nativeBookmarksBridge, BookmarkId parent,
             int index, String title, String url);
     private native void nativeUndo(long nativeBookmarksBridge);
     private native void nativeStartGroupingUndos(long nativeBookmarksBridge);
     private native void nativeEndGroupingUndos(long nativeBookmarksBridge);
-    private static native boolean nativeIsEnhancedBookmarksFeatureEnabled(Profile profile);
+    private static native boolean nativeIsEnhancedBookmarksFeatureEnabled();
     private native void nativeLoadEmptyPartnerBookmarkShimForTesting(long nativeBookmarksBridge);
-
+    private native void nativeSearchBookmarks(long nativeBookmarksBridge,
+            List<BookmarkMatch> bookmarkMatches, String query, int maxNumber);
     private native long nativeInit(Profile profile);
     private native boolean nativeIsDoingExtensiveChanges(long nativeBookmarksBridge);
     private native void nativeDestroy(long nativeBookmarksBridge);
-    private static native boolean nativeIsEditBookmarksEnabled(Profile profile);
+    private static native boolean nativeIsEditBookmarksEnabled(long nativeBookmarksBridge);
 
     /**
      * Simple object representing the bookmark item.
@@ -813,6 +817,16 @@ public class BookmarksBridge {
         /** @return Whether this bookmark can be edited. */
         public boolean isEditable() {
             return mIsEditable;
+        }
+
+        /**@return Whether this bookmark's URL can be edited */
+        public boolean isUrlEditable() {
+            return isEditable() && mId.getType() == BookmarkType.NORMAL;
+        }
+
+        /**@return Whether this bookmark can be moved */
+        public boolean isMovable() {
+            return isEditable() && mId.getType() == BookmarkType.NORMAL;
         }
 
         /** @return Whether this is a managed bookmark. */

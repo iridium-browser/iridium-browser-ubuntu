@@ -33,7 +33,7 @@ SavePasswordInfoBar::CreateRenderInfoBar(JNIEnv* env) {
       env, GetEnumeratedIconId(), message_text.obj(),
       save_password_delegate->title_link_range().start(),
       save_password_delegate->title_link_range().end(), ok_button_text.obj(),
-      cancel_button_text.obj(), save_password_delegate->ShouldShowMoreButton());
+      cancel_button_text.obj());
 }
 
 void SavePasswordInfoBar::OnLinkClicked(JNIEnv* env, jobject obj) {
@@ -42,4 +42,9 @@ void SavePasswordInfoBar::OnLinkClicked(JNIEnv* env, jobject obj) {
 
 bool SavePasswordInfoBar::Register(JNIEnv* env) {
   return RegisterNativesImpl(env);
+}
+
+scoped_ptr<infobars::InfoBar> CreateSavePasswordInfoBar(
+    scoped_ptr<SavePasswordInfoBarDelegate> delegate) {
+  return make_scoped_ptr(new SavePasswordInfoBar(delegate.Pass()));
 }

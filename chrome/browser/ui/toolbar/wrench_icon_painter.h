@@ -28,11 +28,11 @@ class WrenchIconPainter : gfx::AnimationDelegate {
     BEZEL_NONE,
     BEZEL_HOVER,
     BEZEL_PRESSED,
-    BEZEL_RAISED,
   };
 
   enum Severity {
     SEVERITY_NONE,
+    SEVERITY_INFO,
     SEVERITY_LOW,
     SEVERITY_MEDIUM,
     SEVERITY_HIGH,

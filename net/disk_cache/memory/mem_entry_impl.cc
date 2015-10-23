@@ -45,14 +45,14 @@ std::string GenerateChildName(const std::string& base_name, int child_id) {
 
 // Returns NetLog parameters for the creation of a child MemEntryImpl.  Separate
 // function needed because child entries don't suppport GetKey().
-base::Value* NetLogChildEntryCreationCallback(
+scoped_ptr<base::Value> NetLogChildEntryCreationCallback(
     const disk_cache::MemEntryImpl* parent,
     int child_id,
     net::NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("key", GenerateChildName(parent->GetKey(), child_id));
   dict->SetBoolean("created", true);
-  return dict;
+  return dict.Pass();
 }
 
 }  // namespace
@@ -481,7 +481,7 @@ int MemEntryImpl::GetAvailableRange(int64 offset, int len, int64* start) {
 
   // Find the first child and record the number of empty bytes.
   int empty = FindNextChild(offset, len, &current_child);
-  if (current_child) {
+  if (current_child && empty < len) {
     *start = offset + empty;
     len -= empty;
 

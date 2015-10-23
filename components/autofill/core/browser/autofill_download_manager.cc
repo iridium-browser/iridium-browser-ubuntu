@@ -14,7 +14,9 @@
 #include "components/autofill/core/browser/autofill_xml_parser.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/variations/net/variations_http_header_provider.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_fetcher.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlparser.h"
@@ -111,10 +113,11 @@ bool AutofillDownloadManager::StartQueryRequest(
 bool AutofillDownloadManager::StartUploadRequest(
     const FormStructure& form,
     bool form_was_autofilled,
-    const ServerFieldTypeSet& available_field_types) {
+    const ServerFieldTypeSet& available_field_types,
+    const std::string& login_form_signature) {
   std::string form_xml;
   if (!form.EncodeUploadRequest(available_field_types, form_was_autofilled,
-                                &form_xml))
+                                login_form_signature, &form_xml))
     return false;
 
   if (next_upload_request_ > base::Time::Now()) {
@@ -186,6 +189,11 @@ bool AutofillDownloadManager::StartRequest(
   fetcher->SetUploadData("text/plain", form_xml);
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
                         net::LOAD_DO_NOT_SEND_COOKIES);
+  // Add Chrome experiment state to the request headers.
+  net::HttpRequestHeaders headers;
+  variations::VariationsHttpHeaderProvider::GetInstance()->AppendHeaders(
+      fetcher->GetOriginalURL(), driver_->IsOffTheRecord(), false, &headers);
+  fetcher->SetExtraRequestHeaders(headers.ToString());
   fetcher->Start();
 
   VLOG(1) << "Sending AutofillDownloadManager "
@@ -272,9 +280,9 @@ void AutofillDownloadManager::OnURLFetchComplete(
       case kHttpBadGateway:
         if (!source->GetResponseHeaders()->EnumerateHeader(NULL, "server",
                                                            &server_header) ||
-            StartsWithASCII(server_header.c_str(),
-                            kAutofillQueryServerNameStartInHeader,
-                            false) != 0)
+            base::StartsWith(server_header.c_str(),
+                             kAutofillQueryServerNameStartInHeader,
+                             base::CompareCase::INSENSITIVE_ASCII) != 0)
           break;
         // Bad gateway was received from Autofill servers. Fall through to back
         // off.

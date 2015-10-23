@@ -32,11 +32,10 @@
 #include "core/layout/LayoutTableCol.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/SubtreeLayoutScope.h"
-#include "core/style/CollapsedBorderValue.h"
 #include "core/paint/TableCellPainter.h"
+#include "core/style/CollapsedBorderValue.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/TransformState.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
 
 namespace blink {
 
@@ -323,11 +322,11 @@ LayoutRect LayoutTableCell::clippedOverflowRectForPaintInvalidation(const Layout
         return LayoutBlockFlow::clippedOverflowRectForPaintInvalidation(paintInvalidationContainer, paintInvalidationState);
 
     bool rtl = !styleForCellFlow().isLeftToRightDirection();
-    int outlineSize = style()->outlineSize();
-    int left = std::max(borderHalfLeft(true), outlineSize);
-    int right = std::max(borderHalfRight(true), outlineSize);
-    int top = std::max(borderHalfTop(true), outlineSize);
-    int bottom = std::max(borderHalfBottom(true), outlineSize);
+    int outlineOutset = style()->outlineOutsetExtent();
+    int left = std::max(borderHalfLeft(true), outlineOutset);
+    int right = std::max(borderHalfRight(true), outlineOutset);
+    int top = std::max(borderHalfTop(true), outlineOutset);
+    int bottom = std::max(borderHalfBottom(true), outlineOutset);
     if ((left && !rtl) || (right && rtl)) {
         if (LayoutTableCell* before = table()->cellBefore(this)) {
             top = std::max(top, before->borderHalfTop(true));
@@ -377,10 +376,7 @@ LayoutUnit LayoutTableCell::cellBaselinePosition() const
     LayoutUnit firstLineBaseline = firstLineBoxBaseline();
     if (firstLineBaseline != -1)
         return firstLineBaseline;
-    LayoutUnit contentHeight = contentLogicalHeight();
-    if (contentHeight)
-        return borderBefore() + paddingBefore() + contentHeight;
-    return max(logicalHeightFromStyle() - computedCSSPaddingAfter() - borderAfter(), borderBefore() + paddingBefore());
+    return borderBefore() + paddingBefore() + contentLogicalHeight();
 }
 
 void LayoutTableCell::styleDidChange(StyleDifference diff, const ComputedStyle* oldStyle)
@@ -701,7 +697,7 @@ CollapsedBorderValue LayoutTableCell::computeCollapsedBeforeBorder(IncludeBorder
 
     // (4) The previous row's after border.
     if (prevCell) {
-        LayoutObject* prevRow = 0;
+        LayoutObject* prevRow = nullptr;
         if (prevCell->section() == section())
             prevRow = parent()->previousSibling();
         else
@@ -1028,7 +1024,7 @@ void LayoutTableCell::scrollbarsChanged(bool horizontalScrollbarChanged, bool ve
 
 LayoutTableCell* LayoutTableCell::createAnonymous(Document* document)
 {
-    LayoutTableCell* layoutObject = new LayoutTableCell(0);
+    LayoutTableCell* layoutObject = new LayoutTableCell(nullptr);
     layoutObject->setDocumentForAnonymous(document);
     return layoutObject;
 }

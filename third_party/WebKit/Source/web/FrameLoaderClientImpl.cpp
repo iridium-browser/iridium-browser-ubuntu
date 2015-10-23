@@ -42,18 +42,19 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLAppletElement.h"
+#include "core/html/HTMLMediaElement.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/HistoryItem.h"
-#include "core/page/Chrome.h"
-#include "core/page/EventHandler.h"
 #include "core/page/Page.h"
 #include "core/page/WindowFeatures.h"
 #include "modules/device_light/DeviceLightController.h"
 #include "modules/device_orientation/DeviceMotionController.h"
 #include "modules/device_orientation/DeviceOrientationController.h"
+#include "modules/encryptedmedia/HTMLMediaElementEncryptedMedia.h"
 #include "modules/gamepad/NavigatorGamepad.h"
 #include "modules/serviceworkers/NavigatorServiceWorker.h"
 #include "modules/storage/DOMWindowStorageController.h"
@@ -76,7 +77,6 @@
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebVector.h"
 #include "public/web/WebAutofillClient.h"
-#include "public/web/WebCachedURLRequest.h"
 #include "public/web/WebContentSettingsClient.h"
 #include "public/web/WebDOMEvent.h"
 #include "public/web/WebDocument.h"
@@ -86,7 +86,6 @@
 #include "public/web/WebPlugin.h"
 #include "public/web/WebPluginParams.h"
 #include "public/web/WebPluginPlaceholder.h"
-#include "public/web/WebTransitionElementData.h"
 #include "public/web/WebViewClient.h"
 #include "web/DevToolsEmulator.h"
 #include "web/PluginPlaceholderImpl.h"
@@ -131,8 +130,7 @@ void FrameLoaderClientImpl::dispatchDidClearWindowObjectInMainWorld()
             if (RuntimeEnabledFeatures::deviceLightEnabled())
                 DeviceLightController::from(*document);
             NavigatorGamepad::from(*document);
-            if (RuntimeEnabledFeatures::serviceWorkerEnabled())
-                NavigatorServiceWorker::from(*document);
+            NavigatorServiceWorker::from(*document);
             DOMWindowStorageController::from(*document);
             if (RuntimeEnabledFeatures::webVREnabled())
                 NavigatorVRDevice::from(*document);
@@ -267,6 +265,11 @@ bool FrameLoaderClientImpl::hasWebView() const
     return m_webFrame->viewImpl();
 }
 
+bool FrameLoaderClientImpl::inShadowTree() const
+{
+    return m_webFrame->inShadowTree();
+}
+
 Frame* FrameLoaderClientImpl::opener() const
 {
     return toCoreFrame(m_webFrame->opener());
@@ -274,7 +277,10 @@ Frame* FrameLoaderClientImpl::opener() const
 
 void FrameLoaderClientImpl::setOpener(Frame* opener)
 {
-    m_webFrame->setOpener(WebFrame::fromFrame(opener));
+    WebFrame* openerFrame = WebFrame::fromFrame(opener);
+    if (m_webFrame->client() && m_webFrame->opener() != openerFrame)
+        m_webFrame->client()->didChangeOpener(openerFrame);
+    m_webFrame->setOpener(openerFrame);
 }
 
 Frame* FrameLoaderClientImpl::parent() const
@@ -312,7 +318,7 @@ void FrameLoaderClientImpl::willBeDetached()
     m_webFrame->willBeDetached();
 }
 
-void FrameLoaderClientImpl::detached()
+void FrameLoaderClientImpl::detached(FrameDetachType type)
 {
     // Alert the client that the frame is being detached. This is the last
     // chance we have to communicate with the client.
@@ -328,7 +334,7 @@ void FrameLoaderClientImpl::detached()
     // place at this point since we are no longer associated with the Page.
     m_webFrame->setClient(0);
 
-    client->frameDetached(m_webFrame);
+    client->frameDetached(m_webFrame, static_cast<WebFrameClient::DetachType>(type));
     // Clear our reference to LocalFrame at the very end, in case the client
     // refers to it.
     m_webFrame->setCoreFrame(nullptr);
@@ -371,10 +377,10 @@ void FrameLoaderClientImpl::dispatchDidFinishLoading(DocumentLoader* loader,
         m_webFrame->client()->didFinishResourceLoad(m_webFrame, identifier);
 }
 
-void FrameLoaderClientImpl::dispatchDidFinishDocumentLoad()
+void FrameLoaderClientImpl::dispatchDidFinishDocumentLoad(bool documentIsEmpty)
 {
     if (m_webFrame->client())
-        m_webFrame->client()->didFinishDocumentLoad(m_webFrame);
+        m_webFrame->client()->didFinishDocumentLoad(m_webFrame, documentIsEmpty);
 }
 
 void FrameLoaderClientImpl::dispatchDidLoadResourceFromMemoryCache(const ResourceRequest& request, const ResourceResponse& response)
@@ -409,10 +415,10 @@ void FrameLoaderClientImpl::dispatchWillClose()
         m_webFrame->client()->willClose(m_webFrame);
 }
 
-void FrameLoaderClientImpl::dispatchDidStartProvisionalLoad(bool isTransitionNavigation, double triggeringEventTime)
+void FrameLoaderClientImpl::dispatchDidStartProvisionalLoad(double triggeringEventTime)
 {
     if (m_webFrame->client())
-        m_webFrame->client()->didStartProvisionalLoad(m_webFrame, isTransitionNavigation, triggeringEventTime);
+        m_webFrame->client()->didStartProvisionalLoad(m_webFrame, triggeringEventTime);
 }
 
 void FrameLoaderClientImpl::dispatchDidReceiveTitle(const String& title)
@@ -525,7 +531,7 @@ static bool allowCreatingBackgroundTabs()
     return userPolicy == NavigationPolicyNewBackgroundTab;
 }
 
-NavigationPolicy FrameLoaderClientImpl::decidePolicyForNavigation(const ResourceRequest& request, DocumentLoader* loader, NavigationPolicy policy, bool isTransitionNavigation)
+NavigationPolicy FrameLoaderClientImpl::decidePolicyForNavigation(const ResourceRequest& request, DocumentLoader* loader, NavigationPolicy policy)
 {
     if (!m_webFrame->client())
         return NavigationPolicyIgnore;
@@ -542,32 +548,9 @@ NavigationPolicy FrameLoaderClientImpl::decidePolicyForNavigation(const Resource
     navigationInfo.navigationType = ds->navigationType();
     navigationInfo.defaultPolicy = static_cast<WebNavigationPolicy>(policy);
     navigationInfo.isRedirect = ds->isRedirect();
-    navigationInfo.isTransitionNavigation = isTransitionNavigation;
 
     WebNavigationPolicy webPolicy = m_webFrame->client()->decidePolicyForNavigation(navigationInfo);
     return static_cast<NavigationPolicy>(webPolicy);
-}
-
-void FrameLoaderClientImpl::dispatchAddNavigationTransitionData(const Document::TransitionElementData& data)
-{
-    if (!m_webFrame->client())
-        return;
-
-    WebVector<WebTransitionElement> webElements(data.elements.size());
-    for (size_t i = 0; i < data.elements.size(); ++i) {
-        webElements[i].id = data.elements[i].id;
-        webElements[i].rect = data.elements[i].rect;
-    }
-    WebTransitionElementData webData(data.scope, data.selector, data.markup, webElements);
-    m_webFrame->client()->addNavigationTransitionData(webData);
-}
-
-void FrameLoaderClientImpl::dispatchWillRequestResource(FetchRequest* request)
-{
-    if (m_webFrame->client()) {
-        WebCachedURLRequest urlRequest(request);
-        m_webFrame->client()->willRequestResource(m_webFrame, urlRequest);
-    }
 }
 
 void FrameLoaderClientImpl::dispatchWillSendSubmitEvent(HTMLFormElement* form)
@@ -656,15 +639,21 @@ void FrameLoaderClientImpl::didDispatchPingLoader(const KURL& url)
         m_webFrame->client()->didDispatchPingLoader(m_webFrame, url);
 }
 
+void FrameLoaderClientImpl::didChangePerformanceTiming()
+{
+    if (m_webFrame->client())
+        m_webFrame->client()->didChangePerformanceTiming();
+}
+
 void FrameLoaderClientImpl::selectorMatchChanged(const Vector<String>& addedSelectors, const Vector<String>& removedSelectors)
 {
     if (WebFrameClient* client = m_webFrame->client())
         client->didMatchCSS(m_webFrame, WebVector<WebString>(addedSelectors), WebVector<WebString>(removedSelectors));
 }
 
-PassRefPtr<DocumentLoader> FrameLoaderClientImpl::createDocumentLoader(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& data)
+PassRefPtrWillBeRawPtr<DocumentLoader> FrameLoaderClientImpl::createDocumentLoader(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& data)
 {
-    RefPtr<WebDataSourceImpl> ds = WebDataSourceImpl::create(frame, request, data);
+    RefPtrWillBeRawPtr<WebDataSourceImpl> ds = WebDataSourceImpl::create(frame, request, data);
     if (m_webFrame->client())
         m_webFrame->client()->didCreateDataSource(m_webFrame, ds.get());
     return ds.release();
@@ -790,6 +779,23 @@ PassRefPtrWillBeRawPtr<Widget> FrameLoaderClientImpl::createJavaAppletWidget(
         "application/x-java-applet", false, FailOnDetachedPlugin);
 }
 
+PassOwnPtr<WebMediaPlayer> FrameLoaderClientImpl::createWebMediaPlayer(
+    HTMLMediaElement& htmlMediaElement,
+    const WebURL& url,
+    WebMediaPlayerClient* client)
+{
+    WebLocalFrameImpl* webFrame = WebLocalFrameImpl::fromFrame(
+        htmlMediaElement.document().frame());
+
+    if (!webFrame || !webFrame->client())
+        return nullptr;
+
+    HTMLMediaElementEncryptedMedia& encryptedMedia = HTMLMediaElementEncryptedMedia::from(htmlMediaElement);
+    return adoptPtr(webFrame->client()->createMediaPlayer(webFrame, url,
+        client, &encryptedMedia,
+        encryptedMedia.contentDecryptionModule()));
+}
+
 ObjectContentType FrameLoaderClientImpl::objectContentType(
     const KURL& url,
     const String& explicitMimeType,
@@ -907,6 +913,11 @@ void FrameLoaderClientImpl::dispatchWillInsertBody()
         m_webFrame->viewImpl()->willInsertBody(m_webFrame);
 }
 
+v8::Local<v8::Value> FrameLoaderClientImpl::createTestInterface(const AtomicString& name)
+{
+    return m_webFrame->createTestInterface(name);
+}
+
 PassOwnPtr<WebServiceWorkerProvider> FrameLoaderClientImpl::createServiceWorkerProvider()
 {
     if (!m_webFrame->client())
@@ -948,12 +959,6 @@ void FrameLoaderClientImpl::dispatchDidChangeManifest()
 {
     if (m_webFrame->client())
         m_webFrame->client()->didChangeManifest(m_webFrame);
-}
-
-void FrameLoaderClientImpl::dispatchDidChangeDefaultPresentation()
-{
-    if (m_webFrame->client())
-        m_webFrame->client()->didChangeDefaultPresentation(m_webFrame);
 }
 
 unsigned FrameLoaderClientImpl::backForwardLength()

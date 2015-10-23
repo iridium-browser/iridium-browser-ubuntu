@@ -93,15 +93,15 @@ static inline bool shouldUpdateHeaderAfterRevalidation(const AtomicString& heade
 }
 
 DEFINE_DEBUG_ONLY_GLOBAL(RefCountedLeakCounter, cachedResourceLeakCounter, ("Resource"));
-unsigned Resource::s_instanceCount = 0;
 
 class Resource::CacheHandler : public CachedMetadataHandler {
 public:
-    static PassOwnPtr<CacheHandler> create(Resource* resource)
+    static PassOwnPtrWillBeRawPtr<CacheHandler> create(Resource* resource)
     {
-        return adoptPtr(new CacheHandler(resource));
+        return adoptPtrWillBeNoop(new CacheHandler(resource));
     }
     ~CacheHandler() override { }
+    DECLARE_VIRTUAL_TRACE();
     void setCachedMetadata(unsigned, const char*, size_t, CacheType) override;
     void clearCachedMetadata(CacheType) override;
     CachedMetadata* cachedMetadata(unsigned) const override;
@@ -109,12 +109,20 @@ public:
 
 private:
     explicit CacheHandler(Resource*);
-    Resource* m_resource;
+    RawPtrWillBeMember<Resource> m_resource;
 };
 
 Resource::CacheHandler::CacheHandler(Resource* resource)
     : m_resource(resource)
 {
+}
+
+DEFINE_TRACE(Resource::CacheHandler)
+{
+#if ENABLE(OILPAN)
+    visitor->trace(m_resource);
+#endif
+    CachedMetadataHandler::trace(visitor);
 }
 
 void Resource::CacheHandler::setCachedMetadata(unsigned dataTypeID, const char* data, size_t size, CacheType type)
@@ -164,7 +172,7 @@ Resource::Resource(const ResourceRequest& request, Type type)
     , m_proxyResource(nullptr)
 {
     ASSERT(m_type == unsigned(type)); // m_type is a bitfield, so this tests careless updates of the enum.
-    ++s_instanceCount;
+    InstanceCounters::incrementCounter(InstanceCounters::ResourceCounter);
 #ifndef NDEBUG
     cachedResourceLeakCounter.increment();
 #endif
@@ -197,7 +205,7 @@ Resource::~Resource()
 #ifndef NDEBUG
     cachedResourceLeakCounter.decrement();
 #endif
-    --s_instanceCount;
+    InstanceCounters::decrementCounter(InstanceCounters::ResourceCounter);
 }
 
 void Resource::dispose()
@@ -209,6 +217,9 @@ DEFINE_TRACE(Resource)
     visitor->trace(m_loader);
     visitor->trace(m_resourceToRevalidate);
     visitor->trace(m_proxyResource);
+#if ENABLE(OILPAN)
+    visitor->trace(m_cacheHandler);
+#endif
 }
 
 void Resource::load(ResourceFetcher* fetcher, const ResourceLoaderOptions& options)
@@ -322,8 +333,8 @@ bool Resource::passesAccessControlCheck(SecurityOrigin* securityOrigin, String& 
 
 bool Resource::isEligibleForIntegrityCheck(SecurityOrigin* securityOrigin) const
 {
-    String errorDescription;
-    return securityOrigin->canRequest(resourceRequest().url()) || passesAccessControlCheck(securityOrigin, errorDescription);
+    String ignoredErrorDescription;
+    return securityOrigin->canRequest(resourceRequest().url()) || passesAccessControlCheck(securityOrigin, ignoredErrorDescription);
 }
 
 static double currentAge(const ResourceResponse& response, double responseTimestamp)
@@ -885,6 +896,11 @@ bool Resource::hasCacheControlNoStoreHeader()
     return m_response.cacheControlContainsNoStore() || m_resourceRequest.cacheControlContainsNoStore();
 }
 
+bool Resource::hasVaryHeader() const
+{
+    return !m_response.httpHeaderField("Vary").isNull();
+}
+
 bool Resource::mustRevalidateDueToCacheHeaders()
 {
     return !canUseResponse(m_response, m_responseTimestamp) || m_resourceRequest.cacheControlContainsNoCache() || m_resourceRequest.cacheControlContainsNoStore();
@@ -940,8 +956,15 @@ void Resource::didChangePriority(ResourceLoadPriority loadPriority, int intraPri
 
 Resource::ResourceCallback* Resource::ResourceCallback::callbackHandler()
 {
-    DEFINE_STATIC_LOCAL(ResourceCallback, callbackHandler, ());
-    return &callbackHandler;
+    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<ResourceCallback>, callbackHandler, (adoptPtrWillBeNoop(new ResourceCallback)));
+    return callbackHandler.get();
+}
+
+DEFINE_TRACE(Resource::ResourceCallback)
+{
+#if ENABLE(OILPAN)
+    visitor->trace(m_resourcesWithPendingClients);
+#endif
 }
 
 Resource::ResourceCallback::ResourceCallback()
@@ -973,8 +996,8 @@ bool Resource::ResourceCallback::isScheduled(Resource* resource) const
 void Resource::ResourceCallback::timerFired(Timer<ResourceCallback>*)
 {
     Vector<ResourcePtr<Resource>> resources;
-    for (Resource* resource : m_resourcesWithPendingClients)
-        resources.append(resource);
+    for (const RawPtrWillBeMember<Resource>& resource : m_resourcesWithPendingClients)
+        resources.append(resource.get());
     m_resourcesWithPendingClients.clear();
 
     for (const auto& resource : resources) {
@@ -1034,6 +1057,8 @@ const char* Resource::resourceTypeToString(Type type, const FetchInitiatorInfo& 
         return "Link prefetch resource";
     case Resource::LinkSubresource:
         return "Link subresource";
+    case Resource::LinkPreload:
+        return "Link preload";
     case Resource::TextTrack:
         return "Text track";
     case Resource::ImportResource:
@@ -1069,6 +1094,8 @@ const char* ResourceTypeName(Resource::Type type)
         return "LinkPrefetch";
     case Resource::LinkSubresource:
         return "LinkSubresource";
+    case Resource::LinkPreload:
+        return "LinkPreload";
     case Resource::TextTrack:
         return "TextTrack";
     case Resource::ImportResource:

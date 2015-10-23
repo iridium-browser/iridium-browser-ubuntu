@@ -29,7 +29,7 @@ GrTexture* GrTextureProvider::createTexture(const GrSurfaceDesc& desc, bool budg
     if (!GrPixelConfigIsCompressed(desc.fConfig)) {
         static const uint32_t kFlags = kExact_ScratchTextureFlag |
                                        kNoCreate_ScratchTextureFlag;
-        if (GrTexture* texture = this->internalRefScratchTexture(desc, kFlags)) {
+        if (GrTexture* texture = this->refScratchTexture(desc, kFlags)) {
             if (!srcData || texture->writePixels(0, 0, desc.fWidth, desc.fHeight, desc.fConfig,
                                                  srcData, rowBytes)) {
                 if (!budgeted) {
@@ -43,8 +43,12 @@ GrTexture* GrTextureProvider::createTexture(const GrSurfaceDesc& desc, bool budg
     return fGpu->createTexture(desc, budgeted, srcData, rowBytes);
 }
 
-GrTexture* GrTextureProvider::refScratchTexture(const GrSurfaceDesc& desc, ScratchTexMatch match,
-                                                bool calledDuringFlush) {
+GrTexture* GrTextureProvider::createApproxTexture(const GrSurfaceDesc& desc) {
+    return this->internalCreateApproxTexture(desc, 0);
+}
+
+GrTexture* GrTextureProvider::internalCreateApproxTexture(const GrSurfaceDesc& desc,
+                                                          uint32_t scratchFlags) {
     if (this->isAbandoned()) {
         return NULL;
     }
@@ -52,19 +56,12 @@ GrTexture* GrTextureProvider::refScratchTexture(const GrSurfaceDesc& desc, Scrat
     if (GrPixelConfigIsCompressed(desc.fConfig)) {
         return NULL;
     } else {
-        uint32_t flags = 0;
-        if (kExact_ScratchTexMatch == match) {
-            flags |= kExact_ScratchTextureFlag;
-        }
-        if (calledDuringFlush) {
-            flags |= kNoPendingIO_ScratchTextureFlag;
-        }
-        return this->internalRefScratchTexture(desc, flags);
+        return this->refScratchTexture(desc, scratchFlags);
     }
 }
 
-GrTexture* GrTextureProvider::internalRefScratchTexture(const GrSurfaceDesc& inDesc,
-                                                        uint32_t flags) {
+GrTexture* GrTextureProvider::refScratchTexture(const GrSurfaceDesc& inDesc,
+                                                uint32_t flags) {
     SkASSERT(!this->isAbandoned());
     SkASSERT(!GrPixelConfigIsCompressed(inDesc.fConfig));
 
@@ -73,10 +70,10 @@ GrTexture* GrTextureProvider::internalRefScratchTexture(const GrSurfaceDesc& inD
     if (fGpu->caps()->reuseScratchTextures() || (desc->fFlags & kRenderTarget_GrSurfaceFlag)) {
         if (!(kExact_ScratchTextureFlag & flags)) {
             // bin by pow2 with a reasonable min
-            static const int MIN_SIZE = 16;
+            const int minSize = SkTMin(16, fGpu->caps()->minTextureSize());
             GrSurfaceDesc* wdesc = desc.writable();
-            wdesc->fWidth  = SkTMax(MIN_SIZE, GrNextPow2(desc->fWidth));
-            wdesc->fHeight = SkTMax(MIN_SIZE, GrNextPow2(desc->fHeight));
+            wdesc->fWidth  = SkTMax(minSize, GrNextPow2(desc->fWidth));
+            wdesc->fHeight = SkTMax(minSize, GrNextPow2(desc->fHeight));
         }
 
         GrScratchKey key;
@@ -89,7 +86,9 @@ GrTexture* GrTextureProvider::internalRefScratchTexture(const GrSurfaceDesc& inD
             // writePixels() which will trigger a flush if the texture has pending IO.
             scratchFlags = GrResourceCache::kPreferNoPendingIO_ScratchFlag;
         }
-        GrGpuResource* resource = fCache->findAndRefScratchResource(key, scratchFlags);
+        GrGpuResource* resource = fCache->findAndRefScratchResource(key,
+                                                                   GrSurface::WorseCaseSize(*desc),
+                                                                   scratchFlags);
         if (resource) {
             GrSurface* surface = static_cast<GrSurface*>(resource);
             GrRenderTarget* rt = surface->asRenderTarget();
@@ -107,15 +106,17 @@ GrTexture* GrTextureProvider::internalRefScratchTexture(const GrSurfaceDesc& inD
     return NULL;
 }
 
-GrTexture* GrTextureProvider::wrapBackendTexture(const GrBackendTextureDesc& desc) {
+GrTexture* GrTextureProvider::wrapBackendTexture(const GrBackendTextureDesc& desc,
+                                                 GrWrapOwnership ownership) {
     if (this->isAbandoned()) {
         return NULL;
     }
-    return fGpu->wrapBackendTexture(desc);
+    return fGpu->wrapBackendTexture(desc, ownership);
 }
 
 GrRenderTarget* GrTextureProvider::wrapBackendRenderTarget(const GrBackendRenderTargetDesc& desc) {
-    return this->isAbandoned() ? NULL : fGpu->wrapBackendRenderTarget(desc);
+    return this->isAbandoned() ? NULL : fGpu->wrapBackendRenderTarget(desc,
+                                                                      kBorrow_GrWrapOwnership);
 }
 
 void GrTextureProvider::assignUniqueKeyToResource(const GrUniqueKey& key, GrGpuResource* resource) {

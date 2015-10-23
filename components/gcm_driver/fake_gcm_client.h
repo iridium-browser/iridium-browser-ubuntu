@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_GCM_DRIVER_FAKE_GCM_CLIENT_H_
 #define COMPONENTS_GCM_DRIVER_FAKE_GCM_CLIENT_H_
 
+#include <map>
+
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "components/gcm_driver/gcm_client.h"
@@ -25,6 +27,13 @@ class FakeGCMClient : public GCMClient {
     FORCE_TO_ALWAYS_DELAY_START_GCM,
   };
 
+  // Generate and return the registration ID/token based on parameters for
+  // testing verification.
+  static std::string GenerateGCMRegistrationID(
+      const std::vector<std::string>& sender_ids);
+  static std::string GenerateInstanceIDToken(
+      const std::string& authorized_entity, const std::string& scope);
+
   FakeGCMClient(const scoped_refptr<base::SequencedTaskRunner>& ui_thread,
                 const scoped_refptr<base::SequencedTaskRunner>& io_thread);
   ~FakeGCMClient() override;
@@ -41,9 +50,9 @@ class FakeGCMClient : public GCMClient {
       Delegate* delegate) override;
   void Start(StartMode start_mode) override;
   void Stop() override;
-  void Register(const std::string& app_id,
-                const std::vector<std::string>& sender_ids) override;
-  void Unregister(const std::string& app_id) override;
+  void Register(const linked_ptr<RegistrationInfo>& registration_info) override;
+  void Unregister(
+      const linked_ptr<RegistrationInfo>& registration_info) override;
   void Send(const std::string& app_id,
             const std::string& receiver_id,
             const OutgoingMessage& message) override;
@@ -57,9 +66,12 @@ class FakeGCMClient : public GCMClient {
   void SetLastTokenFetchTime(const base::Time& time) override;
   void UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) override;
   void AddInstanceIDData(const std::string& app_id,
-                         const std::string& instance_id_data) override;
+                         const std::string& instance_id,
+                         const std::string& extra_data) override;
   void RemoveInstanceIDData(const std::string& app_id) override;
-  std::string GetInstanceIDData(const std::string& app_id) override;
+  void GetInstanceIDData(const std::string& app_id,
+                         std::string* instance_id,
+                         std::string* extra_data) override;
   void AddHeartbeatInterval(const std::string& scope, int interval_ms) override;
   void RemoveHeartbeatInterval(const std::string& scope) override;
 
@@ -73,9 +85,6 @@ class FakeGCMClient : public GCMClient {
                       const IncomingMessage& message);
   void DeleteMessages(const std::string& app_id);
 
-  std::string GetRegistrationIdFromSenderIds(
-      const std::vector<std::string>& sender_ids) const;
-
   void set_start_mode_overridding(StartModeOverridding overridding) {
     start_mode_overridding_ = overridding;
   }
@@ -84,9 +93,11 @@ class FakeGCMClient : public GCMClient {
   // Called on IO thread.
   void DoStart();
   void Started();
-  void RegisterFinished(const std::string& app_id,
-                        const std::string& registrion_id);
-  void UnregisterFinished(const std::string& app_id);
+  void RegisterFinished(
+      const linked_ptr<RegistrationInfo>& registration_info,
+      const std::string& registrion_id);
+  void UnregisterFinished(
+      const linked_ptr<RegistrationInfo>& registration_info);
   void SendFinished(const std::string& app_id, const OutgoingMessage& message);
   void MessageReceived(const std::string& app_id,
                        const IncomingMessage& message);
@@ -102,6 +113,7 @@ class FakeGCMClient : public GCMClient {
   StartModeOverridding start_mode_overridding_;
   scoped_refptr<base::SequencedTaskRunner> ui_thread_;
   scoped_refptr<base::SequencedTaskRunner> io_thread_;
+  std::map<std::string, std::pair<std::string, std::string>> instance_id_data_;
   base::WeakPtrFactory<FakeGCMClient> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeGCMClient);

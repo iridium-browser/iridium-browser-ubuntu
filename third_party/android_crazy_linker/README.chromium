@@ -52,11 +52,7 @@ Local Modifications:
 
 - Avoid mixing size_t and uint32_t in Leb128Decoder::Dequeue().
 
-- Add fallback library loading when SELinux blocks EXEC permission.
-
 - Re-order application of relocation sections to match the system linker.
-
-- Add method for enabling/disabling the memory fallback (disabled by default).
 
 - Add a check whether file is uncompressed in zip file.
 
@@ -77,4 +73,16 @@ Local Modifications:
 - Fix RELRO sharing issue caused by packing relocations.
 
 - Correct fix for crbug/479220 (replace IsSystemLibrary() with caller flags).
+
+- Fix link_map_.l_addr (was load address, should be load bias).
+
+- Convert packed relocation code to handle Android packed relocations.
+
+- Implement a stub __cxa_demangle to avoid linking to LLVM's implementation.
+
+- Change relocation packing constant names for C++ style (cosmetic only).
+
+- Add a Breakpad "guard region" to the start of reserved address space.
+
+- Remove CVE-2011-1149 detection machinery.
 

@@ -45,10 +45,9 @@ int32_t FakeEncoder::InitEncode(const VideoCodec* config,
   return 0;
 }
 
-int32_t FakeEncoder::Encode(
-    const I420VideoFrame& input_image,
-    const CodecSpecificInfo* codec_specific_info,
-    const std::vector<VideoFrameType>* frame_types) {
+int32_t FakeEncoder::Encode(const VideoFrame& input_image,
+                            const CodecSpecificInfo* codec_specific_info,
+                            const std::vector<VideoFrameType>* frame_types) {
   assert(config_.maxFramerate > 0);
   int64_t time_since_last_encode_ms = 1000 / config_.maxFramerate;
   int64_t time_now_ms = clock_->TimeInMilliseconds();
@@ -98,6 +97,8 @@ int32_t FakeEncoder::Encode(
     encoded._timeStamp = input_image.timestamp();
     encoded.capture_time_ms_ = input_image.render_time_ms();
     encoded._frameType = (*frame_types)[i];
+    encoded._encodedWidth = config_.simulcastStream[i].width;
+    encoded._encodedHeight = config_.simulcastStream[i].height;
     // Always encode something on the first frame.
     if (min_stream_bits > bits_available && i > 0) {
       encoded._length = 0;
@@ -188,7 +189,7 @@ DelayedEncoder::DelayedEncoder(Clock* clock, int delay_ms)
     : test::FakeEncoder(clock),
       delay_ms_(delay_ms) {}
 
-int32_t DelayedEncoder::Encode(const I420VideoFrame& input_image,
+int32_t DelayedEncoder::Encode(const VideoFrame& input_image,
                                const CodecSpecificInfo* codec_specific_info,
                                const std::vector<VideoFrameType>* frame_types) {
   SleepMs(delay_ms_);

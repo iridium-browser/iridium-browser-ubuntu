@@ -17,7 +17,6 @@
 #include "chrome/browser/extensions/activity_log/activity_action_constants.h"
 #include "chrome/browser/extensions/activity_log/counting_policy.h"
 #include "chrome/browser/extensions/activity_log/fullstream_ui_policy.h"
-#include "chrome/browser/extensions/activity_log/uma_policy.h"
 #include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
@@ -352,7 +351,6 @@ ActivityLog* ActivityLog::GetInstance(content::BrowserContext* context) {
 ActivityLog::ActivityLog(content::BrowserContext* context)
     : database_policy_(NULL),
       database_policy_type_(ActivityLogPolicy::POLICY_INVALID),
-      uma_policy_(NULL),
       profile_(Profile::FromBrowserContext(context)),
       db_enabled_(false),
       testing_mode_(false),
@@ -367,7 +365,7 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
   watchdog_apps_active_ =
       profile_->GetPrefs()->GetInteger(prefs::kWatchdogExtensionActive);
 
-  observers_ = new ObserverListThreadSafe<Observer>;
+  observers_ = new base::ObserverListThreadSafe<Observer>;
 
   // Check that the right threads exist for logging to the database.
   // If not, we shouldn't try to do things that require them.
@@ -382,13 +380,7 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
                            switches::kEnableExtensionActivityLogging) ||
                        watchdog_apps_active_);
 
-  ExtensionSystem::Get(profile_)->ready().Post(
-      FROM_HERE,
-      base::Bind(&ActivityLog::StartObserving, base::Unretained(this)));
-
-  if (!profile_->IsOffTheRecord())
-    uma_policy_ = new UmaPolicy(profile_);
-
+  extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
   ChooseDatabasePolicy();
 }
 
@@ -425,17 +417,11 @@ void ActivityLog::SetDatabasePolicy(
 }
 
 ActivityLog::~ActivityLog() {
-  if (uma_policy_)
-    uma_policy_->Close();
   if (database_policy_)
     database_policy_->Close();
 }
 
 // MAINTAIN STATUS. ------------------------------------------------------------
-
-void ActivityLog::StartObserving() {
-  extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
-}
 
 void ActivityLog::ChooseDatabasePolicy() {
   if (!(IsDatabaseEnabled() || IsWatchdogAppActive()))
@@ -527,7 +513,8 @@ void ActivityLog::LogAction(scoped_refptr<Action> action) {
 
   // Mark DOM XHR requests as such, for easier processing later.
   if (action->action_type() == Action::ACTION_DOM_ACCESS &&
-      StartsWithASCII(action->api_name(), kDomXhrPrefix, true) &&
+      base::StartsWith(action->api_name(), kDomXhrPrefix,
+                       base::CompareCase::SENSITIVE) &&
       action->other()) {
     base::DictionaryValue* other = action->mutable_other();
     int dom_verb = -1;
@@ -537,8 +524,6 @@ void ActivityLog::LogAction(scoped_refptr<Action> action) {
     }
   }
 
-  if (uma_policy_)
-    uma_policy_->ProcessAction(action);
   if (IsDatabaseEnabled() && database_policy_)
     database_policy_->ProcessAction(action);
   if (IsWatchdogAppActive())

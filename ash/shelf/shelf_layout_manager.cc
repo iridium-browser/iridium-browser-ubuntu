@@ -529,8 +529,10 @@ void ShelfLayoutManager::OnLockStateChanged(bool locked) {
   UpdateShelfVisibilityAfterLoginUIChange();
 }
 
-void ShelfLayoutManager::OnWindowActivated(aura::Window* gained_active,
-                                           aura::Window* lost_active) {
+void ShelfLayoutManager::OnWindowActivated(
+    aura::client::ActivationChangeObserver::ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
   UpdateAutoHideStateNow();
 }
 
@@ -548,7 +550,9 @@ ShelfLayoutManager* ShelfLayoutManager::ForShelf(aura::Window* window) {
 ////////////////////////////////////////////////////////////////////////////////
 // ShelfLayoutManager, private:
 
-ShelfLayoutManager::TargetBounds::TargetBounds() : opacity(0.0f) {}
+ShelfLayoutManager::TargetBounds::TargetBounds()
+    : opacity(0.0f), status_opacity(0.0f) {}
+
 ShelfLayoutManager::TargetBounds::~TargetBounds() {}
 
 void ShelfLayoutManager::SetState(ShelfVisibilityState visibility_state) {
@@ -859,6 +863,11 @@ void ShelfLayoutManager::CalculateTargetBounds(
       gfx::Rect(0, 0,
                 shelf_width - status_size.width(),
                 target_bounds->shelf_bounds_in_root.height()));
+
+  available_bounds.Subtract(target_bounds->shelf_bounds_in_root);
+  available_bounds.Subtract(keyboard_bounds_);
+  user_work_area_bounds_ =
+      ScreenUtil::ConvertRectToScreen(root_window_, available_bounds);
 }
 
 void ShelfLayoutManager::UpdateTargetBoundsForGesture(

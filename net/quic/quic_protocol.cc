@@ -73,20 +73,20 @@ QuicPacketPublicHeader::QuicPacketPublicHeader(
 QuicPacketPublicHeader::~QuicPacketPublicHeader() {}
 
 QuicPacketHeader::QuicPacketHeader()
-    : fec_flag(false),
+    : packet_sequence_number(0),
+      fec_flag(false),
       entropy_flag(false),
       entropy_hash(0),
-      packet_sequence_number(0),
       is_in_fec_group(NOT_IN_FEC_GROUP),
       fec_group(0) {
 }
 
 QuicPacketHeader::QuicPacketHeader(const QuicPacketPublicHeader& header)
     : public_header(header),
+      packet_sequence_number(0),
       fec_flag(false),
       entropy_flag(false),
       entropy_hash(0),
-      packet_sequence_number(0),
       is_in_fec_group(NOT_IN_FEC_GROUP),
       fec_group(0) {
 }
@@ -114,19 +114,8 @@ QuicStreamFrame::QuicStreamFrame(const QuicStreamFrame& frame)
 QuicStreamFrame::QuicStreamFrame(QuicStreamId stream_id,
                                  bool fin,
                                  QuicStreamOffset offset,
-                                 IOVector data)
+                                 StringPiece data)
     : stream_id(stream_id), fin(fin), offset(offset), data(data) {
-}
-
-string* QuicStreamFrame::GetDataAsString() const {
-  string* data_string = new string();
-  data_string->reserve(data.TotalBufferSize());
-  for (size_t i = 0; i < data.Size(); ++i) {
-    data_string->append(static_cast<char*>(data.iovec()[i].iov_base),
-                        data.iovec()[i].iov_len);
-  }
-  DCHECK_EQ(data_string->size(), data.TotalBufferSize());
-  return data_string;
 }
 
 uint32 MakeQuicTag(char a, char b, char c, char d) {
@@ -266,9 +255,7 @@ QuicRstStreamErrorCode AdjustErrorForVersion(
 }
 
 QuicRstStreamFrame::QuicRstStreamFrame()
-    : stream_id(0),
-      error_code(QUIC_STREAM_NO_ERROR) {
-}
+    : stream_id(0), error_code(QUIC_STREAM_NO_ERROR), byte_offset(0) {}
 
 QuicRstStreamFrame::QuicRstStreamFrame(QuicStreamId stream_id,
                                        QuicRstStreamErrorCode error_code,
@@ -298,6 +285,10 @@ QuicFrame::QuicFrame(QuicStreamFrame* stream_frame)
 QuicFrame::QuicFrame(QuicAckFrame* frame)
     : type(ACK_FRAME),
       ack_frame(frame) {
+}
+
+QuicFrame::QuicFrame(QuicMtuDiscoveryFrame* frame)
+    : type(MTU_DISCOVERY_FRAME), mtu_discovery_frame(frame) {
 }
 
 QuicFrame::QuicFrame(QuicStopWaitingFrame* frame)
@@ -412,6 +403,10 @@ ostream& operator<<(ostream& os, const QuicFrame& frame) {
       os << "type { PING_FRAME } ";
       break;
     }
+    case MTU_DISCOVERY_FRAME: {
+      os << "type { MTU_DISCOVERY_FRAME } ";
+      break;
+    }
     default: {
       LOG(ERROR) << "Unknown frame type: " << frame.type;
       break;
@@ -457,8 +452,7 @@ ostream& operator<<(ostream& os, const QuicStreamFrame& stream_frame) {
   os << "stream_id { " << stream_frame.stream_id << " } "
      << "fin { " << stream_frame.fin << " } "
      << "offset { " << stream_frame.offset << " } "
-     << "data { "
-     << QuicUtils::StringToHexASCIIDump(*(stream_frame.GetDataAsString()))
+     << "data { " << QuicUtils::StringToHexASCIIDump(stream_frame.data)
      << " }\n";
   return os;
 }
@@ -559,7 +553,9 @@ StringPiece QuicPacket::Plaintext() const {
 }
 
 RetransmittableFrames::RetransmittableFrames(EncryptionLevel level)
-    : encryption_level_(level), has_crypto_handshake_(NOT_HANDSHAKE) {
+    : encryption_level_(level),
+      has_crypto_handshake_(NOT_HANDSHAKE),
+      needs_padding_(false) {
 }
 
 RetransmittableFrames::~RetransmittableFrames() {
@@ -573,6 +569,9 @@ RetransmittableFrames::~RetransmittableFrames() {
         break;
       case ACK_FRAME:
         delete it->ack_frame;
+        break;
+      case MTU_DISCOVERY_FRAME:
+        delete it->mtu_discovery_frame;
         break;
       case STOP_WAITING_FRAME:
         delete it->stop_waiting_frame;
@@ -599,27 +598,24 @@ RetransmittableFrames::~RetransmittableFrames() {
         DCHECK(false) << "Cannot delete type: " << it->type;
     }
   }
-  STLDeleteElements(&stream_data_);
+  for (const char* buffer : stream_data_) {
+    delete[] buffer;
+  }
 }
 
-const QuicFrame& RetransmittableFrames::AddStreamFrame(
-    QuicStreamFrame* stream_frame) {
-  // Make an owned copy of the stream frame's data.
-  stream_data_.push_back(stream_frame->GetDataAsString());
-  // Ensure the stream frame's IOVector points to the owned copy of the data.
-  stream_frame->data.Clear();
-  stream_frame->data.Append(const_cast<char*>(stream_data_.back()->data()),
-                            stream_data_.back()->size());
-  frames_.push_back(QuicFrame(stream_frame));
-  if (stream_frame->stream_id == kCryptoStreamId) {
+const QuicFrame& RetransmittableFrames::AddFrame(const QuicFrame& frame) {
+  return AddFrame(frame, nullptr);
+}
+
+const QuicFrame& RetransmittableFrames::AddFrame(const QuicFrame& frame,
+                                                 char* buffer) {
+  if (frame.type == STREAM_FRAME &&
+      frame.stream_frame->stream_id == kCryptoStreamId) {
     has_crypto_handshake_ = IS_HANDSHAKE;
   }
-  return frames_.back();
-}
-
-const QuicFrame& RetransmittableFrames::AddNonStreamFrame(
-    const QuicFrame& frame) {
-  DCHECK_NE(frame.type, STREAM_FRAME);
+  if (buffer != nullptr) {
+    stream_data_.push_back(buffer);
+  }
   frames_.push_back(frame);
   return frames_.back();
 }
@@ -641,14 +637,17 @@ SerializedPacket::SerializedPacket(
     QuicSequenceNumberLength sequence_number_length,
     QuicEncryptedPacket* packet,
     QuicPacketEntropyHash entropy_hash,
-    RetransmittableFrames* retransmittable_frames)
-    : sequence_number(sequence_number),
-      sequence_number_length(sequence_number_length),
-      packet(packet),
-      entropy_hash(entropy_hash),
+    RetransmittableFrames* retransmittable_frames,
+    bool has_ack,
+    bool has_stop_waiting)
+    : packet(packet),
       retransmittable_frames(retransmittable_frames),
-      is_fec_packet(false) {
-}
+      sequence_number(sequence_number),
+      sequence_number_length(sequence_number_length),
+      entropy_hash(entropy_hash),
+      is_fec_packet(false),
+      has_ack(has_ack),
+      has_stop_waiting(has_stop_waiting) {}
 
 SerializedPacket::~SerializedPacket() {}
 

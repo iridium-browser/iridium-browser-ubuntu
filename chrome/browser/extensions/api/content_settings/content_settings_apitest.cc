@@ -2,16 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/location.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
@@ -55,7 +59,7 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
   void TearDownOnMainThread() override {
     // ReleaseBrowserProcessModule() needs to be called in a message loop, so we
     // post a task to do it, then run the message loop.
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&ReleaseBrowserProcessModule));
     content::RunAllPendingInMessageLoop();
 
@@ -66,8 +70,8 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
   void CheckContentSettingsSet() {
     HostContentSettingsMap* map =
         profile_->GetHostContentSettingsMap();
-    CookieSettings* cookie_settings =
-        CookieSettings::Factory::GetForProfile(profile_).get();
+    content_settings::CookieSettings* cookie_settings =
+        CookieSettingsFactory::GetForProfile(profile_).get();
 
     // Check default content settings by using an unknown URL.
     GURL example_url("http://www.example.com");
@@ -119,6 +123,16 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
     EXPECT_EQ(CONTENT_SETTING_ASK,
               map->GetContentSetting(example_url,
                                      example_url,
+                                     CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+                                     std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+              map->GetContentSetting(example_url,
+                                     example_url,
+                                     CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                                     std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+              map->GetContentSetting(example_url,
+                                     example_url,
                                      CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
                                      std::string()));
     EXPECT_EQ(CONTENT_SETTING_ASK,
@@ -157,6 +171,12 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
             url, url, CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string()));
     EXPECT_EQ(CONTENT_SETTING_BLOCK,
         map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_BLOCK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_BLOCK,
+        map->GetContentSetting(
             url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
     EXPECT_EQ(CONTENT_SETTING_BLOCK,
         map->GetContentSetting(
@@ -167,8 +187,8 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
   void CheckContentSettingsDefault() {
     HostContentSettingsMap* map =
         profile_->GetHostContentSettingsMap();
-    CookieSettings* cookie_settings =
-        CookieSettings::Factory::GetForProfile(profile_).get();
+    content_settings::CookieSettings* cookie_settings =
+        CookieSettingsFactory::GetForProfile(profile_).get();
 
     // Check content settings for www.google.com
     GURL url("http://www.google.com");
@@ -200,6 +220,12 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
     EXPECT_EQ(CONTENT_SETTING_ASK,
         map->GetContentSetting(
             url, url, CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string()));
     EXPECT_EQ(CONTENT_SETTING_ASK,
         map->GetContentSetting(
             url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
@@ -268,6 +294,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionContentSettingsApiTest,
 
   EXPECT_TRUE(RunExtensionTest("content_settings/getresourceidentifiers"))
       << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionContentSettingsApiTest,
+                       UnsupportedDefaultSettings) {
+  const char kExtensionPath[] = "content_settings/unsupporteddefaultsettings";
+  EXPECT_TRUE(RunExtensionSubtest(kExtensionPath, "test.html")) << message_;
 }
 
 }  // namespace extensions

@@ -59,8 +59,6 @@
 
 #include <openssl/base.h>
 
-#include <openssl/asn1.h>
-
 
 #if defined(__cplusplus)
 extern "C" {
@@ -109,8 +107,6 @@ int RSA_padding_check_PKCS1_OAEP_mgf1(uint8_t *to, unsigned to_len,
                                       const EVP_MD *md, const EVP_MD *mgf1md);
 int RSA_padding_add_none(uint8_t *to, unsigned to_len, const uint8_t *from,
                          unsigned from_len);
-int RSA_padding_check_none(uint8_t *to, unsigned to_len, const uint8_t *from,
-                           unsigned from_len);
 
 /* RSA_private_transform calls either the method-specific |private_transform|
  * function (if given) or the generic one. See the comment for
@@ -118,20 +114,26 @@ int RSA_padding_check_none(uint8_t *to, unsigned to_len, const uint8_t *from,
 int RSA_private_transform(RSA *rsa, uint8_t *out, const uint8_t *in,
                           size_t len);
 
-typedef struct rsa_pss_params_st {
-  X509_ALGOR *hashAlgorithm;
-  X509_ALGOR *maskGenAlgorithm;
-  ASN1_INTEGER *saltLength;
-  ASN1_INTEGER *trailerField;
-} RSA_PSS_PARAMS;
 
-DECLARE_ASN1_FUNCTIONS(RSA_PSS_PARAMS)
+/* RSA_additional_prime contains information about the third, forth etc prime
+ * in a multi-prime RSA key. */
+typedef struct RSA_additional_prime_st {
+  BIGNUM *prime;
+  /* exp is d^{prime-1} mod prime */
+  BIGNUM *exp;
+  /* coeff is such that r×coeff ≡ 1 mod prime. */
+  BIGNUM *coeff;
 
-typedef struct rsa_oaep_params_st {
-  X509_ALGOR *hashFunc;
-  X509_ALGOR *maskGenFunc;
-  X509_ALGOR *pSourceFunc;
-} RSA_OAEP_PARAMS;
+  /* Values below here are not in the ASN.1 serialisation. */
+
+  /* r is the product of all primes (including p and q) prior to this one. */
+  BIGNUM *r;
+  /* method_mod is managed by the |RSA_METHOD|. */
+  BN_MONT_CTX *method_mod;
+} RSA_additional_prime;
+
+void RSA_additional_prime_free(RSA_additional_prime *ap);
+
 
 #if defined(__cplusplus)
 } /* extern C */

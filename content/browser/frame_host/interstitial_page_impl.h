@@ -105,6 +105,10 @@ class CONTENT_EXPORT InterstitialPageImpl
                    const base::string16& title,
                    base::i18n::TextDirection title_direction) override;
   AccessibilityMode GetAccessibilityMode() const override;
+  void Cut() override;
+  void Copy() override;
+  void Paste() override;
+  void SelectAll() override;
 
   // RenderViewHostDelegate implementation:
   RenderViewHostDelegateView* GetDelegateView() override;
@@ -118,7 +122,7 @@ class CONTENT_EXPORT InterstitialPageImpl
       BrowserContext* browser_context) const override;
   gfx::Rect GetRootWindowResizerRect() const override;
   void CreateNewWindow(
-      int render_process_id,
+      SiteInstance* source_site_instance,
       int route_id,
       int main_frame_route_id,
       const ViewHostMsg_CreateWindow_Params& params,

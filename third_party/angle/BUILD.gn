@@ -5,6 +5,15 @@
 # import the use_x11 variable
 import("//build/config/ui.gni")
 
+angle_git_is_present = exec_script("src/commit_id.py",
+                                   [
+                                     "check",
+                                     rebase_path(".", root_build_dir),
+                                   ],
+                                   "value")
+
+angle_use_commit_id = angle_git_is_present == 1
+
 gles_gypi = exec_script(
   "//build/gypi_to_gn.py",
   [ rebase_path("src/libGLESv2.gypi") ],
@@ -114,11 +123,22 @@ config("translator_static_config") {
   defines = [ "ANGLE_TRANSLATOR_STATIC" ]
 }
 
+config("debug_annotations_config") {
+  if (is_debug) {
+    defines = [
+      "ANGLE_ENABLE_DEBUG_ANNOTATIONS",
+    ]
+  }
+}
+
 static_library("angle_common") {
   sources = rebase_path(gles_gypi.libangle_common_sources, ".", "src")
+
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [
     ":internal_config",
+    ":debug_annotations_config",
+    "//build/config/compiler:no_chromium_code",
   ]
 }
 
@@ -173,19 +193,32 @@ config("commit_id_config") {
   include_dirs = [ "$root_gen_dir/angle" ]
 }
 
-action("commit_id") {
-  script = "src/commit_id.py"
+commit_id_output_file = "$root_gen_dir/angle/id/commit.h"
+if (angle_use_commit_id) {
+  action("commit_id") {
+    script = "src/commit_id.py"
+    outputs = [
+      commit_id_output_file,
+    ]
 
-  output_file = "$root_gen_dir/angle/id/commit.h"
-  outputs = [ output_file ]
+    args = [
+      "gen",
+      rebase_path(".", root_build_dir),
+      rebase_path(commit_id_output_file, root_build_dir),
+    ]
 
-  args = [
-    "gen",
-    rebase_path(".", root_build_dir),
-    rebase_path(output_file, root_build_dir),
-  ]
-
-  public_configs = [ ":commit_id_config" ]
+    public_configs = [ ":commit_id_config" ]
+  }
+} else {
+  copy("commit_id") {
+    sources = [
+      "src/commit.h",
+    ]
+    outputs = [
+      commit_id_output_file,
+    ]
+    public_configs = [ ":commit_id_config" ]
+  }
 }
 
 config("libANGLE_config") {
@@ -259,13 +292,13 @@ static_library("libANGLE") {
   if (is_debug) {
     defines += [
       "ANGLE_GENERATE_SHADER_DEBUG_INFO",
-      "ANGLE_ENABLE_DEBUG_ANNOTATIONS",
     ]
   }
 
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [
     ":commit_id_config",
+    ":debug_annotations_config",
     ":libANGLE_config",
     ":internal_config",
     "//build/config/compiler:no_chromium_code",
@@ -295,6 +328,7 @@ shared_library("libGLESv2") {
   configs += [
     ":internal_config",
     ":commit_id_config",
+    ":debug_annotations_config",
     ":libANGLE_config",
     "//build/config/compiler:no_chromium_code",
   ]

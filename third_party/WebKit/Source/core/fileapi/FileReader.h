@@ -51,12 +51,12 @@ class StringOrArrayBuffer;
 
 class CORE_EXPORT FileReader final : public RefCountedGarbageCollectedEventTargetWithInlineData<FileReader>, public ActiveDOMObject, public FileReaderLoaderClient {
     DEFINE_WRAPPERTYPEINFO();
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<FileReader>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(FileReader);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(FileReader);
 public:
     static FileReader* create(ExecutionContext*);
 
-    virtual ~FileReader();
+    ~FileReader() override;
 
     enum ReadyState {
         EMPTY = 0,
@@ -78,18 +78,18 @@ public:
     void result(StringOrArrayBuffer& resultAttribute) const;
 
     // ActiveDOMObject
-    virtual void stop() override;
-    virtual bool hasPendingActivity() const override;
+    void stop() override;
+    bool hasPendingActivity() const override;
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override { return ActiveDOMObject::executionContext(); }
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override { return ActiveDOMObject::executionContext(); }
 
     // FileReaderLoaderClient
-    virtual void didStartLoading() override;
-    virtual void didReceiveData() override;
-    virtual void didFinishLoading() override;
-    virtual void didFail(FileError::ErrorCode) override;
+    void didStartLoading() override;
+    void didReceiveData() override;
+    void didFinishLoading() override;
+    void didFail(FileError::ErrorCode) override;
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(loadstart);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);

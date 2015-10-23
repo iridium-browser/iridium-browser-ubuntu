@@ -19,6 +19,8 @@
 #include "native_client/src/include/nacl_base.h"
 #include "native_client/src/include/portability.h"
 
+#include "native_client/src/public/nacl_desc.h"
+
 /* For NaClHandle */
 #include "native_client/src/shared/imc/nacl_imc_c.h"
 
@@ -35,7 +37,6 @@ struct NaClDesc;
 struct nacl_abi_stat;
 struct nacl_abi_timespec;
 struct NaClDescEffector;
-struct NaClDescQuotaInterface;
 struct NaClImcTypedMsgHdr;
 struct NaClMessageHeader;
 
@@ -147,8 +148,7 @@ struct NaClInternalHeader {
  */
 extern int
 (*NaClDescInternalize[NACL_DESC_TYPE_MAX])(struct NaClDesc **,
-                                           struct NaClDescXferState *,
-                                           struct NaClDescQuotaInterface *);
+                                           struct NaClDescXferState *);
 
 extern char const *NaClDescTypeString(enum NaClDescTypeTag type_tag);
 
@@ -219,6 +219,18 @@ struct NaClDescVtbl {
   int (*Fstat)(struct NaClDesc      *vself,
                struct nacl_abi_stat *statbuf);
 
+  int (*Fchdir)(struct NaClDesc *vself) NACL_WUR;
+
+  int (*Fchmod)(struct NaClDesc *vself,
+                int             mode) NACL_WUR;
+
+  int (*Fsync)(struct NaClDesc *vself) NACL_WUR;
+
+  int (*Fdatasync)(struct NaClDesc *vself) NACL_WUR;
+
+  int (*Ftruncate)(struct NaClDesc  *vself,
+                   nacl_abi_off_t   length) NACL_WUR;
+
   /*
    * Directory access support.  Directories require support for getdents.
    */
@@ -282,8 +294,7 @@ struct NaClDescVtbl {
 
   ssize_t (*RecvMsg)(struct NaClDesc               *vself,
                      struct NaClImcTypedMsgHdr     *nitmhp,
-                     int                           flags,
-                     struct NaClDescQuotaInterface *quota_interface) NACL_WUR;
+                     int                           flags) NACL_WUR;
 
   ssize_t (*LowLevelSendMsg)(struct NaClDesc                *vself,
                              struct NaClMessageHeader const *dgram,
@@ -445,11 +456,6 @@ int NaClDescCtor(struct NaClDesc *ndp) NACL_WUR;
 
 extern struct NaClDescVtbl const kNaClDescVtbl;
 
-struct NaClDesc *NaClDescRef(struct NaClDesc *ndp);
-
-/* when ref_count reaches zero, will call dtor and free */
-void NaClDescUnref(struct NaClDesc *ndp);
-
 /*
  * NaClDescSafeUnref is just like NaCDescUnref, except that ndp may be
  * NULL (in which case this is a noop).
@@ -592,6 +598,18 @@ ssize_t NaClDescPWriteNotImplemented(struct NaClDesc *vself,
 int NaClDescFstatNotImplemented(struct NaClDesc       *vself,
                                 struct nacl_abi_stat  *statbuf);
 
+int NaClDescFchdirNotImplemented(struct NaClDesc *vself);
+
+int NaClDescFchmodNotImplemented(struct NaClDesc *vself,
+                                 int             mode);
+
+int NaClDescFsyncNotImplemented(struct NaClDesc *vself);
+
+int NaClDescFdatasyncNotImplemented(struct NaClDesc *vself);
+
+int NaClDescFtruncateNotImplemented(struct NaClDesc  *vself,
+                                    nacl_abi_off_t   length);
+
 ssize_t NaClDescGetdentsNotImplemented(struct NaClDesc  *vself,
                                        void             *dirp,
                                        size_t           count);
@@ -628,8 +646,7 @@ ssize_t NaClDescSendMsgNotImplemented(
 ssize_t NaClDescRecvMsgNotImplemented(
     struct NaClDesc               *vself,
     struct NaClImcTypedMsgHdr     *nitmhp,
-    int                           flags,
-    struct NaClDescQuotaInterface *quota_interface);
+    int                           flags);
 
 ssize_t NaClDescLowLevelSendMsgNotImplemented(
     struct NaClDesc                *vself,
@@ -655,8 +672,7 @@ int NaClDescGetValueNotImplemented(struct NaClDesc  *vself);
 
 int NaClDescInternalizeNotImplemented(
     struct NaClDesc                **out_desc,
-    struct NaClDescXferState       *xfer,
-    struct NaClDescQuotaInterface  *quota_interface);
+    struct NaClDescXferState       *xfer);
 
 
 int NaClSafeCloseNaClHandle(NaClHandle h);

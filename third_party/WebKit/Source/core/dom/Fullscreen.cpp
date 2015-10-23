@@ -34,15 +34,15 @@
 #include "core/events/Event.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/OriginsUsingFeatures.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLMediaElement.h"
+#include "core/input/EventHandler.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutFullScreen.h"
-#include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
-#include "core/page/EventHandler.h"
 #include "platform/UserGestureIndicator.h"
 
 namespace blink {
@@ -77,12 +77,8 @@ static bool fullscreenElementReady(const Element& element, Fullscreen::RequestTy
         return false;
 
     // |element|'s node document's fullscreen enabled flag is set.
-    if (!fullscreenIsAllowedForAllOwners(element.document())) {
-        if (requestType == Fullscreen::PrefixedVideoRequest)
-            UseCounter::countDeprecation(element.document(), UseCounter::VideoFullscreenAllowedExemption);
-        else
-            return false;
-    }
+    if (!fullscreenIsAllowedForAllOwners(element.document()))
+        return false;
 
     // |element|'s node document's fullscreen element stack is either empty or its top element is an
     // inclusive ancestor of |element|.
@@ -115,7 +111,7 @@ static bool isPrefixed(const AtomicString& type)
 static PassRefPtrWillBeRawPtr<Event> createEvent(const AtomicString& type, EventTarget& target)
 {
     EventInit initializer;
-    initializer.bubbles = isPrefixed(type);
+    initializer.setBubbles(isPrefixed(type));
     RefPtrWillBeRawPtr<Event> event = Event::create(type, initializer);
     event->setTarget(&target);
     return event;
@@ -208,10 +204,12 @@ void Fullscreen::requestFullscreen(Element& element, RequestType requestType)
     // actually used. This could be used later if a warning is shown in the
     // developer console.
     String errorMessage;
-    if (document()->isPrivilegedContext(errorMessage))
+    if (document()->isPrivilegedContext(errorMessage)) {
         UseCounter::count(document(), UseCounter::FullscreenSecureOrigin);
-    else
+    } else {
         UseCounter::countDeprecation(document(), UseCounter::FullscreenInsecureOrigin);
+        OriginsUsingFeatures::countAnyWorld(*document(), OriginsUsingFeatures::Feature::FullscreenInsecureOrigin);
+    }
 
     // Ignore this request if the document is not in a live frame.
     if (!document()->isActive())
@@ -294,7 +292,7 @@ void Fullscreen::requestFullscreen(Element& element, RequestType requestType)
 
         // 5. Return, and run the remaining steps asynchronously.
         // 6. Optionally, perform some animation.
-        document()->frameHost()->chrome().client().enterFullScreenForElement(&element);
+        document()->frameHost()->chromeClient().enterFullScreenForElement(&element);
 
         // 7. Optionally, display a message indicating how the user can exit displaying the context object fullscreen.
         return;
@@ -406,13 +404,13 @@ void Fullscreen::exitFullscreen()
         // document so we will pass the documentElement in that case.
         // This should be fix by exiting fullscreen for a frame instead of an
         // element, see https://crbug.com/441259
-        host->chrome().client().exitFullScreenForElement(
+        host->chromeClient().exitFullScreenForElement(
             m_fullScreenElement ? m_fullScreenElement.get() : document()->documentElement());
         return;
     }
 
     // Otherwise, notify the chrome of the new full screen element.
-    host->chrome().client().enterFullScreenForElement(newTop);
+    host->chromeClient().enterFullScreenForElement(newTop);
 }
 
 bool Fullscreen::fullscreenEnabled(Document& document)

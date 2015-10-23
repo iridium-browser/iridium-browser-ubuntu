@@ -33,7 +33,7 @@ const std::string GetShowFeedbackFormJs();
 // considered unsafe, so callers must ensure rendering it does not compromise
 // Chrome.
 const std::string GetUnsafeArticleTemplateHtml(
-    const DistilledPageProto* page_proto,
+    const std::string original_url,
     const DistilledPagePrefs::Theme theme,
     const DistilledPagePrefs::FontFamily font_family);
 
@@ -51,6 +51,12 @@ const std::string GetUnsafeIncrementalDistilledPageJs(
     const DistilledPageProto* page_proto,
     const bool is_last_page);
 
+// Returns the JavaScript to set the title of the distilled article page.
+const std::string GetSetTitleJs(std::string title);
+
+// Return the JavaScript to set the text direction of the distiller page.
+const std::string GetSetTextDirectionJs(const std::string& direction);
+
 // Returns a JavaScript blob for updating a view request with error page
 // contents.
 const std::string GetErrorPageJs();
@@ -60,13 +66,11 @@ const std::string GetErrorPageJs();
 // the last page of the article (i.e. loading indicator should be removed).
 const std::string GetToggleLoadingIndicatorJs(const bool is_last_page);
 
-// Returns a full HTML page which displays a generic error.
-const std::string GetErrorPageHtml(
-    const DistilledPagePrefs::Theme theme,
-    const DistilledPagePrefs::FontFamily font_family);
-
 // Returns the default CSS to be used for a viewer.
 const std::string GetCss();
+
+// Returns the iOS specific CSS to be used for the distiller viewer.
+const std::string GetIOSCss();
 
 // Returns the default JS to be used for a viewer.
 const std::string GetJavaScript();

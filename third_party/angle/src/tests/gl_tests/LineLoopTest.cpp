@@ -28,20 +28,16 @@ class LineLoopTest : public ANGLETest
         const std::string vsSource = SHADER_SOURCE
         (
             attribute highp vec4 position;
-            attribute highp vec4 in_color;
-
-            varying highp vec4 color;
 
             void main(void)
             {
                 gl_Position = position;
-                color = in_color;
             }
         );
 
         const std::string fsSource = SHADER_SOURCE
         (
-            varying highp vec4 color;
+            uniform highp vec4 color;
             void main(void)
             {
                 gl_FragColor = color;
@@ -55,13 +51,11 @@ class LineLoopTest : public ANGLETest
         }
 
         mPositionLocation = glGetAttribLocation(mProgram, "position");
-        mColorLocation = glGetAttribLocation(mProgram, "in_color");
+        mColorLocation = glGetUniformLocation(mProgram, "color");
 
         glBlendFunc(GL_ONE, GL_ONE);
         glEnable(GL_BLEND);
-
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
 
         ASSERT_GL_NO_ERROR();
     }
@@ -75,6 +69,8 @@ class LineLoopTest : public ANGLETest
 
     void runTest(GLenum indexType, GLuint indexBuffer, const GLvoid *indexPtr)
     {
+        glClear(GL_COLOR_BUFFER_BIT);
+
         static const GLfloat loopPositions[] =
         {
              0.0f,  0.0f,
@@ -98,7 +94,7 @@ class LineLoopTest : public ANGLETest
         };
         static const GLubyte stripIndices[] =
         {
-            2, 0, 3, 1, 2
+            1, 0, 3, 2, 1
         };
 
         glUseProgram(mProgram);
@@ -115,6 +111,8 @@ class LineLoopTest : public ANGLETest
 
         std::vector<GLubyte> pixels(getWindowWidth() * getWindowHeight() * 4);
         glReadPixels(0, 0, getWindowWidth(), getWindowHeight(), GL_RGBA, GL_UNSIGNED_BYTE, &pixels[0]);
+
+        ASSERT_GL_NO_ERROR();
 
         for (int y = 0; y < getWindowHeight(); y++)
         {
@@ -205,4 +203,4 @@ TEST_P(LineLoopTest, LineLoopUIntIndexBuffer)
 }
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
-ANGLE_INSTANTIATE_TEST(LineLoopTest, ES2_D3D9(), ES2_D3D11());
+ANGLE_INSTANTIATE_TEST(LineLoopTest, ES2_D3D9(), ES2_D3D11(), ES2_OPENGL());

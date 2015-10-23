@@ -172,25 +172,12 @@ AtomicString FrameTree::uniqueChildName(const AtomicString& requestedName) const
 
 Frame* FrameTree::scopedChild(unsigned index) const
 {
-    // TODO(dcheng, alexmos): Currently, all children of a RemoteFrame are
-    // visible, even through a shadow DOM scope.  Once RemoteFrames have a
-    // TreeScope, it should be used here.
-    TreeScope* scope = nullptr;
-    if (m_thisFrame->isLocalFrame()) {
-        scope = toLocalFrame(m_thisFrame)->document();
-        if (!scope)
-            return nullptr;
-    }
-
     unsigned scopedIndex = 0;
-    for (Frame* result = firstChild(); result; result = result->tree().nextSibling()) {
-        // TODO(dcheng, alexmos): Currently, RemoteFrames are always visible,
-        // even through a shadow DOM scope. Once RemoteFrames have a TreeScope,
-        // the scoping check should apply to RemoteFrames too.
-        if (scope && result->isLocalFrame() && !toLocalFrame(result)->inScope(scope))
+    for (Frame* child = firstChild(); child; child = child->tree().nextSibling()) {
+        if (child->client()->inShadowTree())
             continue;
         if (scopedIndex == index)
-            return result;
+            return child;
         scopedIndex++;
     }
 
@@ -199,35 +186,20 @@ Frame* FrameTree::scopedChild(unsigned index) const
 
 Frame* FrameTree::scopedChild(const AtomicString& name) const
 {
-    // TODO(dcheng, alexmos): Currently, all children of a RemoteFrame are
-    // visible, even through a shadow DOM scope.  Once RemoteFrames have a
-    // TreeScope, it should be used here.
-    TreeScope* scope = nullptr;
-    if (m_thisFrame->isLocalFrame()) {
-        scope = toLocalFrame(m_thisFrame)->document();
-        if (!scope)
-            return nullptr;
-    }
-
-    for (Frame* child = firstChild(); child; child = child->tree().nextSibling())
-        // TODO(dcheng, alexmos): Currently, RemoteFrames are always visible,
-        // even through a shadow DOM scope. Once RemoteFrames have a TreeScope,
-        // the scoping check should apply to RemoteFrames too.
-        if (child->tree().name() == name && (!scope || !child->isLocalFrame() || toLocalFrame(child)->inScope(scope)))
+    for (Frame* child = firstChild(); child; child = child->tree().nextSibling()) {
+        if (child->client()->inShadowTree())
+            continue;
+        if (child->tree().name() == name)
             return child;
+    }
     return nullptr;
 }
 
 inline unsigned FrameTree::scopedChildCount(TreeScope* scope) const
 {
-    // TODO(dcheng, alexmos): Once RemoteFrames have a TreeScope, this should
-    // return 0 if there is no scope.
-
     unsigned scopedCount = 0;
-    for (Frame* result = firstChild(); result; result = result->tree().nextSibling()) {
-        // FIXME: Currently, RemoteFrames are always visible, even through a shadow DOM scope.
-        // Once RemoteFrames have a TreeScope, the scoping check should apply to RemoteFrames too.
-        if (scope && result->isLocalFrame() && !toLocalFrame(result)->inScope(scope))
+    for (Frame* child = firstChild(); child; child = child->tree().nextSibling()) {
+        if (child->client()->inShadowTree())
             continue;
         scopedCount++;
     }
@@ -260,9 +232,10 @@ unsigned FrameTree::childCount() const
 
 Frame* FrameTree::child(const AtomicString& name) const
 {
-    for (Frame* child = firstChild(); child; child = child->tree().nextSibling())
+    for (Frame* child = firstChild(); child; child = child->tree().nextSibling()) {
         if (child->tree().name() == name)
             return child;
+    }
     return nullptr;
 }
 
@@ -282,9 +255,10 @@ Frame* FrameTree::find(const AtomicString& name) const
         return nullptr;
 
     // Search subtree starting with this frame first.
-    for (Frame* frame = m_thisFrame; frame; frame = frame->tree().traverseNext(m_thisFrame))
+    for (Frame* frame = m_thisFrame; frame; frame = frame->tree().traverseNext(m_thisFrame)) {
         if (frame->tree().name() == name)
             return frame;
+    }
 
     // Search the entire tree for this page next.
     Page* page = m_thisFrame->page();
@@ -293,9 +267,10 @@ Frame* FrameTree::find(const AtomicString& name) const
     if (!page)
         return nullptr;
 
-    for (Frame* frame = page->mainFrame(); frame; frame = frame->tree().traverseNext())
+    for (Frame* frame = page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
         if (frame->tree().name() == name)
             return frame;
+    }
 
     // Search the entire tree of each of the other pages in this namespace.
     // FIXME: Is random order OK?
@@ -320,9 +295,10 @@ bool FrameTree::isDescendantOf(const Frame* ancestor) const
     if (m_thisFrame->page() != ancestor->page())
         return false;
 
-    for (Frame* frame = m_thisFrame; frame; frame = frame->tree().parent())
+    for (Frame* frame = m_thisFrame; frame; frame = frame->tree().parent()) {
         if (frame == ancestor)
             return true;
+    }
     return false;
 }
 
@@ -416,8 +392,9 @@ static void printFrames(const blink::Frame* frame, const blink::Frame* targetFra
     if (frame == targetFrame) {
         printf("--> ");
         printIndent(indent - 1);
-    } else
+    } else {
         printIndent(indent);
+    }
 
     blink::FrameView* view = frame->isLocalFrame() ? toLocalFrame(frame)->view() : 0;
     printf("Frame %p %dx%d\n", frame, view ? view->width() : 0, view ? view->height() : 0);

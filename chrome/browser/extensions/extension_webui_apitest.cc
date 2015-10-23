@@ -22,7 +22,7 @@
 
 namespace extensions {
 
-namespace OnMessage = core_api::test::OnMessage;
+namespace OnMessage = api::test::OnMessage;
 
 namespace {
 
@@ -156,7 +156,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebUITest, OnMessage) {
   info.data = "hi";
   info.last_message = true;
   EventRouter::Get(profile())->BroadcastEvent(make_scoped_ptr(
-      new Event(OnMessage::kEventName, OnMessage::Create(info))));
+      new Event(events::RUNTIME_ON_MESSAGE, OnMessage::kEventName,
+                OnMessage::Create(info))));
 
   scoped_ptr<ExtensionTestMessageListener> listener(
       new ExtensionTestMessageListener(false));

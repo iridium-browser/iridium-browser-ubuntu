@@ -10,8 +10,7 @@
 #include "GrFragmentProcessor.h"
 #include "GrInvariantOutput.h"
 #include "SkRect.h"
-#include "gl/GrGLProcessor.h"
-#include "gl/GrGLSL.h"
+#include "gl/GrGLFragmentProcessor.h"
 #include "gl/builders/GrGLProgramBuilder.h"
 
 //////////////////////////////////////////////////////////////////////////////
@@ -24,10 +23,6 @@ public:
 
     const char* name() const override { return "Circle"; }
 
-    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
-
-    GrGLFragmentProcessor* createGLInstance() const override;
-
     const SkPoint& getCenter() const { return fCenter; }
     SkScalar getRadius() const { return fRadius; }
 
@@ -35,6 +30,10 @@ public:
 
 private:
     CircleEffect(GrPrimitiveEdgeType, const SkPoint& center, SkScalar radius);
+
+    GrGLFragmentProcessor* onCreateGLInstance() const override;
+
+    void onGetGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     bool onIsEqual(const GrFragmentProcessor&) const override;
 
@@ -76,17 +75,14 @@ bool CircleEffect::onIsEqual(const GrFragmentProcessor& other) const {
 
 GR_DEFINE_FRAGMENT_PROCESSOR_TEST(CircleEffect);
 
-GrFragmentProcessor* CircleEffect::TestCreate(SkRandom* random,
-                                              GrContext*,
-                                              const GrDrawTargetCaps& caps,
-                                              GrTexture*[]) {
+GrFragmentProcessor* CircleEffect::TestCreate(GrProcessorTestData* d) {
     SkPoint center;
-    center.fX = random->nextRangeScalar(0.f, 1000.f);
-    center.fY = random->nextRangeScalar(0.f, 1000.f);
-    SkScalar radius = random->nextRangeF(0.f, 1000.f);
+    center.fX = d->fRandom->nextRangeScalar(0.f, 1000.f);
+    center.fY = d->fRandom->nextRangeScalar(0.f, 1000.f);
+    SkScalar radius = d->fRandom->nextRangeF(0.f, 1000.f);
     GrPrimitiveEdgeType et;
     do {
-        et = (GrPrimitiveEdgeType)random->nextULessThan(kGrProcessorEdgeTypeCnt);
+        et = (GrPrimitiveEdgeType)d->fRandom->nextULessThan(kGrProcessorEdgeTypeCnt);
     } while (kHairlineAA_GrProcessorEdgeType == et);
     return CircleEffect::Create(et, center, radius);
 }
@@ -97,16 +93,12 @@ class GLCircleEffect : public GrGLFragmentProcessor {
 public:
     GLCircleEffect(const GrProcessor&);
 
-    virtual void emitCode(GrGLFPBuilder* builder,
-                          const GrFragmentProcessor& fp,
-                          const char* outputColor,
-                          const char* inputColor,
-                          const TransformedCoordsArray&,
-                          const TextureSamplerArray&) override;
+    virtual void emitCode(EmitArgs&) override;
 
     static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
-    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
+protected:
+    void onSetData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
 private:
     GrGLProgramDataManager::UniformHandle fCircleUniform;
@@ -120,22 +112,17 @@ GLCircleEffect::GLCircleEffect(const GrProcessor&) {
     fPrevRadius = -1.f;
 }
 
-void GLCircleEffect::emitCode(GrGLFPBuilder* builder,
-                              const GrFragmentProcessor& fp,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray& samplers) {
-    const CircleEffect& ce = fp.cast<CircleEffect>();
+void GLCircleEffect::emitCode(EmitArgs& args) {
+    const CircleEffect& ce = args.fFp.cast<CircleEffect>();
     const char *circleName;
     // The circle uniform is (center.x, center.y, radius + 0.5, 1 / (radius + 0.5)) for regular
     // fills and (..., radius - 0.5, 1 / (radius - 0.5)) for inverse fills.
-    fCircleUniform = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
+    fCircleUniform = args.fBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                          kVec4f_GrSLType, kDefault_GrSLPrecision,
                                          "circle",
                                          &circleName);
 
-    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = args.fBuilder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
 
     SkASSERT(kHairlineAA_GrProcessorEdgeType != ce.getEdgeType());
@@ -156,8 +143,8 @@ void GLCircleEffect::emitCode(GrGLFPBuilder* builder,
         fsBuilder->codeAppend("\t\td = d > 0.5 ? 1.0 : 0.0;\n");
     }
 
-    fsBuilder->codeAppendf("\t\t%s = %s;\n", outputColor,
-                           (GrGLSLExpr4(inputColor) * GrGLSLExpr1("d")).c_str());
+    fsBuilder->codeAppendf("\t\t%s = %s;\n", args.fOutputColor,
+                           (GrGLSLExpr4(args.fInputColor) * GrGLSLExpr1("d")).c_str());
 }
 
 void GLCircleEffect::GenKey(const GrProcessor& processor, const GrGLSLCaps&,
@@ -166,7 +153,7 @@ void GLCircleEffect::GenKey(const GrProcessor& processor, const GrGLSLCaps&,
     b->add32(ce.getEdgeType());
 }
 
-void GLCircleEffect::setData(const GrGLProgramDataManager& pdman, const GrProcessor& processor) {
+void GLCircleEffect::onSetData(const GrGLProgramDataManager& pdman, const GrProcessor& processor) {
     const CircleEffect& ce = processor.cast<CircleEffect>();
     if (ce.getRadius() != fPrevRadius || ce.getCenter() != fPrevCenter) {
         SkScalar radius = ce.getRadius();
@@ -184,12 +171,12 @@ void GLCircleEffect::setData(const GrGLProgramDataManager& pdman, const GrProces
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void CircleEffect::getGLProcessorKey(const GrGLSLCaps& caps,
+void CircleEffect::onGetGLProcessorKey(const GrGLSLCaps& caps,
                                      GrProcessorKeyBuilder* b) const {
     GLCircleEffect::GenKey(*this, caps, b);
 }
 
-GrGLFragmentProcessor* CircleEffect::createGLInstance() const  {
+GrGLFragmentProcessor* CircleEffect::onCreateGLInstance() const  {
     return SkNEW_ARGS(GLCircleEffect, (*this));
 }
 
@@ -204,10 +191,6 @@ public:
 
     const char* name() const override { return "Ellipse"; }
 
-    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
-
-    GrGLFragmentProcessor* createGLInstance() const override;
-
     const SkPoint& getCenter() const { return fCenter; }
     SkVector getRadii() const { return fRadii; }
 
@@ -215,6 +198,10 @@ public:
 
 private:
     EllipseEffect(GrPrimitiveEdgeType, const SkPoint& center, SkScalar rx, SkScalar ry);
+
+    GrGLFragmentProcessor* onCreateGLInstance() const override;
+
+    void onGetGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     bool onIsEqual(const GrFragmentProcessor&) const override;
 
@@ -258,18 +245,15 @@ bool EllipseEffect::onIsEqual(const GrFragmentProcessor& other) const {
 
 GR_DEFINE_FRAGMENT_PROCESSOR_TEST(EllipseEffect);
 
-GrFragmentProcessor* EllipseEffect::TestCreate(SkRandom* random,
-                                               GrContext*,
-                                               const GrDrawTargetCaps& caps,
-                                               GrTexture*[]) {
+GrFragmentProcessor* EllipseEffect::TestCreate(GrProcessorTestData* d) {
     SkPoint center;
-    center.fX = random->nextRangeScalar(0.f, 1000.f);
-    center.fY = random->nextRangeScalar(0.f, 1000.f);
-    SkScalar rx = random->nextRangeF(0.f, 1000.f);
-    SkScalar ry = random->nextRangeF(0.f, 1000.f);
+    center.fX = d->fRandom->nextRangeScalar(0.f, 1000.f);
+    center.fY = d->fRandom->nextRangeScalar(0.f, 1000.f);
+    SkScalar rx = d->fRandom->nextRangeF(0.f, 1000.f);
+    SkScalar ry = d->fRandom->nextRangeF(0.f, 1000.f);
     GrPrimitiveEdgeType et;
     do {
-        et = (GrPrimitiveEdgeType)random->nextULessThan(kGrProcessorEdgeTypeCnt);
+        et = (GrPrimitiveEdgeType)d->fRandom->nextULessThan(kGrProcessorEdgeTypeCnt);
     } while (kHairlineAA_GrProcessorEdgeType == et);
     return EllipseEffect::Create(et, center, rx, ry);
 }
@@ -280,16 +264,12 @@ class GLEllipseEffect : public GrGLFragmentProcessor {
 public:
     GLEllipseEffect(const GrProcessor&);
 
-    virtual void emitCode(GrGLFPBuilder* builder,
-                          const GrFragmentProcessor& fp,
-                          const char* outputColor,
-                          const char* inputColor,
-                          const TransformedCoordsArray&,
-                          const TextureSamplerArray&) override;
+    virtual void emitCode(EmitArgs&) override;
 
     static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
-    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
+protected:
+    void onSetData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
 private:
     GrGLProgramDataManager::UniformHandle fEllipseUniform;
@@ -303,21 +283,17 @@ GLEllipseEffect::GLEllipseEffect(const GrProcessor& effect) {
     fPrevRadii.fX = -1.f;
 }
 
-void GLEllipseEffect::emitCode(GrGLFPBuilder* builder,
-                               const GrFragmentProcessor& fp,
-                               const char* outputColor,
-                               const char* inputColor,
-                               const TransformedCoordsArray&,
-                               const TextureSamplerArray& samplers) {
-    const EllipseEffect& ee = fp.cast<EllipseEffect>();
+void GLEllipseEffect::emitCode(EmitArgs& args) {
+    const EllipseEffect& ee = args.fFp.cast<EllipseEffect>();
     const char *ellipseName;
     // The ellipse uniform is (center.x, center.y, 1 / rx^2, 1 / ry^2)
-    fEllipseUniform = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
-                                         kVec4f_GrSLType, kDefault_GrSLPrecision,
+    // The last two terms can underflow on mediump, so we use highp.
+    fEllipseUniform = args.fBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
+                                         kVec4f_GrSLType, kHigh_GrSLPrecision,
                                          "ellipse",
                                          &ellipseName);
 
-    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = args.fBuilder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
 
     // d is the offset to the ellipse center
@@ -348,8 +324,8 @@ void GLEllipseEffect::emitCode(GrGLFPBuilder* builder,
             SkFAIL("Hairline not expected here.");
     }
 
-    fsBuilder->codeAppendf("\t\t%s = %s;\n", outputColor,
-                           (GrGLSLExpr4(inputColor) * GrGLSLExpr1("alpha")).c_str());
+    fsBuilder->codeAppendf("\t\t%s = %s;\n", args.fOutputColor,
+                           (GrGLSLExpr4(args.fInputColor) * GrGLSLExpr1("alpha")).c_str());
 }
 
 void GLEllipseEffect::GenKey(const GrProcessor& effect, const GrGLSLCaps&,
@@ -358,7 +334,7 @@ void GLEllipseEffect::GenKey(const GrProcessor& effect, const GrGLSLCaps&,
     b->add32(ee.getEdgeType());
 }
 
-void GLEllipseEffect::setData(const GrGLProgramDataManager& pdman, const GrProcessor& effect) {
+void GLEllipseEffect::onSetData(const GrGLProgramDataManager& pdman, const GrProcessor& effect) {
     const EllipseEffect& ee = effect.cast<EllipseEffect>();
     if (ee.getRadii() != fPrevRadii || ee.getCenter() != fPrevCenter) {
         SkScalar invRXSqd = 1.f / (ee.getRadii().fX * ee.getRadii().fX);
@@ -371,12 +347,12 @@ void GLEllipseEffect::setData(const GrGLProgramDataManager& pdman, const GrProce
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void EllipseEffect::getGLProcessorKey(const GrGLSLCaps& caps,
+void EllipseEffect::onGetGLProcessorKey(const GrGLSLCaps& caps,
                                      GrProcessorKeyBuilder* b) const {
     GLEllipseEffect::GenKey(*this, caps, b);
 }
 
-GrGLFragmentProcessor* EllipseEffect::createGLInstance() const  {
+GrGLFragmentProcessor* EllipseEffect::onCreateGLInstance() const  {
     return SkNEW_ARGS(GLEllipseEffect, (*this));
 }
 

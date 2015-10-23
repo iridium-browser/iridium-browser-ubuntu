@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
 
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/shell.h"
 #include "base/logging.h"
 #include "chrome/browser/chromeos/ui/focus_ring_layer.h"
@@ -43,7 +43,7 @@ AccessibilityFocusRingController*
 }
 
 AccessibilityFocusRingController::AccessibilityFocusRingController()
-    : compositor_(NULL) {
+    : compositor_(nullptr) {
 }
 
 AccessibilityFocusRingController::~AccessibilityFocusRingController() {
@@ -73,14 +73,15 @@ void AccessibilityFocusRingController::Update() {
     gfx::Rect bounds = rings_[0].GetBounds();
     gfx::Display display =
       gfx::Screen::GetNativeScreen()->GetDisplayMatching(bounds);
-    aura::Window* root_window = ash::Shell::GetInstance()->display_controller()
-        ->GetRootWindowForDisplayId(display.id());
+    aura::Window* root_window = ash::Shell::GetInstance()
+                                    ->window_tree_host_manager()
+                                    ->GetRootWindowForDisplayId(display.id());
     ui::Compositor* compositor = root_window->layer()->GetCompositor();
     if (!compositor || root_window != layers_[0]->root_window()) {
       layers_[0]->Set(rings_[0]);
       if (compositor_ && compositor_->HasAnimationObserver(this)) {
         compositor_->RemoveAnimationObserver(this);
-        compositor_ = NULL;
+        compositor_ = nullptr;
       }
       continue;
     }
@@ -309,7 +310,7 @@ void AccessibilityFocusRingController::OnAnimationStep(
   if (delta >= transition_time) {
     layers_[0]->Set(rings_[0]);
     compositor_->RemoveAnimationObserver(this);
-    compositor_ = NULL;
+    compositor_ = nullptr;
     return;
   }
 
@@ -320,6 +321,13 @@ void AccessibilityFocusRingController::OnAnimationStep(
 
   layers_[0]->Set(AccessibilityFocusRing::Interpolate(
       previous_rings_[0], rings_[0], fraction));
+}
+
+void AccessibilityFocusRingController::OnCompositingShuttingDown(
+    ui::Compositor* compositor) {
+  DCHECK_EQ(compositor_, compositor);
+  compositor_->RemoveAnimationObserver(this);
+  compositor_ = nullptr;
 }
 
 }  // namespace chromeos

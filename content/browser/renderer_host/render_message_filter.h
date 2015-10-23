@@ -35,7 +35,7 @@
 #include "ui/surface/transport_dib.h"
 
 #if defined(OS_MACOSX)
-#include <IOSurface/IOSurfaceAPI.h>
+#include <IOSurface/IOSurface.h>
 #include "base/mac/scoped_cftyperef.h"
 #include "content/common/mac/font_loader.h"
 #endif
@@ -49,7 +49,6 @@
 #endif
 
 struct FontDescriptor;
-struct FrameHostMsg_AddNavigationTransitionData_Params;
 struct ViewHostMsg_CreateWindow_Params;
 
 namespace blink {
@@ -108,6 +107,8 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   // BrowserMessageFilter methods:
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnDestruct() const override;
+  void OverrideThreadForMessage(const IPC::Message& message,
+                                BrowserThread::ID* thread) override;
   base::TaskRunner* OverrideTaskRunnerForMessage(
       const IPC::Message& message) override;
 
@@ -291,13 +292,11 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
                             uint32_t data_size);
 #endif
 
-  void OnAddNavigationTransitionData(
-      FrameHostMsg_AddNavigationTransitionData_Params params);
-
-  void OnAllocateGpuMemoryBuffer(uint32 width,
+  void OnAllocateGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
+                                 uint32 width,
                                  uint32 height,
-                                 gfx::GpuMemoryBuffer::Format format,
-                                 gfx::GpuMemoryBuffer::Usage usage,
+                                 gfx::BufferFormat format,
+                                 gfx::BufferUsage usage,
                                  IPC::Message* reply);
   void GpuMemoryBufferAllocated(IPC::Message* reply,
                                 const gfx::GpuMemoryBufferHandle& handle);

@@ -90,8 +90,8 @@ class ExtensionContextMenuModel
   void ExecuteCommand(int command_id, int event_flags) override;
 
   // ExtensionUninstallDialog::Delegate:
-  void ExtensionUninstallAccepted() override;
-  void ExtensionUninstallCanceled() override;
+  void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
+                                        const base::string16& error) override;
 
  private:
   friend class base::RefCounted<ExtensionContextMenuModel>;
@@ -100,7 +100,7 @@ class ExtensionContextMenuModel
   ~ExtensionContextMenuModel() override;
 
   void InitMenu(const extensions::Extension* extension,
-                ButtonVisibility button_visibility_);
+                ButtonVisibility button_visibility);
 
   // Gets the extension we are displaying the menu for. Returns NULL if the
   // extension has been uninstalled and no longer exists.

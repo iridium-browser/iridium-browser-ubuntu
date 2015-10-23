@@ -33,8 +33,7 @@ class ServiceWorkerStorage;
 //  - waiting for older ServiceWorkerVersions to deactivate
 //  - designating the new version to be the 'active' version
 //  - updating storage
-class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
-                                 public EmbeddedWorkerInstance::Listener {
+class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase {
  public:
   typedef base::Callback<void(ServiceWorkerStatusCode status,
                               const std::string& status_message,
@@ -106,6 +105,7 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
 
   void SetPhase(Phase phase);
 
+  void StartImpl();
   void ContinueWithRegistration(
       ServiceWorkerStatusCode status,
       const scoped_refptr<ServiceWorkerRegistration>& registration);
@@ -134,14 +134,6 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   void ResolvePromise(ServiceWorkerStatusCode status,
                       const std::string& status_message,
                       ServiceWorkerRegistration* registration);
-
-  // EmbeddedWorkerInstance::Listener override of OnPausedAfterDownload.
-  void OnPausedAfterDownload() override;
-  bool OnMessageReceived(const IPC::Message& message) override;
-
-  void OnCompareScriptResourcesComplete(
-      ServiceWorkerStatusCode status,
-      bool are_equal);
 
   void AddRegistrationToMatchingProviderHosts(
       ServiceWorkerRegistration* registration);

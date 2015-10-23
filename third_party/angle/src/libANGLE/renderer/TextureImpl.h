@@ -20,6 +20,7 @@
 namespace egl
 {
 class Surface;
+class Image;
 }
 
 namespace gl
@@ -50,9 +51,9 @@ class TextureImpl : public FramebufferAttachmentObjectImpl
                                   const gl::PixelUnpackState &unpack, const uint8_t *pixels) = 0;
 
     virtual gl::Error setCompressedImage(GLenum target, size_t level, GLenum internalFormat, const gl::Extents &size,
-                                         const gl::PixelUnpackState &unpack, const uint8_t *pixels) = 0;
+                                         const gl::PixelUnpackState &unpack, size_t imageSize, const uint8_t *pixels) = 0;
     virtual gl::Error setCompressedSubImage(GLenum target, size_t level, const gl::Box &area, GLenum format,
-                                            const gl::PixelUnpackState &unpack, const uint8_t *pixels) = 0;
+                                            const gl::PixelUnpackState &unpack, size_t imageSize, const uint8_t *pixels) = 0;
 
     virtual gl::Error copyImage(GLenum target, size_t level, const gl::Rectangle &sourceArea, GLenum internalFormat,
                                 const gl::Framebuffer *source) = 0;
@@ -60,6 +61,8 @@ class TextureImpl : public FramebufferAttachmentObjectImpl
                                    const gl::Framebuffer *source) = 0;
 
     virtual gl::Error setStorage(GLenum target, size_t levels, GLenum internalFormat, const gl::Extents &size) = 0;
+
+    virtual gl::Error setEGLImageTarget(GLenum target, egl::Image *image) = 0;
 
     virtual gl::Error generateMipmaps(const gl::SamplerState &samplerState) = 0;
 

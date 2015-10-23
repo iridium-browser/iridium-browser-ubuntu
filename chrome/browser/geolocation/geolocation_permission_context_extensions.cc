@@ -7,8 +7,8 @@
 #include "base/callback.h"
 
 #if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/permissions/permission_request_id.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/content_settings/core/common/permission_request_id.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/process_map.h"
@@ -71,7 +71,7 @@ bool GeolocationPermissionContextExtensions::RequestPermission(
             requesting_frame_origin);
     if (IsExtensionWithPermissionOrSuggestInConsole(
             APIPermission::kGeolocation, extension,
-            web_contents->GetRenderViewHost())) {
+            web_contents->GetMainFrame())) {
       // Make sure the extension is in the calling process.
       if (extensions::ProcessMap::Get(profile_)->Contains(
               extension->id(), request_id.render_process_id())) {

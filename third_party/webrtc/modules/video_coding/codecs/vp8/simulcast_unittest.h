@@ -17,7 +17,6 @@
 #include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
-#include "webrtc/experiments.h"
 #include "webrtc/modules/video_coding/codecs/interface/mock/mock_video_codec_interface.h"
 #include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
 #include "webrtc/modules/video_coding/codecs/vp8/temporal_layers.h"
@@ -124,7 +123,7 @@ class Vp8TestDecodedImageCallback : public DecodedImageCallback {
   Vp8TestDecodedImageCallback()
       : decoded_frames_(0) {
   }
-  virtual int32_t Decoded(I420VideoFrame& decoded_image) {
+  virtual int32_t Decoded(VideoFrame& decoded_image) {
     for (int i = 0; i < decoded_image.width(); ++i) {
       EXPECT_NEAR(kColorY, decoded_image.buffer(kYPlane)[i], 1);
     }
@@ -196,11 +195,15 @@ class SkipEncodingUnusedStreamsTest {
       layers_->PopulateCodecSpecific(base_layer_sync, vp8_info, timestamp);
     }
 
-    void FrameEncoded(unsigned int size, uint32_t timestamp) override {
-      layers_->FrameEncoded(size, timestamp);
+    void FrameEncoded(unsigned int size, uint32_t timestamp, int qp) override {
+      layers_->FrameEncoded(size, timestamp, qp);
     }
 
     int CurrentLayerId() const override { return layers_->CurrentLayerId(); }
+
+    bool UpdateConfiguration(vpx_codec_enc_cfg_t* cfg) override {
+      return false;
+    }
 
     int configured_bitrate_;
     TemporalLayers* layers_;
@@ -228,9 +231,8 @@ class TestVp8Simulcast : public ::testing::Test {
      : encoder_(encoder),
        decoder_(decoder) {}
 
-  // Creates an I420VideoFrame from |plane_colors|.
-  static void CreateImage(I420VideoFrame* frame,
-                          int plane_colors[kNumOfPlanes]) {
+  // Creates an VideoFrame from |plane_colors|.
+  static void CreateImage(VideoFrame* frame, int plane_colors[kNumOfPlanes]) {
     for (int plane_num = 0; plane_num < kNumOfPlanes; ++plane_num) {
       int width = (plane_num != kYPlane ? (frame->width() + 1) / 2 :
         frame->width());
@@ -995,7 +997,7 @@ class TestVp8Simulcast : public ::testing::Test {
   rtc::scoped_ptr<VP8Decoder> decoder_;
   MockDecodedImageCallback decoder_callback_;
   VideoCodec settings_;
-  I420VideoFrame input_frame_;
+  VideoFrame input_frame_;
 };
 
 }  // namespace testing

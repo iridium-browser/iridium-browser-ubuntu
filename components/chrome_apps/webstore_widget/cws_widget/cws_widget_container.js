@@ -87,9 +87,6 @@ function CWSWidgetContainer(document, parentNode, delegate, params) {
    */
   var spinnerLayer = document.createElement('div');
   spinnerLayer.className = 'cws-widget-spinner-layer';
-  spinnerLayer.setAttribute('role', 'img');
-  // TODO(tbarzic): Set something meaningfull.
-  spinnerLayer.setAttribute('alt', '');
   parentNode.appendChild(spinnerLayer);
 
   /** @private {!CWSWidgetContainer.SpinnerLayerController} */
@@ -162,7 +159,7 @@ function CWSWidgetContainer(document, parentNode, delegate, params) {
 
   /**
    * Map of options for the widget.
-   * @type {?Object.<string, *>}
+   * @type {?Object<*>}
    * @private
    */
   this.options_ = null;
@@ -224,7 +221,9 @@ function CWSWidgetContainer(document, parentNode, delegate, params) {
  * @typedef {{
  *   UI_LOCALE: string,
  *   LINK_TO_WEBSTORE: string,
- *   INSTALLATION_FAILED_MESSAGE: string
+ *   INSTALLATION_FAILED_MESSAGE: string,
+ *   LOADING_SPINNER_ALT: string,
+ *   INSTALLING_SPINNER_ALT: string
  * }}
  */
 CWSWidgetContainer.Strings;
@@ -369,6 +368,8 @@ CWSWidgetContainer.prototype.ready = function() {
       return;
     }
 
+    this.spinnerLayerController_.setAltText(
+        this.delegate_.strings.LOADING_SPINNER_ALT);
     this.spinnerLayerController_.setVisible(true);
 
     this.metricsRecorder_.recordShowDialog();
@@ -392,7 +393,7 @@ CWSWidgetContainer.prototype.ready = function() {
  * Initializes and starts loading the Chrome Web Store widget webview.
  * Must not be called before {@code this.ready()} is resolved.
  *
- * @param {!Object<string, *>} options Map of options for the dialog.
+ * @param {!Object<*>} options Map of options for the dialog.
  * @param {?string} webStoreUrl Url for more results. Null if not supported.
  * @return {!Promise.<CWSWidgetContainer.ResolveReason>} Resolved when app
  *     installation is done, or the installation is cancelled.
@@ -442,6 +443,8 @@ CWSWidgetContainer.prototype.start = function(options, webStoreUrl) {
     this.webviewContainer_.appendChild(this.webview_);
 
     this.spinnerLayerController_.setElementToFocusOnHide(this.webview_);
+    this.spinnerLayerController_.setAltText(
+        this.delegate_.strings.LOADING_SPINNER_ALT);
     this.spinnerLayerController_.setVisible(true);
 
     this.webviewClient_ = new CWSContainerClient(
@@ -545,6 +548,8 @@ CWSWidgetContainer.prototype.onInstallRequest_ = function(e) {
   this.appInstaller_ = new AppInstaller(itemId, this.delegate_);
   this.appInstaller_.install(this.onItemInstalled_.bind(this));
 
+  this.spinnerLayerController_.setAltText(
+      this.delegate_.strings.INSTALLING_SPINNER_ALT);
   this.spinnerLayerController_.setVisible(true);
   this.state_ = CWSWidgetContainer.State.INSTALLING;
 };
@@ -812,6 +817,15 @@ CWSWidgetContainer.SpinnerLayerController.prototype.reset = function() {
 };
 
 /**
+ * Sets alt text for the spinner layer.
+ * @param {string} text
+ */
+CWSWidgetContainer.SpinnerLayerController.prototype.setAltText = function(
+    text) {
+  this.spinnerLayer_.setAttribute('aria-label', text);
+};
+
+/**
  * Shows or hides the spinner layer and handles the layer's opacity transition.
  * @param {boolean} visible Whether the layer should become visible.
  */
@@ -909,7 +923,7 @@ CWSWidgetContainer.MetricsRecorder.INSTALL = {
  */
 CWSWidgetContainer.MetricsRecorder.prototype.recordLoad = function(result) {
   if (0 <= result && result < 3)
-    this.metricsImpl_.recordEnum('SuggestApps.Load', result, 3);
+    this.metricsImpl_.recordEnum('Load', result, 3);
 };
 
 /**
@@ -919,7 +933,7 @@ CWSWidgetContainer.MetricsRecorder.prototype.recordLoad = function(result) {
 CWSWidgetContainer.MetricsRecorder.prototype.recordCloseDialog = function(
     reason) {
   if (0 <= reason && reason < 4)
-    this.metricsImpl_.recordEnum('SuggestApps.CloseDialog', reason, 4);
+    this.metricsImpl_.recordEnum('CloseDialog', reason, 4);
 };
 
 /**
@@ -928,17 +942,17 @@ CWSWidgetContainer.MetricsRecorder.prototype.recordCloseDialog = function(
  */
 CWSWidgetContainer.MetricsRecorder.prototype.recordInstall = function(result) {
   if (0 <= result && result < 3)
-    this.metricsImpl_.recordEnum('SuggestApps.Install', result, 3);
+    this.metricsImpl_.recordEnum('Install', result, 3);
 };
 
 CWSWidgetContainer.MetricsRecorder.prototype.recordShowDialog = function() {
-  this.metricsImpl_.recordUserAction('SuggestApps.ShowDialog');
+  this.metricsImpl_.recordUserAction('ShowDialog');
 };
 
 CWSWidgetContainer.MetricsRecorder.prototype.startLoad = function() {
-  this.metricsImpl_.startInterval('SuggestApps.LoadTime');
+  this.metricsImpl_.startInterval('LoadTime');
 };
 
 CWSWidgetContainer.MetricsRecorder.prototype.finishLoad = function() {
-  this.metricsImpl_.recordInterval('SuggestApps.LoadTime');
+  this.metricsImpl_.recordInterval('LoadTime');
 };

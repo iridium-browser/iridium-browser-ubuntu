@@ -122,133 +122,59 @@
 #include "internal.h"
 
 
-/* mod 128 saturating subtract of two 64-bit values in big-endian order */
-static int satsub64be(const uint8_t *v1, const uint8_t *v2) {
-  int ret, sat, brw, i;
+/* to_u64_be treats |in| as a 8-byte big-endian integer and returns the value as
+ * a |uint64_t|. */
+static uint64_t to_u64_be(const uint8_t in[8]) {
+  uint64_t ret = 0;
+  unsigned i;
+  for (i = 0; i < 8; i++) {
+    ret <<= 8;
+    ret |= in[i];
+  }
+  return ret;
+}
 
-  if (sizeof(long) == 8) {
-    do {
-      const union {
-        long one;
-        char little;
-      } is_endian = {1};
-      long l;
+/* dtls1_bitmap_should_discard returns one if |seq_num| has been seen in |bitmap|
+ * or is stale. Otherwise it returns zero. */
+static int dtls1_bitmap_should_discard(DTLS1_BITMAP *bitmap,
+                                       const uint8_t seq_num[8]) {
+  const unsigned kWindowSize = sizeof(bitmap->map) * 8;
 
-      if (is_endian.little) {
-        break;
-      }
-      /* not reached on little-endians */
-      /* following test is redundant, because input is
-       * always aligned, but I take no chances... */
-      if (((size_t)v1 | (size_t)v2) & 0x7) {
-        break;
-      }
+  uint64_t seq_num_u = to_u64_be(seq_num);
+  if (seq_num_u > bitmap->max_seq_num) {
+    return 0;
+  }
+  uint64_t idx = bitmap->max_seq_num - seq_num_u;
+  return idx >= kWindowSize || (bitmap->map & (((uint64_t)1) << idx));
+}
 
-      l = *((long *)v1);
-      l -= *((long *)v2);
-      if (l > 128) {
-        return 128;
-      } else if (l < -128) {
-        return -128;
-      } else {
-        return (int)l;
-      }
-    } while (0);
+/* dtls1_bitmap_record updates |bitmap| to record receipt of sequence number
+ * |seq_num|. It slides the window forward if needed. It is an error to call
+ * this function on a stale sequence number. */
+static void dtls1_bitmap_record(DTLS1_BITMAP *bitmap,
+                                const uint8_t seq_num[8]) {
+  const unsigned kWindowSize = sizeof(bitmap->map) * 8;
+
+  uint64_t seq_num_u = to_u64_be(seq_num);
+  /* Shift the window if necessary. */
+  if (seq_num_u > bitmap->max_seq_num) {
+    uint64_t shift = seq_num_u - bitmap->max_seq_num;
+    if (shift >= kWindowSize) {
+      bitmap->map = 0;
+    } else {
+      bitmap->map <<= shift;
+    }
+    bitmap->max_seq_num = seq_num_u;
   }
 
-  ret = (int)v1[7] - (int)v2[7];
-  sat = 0;
-  brw = ret >> 8; /* brw is either 0 or -1 */
-  if (ret & 0x80) {
-    for (i = 6; i >= 0; i--) {
-      brw += (int)v1[i] - (int)v2[i];
-      sat |= ~brw;
-      brw >>= 8;
-    }
-  } else {
-    for (i = 6; i >= 0; i--) {
-      brw += (int)v1[i] - (int)v2[i];
-      sat |= brw;
-      brw >>= 8;
-    }
-  }
-  brw <<= 8; /* brw is either 0 or -256 */
-
-  if (sat & 0xff) {
-    return brw | 0x80;
-  } else {
-    return brw + (ret & 0xFF);
+  uint64_t idx = bitmap->max_seq_num - seq_num_u;
+  if (idx < kWindowSize) {
+    bitmap->map |= ((uint64_t)1) << idx;
   }
 }
 
-static int dtls1_record_replay_check(SSL *s, DTLS1_BITMAP *bitmap);
-static void dtls1_record_bitmap_update(SSL *s, DTLS1_BITMAP *bitmap);
-static int dtls1_process_record(SSL *s);
 static int do_dtls1_write(SSL *s, int type, const uint8_t *buf,
-                          unsigned int len);
-
-static int dtls1_process_record(SSL *s) {
-  int al;
-  SSL3_RECORD *rr;
-
-  rr = &(s->s3->rrec);
-
-  /* At this point, s->packet_length == SSL3_RT_HEADER_LNGTH + rr->length, and
-   * we have that many bytes in s->packet. */
-  rr->input = &(s->packet[DTLS1_RT_HEADER_LENGTH]);
-
-  /* ok, we can now read from 's->packet' data into 'rr' rr->input points at
-   * rr->length bytes, which need to be copied into rr->data by either the
-   * decryption or by the decompression When the data is 'copied' into the
-   * rr->data buffer, rr->input will be pointed at the new buffer */
-
-  /* We now have - encrypted [ MAC [ compressed [ plain ] ] ] rr->length bytes
-   * of encrypted compressed stuff. */
-
-  /* check is not needed I believe */
-  if (rr->length > SSL3_RT_MAX_ENCRYPTED_LENGTH) {
-    al = SSL_AD_RECORD_OVERFLOW;
-    OPENSSL_PUT_ERROR(SSL, dtls1_process_record,
-                      SSL_R_ENCRYPTED_LENGTH_TOO_LONG);
-    goto f_err;
-  }
-
-  /* decrypt in place in 'rr->input' */
-  rr->data = rr->input;
-
-  if (!s->enc_method->enc(s, 0)) {
-    /* Bad packets are silently dropped in DTLS. Clear the error queue of any
-     * errors decryption may have added. */
-    ERR_clear_error();
-    rr->length = 0;
-    s->packet_length = 0;
-    goto err;
-  }
-
-  if (rr->length > SSL3_RT_MAX_PLAIN_LENGTH) {
-    al = SSL_AD_RECORD_OVERFLOW;
-    OPENSSL_PUT_ERROR(SSL, dtls1_process_record, SSL_R_DATA_LENGTH_TOO_LONG);
-    goto f_err;
-  }
-
-  rr->off = 0;
-  /* So at this point the following is true
-   * ssl->s3->rrec.type 	is the type of record
-   * ssl->s3->rrec.length	== number of bytes in record
-   * ssl->s3->rrec.off	== offset to first valid byte
-   * ssl->s3->rrec.data	== where to take bytes from, increment
-   *			   after use :-). */
-
-  /* we have pulled in a full packet so zero things */
-  s->packet_length = 0;
-  return 1;
-
-f_err:
-  ssl3_send_alert(s, SSL3_AL_FATAL, al);
-
-err:
-  return 0;
-}
+                          unsigned int len, enum dtls1_use_epoch_t use_epoch);
 
 /* Call this to get a new input record.
  * It will return <= 0 if more data is needed, normally due to an error
@@ -260,11 +186,11 @@ err:
  *
  * used only by dtls1_read_bytes */
 int dtls1_get_record(SSL *s) {
-  int ssl_major, ssl_minor;
-  int i, n;
+  uint8_t ssl_major, ssl_minor;
+  int n;
   SSL3_RECORD *rr;
-  unsigned char *p = NULL;
-  unsigned short version;
+  uint8_t *p = NULL;
+  uint16_t version;
 
   rr = &(s->s3->rrec);
 
@@ -298,7 +224,7 @@ again:
     rr->type = *(p++);
     ssl_major = *(p++);
     ssl_minor = *(p++);
-    version = (ssl_major << 8) | ssl_minor;
+    version = (((uint16_t)ssl_major) << 8) | ssl_minor;
 
     /* sequence number is 64 bits, with top 2 bytes = epoch */
     n2s(p, rr->epoch);
@@ -308,30 +234,16 @@ again:
 
     n2s(p, rr->length);
 
-    /* Lets check version */
-    if (s->s3->have_version) {
-      if (version != s->version) {
-        /* The record's version doesn't match, so silently drop it.
-         *
-         * TODO(davidben): This doesn't work. The DTLS record layer is not
-         * packet-based, so the remainder of the packet isn't dropped and we
-         * get a framing error. It's also unclear what it means to silently
-         * drop a record in a packet containing two records. */
-        rr->length = 0;
-        s->packet_length = 0;
-        goto again;
-      }
-    }
-
-    if ((version & 0xff00) != (s->version & 0xff00)) {
-      /* wrong version, silently discard record */
-      rr->length = 0;
-      s->packet_length = 0;
-      goto again;
-    }
-
-    if (rr->length > SSL3_RT_MAX_ENCRYPTED_LENGTH) {
-      /* record too long, silently discard it */
+    /* Check the header. */
+    if ((s->s3->have_version && version != s->version) ||
+        (version & 0xff00) != (s->version & 0xff00) ||
+        rr->length > SSL3_RT_MAX_ENCRYPTED_LENGTH) {
+      /* The record's header is invalid, so silently drop it.
+       *
+       * TODO(davidben): This doesn't work. The DTLS record layer is not
+       * packet-based, so the remainder of the packet isn't dropped and we
+       * get a framing error. It's also unclear what it means to silently
+       * drop a record in a packet containing two records. */
       rr->length = 0;
       s->packet_length = 0;
       goto again;
@@ -344,14 +256,9 @@ again:
 
   if (rr->length > s->packet_length - DTLS1_RT_HEADER_LENGTH) {
     /* now s->packet_length == DTLS1_RT_HEADER_LENGTH */
-    i = rr->length;
-    n = ssl3_read_n(s, i, 1);
-    if (n <= 0) {
-      return n; /* error or non-blocking io */
-    }
-
-    /* this packet contained a partial record, dump it */
-    if (n != i) {
+    n = ssl3_read_n(s, rr->length, 1);
+    /* This packet contained a partial record, dump it. */
+    if (n != rr->length) {
       rr->length = 0;
       s->packet_length = 0;
       goto again;
@@ -372,25 +279,72 @@ again:
   }
 
   /* Check whether this is a repeat, or aged record. */
-  if (!dtls1_record_replay_check(s, &s->d1->bitmap)) {
+  if (dtls1_bitmap_should_discard(&s->d1->bitmap, s->s3->read_sequence)) {
     rr->length = 0;
     s->packet_length = 0; /* dump this record */
     goto again;           /* get another record */
   }
 
-  /* just read a 0 length packet */
+  /* |rr->data| points to |rr->length| bytes of ciphertext in |s->packet|. */
+  rr->data = &s->packet[DTLS1_RT_HEADER_LENGTH];
+
+  uint8_t seq[8];
+  seq[0] = rr->epoch >> 8;
+  seq[1] = rr->epoch & 0xff;
+  memcpy(&seq[2], &s->s3->read_sequence[2], 6);
+
+  /* Decrypt the packet in-place. Note it is important that |ssl_aead_ctx_open|
+   * not write beyond |rr->length|. There may be another record in the packet.
+   *
+   * TODO(davidben): This assumes |s->version| is the same as the record-layer
+   * version which isn't always true, but it only differs with the NULL cipher
+   * which ignores the parameter. */
+  size_t plaintext_len;
+  if (!SSL_AEAD_CTX_open(s->aead_read_ctx, rr->data, &plaintext_len, rr->length,
+                         rr->type, s->version, seq, rr->data, rr->length)) {
+    /* Bad packets are silently dropped in DTLS. Clear the error queue of any
+     * errors decryption may have added. */
+    ERR_clear_error();
+    rr->length = 0;
+    s->packet_length = 0;
+    goto again;
+  }
+
+  if (plaintext_len > SSL3_RT_MAX_PLAIN_LENGTH) {
+    OPENSSL_PUT_ERROR(SSL, SSL_R_DATA_LENGTH_TOO_LONG);
+    ssl3_send_alert(s, SSL3_AL_FATAL, SSL_AD_RECORD_OVERFLOW);
+    return -1;
+  }
+  assert(plaintext_len < (1u << 16));
+  rr->length = plaintext_len;
+
+  rr->off = 0;
+  /* So at this point the following is true
+   * ssl->s3->rrec.type   is the type of record
+   * ssl->s3->rrec.length == number of bytes in record
+   * ssl->s3->rrec.off  == offset to first valid byte
+   * ssl->s3->rrec.data == the first byte of the record body. */
+
+  /* we have pulled in a full packet so zero things */
+  s->packet_length = 0;
+
+  dtls1_bitmap_record(&s->d1->bitmap, s->s3->read_sequence);
+
+  /* just read a 0 length packet
+   * TODO(davidben): Reject excess 0-length packets? */
   if (rr->length == 0) {
     goto again;
   }
 
-  if (!dtls1_process_record(s)) {
-    rr->length = 0;
-    s->packet_length = 0; /* dump this record */
-    goto again;           /* get another record */
-  }
-  dtls1_record_bitmap_update(s, &s->d1->bitmap); /* Mark receipt of record. */
-
   return 1;
+}
+
+int dtls1_read_app_data(SSL *ssl, uint8_t *buf, int len, int peek) {
+  return dtls1_read_bytes(ssl, SSL3_RT_APPLICATION_DATA, buf, len, peek);
+}
+
+void dtls1_read_close_notify(SSL *ssl) {
+  dtls1_read_bytes(ssl, 0, NULL, 0, 0);
 }
 
 /* Return up to 'len' payload bytes received in 'type' records.
@@ -430,7 +384,7 @@ int dtls1_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek) {
   if ((type && (type != SSL3_RT_APPLICATION_DATA) &&
        (type != SSL3_RT_HANDSHAKE) && type) ||
       (peek && (type != SSL3_RT_APPLICATION_DATA))) {
-    OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, ERR_R_INTERNAL_ERROR);
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
     return -1;
   }
 
@@ -441,7 +395,7 @@ int dtls1_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek) {
       return i;
     }
     if (i == 0) {
-      OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, SSL_R_SSL_HANDSHAKE_FAILURE);
+      OPENSSL_PUT_ERROR(SSL, SSL_R_SSL_HANDSHAKE_FAILURE);
       return -1;
     }
   }
@@ -504,7 +458,7 @@ start:
       /* TODO(davidben): Is this check redundant with the handshake_func
        * check? */
       al = SSL_AD_UNEXPECTED_MESSAGE;
-      OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, SSL_R_APP_DATA_IN_HANDSHAKE);
+      OPENSSL_PUT_ERROR(SSL, SSL_R_APP_DATA_IN_HANDSHAKE);
       goto f_err;
     }
 
@@ -539,7 +493,7 @@ start:
     /* Alerts may not be fragmented. */
     if (rr->length < 2) {
       al = SSL_AD_DECODE_ERROR;
-      OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, SSL_R_BAD_ALERT);
+      OPENSSL_PUT_ERROR(SSL, SSL_R_BAD_ALERT);
       goto f_err;
     }
 
@@ -573,8 +527,7 @@ start:
 
       s->rwstate = SSL_NOTHING;
       s->s3->fatal_alert = alert_descr;
-      OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes,
-                        SSL_AD_REASON_OFFSET + alert_descr);
+      OPENSSL_PUT_ERROR(SSL, SSL_AD_REASON_OFFSET + alert_descr);
       BIO_snprintf(tmp, sizeof tmp, "%d", alert_descr);
       ERR_add_error_data(2, "SSL alert number ", tmp);
       s->shutdown |= SSL_RECEIVED_SHUTDOWN;
@@ -582,7 +535,7 @@ start:
       return 0;
     } else {
       al = SSL_AD_ILLEGAL_PARAMETER;
-      OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, SSL_R_UNKNOWN_ALERT_TYPE);
+      OPENSSL_PUT_ERROR(SSL, SSL_R_UNKNOWN_ALERT_TYPE);
       goto f_err;
     }
 
@@ -601,7 +554,7 @@ start:
      * record payload has to look like */
     if (rr->length != 1 || rr->off != 0 || rr->data[0] != SSL3_MT_CCS) {
       al = SSL_AD_ILLEGAL_PARAMETER;
-      OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, SSL_R_BAD_CHANGE_CIPHER_SPEC);
+      OPENSSL_PUT_ERROR(SSL, SSL_R_BAD_CHANGE_CIPHER_SPEC);
       goto f_err;
     }
 
@@ -638,7 +591,7 @@ start:
   if (rr->type == SSL3_RT_HANDSHAKE && !s->in_handshake) {
     if (rr->length < DTLS1_HM_HEADER_LENGTH) {
       al = SSL_AD_DECODE_ERROR;
-      OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, SSL_R_BAD_HANDSHAKE_RECORD);
+      OPENSSL_PUT_ERROR(SSL, SSL_R_BAD_HANDSHAKE_RECORD);
       goto f_err;
     }
     struct hm_header_st msg_hdr;
@@ -666,7 +619,7 @@ start:
   assert(rr->type != SSL3_RT_CHANGE_CIPHER_SPEC && rr->type != SSL3_RT_ALERT);
 
   al = SSL_AD_UNEXPECTED_MESSAGE;
-  OPENSSL_PUT_ERROR(SSL, dtls1_read_bytes, SSL_R_UNEXPECTED_RECORD);
+  OPENSSL_PUT_ERROR(SSL, SSL_R_UNEXPECTED_RECORD);
 
 f_err:
   ssl3_send_alert(s, SSL3_AL_FATAL, al);
@@ -674,7 +627,7 @@ err:
   return -1;
 }
 
-int dtls1_write_app_data_bytes(SSL *s, int type, const void *buf_, int len) {
+int dtls1_write_app_data(SSL *s, const void *buf_, int len) {
   int i;
 
   if (SSL_in_init(s) && !s->in_handshake) {
@@ -683,41 +636,96 @@ int dtls1_write_app_data_bytes(SSL *s, int type, const void *buf_, int len) {
       return i;
     }
     if (i == 0) {
-      OPENSSL_PUT_ERROR(SSL, dtls1_write_app_data_bytes,
-                        SSL_R_SSL_HANDSHAKE_FAILURE);
+      OPENSSL_PUT_ERROR(SSL, SSL_R_SSL_HANDSHAKE_FAILURE);
       return -1;
     }
   }
 
   if (len > SSL3_RT_MAX_PLAIN_LENGTH) {
-    OPENSSL_PUT_ERROR(SSL, dtls1_write_app_data_bytes,
-                      SSL_R_DTLS_MESSAGE_TOO_BIG);
+    OPENSSL_PUT_ERROR(SSL, SSL_R_DTLS_MESSAGE_TOO_BIG);
     return -1;
   }
 
-  i = dtls1_write_bytes(s, type, buf_, len);
+  i = dtls1_write_bytes(s, SSL3_RT_APPLICATION_DATA, buf_, len,
+                        dtls1_use_current_epoch);
   return i;
 }
 
 /* Call this to write data in records of type 'type' It will return <= 0 if not
  * all data has been sent or non-blocking IO. */
-int dtls1_write_bytes(SSL *s, int type, const void *buf, int len) {
+int dtls1_write_bytes(SSL *s, int type, const void *buf, int len,
+                      enum dtls1_use_epoch_t use_epoch) {
   int i;
 
   assert(len <= SSL3_RT_MAX_PLAIN_LENGTH);
   s->rwstate = SSL_NOTHING;
-  i = do_dtls1_write(s, type, buf, len);
+  i = do_dtls1_write(s, type, buf, len, use_epoch);
   return i;
 }
 
+/* dtls1_seal_record seals a new record of type |type| and plaintext |in| and
+ * writes it to |out|. At most |max_out| bytes will be written. It returns one
+ * on success and zero on error. On success, it updates the write sequence
+ * number. */
+static int dtls1_seal_record(SSL *s, uint8_t *out, size_t *out_len,
+                             size_t max_out, uint8_t type, const uint8_t *in,
+                             size_t in_len, enum dtls1_use_epoch_t use_epoch) {
+  if (max_out < DTLS1_RT_HEADER_LENGTH) {
+    OPENSSL_PUT_ERROR(SSL, SSL_R_BUFFER_TOO_SMALL);
+    return 0;
+  }
+
+  /* Determine the parameters for the current epoch. */
+  uint16_t epoch = s->d1->w_epoch;
+  SSL_AEAD_CTX *aead = s->aead_write_ctx;
+  uint8_t *seq = s->s3->write_sequence;
+  if (use_epoch == dtls1_use_previous_epoch) {
+    /* DTLS renegotiation is unsupported, so only epochs 0 (NULL cipher) and 1
+     * (negotiated cipher) exist. */
+    assert(s->d1->w_epoch == 1);
+    epoch = s->d1->w_epoch - 1;
+    aead = NULL;
+    seq = s->d1->last_write_sequence;
+  }
+
+  out[0] = type;
+
+  uint16_t wire_version = s->s3->have_version ? s->version : DTLS1_VERSION;
+  out[1] = wire_version >> 8;
+  out[2] = wire_version & 0xff;
+
+  out[3] = epoch >> 8;
+  out[4] = epoch & 0xff;
+  memcpy(&out[5], &seq[2], 6);
+
+  size_t ciphertext_len;
+  if (!SSL_AEAD_CTX_seal(aead, out + DTLS1_RT_HEADER_LENGTH, &ciphertext_len,
+                         max_out - DTLS1_RT_HEADER_LENGTH, type, wire_version,
+                         &out[3] /* seq */, in, in_len) ||
+      !ssl3_record_sequence_update(&seq[2], 6)) {
+    return 0;
+  }
+
+  if (ciphertext_len >= 1 << 16) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_OVERFLOW);
+    return 0;
+  }
+  out[11] = ciphertext_len >> 8;
+  out[12] = ciphertext_len & 0xff;
+
+  *out_len = DTLS1_RT_HEADER_LENGTH + ciphertext_len;
+
+  if (s->msg_callback) {
+    s->msg_callback(1 /* write */, 0, SSL3_RT_HEADER, out,
+                    DTLS1_RT_HEADER_LENGTH, s, s->msg_callback_arg);
+  }
+
+  return 1;
+}
+
 static int do_dtls1_write(SSL *s, int type, const uint8_t *buf,
-                          unsigned int len) {
-  uint8_t *p, *pseq;
-  int i;
-  int prefix_len = 0;
-  int eivlen = 0;
-  SSL3_RECORD *wr;
-  SSL3_BUFFER *wb;
+                          unsigned int len, enum dtls1_use_epoch_t use_epoch) {
+  SSL3_BUFFER *wb = &s->s3->wbuf;
 
   /* ssl3_write_pending drops the write if |BIO_write| fails in DTLS, so there
    * is never pending data. */
@@ -725,88 +733,36 @@ static int do_dtls1_write(SSL *s, int type, const uint8_t *buf,
 
   /* If we have an alert to send, lets send it */
   if (s->s3->alert_dispatch) {
-    i = s->method->ssl_dispatch_alert(s);
-    if (i <= 0) {
-      return i;
+    int ret = s->method->ssl_dispatch_alert(s);
+    if (ret <= 0) {
+      return ret;
     }
     /* if it went, fall through and send more stuff */
+  }
+
+  if (wb->buf == NULL && !ssl3_setup_write_buffer(s)) {
+    return -1;
   }
 
   if (len == 0) {
     return 0;
   }
 
-  wr = &(s->s3->wrec);
-  wb = &(s->s3->wbuf);
+  /* Align the output so the ciphertext is aligned to |SSL3_ALIGN_PAYLOAD|. */
+  uintptr_t align = (uintptr_t)wb->buf + DTLS1_RT_HEADER_LENGTH;
+  align = (0 - align) & (SSL3_ALIGN_PAYLOAD - 1);
+  uint8_t *out = wb->buf + align;
+  wb->offset = align;
+  size_t max_out = wb->len - wb->offset;
 
-  if (wb->buf == NULL && !ssl3_setup_write_buffer(s)) {
+  size_t ciphertext_len;
+  if (!dtls1_seal_record(s, out, &ciphertext_len, max_out, type, buf, len,
+                         use_epoch)) {
     return -1;
-  }
-  p = wb->buf + prefix_len;
-
-  /* write the header */
-
-  *(p++) = type & 0xff;
-  wr->type = type;
-  /* Special case: for hello verify request, client version 1.0 and
-   * we haven't decided which version to use yet send back using
-   * version 1.0 header: otherwise some clients will ignore it.
-   */
-  if (!s->s3->have_version) {
-    *(p++) = DTLS1_VERSION >> 8;
-    *(p++) = DTLS1_VERSION & 0xff;
-  } else {
-    *(p++) = s->version >> 8;
-    *(p++) = s->version & 0xff;
-  }
-
-  /* field where we are to write out packet epoch, seq num and len */
-  pseq = p;
-  p += 10;
-
-  /* Leave room for the variable nonce for AEADs which specify it explicitly. */
-  if (s->aead_write_ctx != NULL &&
-      s->aead_write_ctx->variable_nonce_included_in_record) {
-    eivlen = s->aead_write_ctx->variable_nonce_len;
-  }
-
-  /* Assemble the input for |s->enc_method->enc|. The input is the plaintext
-   * with |eivlen| bytes of space prepended for the explicit nonce. */
-  wr->input = p;
-  wr->length = eivlen + len;
-  memcpy(p + eivlen, buf, len);
-
-  /* Encrypt in-place, so the output also goes into |p|. */
-  wr->data = p;
-
-  if (!s->enc_method->enc(s, 1)) {
-    goto err;
-  }
-
-  /* there's only one epoch between handshake and app data */
-  s2n(s->d1->w_epoch, pseq);
-
-  memcpy(pseq, &(s->s3->write_sequence[2]), 6);
-  pseq += 6;
-  s2n(wr->length, pseq);
-
-  if (s->msg_callback) {
-    s->msg_callback(1, 0, SSL3_RT_HEADER, pseq - DTLS1_RT_HEADER_LENGTH,
-                    DTLS1_RT_HEADER_LENGTH, s, s->msg_callback_arg);
-  }
-
-  /* we should now have wr->data pointing to the encrypted data, which is
-   * wr->length long */
-  wr->type = type; /* not needed but helps for debugging */
-  wr->length += DTLS1_RT_HEADER_LENGTH;
-
-  if (!ssl3_record_sequence_update(&s->s3->write_sequence[2], 6)) {
-    goto err;
   }
 
   /* now let's set up wb */
-  wb->left = prefix_len + wr->length;
-  wb->offset = 0;
+  wb->left = ciphertext_len;
 
   /* memorize arguments so that ssl3_write_pending can detect bad write retries
    * later */
@@ -817,52 +773,6 @@ static int do_dtls1_write(SSL *s, int type, const uint8_t *buf,
 
   /* we now just need to write the buffer */
   return ssl3_write_pending(s, type, buf, len);
-
-err:
-  return -1;
-}
-
-static int dtls1_record_replay_check(SSL *s, DTLS1_BITMAP *bitmap) {
-  int cmp;
-  unsigned int shift;
-  const uint8_t *seq = s->s3->read_sequence;
-
-  cmp = satsub64be(seq, bitmap->max_seq_num);
-  if (cmp > 0) {
-    memcpy(s->s3->rrec.seq_num, seq, 8);
-    return 1; /* this record in new */
-  }
-  shift = -cmp;
-  if (shift >= sizeof(bitmap->map) * 8) {
-    return 0; /* stale, outside the window */
-  } else if (bitmap->map & (((uint64_t)1) << shift)) {
-    return 0; /* record previously received */
-  }
-
-  memcpy(s->s3->rrec.seq_num, seq, 8);
-  return 1;
-}
-
-static void dtls1_record_bitmap_update(SSL *s, DTLS1_BITMAP *bitmap) {
-  int cmp;
-  unsigned int shift;
-  const uint8_t *seq = s->s3->read_sequence;
-
-  cmp = satsub64be(seq, bitmap->max_seq_num);
-  if (cmp > 0) {
-    shift = cmp;
-    if (shift < sizeof(bitmap->map) * 8) {
-      bitmap->map <<= shift, bitmap->map |= 1UL;
-    } else {
-      bitmap->map = 1UL;
-    }
-    memcpy(bitmap->max_seq_num, seq, 8);
-  } else {
-    shift = -cmp;
-    if (shift < sizeof(bitmap->map) * 8) {
-      bitmap->map |= ((uint64_t)1) << shift;
-    }
-  }
 }
 
 int dtls1_dispatch_alert(SSL *s) {
@@ -877,7 +787,8 @@ int dtls1_dispatch_alert(SSL *s) {
   *ptr++ = s->s3->send_alert[0];
   *ptr++ = s->s3->send_alert[1];
 
-  i = do_dtls1_write(s, SSL3_RT_ALERT, &buf[0], sizeof(buf));
+  i = do_dtls1_write(s, SSL3_RT_ALERT, &buf[0], sizeof(buf),
+                     dtls1_use_current_epoch);
   if (i <= 0) {
     s->s3->alert_dispatch = 1;
   } else {

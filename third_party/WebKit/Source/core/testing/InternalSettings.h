@@ -61,6 +61,7 @@ public:
 
         bool m_originalAuthorShadowDOMForAnyElementEnabled;
         bool m_originalCSP;
+        bool m_originalCSSStickyPositionEnabled;
         bool m_originalOverlayScrollbarsEnabled;
         EditingBehaviorType m_originalEditingBehavior;
         bool m_originalTextAutosizingEnabled;
@@ -89,7 +90,7 @@ public:
     void hostDestroyed() { m_page = nullptr; }
 #endif
 
-    virtual ~InternalSettings();
+    ~InternalSettings() override;
     void resetToConsistentState();
 
     void setStandardFontFamily(const AtomicString& family, const String& script, ExceptionState&);
@@ -108,6 +109,7 @@ public:
     void setMockScrollbarsEnabled(bool, ExceptionState&);
     void setMockGestureTapHighlightsEnabled(bool, ExceptionState&);
     void setTextAutosizingEnabled(bool, ExceptionState&);
+    void setTextTrackKindUserPreference(const String& preference, ExceptionState&);
     void setAccessibilityFontScaleFactor(float fontScaleFactor, ExceptionState&);
     void setTextAutosizingWindowSizeOverride(int width, int height, ExceptionState&);
     void setViewportEnabled(bool, ExceptionState&);
@@ -117,6 +119,7 @@ public:
     // cannot be changed after process start. These setters should
     // be removed or moved onto internals.runtimeFlags:
     void setAuthorShadowDOMForAnyElementEnabled(bool);
+    void setCSSStickyPositionEnabled(bool);
     void setLangAttributeAwareFormControlUIEnabled(bool);
     void setOverlayScrollbarsEnabled(bool);
     void setExperimentalContentSecurityPolicyFeaturesEnabled(bool);

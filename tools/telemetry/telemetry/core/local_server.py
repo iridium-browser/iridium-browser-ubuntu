@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# TODO(aiolos): this should be moved to catapult/base after the repo move.
+# It is used by tracing in tvcm/browser_controller.
 import collections
 import json
 import os
@@ -9,8 +11,8 @@ import re
 import subprocess
 import sys
 
-from telemetry.core import forwarders
 from telemetry.core import util
+from telemetry.internal import forwarders
 
 NamedPort = collections.namedtuple('NamedPort', ['name', 'port'])
 

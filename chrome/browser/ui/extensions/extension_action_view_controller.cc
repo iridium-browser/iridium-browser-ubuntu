@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "chrome/common/icon_with_badge_image_source.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -60,7 +61,7 @@ ExtensionActionViewController::~ExtensionActionViewController() {
   DCHECK(!is_showing_popup());
 }
 
-const std::string& ExtensionActionViewController::GetId() const {
+std::string ExtensionActionViewController::GetId() const {
   return extension_->id();
 }
 
@@ -79,24 +80,13 @@ void ExtensionActionViewController::SetDelegate(
 }
 
 gfx::Image ExtensionActionViewController::GetIcon(
-    content::WebContents* web_contents) {
+    content::WebContents* web_contents,
+    const gfx::Size& size) {
   if (!ExtensionIsValid())
     return gfx::Image();
 
-  return icon_factory_.GetIcon(SessionTabHelper::IdForTab(web_contents));
-}
-
-gfx::ImageSkia ExtensionActionViewController::GetIconWithBadge() {
-  if (!ExtensionIsValid())
-    return gfx::ImageSkia();
-
-  content::WebContents* web_contents = view_delegate_->GetCurrentWebContents();
-  gfx::Size spacing(0, 3);
-  gfx::ImageSkia icon = *GetIcon(web_contents).ToImageSkia();
-  if (!IsEnabled(web_contents))
-    icon = gfx::ImageSkiaOperations::CreateTransparentImage(icon, .25);
-  return extension_action_->GetIconWithBadge(
-      icon, SessionTabHelper::IdForTab(web_contents), spacing);
+  return gfx::Image(
+      gfx::ImageSkia(GetIconImageSource(web_contents, size).release(), size));
 }
 
 base::string16 ExtensionActionViewController::GetActionName() const {
@@ -152,9 +142,10 @@ void ExtensionActionViewController::HidePopup() {
     popup_host_->Close();
     // We need to do these actions synchronously (instead of closing and then
     // performing the rest of the cleanup in OnExtensionHostDestroyed()) because
-    // the extension host can close asynchronously, and we need to keep the view
+    // the extension host may close asynchronously, and we need to keep the view
     // delegate up-to-date.
-    OnPopupClosed();
+    if (popup_host_)
+      OnPopupClosed();
   }
 }
 
@@ -171,7 +162,7 @@ ui::MenuModel* ExtensionActionViewController::GetContextMenu() {
   if (toolbar_actions_bar_) {
     if (toolbar_actions_bar_->popped_out_action() == this)
       visibility = ExtensionContextMenuModel::TRANSITIVELY_VISIBLE;
-    else if (!toolbar_actions_bar_->IsActionVisible(this))
+    else if (!toolbar_actions_bar_->IsActionVisibleOnMainBar(this))
       visibility = ExtensionContextMenuModel::OVERFLOWED;
     // Else, VISIBLE is correct.
   }
@@ -221,18 +212,6 @@ bool ExtensionActionViewController::ExecuteAction(PopupShowAction show_action,
   return false;
 }
 
-void ExtensionActionViewController::PaintExtra(
-    gfx::Canvas* canvas,
-    const gfx::Rect& bounds,
-    content::WebContents* web_contents) const {
-  if (!ExtensionIsValid())
-    return;
-
-  int tab_id = SessionTabHelper::IdForTab(web_contents);
-  if (tab_id >= 0)
-    extension_action_->PaintBadge(canvas, bounds, tab_id);
-}
-
 void ExtensionActionViewController::RegisterCommand() {
   if (!ExtensionIsValid())
     return;
@@ -240,15 +219,21 @@ void ExtensionActionViewController::RegisterCommand() {
   platform_delegate_->RegisterCommand();
 }
 
+bool ExtensionActionViewController::DisabledClickOpensMenu() const {
+  return extensions::FeatureSwitch::extension_action_redesign()->IsEnabled();
+}
+
 void ExtensionActionViewController::InspectPopup() {
   ExecuteAction(SHOW_POPUP_AND_INSPECT, true);
 }
 
 void ExtensionActionViewController::OnIconUpdated() {
-  if (icon_observer_)
-    icon_observer_->OnIconUpdated();
+  // We update the view first, so that if the observer relies on its UI it can
+  // be ready.
   if (view_delegate_)
     view_delegate_->UpdateState();
+  if (icon_observer_)
+    icon_observer_->OnIconUpdated();
 }
 
 void ExtensionActionViewController::OnExtensionHostDestroyed(
@@ -284,6 +269,13 @@ bool ExtensionActionViewController::GetExtensionCommand(
   }
   return command_service->GetBrowserActionCommand(
       extension_->id(), CommandService::ACTIVE, command, NULL);
+}
+
+scoped_ptr<IconWithBadgeImageSource>
+ExtensionActionViewController::GetIconImageSourceForTesting(
+    content::WebContents* web_contents,
+    const gfx::Size& size) {
+  return GetIconImageSource(web_contents, size);
 }
 
 ExtensionActionViewController*
@@ -327,7 +319,7 @@ bool ExtensionActionViewController::TriggerPopupWithUrl(
     toolbar_actions_bar_->SetPopupOwner(this);
 
   if (toolbar_actions_bar_ &&
-      !toolbar_actions_bar_->IsActionVisible(this) &&
+      !toolbar_actions_bar_->IsActionVisibleOnMainBar(this) &&
       extensions::FeatureSwitch::extension_action_redesign()->IsEnabled()) {
     platform_delegate_->CloseOverflowMenu();
     toolbar_actions_bar_->PopOutAction(
@@ -367,4 +359,40 @@ void ExtensionActionViewController::OnPopupClosed() {
       toolbar_actions_bar_->UndoPopOut();
   }
   view_delegate_->OnPopupClosed();
+}
+
+scoped_ptr<IconWithBadgeImageSource>
+ExtensionActionViewController::GetIconImageSource(
+    content::WebContents* web_contents,
+    const gfx::Size& size) {
+  int tab_id = SessionTabHelper::IdForTab(web_contents);
+  scoped_ptr<IconWithBadgeImageSource> image_source(
+      new IconWithBadgeImageSource(size));
+  image_source->SetIcon(icon_factory_.GetIcon(tab_id));
+  scoped_ptr<IconWithBadgeImageSource::Badge> badge;
+  std::string badge_text = extension_action_->GetBadgeText(tab_id);
+  if (!badge_text.empty()) {
+    badge.reset(new IconWithBadgeImageSource::Badge(
+            badge_text,
+            extension_action_->GetBadgeTextColor(tab_id),
+            extension_action_->GetBadgeBackgroundColor(tab_id)));
+  }
+  image_source->SetBadge(badge.Pass());
+
+  // Greyscaling disabled actions and having a special wants-to-run decoration
+  // are gated on the toolbar redesign.
+  if (extensions::FeatureSwitch::extension_action_redesign()->IsEnabled()) {
+    // If the extension doesn't want to run on the active web contents, we
+    // grayscale it to indicate that.
+    image_source->set_grayscale(!IsEnabled(web_contents));
+    // If the action *does* want to run on the active web contents and is also
+    // overflowed, we add a decoration so that the user can see which overflowed
+    // action wants to run (since they wouldn't be able to see the change from
+    // grayscale to color).
+    bool is_overflow =
+        toolbar_actions_bar_ && toolbar_actions_bar_->in_overflow_mode();
+    image_source->set_paint_decoration(WantsToRun(web_contents) && is_overflow);
+  }
+
+  return image_source.Pass();
 }

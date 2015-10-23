@@ -22,7 +22,6 @@
 #include "third_party/WebKit/public/platform/WebLayer.h"
 #include "third_party/WebKit/public/platform/WebLayerTreeView.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
-#include "ui/gfx/frame_time.h"
 
 using blink::WebColor;
 using blink::WebGraphicsContext3D;
@@ -48,6 +47,7 @@ void WebLayerTreeViewImplForTesting::Initialize() {
   params.client = this;
   params.settings = &settings;
   params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
+  params.task_graph_runner = &task_graph_runner_;
   layer_tree_host_ = cc::LayerTreeHost::CreateSingleThreaded(this, &params);
   DCHECK(layer_tree_host_);
 }
@@ -121,10 +121,6 @@ void WebLayerTreeViewImplForTesting::setNeedsAnimate() {
   layer_tree_host_->SetNeedsAnimate();
 }
 
-bool WebLayerTreeViewImplForTesting::commitRequested() const {
-  return layer_tree_host_->CommitRequested();
-}
-
 void WebLayerTreeViewImplForTesting::didStopFlinging() {}
 
 void WebLayerTreeViewImplForTesting::finishAllRendering() {
@@ -146,11 +142,6 @@ void WebLayerTreeViewImplForTesting::ApplyViewportDeltas(
     float top_controls_delta) {
 }
 
-void WebLayerTreeViewImplForTesting::ApplyViewportDeltas(
-    const gfx::Vector2d& scroll_delta,
-    float page_scale,
-    float top_controls_delta) {}
-
 void WebLayerTreeViewImplForTesting::RequestNewOutputSurface() {
   bool flipped_output_surface = false;
   layer_tree_host_->SetOutputSurface(
@@ -160,6 +151,12 @@ void WebLayerTreeViewImplForTesting::RequestNewOutputSurface() {
 
 void WebLayerTreeViewImplForTesting::DidFailToInitializeOutputSurface() {
   RequestNewOutputSurface();
+}
+
+void WebLayerTreeViewImplForTesting::registerForAnimations(
+    blink::WebLayer* layer) {
+  cc::Layer* cc_layer = static_cast<cc_blink::WebLayerImpl*>(layer)->layer();
+  cc_layer->RegisterForAnimations(layer_tree_host_->animation_registrar());
 }
 
 void WebLayerTreeViewImplForTesting::registerViewportLayers(

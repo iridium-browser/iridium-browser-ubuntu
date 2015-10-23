@@ -11,8 +11,8 @@
 #include "base/task_runner_util.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/extensions_api_client.h"
@@ -23,12 +23,11 @@
 #include "extensions/common/extension_api.h"
 #include "extensions/common/permissions/permissions_data.h"
 
-using extensions::core_api::events::Rule;
+using extensions::api::events::Rule;
 
-namespace AddRules = extensions::core_api::events::Event::AddRules;
-namespace GetRules = extensions::core_api::events::Event::GetRules;
-namespace RemoveRules = extensions::core_api::events::Event::RemoveRules;
-
+namespace AddRules = extensions::api::events::Event::AddRules;
+namespace GetRules = extensions::api::events::Event::GetRules;
+namespace RemoveRules = extensions::api::events::Event::RemoveRules;
 
 namespace extensions {
 
@@ -122,7 +121,7 @@ bool RulesFunction::RunAsync() {
 
   int web_view_instance_id = 0;
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(1, &web_view_instance_id));
-  int embedder_process_id = render_view_host()->GetProcess()->GetID();
+  int embedder_process_id = render_frame_host()->GetProcess()->GetID();
 
   bool from_web_view = web_view_instance_id != 0;
   // If we are not operating on a particular <webview>, then the key is 0.

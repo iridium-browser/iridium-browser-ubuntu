@@ -10,7 +10,6 @@
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -24,7 +23,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/version_info/version_info.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,9 +44,11 @@ using content::MessageLoopRunner;
 
 namespace {
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void OnProfileDownloadedFail(const base::string16& full_name) {
   ASSERT_TRUE(false) << "Profile download should not have succeeded.";
 }
+#endif
 
 // Base class for helper objects that wait for certain events to happen.
 // This class will ensure that calls to QuitRunLoop() (triggered by a subclass)
@@ -211,6 +214,7 @@ TEST_F(SupervisedUserServiceTest, ChangesIncludedSessionOnChangedSettings) {
   EXPECT_FALSE(supervised_user_service_->IncludesSyncSessionsType());
 }
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 // Ensure that the CustodianProfileDownloaderService shuts down cleanly. If no
 // DCHECK is hit when the service is destroyed, this test passed.
 TEST_F(SupervisedUserServiceTest, ShutDownCustodianProfileDownloader) {
@@ -223,6 +227,7 @@ TEST_F(SupervisedUserServiceTest, ShutDownCustodianProfileDownloader) {
       SetAuthenticatedAccountInfo("12345", "Logged In");
   downloader_service->DownloadProfile(base::Bind(&OnProfileDownloadedFail));
 }
+#endif
 
 namespace {
 
@@ -359,7 +364,7 @@ class SupervisedUserServiceExtensionTestBase
  public:
   explicit SupervisedUserServiceExtensionTestBase(bool is_supervised)
       : is_supervised_(is_supervised),
-        channel_(chrome::VersionInfo::CHANNEL_DEV) {}
+        channel_(version_info::Channel::DEV) {}
   ~SupervisedUserServiceExtensionTestBase() override {}
 
   void SetUp() override {

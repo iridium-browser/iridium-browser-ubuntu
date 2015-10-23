@@ -10,14 +10,15 @@ import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 /**
  * Provides context for the native HTTP operations.
+ * @deprecated Use {@link CronetUrlRequestContext} instead.
  */
 @JNINamespace("cronet")
+@Deprecated
 public class ChromiumUrlRequestContext {
     private static final int LOG_NONE = 3;  // LOG(FATAL), no VLOG.
     private static final int LOG_DEBUG = -1;  // LOG(FATAL...INFO), VLOG(1)
@@ -102,15 +103,6 @@ public class ChromiumUrlRequestContext {
         nativeStopNetLog(mChromiumUrlRequestContextAdapter);
     }
 
-    /**
-     * Returns the native URLRequestContextAdapter pointer.
-     * Currently this method is only used in testing.
-     */
-    @VisibleForTesting
-    long getUrlRequestContextAdapterForTesting() {
-        return mChromiumUrlRequestContextAdapter;
-    }
-
     @CalledByNative
     private void initNetworkThread() {
         Thread.currentThread().setName("ChromiumNet");
@@ -119,11 +111,13 @@ public class ChromiumUrlRequestContext {
 
     @Override
     protected void finalize() throws Throwable {
-        nativeReleaseRequestContextAdapter(mChromiumUrlRequestContextAdapter);
+        if (mChromiumUrlRequestContextAdapter != 0) {
+            nativeReleaseRequestContextAdapter(mChromiumUrlRequestContextAdapter);
+        }
         super.finalize();
     }
 
-    protected long getChromiumUrlRequestContextAdapter() {
+    protected long getUrlRequestContextAdapter() {
         return mChromiumUrlRequestContextAdapter;
     }
 

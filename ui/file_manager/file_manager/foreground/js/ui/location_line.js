@@ -88,7 +88,7 @@ LocationLine.prototype.getComponents_ = function(entry) {
   // Add directory components to the target path.
   var paths = relativePath.split('/');
   for (var i = 0; i < paths.length; i++) {
-    currentUrl += '/' + paths[i];
+    currentUrl += '/' + encodeURIComponent(paths[i]);
     components.push(new LocationLine.PathComponent(paths[i], currentUrl));
   }
 
@@ -97,7 +97,7 @@ LocationLine.prototype.getComponents_ = function(entry) {
 
 /**
  * Updates the breadcrumb display.
- * @param {!Array.<!LocationLine.PathComponent>} components Components to the
+ * @param {!Array<!LocationLine.PathComponent>} components Components to the
  *     target path.
  * @private
  */
@@ -112,7 +112,10 @@ LocationLine.prototype.update_ = function(components) {
     var button = document.createElement('button');
     button.classList.add(
         'breadcrumb-path', 'entry-name', 'imitate-paper-button');
-    button.textContent = component.name;
+    var nameElement = document.createElement('div');
+    nameElement.classList.add('name');
+    nameElement.textContent = component.name;
+    button.appendChild(nameElement);
     button.addEventListener('click', this.onClick_.bind(this, i));
     newBreadcrumbs.appendChild(button);
 
@@ -184,7 +187,7 @@ LocationLine.prototype.truncate = function() {
     item.removeAttribute('hidden');
   }
 
-  var containerWidth = this.breadcrumbs_.clientWidth;
+  var containerWidth = this.breadcrumbs_.getBoundingClientRect().width;
 
   var pathWidth = 0;
   var currentWidth = 0;
@@ -192,10 +195,10 @@ LocationLine.prototype.truncate = function() {
   for (var item = this.breadcrumbs_.firstChild; item; item = item.nextSibling) {
     if (item.className == 'separator') {
       pathWidth += currentWidth;
-      currentWidth = item.clientWidth;
+      currentWidth = item.getBoundingClientRect().width;
       lastSeparator = item;
     } else {
-      currentWidth += item.clientWidth;
+      currentWidth += item.getBoundingClientRect().width;
     }
   }
   if (pathWidth + currentWidth <= containerWidth)
@@ -205,7 +208,7 @@ LocationLine.prototype.truncate = function() {
         Math.min(currentWidth, containerWidth) + 'px';
     return;
   }
-  var lastCrumbSeparatorWidth = lastSeparator.clientWidth;
+  var lastCrumbSeparatorWidth = lastSeparator.getBoundingClientRect().width;
   // Current directory name may occupy up to 70% of space or even more if the
   // path is short.
   var maxPathWidth = Math.max(Math.round(containerWidth * 0.3),
@@ -216,19 +219,21 @@ LocationLine.prototype.truncate = function() {
 
   // Pre-calculate the minimum width for crumbs.
   parentCrumb.setAttribute('collapsed', '');
-  var minCrumbWidth = parentCrumb.clientWidth;
+  var minCrumbWidth = parentCrumb.getBoundingClientRect().width;
   parentCrumb.removeAttribute('collapsed');
 
   var collapsedWidth = 0;
   if (parentCrumb &&
-      pathWidth - parentCrumb.clientWidth + minCrumbWidth > maxPathWidth) {
+      pathWidth - parentCrumb.getBoundingClientRect().width + minCrumbWidth >
+          maxPathWidth) {
     // At least one crumb is hidden completely (or almost completely).
     // Show sign of hidden crumbs like this:
     // root > some di... > ... > current directory.
     parentCrumb.setAttribute('collapsed', '');
-    collapsedWidth = Math.min(maxPathWidth, parentCrumb.clientWidth);
+    collapsedWidth = Math.min(maxPathWidth,
+                              parentCrumb.getBoundingClientRect().width);
     maxPathWidth -= collapsedWidth;
-    if (parentCrumb.clientWidth != collapsedWidth)
+    if (parentCrumb.getBoundingClientRect().width != collapsedWidth)
       parentCrumb.style.width = collapsedWidth + 'px';
 
     lastSeparator = parentCrumb.previousSibling;
@@ -249,20 +254,21 @@ LocationLine.prototype.truncate = function() {
       if (item.classList.contains('separator')) {
         // If the current separator and the following crumb don't fit in the
         // breadcrumbs area, hide remaining separators and crumbs.
-        if (pathWidth + item.clientWidth + minCrumbWidth > maxPathWidth) {
+        if (pathWidth + item.getBoundingClientRect().width + minCrumbWidth >
+                maxPathWidth) {
           item.setAttribute('hidden', '');
           maxPathWidth = pathWidth;
         } else {
-          pathWidth += item.clientWidth;
+          pathWidth += item.getBoundingClientRect().width;
         }
       } else {
         // If the current crumb doesn't fully fit in the breadcrumbs area,
         // shorten the crumb and hide remaining separators and crums.
-        if (pathWidth + item.clientWidth > maxPathWidth) {
+        if (pathWidth + item.getBoundingClientRect().width > maxPathWidth) {
           item.style.width = (maxPathWidth - pathWidth) + 'px';
           pathWidth = maxPathWidth;
         } else {
-          pathWidth += item.clientWidth;
+          pathWidth += item.getBoundingClientRect().width;
         }
       }
     }

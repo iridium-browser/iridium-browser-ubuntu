@@ -101,9 +101,9 @@ class ProfileImpl : public Profile {
   void DestroyOffTheRecordProfile() override;
   bool HasOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
-  bool IsSupervised() override;
-  bool IsChild() override;
-  bool IsLegacySupervised() override;
+  bool IsSupervised() const override;
+  bool IsChild() const override;
+  bool IsLegacySupervised() const override;
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
   PrefService* GetPrefs() override;
   const PrefService* GetPrefs() const override;
@@ -125,7 +125,8 @@ class ProfileImpl : public Profile {
   base::FilePath last_selected_directory() override;
   void set_last_selected_directory(const base::FilePath& path) override;
   chrome_browser_net::Predictor* GetNetworkPredictor() override;
-  DevToolsNetworkController* GetDevToolsNetworkController() override;
+  DevToolsNetworkControllerHandle* GetDevToolsNetworkControllerHandle()
+      override;
   void ClearNetworkingHistorySince(base::Time time,
                                    const base::Closure& completion) override;
   GURL GetHomePage() override;
@@ -152,10 +153,6 @@ class ProfileImpl : public Profile {
   FRIEND_TEST_ALL_PREFIXES(ProfileBrowserTest, DISABLED_ProfileReadmeCreated);
   FRIEND_TEST_ALL_PREFIXES(ProfileBrowserTest,
                            ProfileDeletedBeforeReadmeCreated);
-
-  // Delay, in milliseconds, before README file is created for a new profile.
-  // This is non-const for testing purposes.
-  static int create_readme_delay_ms;
 
   ProfileImpl(const base::FilePath& path,
               Delegate* delegate,

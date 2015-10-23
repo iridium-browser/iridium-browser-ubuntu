@@ -17,6 +17,7 @@ from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib import perf_uploader
 from chromite.lib import portage_util
+from chromite.lib import toolchain
 
 
 class SDKBuildToolchainsStageTest(
@@ -175,6 +176,84 @@ class SDKPackageStageTest(generic_stages_unittest.AbstractStageTestCase):
 
     kwargs = m.call_args[1]
     self.assertEqual(kwargs['revision'], 123456)
+
+
+class SDKPackageToolchainOverlaysStageTest(
+    generic_stages_unittest.AbstractStageTestCase):
+  """Tests board toolchain overlay installation and packaging."""
+
+  def setUp(self):
+    # Mock out running of cros_setup_toolchains.
+    self.PatchObject(commands, 'RunBuildScript', wraps=self.FakeRunBuildScript)
+    self._setup_toolchain_cmds = []
+
+    # Prepare a fake chroot.
+    self.fake_chroot = os.path.join(self.build_root, 'chroot/build/amd64-host')
+    osutils.SafeMakedirs(self.fake_chroot)
+    osutils.Touch(os.path.join(self.fake_chroot, 'file'))
+
+  def FakeRunBuildScript(self, build_root, cmd, chromite_cmd=False, **kwargs):
+    if cmd[0] == 'cros_setup_toolchains':
+      self.assertEqual(self.build_root, build_root)
+      self.assertTrue(chromite_cmd)
+      self.assertTrue(kwargs.get('enter_chroot', False))
+      self.assertTrue(kwargs.get('sudo', False))
+
+      # Drop a uniquely named file in the toolchain overlay merged location.
+      sysroot = None
+      board = None
+      targets = None
+      for opt in cmd[1:]:
+        if opt.startswith('--sysroot='):
+          sysroot = opt[len('--sysroot='):]
+        elif opt.startswith('--include-boards='):
+          board = opt[len('--include-boards='):]
+        elif opt.startswith('--targets='):
+          targets = opt[len('--targets='):]
+
+      self.assertTrue(sysroot)
+      self.assertTrue(board)
+      self.assertEqual('boards', targets)
+      merged_dir = os.path.join(self.build_root, constants.DEFAULT_CHROOT_DIR,
+                                sysroot.lstrip(os.path.sep))
+      osutils.Touch(os.path.join(merged_dir, board + '.tmp'))
+
+  def ConstructStage(self):
+    return sdk_stages.SDKPackageToolchainOverlaysStage(self._run)
+
+  def testTarballCreation(self):
+    """Tests that tarballs are created for all board toolchains."""
+    self._Prepare('chromiumos-sdk')
+    self.RunStage()
+
+    # Check that a tarball was created correctly for all toolchain sets.
+    sdk_toolchains = set(toolchain.GetToolchainsForBoard('sdk'))
+    all_toolchain_combos = set()
+    for board in self._run.site_config.GetBoards():
+      try:
+        toolchains = set(toolchain.GetToolchainsForBoard(board).iterkeys())
+        if toolchains.issubset(sdk_toolchains):
+          all_toolchain_combos.add('-'.join(sorted(toolchains)))
+      except portage_util.MissingOverlayException:
+        pass
+
+    for toolchains in all_toolchain_combos:
+      overlay_tarball = os.path.join(
+          self.build_root, constants.DEFAULT_CHROOT_DIR,
+          constants.SDK_OVERLAYS_OUTPUT,
+          'built-sdk-overlay-toolchains-%s.tar.xz' % toolchains)
+      output = cros_build_lib.RunCommand(
+          ['tar', '-I', 'xz', '-tf', overlay_tarball],
+          capture_output=True).output.splitlines()
+      # Check that the overlay tarball contains a marker file and that the
+      # board recorded by this marker file indeed uses the toolchains for which
+      # the tarball was built.
+      tmp_files = [os.path.basename(x) for x in output if x.endswith('.tmp')]
+      self.assertEqual(1, len(tmp_files))
+      board = tmp_files[0][:-len('.tmp')]
+      board_toolchains = '-'.join(sorted(
+          toolchain.GetToolchainsForBoard(board).iterkeys()))
+      self.assertEqual(toolchains, board_toolchains)
 
 
 class SDKTestStageTest(generic_stages_unittest.AbstractStageTestCase):

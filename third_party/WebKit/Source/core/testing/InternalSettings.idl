@@ -39,6 +39,7 @@
     [RaisesException] void setPictographFontFamily(DOMString family, DOMString script);
     [RaisesException] void setTextAutosizingEnabled(boolean enabled);
     [RaisesException] void setTextAutosizingWindowSizeOverride(long width, long height);
+    [RaisesException] void setTextTrackKindUserPreference(DOMString preference);
     [RaisesException] void setAccessibilityFontScaleFactor(float fontScaleFactor);
     [RaisesException] void setMediaTypeOverride(DOMString mediaTypeOverride);
     [RaisesException] void setDisplayModeOverride(DOMString displayModeOverride);
@@ -57,6 +58,7 @@
     // cannot be changed after process start.  These setters should
     // be removed or moved onto internals.runtimeFlags:
     void setAuthorShadowDOMForAnyElementEnabled(boolean enabled);
+    void setCSSStickyPositionEnabled(boolean enabled);
     void setLangAttributeAwareFormControlUIEnabled(boolean enabled);
     void setOverlayScrollbarsEnabled(boolean enabled);
     void setExperimentalContentSecurityPolicyFeaturesEnabled(boolean enabled);

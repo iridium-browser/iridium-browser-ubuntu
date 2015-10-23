@@ -41,33 +41,53 @@
 #include "core/paint/DeprecatedPaintLayer.h"
 #include "core/svg/SVGElement.h"
 #include "platform/geometry/TransformState.h"
+#include "platform/graphics/StrokeData.h"
 
 namespace blink {
 
-static inline LayoutRect enclosingIntRectIfNotEmpty(const FloatRect& rect)
+static inline LayoutRect adjustedEnclosingIntRect(const FloatRect& rect,
+    const AffineTransform& rootTransform, float strokeWidthForHairlinePadding)
 {
-    if (rect.isEmpty())
+    FloatRect adjustedRect = rect;
+
+    if (strokeWidthForHairlinePadding) {
+        // For hairline strokes (stroke-width < 1 in device space), Skia rasterizes up to 0.4(9) off
+        // the stroke center. That means enclosingIntRect is not enough - we must also pad to 0.5.
+        // This is still fragile as it misses out on CC/DSF CTM components.
+        const FloatSize strokeSize = rootTransform.mapSize(
+            FloatSize(strokeWidthForHairlinePadding, strokeWidthForHairlinePadding));
+        if (strokeSize.width() < 1 || strokeSize.height() < 1) {
+            const float pad = 0.5f - std::min(strokeSize.width(), strokeSize.height()) / 2;
+            ASSERT(pad > 0);
+            adjustedRect.inflate(pad);
+        }
+    }
+
+    if (adjustedRect.isEmpty())
         return LayoutRect();
-    return LayoutRect(enclosingIntRect(rect));
+
+    return LayoutRect(enclosingIntRect(adjustedRect));
 }
 
-LayoutRect SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(const LayoutObject* object, const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState)
+LayoutRect SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(const LayoutObject& object,
+    const LayoutBoxModelObject* paintInvalidationContainer,
+    const PaintInvalidationState* paintInvalidationState, float strokeWidthForHairlinePadding)
 {
     // Return early for any cases where we don't actually paint
-    if (object->style()->visibility() != VISIBLE && !object->enclosingLayer()->hasVisibleContent())
+    if (object.styleRef().visibility() != VISIBLE && !object.enclosingLayer()->hasVisibleContent())
         return LayoutRect();
 
-    // Pass our local paint rect to computeRectForPaintInvalidation() which will
-    // map to parent coords and recurse up the parent chain.
-    FloatRect paintInvalidationRect = object->paintInvalidationRectInLocalCoordinates();
-    paintInvalidationRect.inflate(object->style()->outlineWidth());
+    FloatRect paintInvalidationRect = object.paintInvalidationRectInLocalCoordinates();
+    if (int outlineOutset = object.styleRef().outlineOutsetExtent())
+        paintInvalidationRect.inflate(outlineOutset);
 
     if (paintInvalidationState && paintInvalidationState->canMapToContainer(paintInvalidationContainer)) {
         // Compute accumulated SVG transform and apply to local paint rect.
-        AffineTransform transform = paintInvalidationState->svgTransform() * object->localToParentTransform();
-        paintInvalidationRect = transform.mapRect(paintInvalidationRect);
+        AffineTransform transform = paintInvalidationState->svgTransform() * object.localToParentTransform();
+
         // FIXME: These are quirks carried forward from the old paint invalidation infrastructure.
-        LayoutRect rect = enclosingIntRectIfNotEmpty(paintInvalidationRect);
+        LayoutRect rect = adjustedEnclosingIntRect(transform.mapRect(paintInvalidationRect),
+            transform, strokeWidthForHairlinePadding);
         // Offset by SVG root paint offset and apply clipping as needed.
         rect.move(paintInvalidationState->paintOffset());
         if (paintInvalidationState->isClipped())
@@ -76,30 +96,28 @@ LayoutRect SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(const Layou
     }
 
     LayoutRect rect;
-    const LayoutSVGRoot& svgRoot = mapRectToSVGRootForPaintInvalidation(object, paintInvalidationRect, rect);
+    const LayoutSVGRoot& svgRoot = mapRectToSVGRootForPaintInvalidation(object,
+        paintInvalidationRect, rect, strokeWidthForHairlinePadding);
     svgRoot.mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, paintInvalidationState);
     return rect;
 }
 
-const LayoutSVGRoot& SVGLayoutSupport::mapRectToSVGRootForPaintInvalidation(const LayoutObject* object, const FloatRect& localPaintInvalidationRect, LayoutRect& rect)
+const LayoutSVGRoot& SVGLayoutSupport::mapRectToSVGRootForPaintInvalidation(const LayoutObject& object,
+    const FloatRect& localPaintInvalidationRect, LayoutRect& rect, float strokeWidthForHairlinePadding)
 {
-    ASSERT(object && object->isSVG() && !object->isSVGRoot());
+    ASSERT(object.isSVG() && !object.isSVGRoot());
 
-    FloatRect paintInvalidationRect = localPaintInvalidationRect;
-    // FIXME: Building the transform to the SVG root border box and then doing
-    // mapRect() with that would be slightly more efficient, but requires some
-    // additions to AffineTransform (preMultiply, preTranslate) to avoid
-    // excessive copying and to get a similar fast-path for translations.
-    const LayoutObject* parent = object;
-    do {
-        paintInvalidationRect = parent->localToParentTransform().mapRect(paintInvalidationRect);
-        parent = parent->parent();
-    } while (!parent->isSVGRoot());
+    const LayoutObject* parent;
+    AffineTransform rootBorderBoxTransform;
+    for (parent = &object; !parent->isSVGRoot(); parent = parent->parent())
+        rootBorderBoxTransform.preMultiply(parent->localToParentTransform());
 
     const LayoutSVGRoot& svgRoot = toLayoutSVGRoot(*parent);
+    rootBorderBoxTransform.preMultiply(svgRoot.localToBorderBoxTransform());
 
-    paintInvalidationRect = svgRoot.localToBorderBoxTransform().mapRect(paintInvalidationRect);
-    rect = enclosingIntRectIfNotEmpty(paintInvalidationRect);
+    rect = adjustedEnclosingIntRect(rootBorderBoxTransform.mapRect(localPaintInvalidationRect),
+        rootBorderBoxTransform, strokeWidthForHairlinePadding);
+
     return svgRoot;
 }
 
@@ -419,19 +437,11 @@ SubtreeContentTransformScope::~SubtreeContentTransformScope()
     currentContentTransformation() = m_savedContentTransformation;
 }
 
-float SVGLayoutSupport::calculateScreenFontSizeScalingFactor(const LayoutObject* layoutObject)
+AffineTransform SVGLayoutSupport::deprecatedCalculateTransformToLayer(const LayoutObject* layoutObject)
 {
-    // FIXME: trying to compute a device space transform at record time is wrong. All clients
-    // should be updated to avoid relying on this information, and the method should be removed.
-
-    ASSERT(layoutObject);
-    // We're about to possibly clear the layoutObject, so save the deviceScaleFactor now.
-    float deviceScaleFactor = layoutObject->document().frameHost()->deviceScaleFactor();
-
-    // Walk up the layout tree, accumulating SVG transforms.
-    AffineTransform ctm = currentContentTransformation();
+    AffineTransform transform;
     while (layoutObject) {
-        ctm = layoutObject->localToParentTransform() * ctm;
+        transform = layoutObject->localToParentTransform() * transform;
         if (layoutObject->isSVGRoot())
             break;
         layoutObject = layoutObject->parent();
@@ -451,12 +461,22 @@ float SVGLayoutSupport::calculateScreenFontSizeScalingFactor(const LayoutObject*
             break;
 
         if (TransformationMatrix* layerTransform = layer->transform())
-            ctm = layerTransform->toAffineTransform() * ctm;
+            transform = layerTransform->toAffineTransform() * transform;
 
         layer = layer->parent();
     }
 
-    ctm.scale(deviceScaleFactor);
+    return transform;
+}
+
+float SVGLayoutSupport::calculateScreenFontSizeScalingFactor(const LayoutObject* layoutObject)
+{
+    ASSERT(layoutObject);
+
+    // FIXME: trying to compute a device space transform at record time is wrong. All clients
+    // should be updated to avoid relying on this information, and the method should be removed.
+    AffineTransform ctm = deprecatedCalculateTransformToLayer(layoutObject) * currentContentTransformation();
+    ctm.scale(layoutObject->document().frameHost()->deviceScaleFactor());
 
     return narrowPrecisionToFloat(sqrt((pow(ctm.xScale(), 2) + pow(ctm.yScale(), 2)) / 2));
 }

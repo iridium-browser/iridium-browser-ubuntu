@@ -2,12 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/ui.gni")
 import("//mojo/generate_mojo_shell_assets_list.gni")
-import("//third_party/mojo/src/mojo/public/mojo.gni")
-import("//third_party/mojo/src/mojo/public/mojo_application.gni")
-import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
+import("//mojo/public/mojo_application.gni")
 import("//testing/test.gni")
+import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 
 # We don't support building in the component build since mojo apps are
 # inherently components.
@@ -19,10 +17,6 @@ group("runner") {
   deps = [
     ":mojo_runner",
   ]
-
-  if (is_android) {
-    deps += [ ":mojo_runner_apk" ]
-  }
 }
 
 if (is_android) {
@@ -39,6 +33,7 @@ source_set("mojo_runner_lib") {
     "//build/config/sanitizers:deps",
     "//mojo/common",
     "//mojo/environment:chromium",
+    "//mojo/message_pump",
   ]
 
   if (!is_android) {
@@ -47,6 +42,7 @@ source_set("mojo_runner_lib") {
       "desktop/launcher_process.h",
       "desktop/main.cc",
     ]
+    deps += [ "//components/tracing:startup_tracing" ]
   } else {
     sources += [
       "android/context_init.h",
@@ -57,9 +53,10 @@ source_set("mojo_runner_lib") {
 
     deps += [
       ":jni_headers",
-      "//components/native_viewport:lib",
+      "//components/view_manager",
       "//mojo/shell",
       "//ui/gl",
+      "//ui/platform_window/android",
     ]
   }
 }
@@ -78,6 +75,8 @@ executable("mojo_runner") {
     # It means dynamic symbols must be preserved and exported.
     ldflags = [ "-Wl,--export-dynamic" ]
   }
+
+  deps += [ "//build/config/sanitizers:deps" ]
 }
 
 source_set("in_process_native_runner") {
@@ -98,6 +97,8 @@ source_set("in_process_native_runner") {
 
 source_set("lib") {
   sources = [
+    "about_fetcher.cc",
+    "about_fetcher.h",
     "child_process.cc",
     "child_process.h",
     "child_process_host.cc",
@@ -108,6 +109,8 @@ source_set("lib") {
     "init.h",
     "out_of_process_native_runner.cc",
     "out_of_process_native_runner.h",
+    "scoped_user_data_dir.cc",
+    "scoped_user_data_dir.h",
     "task_runners.cc",
     "task_runners.h",
     "url_resolver.cc",
@@ -121,25 +124,41 @@ source_set("lib") {
     "//base",
     "//base/third_party/dynamic_annotations",
     "//base:base_static",
-    "//mojo/application",
-    "//mojo/application/public/interfaces",
-    "//mojo/common",
+    "//components/devtools_service/public/cpp",
+    "//components/devtools_service/public/interfaces",
+    "//mojo/application/public/cpp",
     "//mojo/common:tracing_impl",
+    "//mojo/message_pump",
+    "//mojo/services/network/public/interfaces",
+    "//mojo/services/tracing/public/cpp",
+    "//mojo/services/tracing/public/interfaces",
+    "//mojo/shell",
     "//mojo/util:filename_util",
     "//third_party/mojo/src/mojo/edk/system",
-    "//third_party/mojo/src/mojo/public/cpp/bindings",
-    "//mojo/services/network/public/interfaces",
-    "//mojo/shell",
-    "//mojo/services/tracing:bindings",
     "//ui/gl",
     "//url",
   ]
+
+  if (is_linux && !is_android) {
+    sources += [
+      "linux_sandbox.cc",
+      "linux_sandbox.h",
+    ]
+
+    deps += [
+      "//sandbox/linux:sandbox",
+      "//sandbox/linux:sandbox_services",
+    ]
+  }
 
   public_deps = [
     ":switches",
   ]
 
-  data_deps = [ "//mojo/services/tracing" ]
+  data_deps = [
+    "//components/devtools_service",
+    "//mojo/services/tracing",
+  ]
 
   if (is_android) {
     sources += [
@@ -149,8 +168,6 @@ source_set("lib") {
       "android/android_handler_loader.h",
       "android/background_application_loader.cc",
       "android/background_application_loader.h",
-      "android/native_viewport_application_loader.cc",
-      "android/native_viewport_application_loader.h",
       "android/ui_application_loader_android.cc",
       "android/ui_application_loader_android.h",
     ]
@@ -158,9 +175,8 @@ source_set("lib") {
     deps += [
       ":jni_headers",
       ":run_android_application_function",
-      "//components/gles2",
-      "//components/native_viewport:lib",
-      "//mojo/application:content_handler",
+      "//components/view_manager/gles2",
+      "//mojo/application/public/cpp:content_handler",
     ]
   }
 
@@ -275,67 +291,103 @@ if (is_android) {
     custom_package = "org.chromium.mojo.shell"
   }
 
-  mojo_runner_assets_dir = "$root_build_dir/mojo_runner_assets"
   mojo_runner_test_assets_dir = "$root_build_dir/mojo_runner_test_assets"
+  mojo_runner_apptests_assets_dir =
+      "$root_build_dir/mojo_runner_apptests_assets"
 
-  copy_ex("copy_mojo_runner_assets") {
+  copy_ex("copy_mojo_runner_apptests_assets") {
+    testonly = true
     clear_dir = true
-    dest = mojo_runner_assets_dir
+    dest = mojo_runner_apptests_assets_dir
+
     deps = [
-      ":copy_mojo_runner",
+      ":bootstrap",
+      ":bootstrap_java",
+      "//components/clipboard:apptests",
+      "//components/resource_provider:apptests",
+      "//components/view_manager:apptests",
+      "//mojo/services/network:apptests",
     ]
+
     sources = [
-      "$root_out_dir/lib.stripped/libbootstrap.so",
-      "$root_out_dir/network_service.mojo",
       "$root_out_dir/obj/mojo/runner/bootstrap_java.dex.jar",
+      "$root_shlib_dir/${shlib_prefix}bootstrap$shlib_extension",
     ]
+
+    apptest_outputs = [
+      "clipboard",
+      "clipboard_apptests",
+      "resource_provider",
+      "resource_provider_apptests",
+      "view_manager_apptests",
+      "network_service",
+      "network_service_apptests",
+    ]
+
+    args = []
+    foreach(path, apptest_outputs) {
+      args +=
+          [ "--files=" + rebase_path("$root_out_dir/$path", root_build_dir) ]
+    }
   }
 
-  generate_mojo_shell_assets_list("build_mojo_runner_assets") {
+  generate_mojo_shell_assets_list("build_mojo_runner_apptests_assets") {
+    testonly = true
     deps = [
-      ":copy_mojo_runner_assets",
+      ":copy_mojo_runner_apptests_assets",
     ]
-    dir = mojo_runner_assets_dir
+    dir = mojo_runner_apptests_assets_dir
   }
 
   copy("copy_mojo_runner") {
     sources = [
-      "$root_out_dir/exe.stripped/mojo_runner",
+      "$root_out_dir/mojo_runner",
     ]
     outputs = [
-      "$root_out_dir/lib.stripped/libmojo_runner.so",
+      "$root_shlib_dir/${shlib_prefix}mojo_runner$shlib_extension",
+    ]
+    deps = [
+      ":mojo_runner",
     ]
   }
 
   copy_ex("copy_mojo_runner_test_assets") {
+    testonly = true
     clear_dir = true
     dest = mojo_runner_test_assets_dir
-    sources = [
-      "$root_out_dir/test_app.mojo",
-      "$root_out_dir/test_request_tracker_app.mojo",
+    deps = [
+      "//mojo/services/test_service:test_app",
+      "//mojo/services/test_service:test_request_tracker_app",
+    ]
+
+    # Directories can't be specified as sources so pass manually to the script.
+    args = [
+      "--files=" + rebase_path("$root_out_dir/test_app", root_build_dir),
+      "--files=" +
+          rebase_path("$root_out_dir/test_request_tracker_app", root_build_dir),
     ]
   }
 
-  android_apk("mojo_runner_apk") {
-    apk_name = "MojoRunner"
-
+  android_apk("mojo_runner_apptests_apk") {
+    testonly = true
+    apk_name = "MojoRunnerApptests"
     android_manifest = "android/apk/AndroidManifest.xml"
-
-    native_libs = [ "libmojo_runner.so" ]
-
-    asset_location = mojo_runner_assets_dir
+    native_libs = [ "${shlib_prefix}mojo_runner$shlib_extension" ]
+    asset_location = mojo_runner_apptests_assets_dir
 
     deps = [
-      ":build_mojo_runner_assets",
+      ":build_mojo_runner_apptests_assets",
+      ":copy_mojo_runner",
       ":java",
       ":resources",
       "//base:base_java",
-      "//components/native_viewport:native_viewport_java",
-      "//third_party/android_tools:google_play_services_default_resources",
+      "//ui/platform_window/android:platform_window_java",
+      google_play_services_resources,
     ]
   }
 
   generate_mojo_shell_assets_list("build_mojo_runner_test_assets") {
+    testonly = true
     deps = [
       ":copy_mojo_runner_test_assets",
     ]
@@ -361,11 +413,13 @@ mojom("child_process_bindings") {
   deps = [
     "//mojo/application/public/interfaces",
   ]
+
+  import_dirs = [ "//mojo/services" ]
 }
 
-test("tests") {
-  output_name = "mojo_runner_unittests"
+test("mojo_runner_unittests") {
   sources = [
+    "about_fetcher_unittest.cc",
     "child_process_host_unittest.cc",
     "data_pipe_peek_unittest.cc",
     "in_process_native_runner_unittest.cc",
@@ -384,8 +438,10 @@ test("tests") {
     "//base",
     "//base:i18n",
     "//base/test:test_support",
+    "//mojo/application/public/cpp",
     "//mojo/common",
     "//mojo/environment:chromium",
+    "//mojo/message_pump",
     "//mojo/services/test_service:bindings",
     "//mojo/shell",
     "//mojo/util:filename_util",
@@ -395,7 +451,7 @@ test("tests") {
     "//url",
   ]
 
-  datadeps = [
+  data_deps = [
     "//mojo/services/test_service:test_app",
     "//mojo/services/test_service:test_request_tracker_app",
   ]
@@ -420,25 +476,15 @@ mojo_native_application("apptests") {
   testonly = true
 
   sources = [
-    # TODO(jam): needs http_server service.
+    # TODO(jam): needs http_server service. http://crbug.com/479316
     #"shell_apptest.cc",
   ]
 
   deps = [
     "//base",
-    "//mojo/application",
-    "//mojo/application:test_support",
-    "//mojo/common:common",
+    "//mojo/application/public/cpp:test_support",
     "//mojo/runner/test:bindings",
-
-    #"//mojo/services/http_server/public/cpp",
-    #"//mojo/services/http_server/public/interfaces",
     "//mojo/services/network/public/interfaces",
-
     "//third_party/mojo/src/mojo/public/cpp/bindings:callback",
-    "//third_party/mojo/src/mojo/public/cpp/environment",
-    "//third_party/mojo/src/mojo/public/cpp/system:system",
   ]
-
-  #data_deps = [ "//services/http_server:http_server($default_toolchain)" ]
 }

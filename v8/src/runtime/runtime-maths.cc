@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
+#include "src/runtime/runtime-utils.h"
 
 #include "src/arguments.h"
 #include "src/assembler.h"
 #include "src/codegen.h"
-#include "src/runtime/runtime-utils.h"
 #include "src/third_party/fdlibm/fdlibm.h"
-
 
 namespace v8 {
 namespace internal {
@@ -135,7 +133,7 @@ RUNTIME_FUNCTION(Runtime_MathFloor) {
 
 // Slow version of Math.pow.  We check for fast paths for special cases.
 // Used if VFP3 is not available.
-RUNTIME_FUNCTION(Runtime_MathPowSlow) {
+RUNTIME_FUNCTION(Runtime_MathPow) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 2);
   isolate->counters()->math_pow()->Increment();
@@ -238,12 +236,6 @@ RUNTIME_FUNCTION(Runtime_MathFround) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_MathPow) {
-  SealHandleScope shs(isolate);
-  return __RT_impl_Runtime_MathPowSlow(args, isolate);
-}
-
-
 RUNTIME_FUNCTION(Runtime_IsMinusZero) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 1);
@@ -252,5 +244,5 @@ RUNTIME_FUNCTION(Runtime_IsMinusZero) {
   HeapNumber* number = HeapNumber::cast(obj);
   return isolate->heap()->ToBoolean(IsMinusZero(number->value()));
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

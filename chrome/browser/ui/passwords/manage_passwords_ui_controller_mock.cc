@@ -14,8 +14,8 @@ ManagePasswordsUIControllerMock::ManagePasswordsUIControllerMock(
     : ManagePasswordsUIController(contents),
       navigated_to_settings_page_(false),
       saved_password_(false),
+      updated_password_(false),
       never_saved_password_(false),
-      unblacklist_site_(false),
       choose_credential_(false),
       manage_accounts_(false) {
   // Do not silently replace an existing ManagePasswordsUIController because it
@@ -60,12 +60,12 @@ void ManagePasswordsUIControllerMock::SavePassword() {
   saved_password_ = true;
 }
 
+void ManagePasswordsUIControllerMock::UpdatePassword(
+    const autofill::PasswordForm& password_form) {
+  updated_password_ = true;
+}
 void ManagePasswordsUIControllerMock::NeverSavePassword() {
   never_saved_password_ = true;
-}
-
-void ManagePasswordsUIControllerMock::UnblacklistSite() {
-  unblacklist_site_ = true;
 }
 
 void ManagePasswordsUIControllerMock::ChooseCredential(

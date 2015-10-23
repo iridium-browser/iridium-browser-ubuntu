@@ -20,6 +20,7 @@
 #include "content/browser/compositor/delegated_frame_host.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/compositor/owned_mailbox.h"
+#include "content/browser/renderer_host/begin_frame_observer_proxy.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "content/common/cursors/webcursor.h"
@@ -30,12 +31,13 @@
 #include "ui/aura/window_tree_host_observer.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/touch/selection_bound.h"
-#include "ui/base/touch/touch_editing_controller.h"
 #include "ui/events/gestures/motion_event_aura.h"
 #include "ui/gfx/display_observer.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/wm/public/activation_delegate.h"
+
+struct ViewHostMsg_TextInputState_Params;
 
 namespace aura {
 class WindowTracker;
@@ -64,6 +66,7 @@ class CompositorLock;
 class InputMethod;
 class LocatedEvent;
 class Texture;
+class TouchSelectionController;
 }
 
 namespace content {
@@ -75,11 +78,13 @@ class OverscrollController;
 class RenderFrameHostImpl;
 class RenderWidgetHostImpl;
 class RenderWidgetHostView;
+class TouchSelectionControllerClientAura;
 
 // RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
 class CONTENT_EXPORT RenderWidgetHostViewAura
     : public RenderWidgetHostViewBase,
       public DelegatedFrameHostClient,
+      public BeginFrameObserverProxyClient,
       public ui::TextInputClient,
       public gfx::DisplayObserver,
       public aura::WindowTreeHostObserver,
@@ -88,49 +93,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       public aura::client::FocusChangeObserver,
       public aura::client::CursorClientObserver {
  public:
-  // Displays and controls touch editing elements such as selection handles.
-  class TouchEditingClient {
-   public:
-    TouchEditingClient() {}
-
-    // Tells the client to start showing touch editing handles.
-    virtual void StartTouchEditing() = 0;
-
-    // Notifies the client that touch editing is no longer needed. |quick|
-    // determines whether the handles should fade out quickly or slowly.
-    virtual void EndTouchEditing(bool quick) = 0;
-
-    // Notifies the client that the selection bounds need to be updated.
-    virtual void OnSelectionOrCursorChanged(
-        const ui::SelectionBound& anchor,
-        const ui::SelectionBound& focus) = 0;
-
-    // Notifies the client that the current text input type as changed.
-    virtual void OnTextInputTypeChanged(ui::TextInputType type) = 0;
-
-    // Notifies the client that an input event is about to be sent to the
-    // renderer. Returns true if the client wants to stop event propagation.
-    virtual bool HandleInputEvent(const ui::Event* event) = 0;
-
-    // Notifies the client that a gesture event ack was received.
-    virtual void GestureEventAck(int gesture_event_type) = 0;
-
-    // Notifies the client that the fling has ended, so it can activate touch
-    // editing if needed.
-    virtual void DidStopFlinging() = 0;
-
-    // This is called when the view is destroyed, so that the client can
-    // perform any necessary clean-up.
-    virtual void OnViewDestroyed() = 0;
-
-   protected:
-    virtual ~TouchEditingClient() {}
-  };
-
-  void set_touch_editing_client(TouchEditingClient* client) {
-    touch_editing_client_ = client;
-  }
-
   // When |is_guest_view_hack| is true, this view isn't really the view for
   // the |widget|, a RenderWidgetHostViewGuest is.
   //
@@ -167,10 +129,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void Focus() override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
-  void TextInputTypeChanged(ui::TextInputType type,
-                            ui::TextInputMode input_mode,
-                            bool can_compose_inline,
-                            int flags) override;
+  void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) override;
   void ImeCancelComposition() override;
   void ImeCompositionRangeChanged(
       const gfx::Range& range,
@@ -225,6 +185,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void DidStopFlinging() override;
   void OnDidNavigateMainFrameToNewPage() override;
   uint32_t GetSurfaceIdNamespace() override;
+  uint32_t SurfaceIdNamespaceAtPoint(const gfx::Point& point,
+                                     gfx::Point* transformed_point) override;
 
 #if defined(OS_WIN)
   void SetParentNativeViewAccessible(
@@ -238,7 +200,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void ClearCompositionText() override;
   void InsertText(const base::string16& text) override;
   void InsertChar(base::char16 ch, int flags) override;
-  gfx::NativeWindow GetAttachedWindow() const override;
   ui::TextInputType GetTextInputType() const override;
   ui::TextInputMode GetTextInputMode() const override;
   int GetTextInputFlags() const override;
@@ -259,9 +220,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       base::i18n::TextDirection direction) override;
   void ExtendSelectionAndDelete(size_t before, size_t after) override;
   void EnsureCaretInRect(const gfx::Rect& rect) override;
-  void OnCandidateWindowShown() override;
-  void OnCandidateWindowUpdated() override;
-  void OnCandidateWindowHidden() override;
   bool IsEditCommandEnabled(int command_id) override;
   void SetEditCommandForNextKeyEvent(int command_id) override;
 
@@ -276,7 +234,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   gfx::Size GetMaximumSize() const override;
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override;
-  ui::TextInputClient* GetFocusedTextInputClient() override;
   gfx::NativeCursor GetCursor(const gfx::Point& point) override;
   int GetNonClientComponent(const gfx::Point& point) const override;
   bool ShouldDescendIntoChildForEventHandling(
@@ -313,8 +270,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void OnHostMoved(const aura::WindowTreeHost* host,
                    const gfx::Point& new_origin) override;
 
-  void OnTextInputStateChanged(const ViewHostMsg_TextInputState_Params& params);
-
 #if defined(OS_WIN)
   // Sets the cutout rects from constrained windows. These are rectangles that
   // windowed NPAPI plugins shouldn't paint in. Overwrites any previous cutout
@@ -347,12 +302,25 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   void SnapToPhysicalPixelBoundary();
 
+  ui::TouchSelectionController* selection_controller() const {
+    return selection_controller_.get();
+  }
+
+  TouchSelectionControllerClientAura* selection_controller_client() const {
+    return selection_controller_client_.get();
+  }
+
   OverscrollController* overscroll_controller() const {
     return overscroll_controller_.get();
   }
 
   // Called when the context menu is about to be displayed.
   void OnShowContextMenu();
+
+  // Used in tests to set a mock client for touch selection controller. It will
+  // create a new touch selection controller for the new client.
+  void SetSelectionControllerClientForTest(
+      scoped_ptr<TouchSelectionControllerClientAura> client);
 
  protected:
   ~RenderWidgetHostViewAura() override;
@@ -366,6 +334,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   const ui::MotionEventAura& pointer_state() const { return pointer_state_; }
 
  private:
+  friend class RenderWidgetHostViewAuraCopyRequestTest;
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
                            PopupRetainsCaptureAfterMouseRelease);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, SetCompositionText);
@@ -386,10 +355,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, SoftwareDPIChange);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
                            UpdateCursorIfOverSelf);
-  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraCopyRequestTest,
-                           DedupeFrameSubscriberRequests);
-  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraCopyRequestTest,
-                           DestroyedAfterCopyRequest);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
                            VisibleViewportTest);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
@@ -476,6 +441,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       const base::TimeTicks& timebase,
       const base::TimeDelta& interval) override;
 
+  // BeginFrameObserverProxyClient implementation.
+  void SendBeginFrame(const cc::BeginFrameArgs& args) override;
+
   // Detaches |this| from the input method object.
   void DetachFromInputMethod();
 
@@ -497,6 +465,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // Helper function to set keyboard focus to the main window.
   void SetKeyboardFocus();
 
+  // Called when RenderWidget wants to start BeginFrame scheduling or stop.
+  void OnSetNeedsBeginFrames(bool needs_begin_frames);
+
   RenderFrameHostImpl* GetFocusedFrame();
 
   // Returns true if the |event| passed in can be forwarded to the renderer.
@@ -509,6 +480,20 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   // Called when the parent window hierarchy for our window changes.
   void ParentHierarchyChanged();
+
+  // Helper function to be called whenever new selection information is
+  // received. It will update selection controller.
+  void SelectionUpdated(bool is_editable,
+                        bool is_empty_text_form_control,
+                        const ui::SelectionBound& start,
+                        const ui::SelectionBound& end);
+
+  // Helper function to create a selection controller.
+  void CreateSelectionController();
+
+  // Performs gesture handling needed for touch text selection. Sets event as
+  // handled if it should not be further processed.
+  void HandleGestureForTouchSelection(ui::GestureEvent* event);
 
   // The model object.
   RenderWidgetHostImpl* host_;
@@ -647,7 +632,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   bool has_snapped_to_boundary_;
 
-  TouchEditingClient* touch_editing_client_;
+  scoped_ptr<TouchSelectionControllerClientAura> selection_controller_client_;
+  scoped_ptr<ui::TouchSelectionController> selection_controller_;
 
   scoped_ptr<OverscrollController> overscroll_controller_;
 
@@ -670,6 +656,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // view, so we can ensure the window hasn't moved between copying from the
   // compositing surface and showing the disambiguation popup.
   gfx::Vector2dF disambiguation_scroll_offset_;
+
+  BeginFrameObserverProxy begin_frame_observer_proxy_;
 
   base::WeakPtrFactory<RenderWidgetHostViewAura> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);

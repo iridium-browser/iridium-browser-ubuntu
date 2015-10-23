@@ -8,11 +8,16 @@
 #include "base/json/json_writer.h"
 #include "base/values.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/shell/browser/shell.h"
+#include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -30,25 +35,36 @@ const char kParamsParam[] = "params";
 class DevToolsProtocolTest : public ContentBrowserTest,
                              public DevToolsAgentHostClient {
  public:
-  DevToolsProtocolTest() : has_dispatched_command(false) {}
+  DevToolsProtocolTest()
+      : last_sent_id_(0),
+        waiting_for_notifications_count_(0),
+        in_dispatch_(false) {
+  }
 
  protected:
   void SendCommand(const std::string& method,
                    scoped_ptr<base::DictionaryValue> params) {
+    SendCommand(method, params.Pass(), true);
+  }
+
+  void SendCommand(const std::string& method,
+                   scoped_ptr<base::DictionaryValue> params,
+                   bool wait) {
+    in_dispatch_ = true;
     base::DictionaryValue command;
-    has_dispatched_command = false;
-    command.SetInteger(kIdParam, 1);
+    command.SetInteger(kIdParam, ++last_sent_id_);
     command.SetString(kMethodParam, method);
     if (params)
       command.Set(kParamsParam, params.release());
 
     std::string json_command;
-    base::JSONWriter::Write(&command, &json_command);
+    base::JSONWriter::Write(command, &json_command);
     agent_host_->DispatchProtocolMessage(json_command);
     // Some messages are dispatched synchronously.
     // Only run loop if we are not finished yet.
-    if (!has_dispatched_command)
+    if (in_dispatch_ && wait)
       base::MessageLoop::current()->Run();
+    in_dispatch_ = false;
   }
 
   bool HasValue(const std::string& path) {
@@ -76,37 +92,61 @@ class DevToolsProtocolTest : public ContentBrowserTest,
     return false;
   }
 
-  void SetUpOnMainThread() override {
+  void Attach() {
     agent_host_ = DevToolsAgentHost::GetOrCreateFor(shell()->web_contents());
     agent_host_->AttachClient(this);
   }
 
   void TearDownOnMainThread() override {
-    agent_host_->DetachClient();
-    agent_host_ = NULL;
+    if (agent_host_) {
+      agent_host_->DetachClient();
+      agent_host_ = nullptr;
+    }
+  }
+
+  void WaitForNotifications(int count) {
+    waiting_for_notifications_count_ = count;
+    RunMessageLoop();
   }
 
   scoped_ptr<base::DictionaryValue> result_;
   scoped_refptr<DevToolsAgentHost> agent_host_;
+  int last_sent_id_;
+  std::vector<int> result_ids_;
+  std::vector<std::string> notifications_;
 
  private:
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
                                const std::string& message) override {
-    scoped_ptr<base::DictionaryValue> root(
-        static_cast<base::DictionaryValue*>(base::JSONReader::Read(message)));
-    base::DictionaryValue* result;
-    EXPECT_TRUE(root->GetDictionary("result", &result));
-    result_.reset(result->DeepCopy());
-    if (base::MessageLoop::current()->is_running())
-      base::MessageLoop::current()->QuitNow();
-    has_dispatched_command = true;
+    scoped_ptr<base::DictionaryValue> root(static_cast<base::DictionaryValue*>(
+        base::JSONReader::DeprecatedRead(message)));
+    int id;
+    if (root->GetInteger("id", &id)) {
+      result_ids_.push_back(id);
+      base::DictionaryValue* result;
+      EXPECT_TRUE(root->GetDictionary("result", &result));
+      result_.reset(result->DeepCopy());
+      in_dispatch_ = false;
+      if (base::MessageLoop::current()->is_running())
+        base::MessageLoop::current()->QuitNow();
+    } else {
+      std::string notification;
+      EXPECT_TRUE(root->GetString("method", &notification));
+      notifications_.push_back(notification);
+      if (waiting_for_notifications_count_) {
+        waiting_for_notifications_count_--;
+        if (!waiting_for_notifications_count_)
+          base::MessageLoop::current()->QuitNow();
+      }
+    }
   }
 
   void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override {
     EXPECT_TRUE(false);
   }
 
-  bool has_dispatched_command;
+  int waiting_for_notifications_count_;
+  bool in_dispatch_;
 };
 
 class SyntheticKeyEventTest : public DevToolsProtocolTest {
@@ -126,6 +166,7 @@ class SyntheticKeyEventTest : public DevToolsProtocolTest {
 
 IN_PROC_BROWSER_TEST_F(SyntheticKeyEventTest, KeyEventSynthesizeKeyIdentifier) {
   NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
+  Attach();
   ASSERT_TRUE(content::ExecuteScript(
       shell()->web_contents()->GetRenderViewHost(),
       "function handleKeyEvent(event) {"
@@ -179,6 +220,7 @@ class CaptureScreenshotTest : public DevToolsProtocolTest {
 #endif
 IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, MAYBE_CaptureScreenshot) {
   shell()->LoadURL(GURL("about:blank"));
+  Attach();
   EXPECT_TRUE(content::ExecuteScript(
       shell()->web_contents()->GetRenderViewHost(),
       "document.body.style.background = '#123456'"));
@@ -196,39 +238,12 @@ IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, MAYBE_CaptureScreenshot) {
   EXPECT_TRUE(std::abs(0x56-(int)SkColorGetB(color)) <= 1);
 }
 
-class SyntheticGestureTest : public DevToolsProtocolTest {
-#if !defined(OS_ANDROID)
- protected:
-  void SetUpOnMainThread() override {
-    DevToolsProtocolTest::SetUpOnMainThread();
-
-    scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
-    params->SetInteger("width", 384);
-    params->SetInteger("height", 640);
-    params->SetDouble("deviceScaleFactor", 2.0);
-    params->SetBoolean("mobile", true);
-    params->SetBoolean("fitWindow", false);
-    params->SetBoolean("textAutosizing", true);
-    SendCommand("Page.setDeviceMetricsOverride", params.Pass());
-
-    params.reset(new base::DictionaryValue());
-    params->SetBoolean("enabled", true);
-    params->SetString("configuration", "mobile");
-    SendCommand("Page.setTouchEmulationEnabled", params.Pass());
-  }
-#endif
-};
-
 #if defined(OS_ANDROID)
-// crbug.com/469947
-#define MAYBE_SynthesizePinchGesture DISABLED_SynthesizePinchGesture
-#else
-// crbug.com/460128
-#define MAYBE_SynthesizePinchGesture DISABLED_SynthesizePinchGesture
-#endif
-IN_PROC_BROWSER_TEST_F(SyntheticGestureTest, MAYBE_SynthesizePinchGesture) {
+// Disabled, see http://crbug.com/469947.
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, DISABLED_SynthesizePinchGesture) {
   GURL test_url = GetTestUrl("devtools", "synthetic_gesture_tests.html");
   NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+  Attach();
 
   int old_width;
   ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
@@ -259,15 +274,10 @@ IN_PROC_BROWSER_TEST_F(SyntheticGestureTest, MAYBE_SynthesizePinchGesture) {
   ASSERT_DOUBLE_EQ(2.0, static_cast<double>(old_height) / new_height);
 }
 
-#if defined(OS_ANDROID)
-#define MAYBE_SynthesizeScrollGesture SynthesizeScrollGesture
-#else
-// crbug.com/460128
-#define MAYBE_SynthesizeScrollGesture DISABLED_SynthesizeScrollGesture
-#endif
-IN_PROC_BROWSER_TEST_F(SyntheticGestureTest, MAYBE_SynthesizeScrollGesture) {
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SynthesizeScrollGesture) {
   GURL test_url = GetTestUrl("devtools", "synthetic_gesture_tests.html");
   NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+  Attach();
 
   int scroll_top;
   ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
@@ -288,15 +298,10 @@ IN_PROC_BROWSER_TEST_F(SyntheticGestureTest, MAYBE_SynthesizeScrollGesture) {
   ASSERT_EQ(100, scroll_top);
 }
 
-#if defined(OS_ANDROID)
-#define MAYBE_SynthesizeTapGesture SynthesizeTapGesture
-#else
-// crbug.com/460128
-#define MAYBE_SynthesizeTapGesture DISABLED_SynthesizeTapGesture
-#endif
-IN_PROC_BROWSER_TEST_F(SyntheticGestureTest, MAYBE_SynthesizeTapGesture) {
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SynthesizeTapGesture) {
   GURL test_url = GetTestUrl("devtools", "synthetic_gesture_tests.html");
   NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+  Attach();
 
   int scroll_top;
   ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
@@ -318,6 +323,77 @@ IN_PROC_BROWSER_TEST_F(SyntheticGestureTest, MAYBE_SynthesizeTapGesture) {
       shell()->web_contents(),
       "domAutomationController.send(document.body.scrollTop)", &scroll_top));
   ASSERT_GT(scroll_top, 0);
+}
+#endif  // defined(OS_ANDROID)
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, NavigationPreservesMessages) {
+  ASSERT_TRUE(test_server()->Start());
+  GURL test_url = test_server()->GetURL("files/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+  Attach();
+  SendCommand("Page.enable", nullptr, false);
+
+  scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  test_url = GetTestUrl("devtools", "navigation.html");
+  params->SetString("url", test_url.spec());
+  SendCommand("Page.navigate", params.Pass(), true);
+
+  bool enough_results = result_ids_.size() >= 2u;
+  EXPECT_TRUE(enough_results);
+  if (enough_results) {
+    EXPECT_EQ(1, result_ids_[0]);  // Page.enable
+    EXPECT_EQ(2, result_ids_[1]);  // Page.navigate
+  }
+
+  enough_results = notifications_.size() >= 1u;
+  EXPECT_TRUE(enough_results);
+  bool found_frame_notification = false;
+  for (const std::string& notification : notifications_) {
+    if (notification == "Page.frameStartedLoading")
+      found_frame_notification = true;
+  }
+  EXPECT_TRUE(found_frame_notification);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CrossSiteNoDetach) {
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  content::SetupCrossSiteRedirector(embedded_test_server());
+
+  GURL test_url1 = embedded_test_server()->GetURL(
+      "A.com", "/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url1, 1);
+  Attach();
+
+  GURL test_url2 = embedded_test_server()->GetURL(
+      "B.com", "/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url2, 1);
+
+  EXPECT_EQ(0u, notifications_.size());
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ReconnectPreservesState) {
+  ASSERT_TRUE(test_server()->Start());
+  GURL test_url = test_server()->GetURL("files/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+
+  Shell* second = CreateBrowser();
+  NavigateToURLBlockUntilNavigationsComplete(second, test_url, 1);
+
+  Attach();
+  SendCommand("Runtime.enable", nullptr);
+
+  size_t notification_count = notifications_.size();
+  agent_host_->DisconnectWebContents();
+  agent_host_->ConnectWebContents(second->web_contents());
+  WaitForNotifications(1);
+
+  bool found_notification = false;
+  for (size_t i = notification_count; i < notifications_.size(); ++i) {
+    if (notifications_[i] == "Runtime.executionContextsCleared")
+      found_notification = true;
+  }
+  EXPECT_TRUE(found_notification);
 }
 
 }  // namespace content

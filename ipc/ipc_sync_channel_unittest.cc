@@ -155,7 +155,7 @@ class Worker : public Listener, public Sender {
   virtual SyncChannel* CreateChannel() {
     scoped_ptr<SyncChannel> channel = SyncChannel::Create(
         channel_name_, mode_, this, ipc_thread_.task_runner().get(), true,
-        &shutdown_event_);
+        &shutdown_event_, nullptr);
     return channel.release();
   }
 
@@ -301,8 +301,13 @@ void Simple(bool pump_during_send) {
   RunTest(workers);
 }
 
+#if defined(OS_ANDROID)
+#define MAYBE_Simple DISABLED_Simple
+#else
+#define MAYBE_Simple Simple
+#endif
 // Tests basic synchronous call
-TEST_F(IPCSyncChannelTest, Simple) {
+TEST_F(IPCSyncChannelTest, MAYBE_Simple) {
   Simple(false);
   Simple(true);
 }
@@ -327,7 +332,7 @@ class TwoStepServer : public Worker {
     SyncChannel* channel =
         SyncChannel::Create(channel_name(), mode(), this,
                             ipc_thread().task_runner().get(), create_pipe_now_,
-                            shutdown_event()).release();
+                            shutdown_event(), nullptr).release();
     return channel;
   }
 
@@ -349,7 +354,7 @@ class TwoStepClient : public Worker {
     SyncChannel* channel =
         SyncChannel::Create(channel_name(), mode(), this,
                             ipc_thread().task_runner().get(), create_pipe_now_,
-                            shutdown_event()).release();
+                            shutdown_event(), nullptr).release();
     return channel;
   }
 
@@ -517,8 +522,13 @@ TEST_F(IPCSyncChannelTest, Unblock) {
 
 //------------------------------------------------------------------------------
 
+#if defined(OS_ANDROID)
+#define MAYBE_ChannelDeleteDuringSend DISABLED_ChannelDeleteDuringSend
+#else
+#define MAYBE_ChannelDeleteDuringSend ChannelDeleteDuringSend
+#endif
 // Tests that the the SyncChannel object can be deleted during a Send.
-TEST_F(IPCSyncChannelTest, ChannelDeleteDuringSend) {
+TEST_F(IPCSyncChannelTest, MAYBE_ChannelDeleteDuringSend) {
   Unblock(false, false, true);
   Unblock(false, true, true);
   Unblock(true, false, true);
@@ -868,10 +878,16 @@ void ChattyServer(bool pump_during_send) {
   RunTest(workers);
 }
 
+#if defined(OS_ANDROID)
+// Times out.
+#define MAYBE_ChattyServer DISABLED_ChattyServer
+#else
+#define MAYBE_ChattyServer ChattyServer
+#endif
 // Tests http://b/1093251 - that sending lots of sync messages while
 // the receiver is waiting for a sync reply does not overflow the PostMessage
 // queue.
-TEST_F(IPCSyncChannelTest, ChattyServer) {
+TEST_F(IPCSyncChannelTest, MAYBE_ChattyServer) {
   ChattyServer(false);
   ChattyServer(true);
 }
@@ -911,10 +927,15 @@ class DoneEventRaceServer : public Worker {
   }
 };
 
+#if defined(OS_ANDROID)
+#define MAYBE_DoneEventRace DISABLED_DoneEventRace
+#else
+#define MAYBE_DoneEventRace DoneEventRace
+#endif
 // Tests http://b/1474092 - that if after the done_event is set but before
 // OnObjectSignaled is called another message is sent out, then after its
 // reply comes back OnObjectSignaled will be called for the first message.
-TEST_F(IPCSyncChannelTest, DoneEventRace) {
+TEST_F(IPCSyncChannelTest, MAYBE_DoneEventRace) {
   std::vector<Worker*> workers;
   workers.push_back(new DoneEventRaceServer());
   workers.push_back(new SimpleClient());
@@ -929,7 +950,7 @@ class TestSyncMessageFilter : public SyncMessageFilter {
       base::WaitableEvent* shutdown_event,
       Worker* worker,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-      : SyncMessageFilter(shutdown_event),
+      : SyncMessageFilter(shutdown_event, false),
         worker_(worker),
         task_runner_(task_runner) {}
 
@@ -1138,7 +1159,7 @@ class RestrictedDispatchClient : public Worker {
 
     non_restricted_channel_ = SyncChannel::Create(
         "non_restricted_channel", IPC::Channel::MODE_CLIENT, this,
-        ipc_thread().task_runner().get(), true, shutdown_event());
+        ipc_thread().task_runner().get(), true, shutdown_event(), nullptr);
 
     server_->ListenerThread()->task_runner()->PostTask(
         FROM_HERE, base::Bind(&RestrictedDispatchServer::OnDoPing, server_, 2));
@@ -1525,7 +1546,7 @@ class RestrictedDispatchPipeWorker : public Worker {
     event2_->Wait();
     other_channel_ = SyncChannel::Create(
         other_channel_name_, IPC::Channel::MODE_CLIENT, this,
-        ipc_thread().task_runner().get(), true, shutdown_event());
+        ipc_thread().task_runner().get(), true, shutdown_event(), nullptr);
     other_channel_->SetRestrictDispatchChannelGroup(group_);
     if (!is_first()) {
       event1_->Signal();
@@ -1563,7 +1584,13 @@ class RestrictedDispatchPipeWorker : public Worker {
   int* success_;
 };
 
-TEST_F(IPCSyncChannelTest, RestrictedDispatch4WayDeadlock) {
+#if defined(OS_ANDROID)
+#define MAYBE_RestrictedDispatch4WayDeadlock \
+  DISABLED_RestrictedDispatch4WayDeadlock
+#else
+#define MAYBE_RestrictedDispatch4WayDeadlock RestrictedDispatch4WayDeadlock
+#endif
+TEST_F(IPCSyncChannelTest, MAYBE_RestrictedDispatch4WayDeadlock) {
   int success = 0;
   std::vector<Worker*> workers;
   WaitableEvent event0(true, false);
@@ -1601,7 +1628,7 @@ class ReentrantReplyServer1 : public Worker {
   void Run() override {
     server2_channel_ = SyncChannel::Create(
         "reentrant_reply2", IPC::Channel::MODE_CLIENT, this,
-        ipc_thread().task_runner().get(), true, shutdown_event());
+        ipc_thread().task_runner().get(), true, shutdown_event(), nullptr);
     server_ready_->Signal();
     Message* msg = new SyncChannelTestMsg_Reentrant1();
     server2_channel_->Send(msg);

@@ -16,16 +16,20 @@ namespace blink {
 
 bool ShadowStyleInterpolation::canCreateFrom(const CSSValue& start, const CSSValue& end)
 {
-    return start.isShadowValue() && end.isShadowValue()
-        && toCSSShadowValue(start).style == toCSSShadowValue(end).style
-        && toCSSShadowValue(start).color && toCSSShadowValue(end).color;
+    if (!start.isShadowValue() || end.isShadowValue())
+        return false;
+    const CSSShadowValue& startShadow = toCSSShadowValue(start);
+    const CSSShadowValue& endShadow = toCSSShadowValue(end);
+    if (startShadow.style != endShadow.style || !startShadow.color || !endShadow.color)
+        return false;
+    return !ColorStyleInterpolation::shouldUseLegacyStyleInterpolation(*startShadow.color, *endShadow.color);
 }
 
 PassOwnPtrWillBeRawPtr<InterpolableValue> ShadowStyleInterpolation::lengthToInterpolableValue(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> value)
 {
     if (value)
         return LengthStyleInterpolation::toInterpolableValue(*value);
-    return LengthStyleInterpolation::toInterpolableValue(*CSSPrimitiveValue::create(0, CSSPrimitiveValue::CSS_PX));
+    return LengthStyleInterpolation::toInterpolableValue(*CSSPrimitiveValue::create(0, CSSPrimitiveValue::UnitType::Pixels));
 }
 
 PassOwnPtrWillBeRawPtr<InterpolableValue> ShadowStyleInterpolation::toInterpolableValue(const CSSValue& value, NonInterpolableType& nonInterpolableData)

@@ -6,24 +6,20 @@
 #define MOJO_SERVICES_NETWORK_NETWORK_SERVICE_IMPL_H_
 
 #include "base/compiler_specific.h"
+#include "mojo/application/public/cpp/app_lifetime_helper.h"
 #include "mojo/services/network/public/interfaces/network_service.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
 #include "url/gurl.h"
 
 namespace mojo {
-class ApplicationConnection;
-class NetworkContext;
 
-class NetworkServiceImpl : public InterfaceImpl<NetworkService> {
+class NetworkServiceImpl : public NetworkService {
  public:
-  NetworkServiceImpl(ApplicationConnection* connection,
-                     NetworkContext* context);
+  NetworkServiceImpl(scoped_ptr<mojo::AppRefCount> app_refcount,
+                     InterfaceRequest<NetworkService> request);
   ~NetworkServiceImpl() override;
 
   // NetworkService methods:
-  void CreateURLLoader(InterfaceRequest<URLLoader> loader) override;
-  void GetCookieStore(InterfaceRequest<CookieStore> store) override;
-  void CreateWebSocket(InterfaceRequest<WebSocket> socket) override;
   void CreateTCPBoundSocket(
       NetAddressPtr local_address,
       InterfaceRequest<TCPBoundSocket> bound_socket,
@@ -38,10 +34,13 @@ class NetworkServiceImpl : public InterfaceImpl<NetworkService> {
   void CreateHttpServer(NetAddressPtr local_address,
                         HttpServerDelegatePtr delegate,
                         const CreateHttpServerCallback& callback) override;
+  void GetMimeTypeFromFile(
+      const mojo::String& file_path,
+      const GetMimeTypeFromFileCallback& callback) override;
 
  private:
-  NetworkContext* context_;
-  GURL origin_;
+  scoped_ptr<mojo::AppRefCount> app_refcount_;
+  StrongBinding<NetworkService> binding_;
 };
 
 }  // namespace mojo

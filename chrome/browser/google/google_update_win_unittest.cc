@@ -663,8 +663,6 @@ TEST_P(GoogleUpdateWinTest, InvalidInstallDirectory) {
   task_runner_->RunUntilIdle();
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
-
 // Test the case where the GoogleUpdate class can't be created for an update
 // check.
 TEST_P(GoogleUpdateWinTest, NoGoogleUpdateForCheck) {
@@ -720,6 +718,24 @@ TEST_P(GoogleUpdateWinTest, UpdatesDisabledByPolicy) {
 
   EXPECT_CALL(mock_update_check_delegate_,
               OnError(GOOGLE_UPDATE_DISABLED_BY_POLICY, _, _));
+  BeginUpdateCheck(task_runner_, std::string(), false, 0,
+                   mock_update_check_delegate_.AsWeakPtr());
+  task_runner_->RunUntilIdle();
+}
+
+// Test the case where the GoogleUpdate class reports that manual updates are
+// disabled by Group Policy, but that automatic updates are enabled.
+TEST_P(GoogleUpdateWinTest, ManualUpdatesDisabledByPolicy) {
+  static const HRESULT GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY_MANUAL =
+      0x8004081f;
+  PrepareSimulatorForUpdateCheck(kChromeBinariesGuid);
+  PushState(STATE_INIT);
+  PushState(STATE_CHECKING_FOR_UPDATE);
+  PushErrorState(GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY_MANUAL,
+                 L"manual updates disabled by policy", -1);
+
+  EXPECT_CALL(mock_update_check_delegate_,
+              OnError(GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY, _, _));
   BeginUpdateCheck(task_runner_, std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
@@ -827,8 +843,6 @@ TEST_P(GoogleUpdateWinTest, UpdateFailed) {
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
 }
-
-#endif  // defined(GOOGLE_CHROME_BUILD)
 
 INSTANTIATE_TEST_CASE_P(UserLevel, GoogleUpdateWinTest, Values(false));
 

@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/scoped_ptr_map.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "components/autofill/core/common/form_data.h"
 #include "url/gurl.h"
@@ -164,10 +166,6 @@ struct PasswordForm {
   // When parsing an HTML form, this is typically empty.
   base::string16 password_value;
 
-  // False if autocomplete is set to "off" for the password input element;
-  // True otherwise.
-  bool password_autocomplete_set;
-
   // If the form was a sign-up or a change password form, the name of the input
   // element corresponding to the new password. Optional, and not persisted.
   base::string16 new_password_element;
@@ -248,8 +246,13 @@ struct PasswordForm {
   // User friendly name to show in the UI.
   base::string16 display_name;
 
-  // The URL of the user's avatar to display in the UI.
-  GURL avatar_url;
+  // The URL of this credential's icon, such as the user's avatar, to display
+  // in the UI.
+  // TODO(msramek): This field was previously named |avatar_url|. It is still
+  // named this way in the password store backends (e.g. the avatar_url column
+  // in the SQL DB of LoginDatabase) and for the purposes of syncing
+  // (i.e in PasswordSpecificsData). Rename these occurrences.
+  GURL icon_url;
 
   // The URL of identity provider used for federated login.
   GURL federation_url;
@@ -275,6 +278,11 @@ struct PasswordForm {
   // We use only client heuristics, so it could include signup forms.
   bool IsPossibleChangePasswordForm() const;
 
+  // Return true if we consider this form to be a change password form
+  // without username field. We use only client heuristics, so it could
+  // include signup forms.
+  bool IsPossibleChangePasswordFormWithoutUsername() const;
+
   // Equality operators for testing.
   bool operator==(const PasswordForm& form) const;
   bool operator!=(const PasswordForm& form) const;
@@ -283,15 +291,27 @@ struct PasswordForm {
   ~PasswordForm();
 };
 
-// Map username to PasswordForm* for convenience. See password_form_manager.h.
-typedef std::map<base::string16, PasswordForm*> PasswordFormMap;
+// True if the unique keys for the forms are the same. The unique key is
+// (origin, username_element, username_value, password_element, signon_realm).
+bool ArePasswordFormUniqueKeyEqual(const PasswordForm& left,
+                                   const PasswordForm& right);
 
+// A comparator for the unique key.
+struct LessThanUniqueKey {
+  bool operator()(const PasswordForm* left, const PasswordForm* right) const;
+};
+
+// Map username to PasswordForm* for convenience. See password_form_manager.h.
+typedef base::ScopedPtrMap<base::string16, scoped_ptr<PasswordForm>>
+    PasswordFormMap;
+
+// Like PasswordFormMap, but with weak (not owned) pointers.
 typedef std::map<base::string16, const PasswordForm*> ConstPasswordFormMap;
 
 // For testing.
 std::ostream& operator<<(std::ostream& os, PasswordForm::Layout layout);
-std::ostream& operator<<(std::ostream& os, const autofill::PasswordForm& form);
-std::ostream& operator<<(std::ostream& os, autofill::PasswordForm* form);
+std::ostream& operator<<(std::ostream& os, const PasswordForm& form);
+std::ostream& operator<<(std::ostream& os, PasswordForm* form);
 
 }  // namespace autofill
 

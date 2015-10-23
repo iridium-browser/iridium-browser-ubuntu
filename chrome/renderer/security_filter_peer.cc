@@ -4,9 +4,12 @@
 
 #include "chrome/renderer/security_filter_peer.h"
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/child/fixed_received_data.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -75,27 +78,6 @@ bool SecurityFilterPeer::OnReceivedRedirect(
   return false;
 }
 
-void SecurityFilterPeer::OnReceivedResponse(
-    const content::ResourceResponseInfo& info) {
-  NOTREACHED();
-}
-
-void SecurityFilterPeer::OnReceivedData(const char* data,
-                                        int data_length,
-                                        int encoded_data_length) {
-  NOTREACHED();
-}
-
-void SecurityFilterPeer::OnCompletedRequest(
-    int error_code,
-    bool was_ignored_by_handler,
-    bool stale_copy_in_cache,
-    const std::string& security_info,
-    const base::TimeTicks& completion_time,
-    int64 total_transfer_size) {
-  NOTREACHED();
-}
-
 // static
 void ProcessResponseInfo(const content::ResourceResponseInfo& info_in,
                          content::ResourceResponseInfo* info_out,
@@ -139,10 +121,8 @@ void BufferedPeer::OnReceivedResponse(
   ProcessResponseInfo(info, &response_info_, mime_type_);
 }
 
-void BufferedPeer::OnReceivedData(const char* data,
-                                  int data_length,
-                                  int encoded_data_length) {
-  data_.append(data, data_length);
+void BufferedPeer::OnReceivedData(scoped_ptr<ReceivedData> data) {
+  data_.append(data->payload(), data->length());
 }
 
 void BufferedPeer::OnCompletedRequest(int error_code,
@@ -158,23 +138,22 @@ void BufferedPeer::OnCompletedRequest(int error_code,
   if (error_code != net::OK || !DataReady()) {
     // Pretend we failed to load the resource.
     original_peer_->OnReceivedCompletedResponse(
-        response_info_, nullptr, 0, -1, net::ERR_ABORTED, false,
-        stale_copy_in_cache, security_info, completion_time,
-        total_transfer_size);
+        response_info_, nullptr, net::ERR_ABORTED, false, stale_copy_in_cache,
+        security_info, completion_time, total_transfer_size);
     return;
   }
 
+  scoped_ptr<content::FixedReceivedData> data_to_pass(
+      data_.empty() ? nullptr : new content::FixedReceivedData(
+                                    data_.data(), data_.size(), -1));
   original_peer_->OnReceivedCompletedResponse(
-      response_info_, data_.data(), data_.size(), -1, error_code,
-      was_ignored_by_handler, stale_copy_in_cache, security_info,
-      completion_time, total_transfer_size);
+      response_info_, data_to_pass.Pass(), error_code, was_ignored_by_handler,
+      stale_copy_in_cache, security_info, completion_time, total_transfer_size);
 }
 
 void BufferedPeer::OnReceivedCompletedResponse(
     const content::ResourceResponseInfo& info,
-    const char* data,
-    int data_length,
-    int encoded_data_length,
+    scoped_ptr<ReceivedData> data,
     int error_code,
     bool was_ignored_by_handler,
     bool stale_copy_in_cache,
@@ -184,9 +163,8 @@ void BufferedPeer::OnReceivedCompletedResponse(
   // Make sure we delete ourselves at the end of this call.
   scoped_ptr<BufferedPeer> this_deleter(this);
   original_peer_->OnReceivedCompletedResponse(
-      info, data, data_length, encoded_data_length, error_code,
-      was_ignored_by_handler, stale_copy_in_cache, security_info,
-      completion_time, total_transfer_size);
+      info, data.Pass(), error_code, was_ignored_by_handler,
+      stale_copy_in_cache, security_info, completion_time, total_transfer_size);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -207,9 +185,7 @@ void ReplaceContentPeer::OnReceivedResponse(
   // Ignore this, we'll serve some alternate content in OnCompletedRequest.
 }
 
-void ReplaceContentPeer::OnReceivedData(const char* data,
-                                        int data_length,
-                                        int encoded_data_length) {
+void ReplaceContentPeer::OnReceivedData(scoped_ptr<ReceivedData> data) {
   // Ignore this, we'll serve some alternate content in OnCompletedRequest.
 }
 
@@ -228,16 +204,17 @@ void ReplaceContentPeer::OnCompletedRequest(
   info.security_info = security_info;
   info.content_length = static_cast<int>(data_.size());
 
+  scoped_ptr<content::FixedReceivedData> data_to_pass(
+      data_.empty() ? nullptr : new content::FixedReceivedData(
+                                    data_.data(), data_.size(), -1));
   original_peer_->OnReceivedCompletedResponse(
-      response_info_, data_.data(), data_.size(), -1, net::OK, false,
-      stale_copy_in_cache, security_info, completion_time, total_transfer_size);
+      response_info_, data_to_pass.Pass(), net::OK, false, stale_copy_in_cache,
+      security_info, completion_time, total_transfer_size);
 }
 
 void ReplaceContentPeer::OnReceivedCompletedResponse(
     const content::ResourceResponseInfo& info,
-    const char* data,
-    int data_length,
-    int encoded_data_length,
+    scoped_ptr<ReceivedData> data,
     int error_code,
     bool was_ignored_by_handler,
     bool stale_copy_in_cache,
@@ -248,7 +225,6 @@ void ReplaceContentPeer::OnReceivedCompletedResponse(
   scoped_ptr<ReplaceContentPeer> this_deleter(this);
 
   original_peer_->OnReceivedCompletedResponse(
-      info, data, data_length, encoded_data_length, error_code,
-      was_ignored_by_handler, stale_copy_in_cache, security_info,
-      completion_time, total_transfer_size);
+      info, data.Pass(), error_code, was_ignored_by_handler,
+      stale_copy_in_cache, security_info, completion_time, total_transfer_size);
 }

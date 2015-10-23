@@ -14,9 +14,9 @@ namespace autofill {
 
 namespace {
 
-const int kPickleVersion = 3;
+const int kPickleVersion = 4;
 
-bool ReadGURL(PickleIterator* iter, GURL* url) {
+bool ReadGURL(base::PickleIterator* iter, GURL* url) {
   std::string spec;
   if (!iter->ReadString(&spec))
     return false;
@@ -26,14 +26,14 @@ bool ReadGURL(PickleIterator* iter, GURL* url) {
 }
 
 void SerializeFormFieldDataVector(const std::vector<FormFieldData>& fields,
-                                  Pickle* pickle) {
+                                  base::Pickle* pickle) {
   pickle->WriteInt(static_cast<int>(fields.size()));
   for (size_t i = 0; i < fields.size(); ++i) {
     SerializeFormFieldData(fields[i], pickle);
   }
 }
 
-bool DeserializeFormFieldDataVector(PickleIterator* iter,
+bool DeserializeFormFieldDataVector(base::PickleIterator* iter,
                                     std::vector<FormFieldData>* fields) {
   int size;
   if (!iter->ReadInt(&size))
@@ -57,15 +57,13 @@ void LogDeserializationError(int version) {
 }  // namespace
 
 FormData::FormData()
-    : user_submitted(false),
-      is_form_tag(true) {
+    : is_form_tag(true) {
 }
 
 FormData::FormData(const FormData& data)
     : name(data.name),
       origin(data.origin),
       action(data.action),
-      user_submitted(data.user_submitted),
       is_form_tag(data.is_form_tag),
       fields(data.fields) {
 }
@@ -77,7 +75,6 @@ bool FormData::SameFormAs(const FormData& form) const {
   if (name != form.name ||
       origin != form.origin ||
       action != form.action ||
-      user_submitted != form.user_submitted ||
       is_form_tag != form.is_form_tag ||
       fields.size() != form.fields.size())
     return false;
@@ -95,8 +92,6 @@ bool FormData::operator<(const FormData& form) const {
     return origin < form.origin;
   if (action != form.action)
     return action < form.action;
-  if (user_submitted != form.user_submitted)
-    return user_submitted < form.user_submitted;
   if (is_form_tag != form.is_form_tag)
     return is_form_tag < form.is_form_tag;
   return fields < form.fields;
@@ -106,7 +101,6 @@ std::ostream& operator<<(std::ostream& os, const FormData& form) {
   os << base::UTF16ToUTF8(form.name) << " "
      << form.origin << " "
      << form.action << " "
-     << form.user_submitted << " "
      << form.is_form_tag << " "
      << "Fields:";
   for (size_t i = 0; i < form.fields.size(); ++i) {
@@ -115,26 +109,25 @@ std::ostream& operator<<(std::ostream& os, const FormData& form) {
   return os;
 }
 
-void SerializeFormData(const FormData& form_data, Pickle* pickle) {
+void SerializeFormData(const FormData& form_data, base::Pickle* pickle) {
   pickle->WriteInt(kPickleVersion);
   pickle->WriteString16(form_data.name);
   pickle->WriteString(form_data.origin.spec());
   pickle->WriteString(form_data.action.spec());
-  pickle->WriteBool(form_data.user_submitted);
   SerializeFormFieldDataVector(form_data.fields, pickle);
   pickle->WriteBool(form_data.is_form_tag);
 }
 
 void SerializeFormDataToBase64String(const FormData& form_data,
                                      std::string* output) {
-  Pickle pickle;
+  base::Pickle pickle;
   SerializeFormData(form_data, &pickle);
   Base64Encode(
       base::StringPiece(static_cast<const char*>(pickle.data()), pickle.size()),
       output);
 }
 
-bool DeserializeFormData(PickleIterator* iter, FormData* form_data) {
+bool DeserializeFormData(base::PickleIterator* iter, FormData* form_data) {
   int version;
   FormData temp_form_data;
   if (!iter->ReadInt(&version)) {
@@ -160,15 +153,17 @@ bool DeserializeFormData(PickleIterator* iter, FormData* form_data) {
     }
   }
 
+  bool unused_user_submitted;
   if (!ReadGURL(iter, &temp_form_data.origin) ||
       !ReadGURL(iter, &temp_form_data.action) ||
-      !iter->ReadBool(&temp_form_data.user_submitted) ||
+      // user_submitted was removed/no longer serialized in version 4.
+      (version < 4 && !iter->ReadBool(&unused_user_submitted)) ||
       !DeserializeFormFieldDataVector(iter, &temp_form_data.fields)) {
     LogDeserializationError(version);
     return false;
   }
 
-  if (version == 3) {
+  if (version >= 3) {
     if (!iter->ReadBool(&temp_form_data.is_form_tag)) {
       LogDeserializationError(version);
       return false;
@@ -187,8 +182,8 @@ bool DeserializeFormDataFromBase64String(const base::StringPiece& input,
     return false;
   std::string pickle_data;
   Base64Decode(input, &pickle_data);
-  Pickle pickle(pickle_data.data(), static_cast<int>(pickle_data.size()));
-  PickleIterator iter(pickle);
+  base::Pickle pickle(pickle_data.data(), static_cast<int>(pickle_data.size()));
+  base::PickleIterator iter(pickle);
   return DeserializeFormData(&iter, form_data);
 }
 

@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-Polymer('log-buffer', {
-  publish: {
+Polymer({
+  is: 'log-buffer',
+
+  properties: {
     /**
      * List of displayed logs.
-     * @type {?Array.<{{
+     * @type {?Array<{{
      *    text: string,
      *    time: string,
      *    file: string,
@@ -14,14 +16,17 @@ Polymer('log-buffer', {
      *    severity: number,
      * }}>} LogMessage
      */
-    logs: null,
+    logs: {
+      type: Array,
+      value: [],
+      notify: true,
+    }
   },
 
   /**
-   * Called when an instance is created.
+   * Called when an instance is initialized.
    */
-  created: function() {
-    this.logs = [];
+  ready: function() {
     // We assume that only one instance of log-buffer is ever created.
     LogBufferInterface = this;
     chrome.send('getLogMessages');
@@ -34,7 +39,7 @@ Polymer('log-buffer', {
 
   // Handles when a new log message is added.
   onLogMessageAdded: function(log) {
-    this.logs.push(log);
+    this.push('logs', log);
   },
 
   // Handles when the logs are cleared.
@@ -68,7 +73,7 @@ LogBufferInterface = {
   /**
    * Called in response to chrome.send('getLogMessages') with the log messages
    * currently in the buffer.
-   * @type {function(Array.<LogMessage>)}
+   * @type {function(Array<LogMessage>)}
    */
   onGotLogMessages: function(messages) {},
 };

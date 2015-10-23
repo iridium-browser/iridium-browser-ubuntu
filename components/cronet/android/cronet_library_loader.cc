@@ -18,9 +18,10 @@
 #include "components/cronet/android/chromium_url_request.h"
 #include "components/cronet/android/chromium_url_request_context.h"
 #include "components/cronet/android/cronet_histogram_manager.h"
-#include "components/cronet/android/cronet_upload_data_stream_delegate.h"
+#include "components/cronet/android/cronet_upload_data_stream_adapter.h"
 #include "components/cronet/android/cronet_url_request_adapter.h"
 #include "components/cronet/android/cronet_url_request_context_adapter.h"
+#include "components/cronet/version.h"
 #include "jni/CronetLibraryLoader_jni.h"
 #include "net/android/net_jni_registrar.h"
 #include "net/android/network_change_notifier_factory_android.h"
@@ -41,8 +42,8 @@ const base::android::RegistrationMethod kCronetRegisteredMethods[] = {
     {"ChromiumUrlRequestContext", ChromiumUrlRequestContextRegisterJni},
     {"CronetHistogramManager", CronetHistogramManagerRegisterJni},
     {"CronetLibraryLoader", RegisterNativesImpl},
-    {"CronetUploadDataStreamDelegate",
-     CronetUploadDataStreamDelegateRegisterJni},
+    {"CronetUploadDataStreamAdapter",
+     CronetUploadDataStreamAdapterRegisterJni},
     {"CronetUrlRequestAdapter", CronetUrlRequestAdapterRegisterJni},
     {"CronetUrlRequestContextAdapter",
      CronetUrlRequestContextAdapterRegisterJni},
@@ -110,6 +111,10 @@ void CronetInitOnMainThread(JNIEnv* env, jclass jcaller) {
   net::NetworkChangeNotifier::SetFactory(
       new net::NetworkChangeNotifierFactoryAndroid());
   g_network_change_notifier = net::NetworkChangeNotifier::Create();
+}
+
+jstring GetCronetVersion(JNIEnv* env, jclass jcaller) {
+  return base::android::ConvertUTF8ToJavaString(env, CRONET_VERSION).Release();
 }
 
 }  // namespace cronet

@@ -41,26 +41,13 @@ chrome.runtime.onMessageExternal.addListener(
           requestInfo['guestProcessId'] = sender.guestProcessId;
         }
 
+        if (sender.guestRenderFrameRoutingId) {
+          requestInfo['guestRenderFrameId'] = sender.guestRenderFrameRoutingId;
+        }
+
         var method = message['method'];
         var origin = getHost(sender.url);
-        if (method == 'chooseDesktopMedia') {
-          // TODO(bemasc): Remove this method once the caller has transitioned
-          // to using the port.
-          var cancelId;
-          function sendResponseWithCancelId(streamId) {
-            var value = {'cancelId': cancelId, 'streamId': streamId};
-            doSendResponse(value);
-          }
-          cancelId = chrome.desktopCapture.chooseDesktopMedia(
-              ['screen', 'window'], sender.tab, sendResponseWithCancelId);
-          return true;
-        } else if (method == 'cancelChooseDesktopMedia') {
-          // TODO(bemasc): Remove this method (see above).
-          var cancelId = message['cancelId'];
-          chrome.desktopCapture.cancelChooseDesktopMedia(cancelId);
-          doSendResponse();
-          return false;
-        } else if (method == 'cpu.getInfo') {
+        if (method == 'cpu.getInfo') {
           chrome.system.cpu.getInfo(doSendResponse);
           return true;
         } else if (method == 'logging.setMetadata') {
@@ -90,13 +77,48 @@ chrome.runtime.onMessageExternal.addListener(
           chrome.webrtcLoggingPrivate.upload(
               requestInfo, origin, doSendResponse);
           return true;
+        } else if (method == 'logging.uploadStored') {
+          var logId = message['logId'];
+          chrome.webrtcLoggingPrivate.uploadStored(
+              requestInfo, origin, logId, doSendResponse);
+          return true;
         } else if (method == 'logging.stopAndUpload') {
-          stopAllRtpDump(requestInfo, origin, function() {
-            chrome.webrtcLoggingPrivate.stop(requestInfo, origin, function() {
-              chrome.webrtcLoggingPrivate.upload(
-                  requestInfo, origin, doSendResponse);
-            });
+          stopAllRtpDump(requestInfo, origin,
+                         function(rtpDumpValue, rtpDumpErrorString) {
+            if (chrome.extension.lastError !== undefined) {
+              // Stopping RTP dump failed, try to stop logging but don't try
+              // to upload since that will fail.
+              chrome.webrtcLoggingPrivate.stop(
+                  requestInfo, origin, function(stopValue, stopErrorString) {
+                if (chrome.extension.lastError !== undefined) {
+                  // Stopping logging also failed, report the error for logging.
+                  doSendResponse(stopValue, stopErrorString);
+                } else {
+                  // Stopping logging succeeded, report the error for RTP dump.
+                  doSendResponse(rtpDumpValue, rtpDumpErrorString);
+                }
+              });
+            } else {
+              // Stopping RTP dump succeeded.
+              chrome.webrtcLoggingPrivate.stop(
+                  requestInfo, origin, function(stopValue, stopErrorString) {
+                if (chrome.extension.lastError !== undefined) {
+                  // Stopping logging failed, report error and don't try to
+                  // upload since that will fail.
+                  doSendResponse(stopValue, stopErrorString);
+                } else {
+                  // Stopping logging succeeded.
+                  chrome.webrtcLoggingPrivate.upload(
+                      requestInfo, origin, doSendResponse);
+                }
+              });
+            }
           });
+          return true;
+        } else if (method == 'logging.store') {
+          var logId = message['logId'];
+          chrome.webrtcLoggingPrivate.store(
+              requestInfo, origin, logId, doSendResponse);
           return true;
         } else if (method == 'logging.discard') {
           chrome.webrtcLoggingPrivate.discard(
@@ -183,12 +205,26 @@ function onChooseDesktopMediaPort(port) {
     var method = message['method'];
     if (method == 'chooseDesktopMedia') {
       var sources = message['sources'];
-      var cancelId = chrome.desktopCapture.chooseDesktopMedia(
-          sources, port.sender.tab, sendResponse);
+      var cancelId = null;
+      if (port.sender.tab) {
+        cancelId = chrome.desktopCapture.chooseDesktopMedia(
+            sources, port.sender.tab, sendResponse);
+      } else {
+        var requestInfo = {};
+        requestInfo['guestProcessId'] = port.sender.guestProcessId || 0;
+        requestInfo['guestRenderFrameId'] =
+            port.sender.guestRenderFrameRoutingId || 0;
+        cancelId = chrome.webrtcDesktopCapturePrivate.chooseDesktopMedia(
+            sources, requestInfo, sendResponse);
+      }
       port.onDisconnect.addListener(function() {
         // This method has no effect if called after the user has selected a
         // desktop media source, so it does not need to be conditional.
-        chrome.desktopCapture.cancelChooseDesktopMedia(cancelId);
+        if (port.sender.tab) {
+          chrome.desktopCapture.cancelChooseDesktopMedia(cancelId);
+        } else {
+          chrome.webrtcDesktopCapturePrivate.cancelChooseDesktopMedia(cancelId);
+        }
       });
     }
   });

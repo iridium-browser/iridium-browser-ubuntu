@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_vector.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "media/audio/audio_manager_base.h"
@@ -39,6 +40,7 @@ class AudioInputDevice::AudioThreadCallback
 
  private:
   int current_segment_id_;
+  uint32 last_buffer_id_;
   ScopedVector<media::AudioBus> audio_buses_;
   CaptureCallback* capture_callback_;
 
@@ -118,11 +120,10 @@ void AudioInputDevice::OnStreamCreated(
     int length,
     int total_segments) {
   DCHECK(task_runner()->BelongsToCurrentThread());
+  DCHECK(base::SharedMemory::IsHandleValid(handle));
 #if defined(OS_WIN)
-  DCHECK(handle);
   DCHECK(socket_handle);
 #else
-  DCHECK_GE(handle.fd, 0);
   DCHECK_GE(socket_handle, 0);
 #endif
   DCHECK_GT(length, 0);
@@ -152,7 +153,7 @@ void AudioInputDevice::OnVolume(double volume) {
 }
 
 void AudioInputDevice::OnStateChanged(
-    AudioInputIPCDelegate::State state) {
+    AudioInputIPCDelegateState state) {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
   // Do nothing if the stream has been closed.
@@ -162,14 +163,14 @@ void AudioInputDevice::OnStateChanged(
   // TODO(miu): Clean-up inconsistent and incomplete handling here.
   // http://crbug.com/180640
   switch (state) {
-    case AudioInputIPCDelegate::kStopped:
+    case AUDIO_INPUT_IPC_DELEGATE_STATE_STOPPED:
       ShutDownOnIOThread();
       break;
-    case AudioInputIPCDelegate::kRecording:
+    case AUDIO_INPUT_IPC_DELEGATE_STATE_RECORDING:
       NOTIMPLEMENTED();
       break;
-    case AudioInputIPCDelegate::kError:
-      DLOG(WARNING) << "AudioInputDevice::OnStateChanged(kError)";
+    case AUDIO_INPUT_IPC_DELEGATE_STATE_ERROR:
+      DLOG(WARNING) << "AudioInputDevice::OnStateChanged(ERROR)";
       // Don't dereference the callback object if the audio thread
       // is stopped or stopping.  That could mean that the callback
       // object has been deleted.
@@ -177,7 +178,8 @@ void AudioInputDevice::OnStateChanged(
       // object.  Possibly require calling Initialize again or provide
       // a callback object via Start() and clear it in Stop().
       if (!audio_thread_.IsStopped())
-        callback_->OnCaptureError();
+        callback_->OnCaptureError(
+            "AudioInputDevice::OnStateChanged - audio thread still running");
       break;
     default:
       NOTREACHED();
@@ -273,6 +275,7 @@ AudioInputDevice::AudioThreadCallback::AudioThreadCallback(
     : AudioDeviceThread::Callback(audio_parameters, memory, memory_length,
                                   total_segments),
       current_segment_id_(0),
+      last_buffer_id_(UINT32_MAX),
       capture_callback_(capture_callback) {
 }
 
@@ -301,21 +304,39 @@ void AudioInputDevice::AudioThreadCallback::Process(uint32 pending_data) {
   uint8* ptr = static_cast<uint8*>(shared_memory_.memory());
   ptr += current_segment_id_ * segment_length_;
   AudioInputBuffer* buffer = reinterpret_cast<AudioInputBuffer*>(ptr);
+
   // Usually this will be equal but in the case of low sample rate (e.g. 8kHz,
   // the buffer may be bigger (on mac at least)).
   DCHECK_GE(buffer->params.size,
             segment_length_ - sizeof(AudioInputBufferParameters));
-  double volume = buffer->params.volume;
-  bool key_pressed = buffer->params.key_pressed;
+
+  // Verify correct sequence.
+  if (buffer->params.id != last_buffer_id_ + 1) {
+    std::string message = base::StringPrintf(
+        "Incorrect buffer sequence. Expected = %u. Actual = %u.",
+        last_buffer_id_ + 1, buffer->params.id);
+    LOG(ERROR) << message;
+    capture_callback_->OnCaptureError(message);
+  }
+  if (current_segment_id_ != static_cast<int>(pending_data)) {
+    std::string message = base::StringPrintf(
+        "Segment id not matching. Remote = %u. Local = %d.",
+        pending_data, current_segment_id_);
+    LOG(ERROR) << message;
+    capture_callback_->OnCaptureError(message);
+  }
+  last_buffer_id_ = buffer->params.id;
 
   // Use pre-allocated audio bus wrapping existing block of shared memory.
   media::AudioBus* audio_bus = audio_buses_[current_segment_id_];
 
-  // Deliver captured data to the client in floating point format
-  // and update the audio-delay measurement.
-  int audio_delay_milliseconds = pending_data / bytes_per_ms_;
+  // Deliver captured data to the client in floating point format and update
+  // the audio delay measurement.
   capture_callback_->Capture(
-      audio_bus, audio_delay_milliseconds, volume, key_pressed);
+      audio_bus,
+      buffer->params.hardware_delay_bytes / bytes_per_ms_,  // Delay in ms
+      buffer->params.volume,
+      buffer->params.key_pressed);
 
   if (++current_segment_id_ >= total_segments_)
     current_segment_id_ = 0;

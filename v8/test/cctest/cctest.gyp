@@ -49,13 +49,9 @@
         'compiler/codegen-tester.h',
         'compiler/function-tester.h',
         'compiler/graph-builder-tester.h',
-        'compiler/simplified-graph-builder.cc',
-        'compiler/simplified-graph-builder.h',
         'compiler/test-basic-block-profiler.cc',
         'compiler/test-branch-combine.cc',
         'compiler/test-changes-lowering.cc',
-        'compiler/test-codegen-deopt.cc',
-        'compiler/test-control-reducer.cc',
         'compiler/test-gap-resolver.cc',
         'compiler/test-graph-visualizer.cc',
         'compiler/test-instruction.cc',
@@ -80,12 +76,15 @@
         'compiler/test-run-jsexceptions.cc',
         'compiler/test-run-jsops.cc',
         'compiler/test-run-machops.cc',
+        'compiler/test-run-native-calls.cc',
         'compiler/test-run-properties.cc',
         'compiler/test-run-stackcheck.cc',
         'compiler/test-run-stubs.cc',
         'compiler/test-run-variables.cc',
         'compiler/test-simplified-lowering.cc',
         'cctest.cc',
+        'interpreter/test-bytecode-generator.cc',
+        'interpreter/test-interpreter.cc',
         'gay-fixed.cc',
         'gay-precision.cc',
         'gay-shortest.cc',
@@ -147,6 +146,7 @@
         'test-representation.cc',
         'test-sampler-api.cc',
         'test-serialize.cc',
+        'test-simd.cc',
         'test-spaces.cc',
         'test-strings.cc',
         'test-symbols.cc',
@@ -165,8 +165,6 @@
         'test-weakmaps.cc',
         'test-weaksets.cc',
         'trace-extension.cc',
-        '../../src/startup-data-util.h',
-        '../../src/startup-data-util.cc'
       ],
       'conditions': [
         ['v8_target_arch=="ia32"', {
@@ -277,6 +275,11 @@
           'dependencies': ['../../tools/gyp/v8.gyp:v8_maybe_snapshot'],
         }, {
           'dependencies': ['../../tools/gyp/v8.gyp:v8'],
+        }],
+        ['v8_wasm!=0', {
+          'dependencies': [
+            '../../third_party/wasm/test/cctest/wasm/wasm.gyp:wasm_cctest'
+          ],
         }],
       ],
     },

@@ -95,8 +95,8 @@ void It2MeHost::Disconnect() {
       return;
 
     case kStarting:
-      SetState(kDisconnecting);
-      SetState(kDisconnected);
+      SetState(kDisconnecting, "");
+      SetState(kDisconnected, "");
       ShutdownOnNetworkThread();
       return;
 
@@ -104,10 +104,10 @@ void It2MeHost::Disconnect() {
       return;
 
     default:
-      SetState(kDisconnecting);
+      SetState(kDisconnecting, "");
 
       if (!host_) {
-        SetState(kDisconnected);
+        SetState(kDisconnected, "");
         ShutdownOnNetworkThread();
         return;
       }
@@ -136,7 +136,7 @@ void It2MeHost::RequestNatPolicy() {
 void It2MeHost::ShowConfirmationPrompt() {
   DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
 
-  SetState(kStarting);
+  SetState(kStarting, "");
 
   scoped_ptr<It2MeConfirmationDialog> confirmation_dialog =
       confirmation_dialog_factory_->Create();
@@ -196,9 +196,10 @@ void It2MeHost::FinishConnect() {
 
   // Check the host domain policy.
   if (!required_host_domain_.empty() &&
-      !EndsWith(xmpp_server_config_.username,
-                std::string("@") + required_host_domain_, false)) {
-    SetState(kInvalidDomainError);
+      !base::EndsWith(xmpp_server_config_.username,
+                      std::string("@") + required_host_domain_,
+                      base::CompareCase::INSENSITIVE_ASCII)) {
+    SetState(kInvalidDomainError, "");
     return;
   }
 
@@ -236,30 +237,28 @@ void It2MeHost::FinishConnect() {
         protocol::NetworkSettings::kDefaultMaxPort;
   }
 
+  scoped_ptr<protocol::SessionManager> session_manager =
+      CreateHostSessionManager(signal_strategy_.get(), network_settings,
+                               host_context_->url_request_context_getter());
+  scoped_ptr<protocol::CandidateSessionConfig> protocol_config =
+      protocol::CandidateSessionConfig::CreateDefault();
+  // Disable audio by default.
+  // TODO(sergeyu): Add UI to enable it.
+  protocol_config->DisableAudioChannel();
+  session_manager->set_protocol_config(protocol_config.Pass());
+
   // Create the host.
   host_.reset(new ChromotingHost(
-      signal_strategy_.get(),
-      desktop_environment_factory_.get(),
-      CreateHostSessionManager(signal_strategy_.get(), network_settings,
-                               host_context_->url_request_context_getter()),
-      host_context_->audio_task_runner(),
+      signal_strategy_.get(), desktop_environment_factory_.get(),
+      session_manager.Pass(), host_context_->audio_task_runner(),
       host_context_->input_task_runner(),
       host_context_->video_capture_task_runner(),
       host_context_->video_encode_task_runner(),
-      host_context_->network_task_runner(),
-      host_context_->ui_task_runner()));
+      host_context_->network_task_runner(), host_context_->ui_task_runner()));
   host_->AddStatusObserver(this);
   host_status_logger_.reset(
       new HostStatusLogger(host_->AsWeakPtr(), ServerLogEntry::IT2ME,
                            signal_strategy_.get(), directory_bot_jid_));
-
-  // Disable audio by default.
-  // TODO(sergeyu): Add UI to enable it.
-  scoped_ptr<protocol::CandidateSessionConfig> protocol_config =
-      protocol::CandidateSessionConfig::CreateDefault();
-  protocol_config->DisableAudioChannel();
-
-  host_->set_protocol_config(protocol_config.Pass());
 
   // Create event logger.
   host_event_logger_ =
@@ -269,7 +268,7 @@ void It2MeHost::FinishConnect() {
   signal_strategy_->Connect();
   host_->Start(xmpp_server_config_.username);
 
-  SetState(kRequestedAccessCode);
+  SetState(kRequestedAccessCode, "");
   return;
 }
 
@@ -287,7 +286,7 @@ void It2MeHost::ShutdownOnNetworkThread() {
     register_request_.reset();
     host_status_logger_.reset();
     signal_strategy_.reset();
-    SetState(kDisconnected);
+    SetState(kDisconnected, "");
   }
 
   host_context_->ui_task_runner()->PostTask(
@@ -341,7 +340,7 @@ void It2MeHost::OnClientAuthenticated(const std::string& jid) {
       FROM_HERE, base::Bind(&It2MeHost::Observer::OnClientAuthenticated,
                             observer_, client_username));
 
-  SetState(kConnected);
+  SetState(kConnected, "");
 }
 
 void It2MeHost::OnClientDisconnected(const std::string& jid) {
@@ -419,7 +418,8 @@ It2MeHost::~It2MeHost() {
   DCHECK(!policy_watcher_.get());
 }
 
-void It2MeHost::SetState(It2MeHostState state) {
+void It2MeHost::SetState(It2MeHostState state,
+                         const std::string& error_message) {
   DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
 
   switch (state_) {
@@ -464,7 +464,7 @@ void It2MeHost::SetState(It2MeHostState state) {
   // Post a state-change notification to the web-app.
   task_runner_->PostTask(
       FROM_HERE, base::Bind(&It2MeHost::Observer::OnStateChanged,
-                            observer_, state));
+                            observer_, state, error_message));
 }
 
 bool It2MeHost::IsConnected() const {
@@ -473,13 +473,13 @@ bool It2MeHost::IsConnected() const {
 }
 
 void It2MeHost::OnReceivedSupportID(
-    bool success,
     const std::string& support_id,
-    const base::TimeDelta& lifetime) {
+    const base::TimeDelta& lifetime,
+    const std::string& error_message) {
   DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!success) {
-    SetState(kError);
+  if (!error_message.empty()) {
+    SetState(kError, error_message);
     Disconnect();
     return;
   }
@@ -489,8 +489,9 @@ void It2MeHost::OnReceivedSupportID(
 
   std::string local_certificate = host_key_pair_->GenerateCertificate();
   if (local_certificate.empty()) {
-    LOG(ERROR) << "Failed to generate host certificate.";
-    SetState(kError);
+    std::string error_message = "Failed to generate host certificate.";
+    LOG(ERROR) << error_message;
+    SetState(kError, error_message);
     Disconnect();
     return;
   }
@@ -505,7 +506,7 @@ void It2MeHost::OnReceivedSupportID(
       FROM_HERE, base::Bind(&It2MeHost::Observer::OnStoreAccessCode,
                             observer_, access_code, lifetime));
 
-  SetState(kReceivedAccessCode);
+  SetState(kReceivedAccessCode, "");
 }
 
 It2MeHostFactory::It2MeHostFactory() : policy_service_(nullptr) {

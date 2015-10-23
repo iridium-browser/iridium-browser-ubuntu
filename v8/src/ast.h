@@ -5,19 +5,18 @@
 #ifndef V8_AST_H_
 #define V8_AST_H_
 
-#include "src/v8.h"
-
 #include "src/assembler.h"
 #include "src/ast-value-factory.h"
 #include "src/bailout-reason.h"
+#include "src/base/flags.h"
+#include "src/base/smart-pointers.h"
 #include "src/factory.h"
 #include "src/isolate.h"
-#include "src/jsregexp.h"
-#include "src/list-inl.h"
+#include "src/list.h"
 #include "src/modules.h"
+#include "src/regexp/jsregexp.h"
 #include "src/runtime/runtime.h"
 #include "src/small-pointer-list.h"
-#include "src/smart-pointers.h"
 #include "src/token.h"
 #include "src/types.h"
 #include "src/utils.h"
@@ -87,7 +86,8 @@ namespace internal {
   V(CompareOperation)           \
   V(Spread)                     \
   V(ThisFunction)               \
-  V(SuperReference)             \
+  V(SuperPropertyReference)     \
+  V(SuperCallReference)         \
   V(CaseClause)
 
 #define AST_NODE_LIST(V)                        \
@@ -126,22 +126,14 @@ AST_NODE_LIST(DEF_FORWARD_DECLARATION)
 
 
 // Typedef only introduced to avoid unreadable code.
-// Please do appreciate the required space in "> >".
-typedef ZoneList<Handle<String> > ZoneStringList;
-typedef ZoneList<Handle<Object> > ZoneObjectList;
+typedef ZoneList<Handle<String>> ZoneStringList;
+typedef ZoneList<Handle<Object>> ZoneObjectList;
 
 
 #define DECLARE_NODE_TYPE(type)                                          \
   void Accept(AstVisitor* v) override;                                   \
   AstNode::NodeType node_type() const final { return AstNode::k##type; } \
   friend class AstNodeFactory;
-
-
-enum AstPropertiesFlag {
-  kDontSelfOptimize,
-  kDontSoftInline,
-  kDontCache
-};
 
 
 class FeedbackVectorRequirements {
@@ -162,8 +154,7 @@ class ICSlotCache {
  public:
   explicit ICSlotCache(Zone* zone)
       : zone_(zone),
-        hash_map_(HashMap::PointersMatch,
-                  FLAG_vector_ics ? ZoneHashMap::kDefaultHashMapCapacity : 0,
+        hash_map_(HashMap::PointersMatch, ZoneHashMap::kDefaultHashMapCapacity,
                   ZoneAllocationPolicy(zone)) {}
 
   void Put(Variable* variable, FeedbackVectorICSlot slot) {
@@ -184,11 +175,18 @@ class ICSlotCache {
 
 class AstProperties final BASE_EMBEDDED {
  public:
-  class Flags : public EnumSet<AstPropertiesFlag, int> {};
+  enum Flag {
+    kNoFlags = 0,
+    kDontSelfOptimize = 1 << 0,
+    kDontCrankshaft = 1 << 1
+  };
+
+  typedef base::Flags<Flag> Flags;
 
   explicit AstProperties(Zone* zone) : node_count_(0), spec_(zone) {}
 
-  Flags* flags() { return &flags_; }
+  Flags& flags() { return flags_; }
+  Flags flags() const { return flags_; }
   int node_count() { return node_count_; }
   void add_node_count(int count) { node_count_ += count; }
 
@@ -205,6 +203,8 @@ class AstProperties final BASE_EMBEDDED {
   int node_count_;
   ZoneFeedbackVectorSpec spec_;
 };
+
+DEFINE_OPERATORS_FOR_FLAGS(AstProperties::Flags)
 
 
 class AstNode: public ZoneObject {
@@ -341,6 +341,7 @@ class Expression : public AstNode {
     kTest
   };
 
+  // True iff the expression is a valid reference expression.
   virtual bool IsValidReferenceExpression() const { return false; }
 
   // Helpers for ToBoolean conversion.
@@ -364,22 +365,12 @@ class Expression : public AstNode {
   // True if we can prove that the expression is the undefined literal.
   bool IsUndefinedLiteral(Isolate* isolate) const;
 
+  // True iff the expression is a valid target for an assignment.
+  bool IsValidReferenceExpressionOrThis() const;
+
   // Expression type bounds
   Bounds bounds() const { return bounds_; }
   void set_bounds(Bounds bounds) { bounds_ = bounds; }
-
-  // Whether the expression is parenthesized
-  bool is_single_parenthesized() const {
-    return IsSingleParenthesizedField::decode(bit_field_);
-  }
-  bool is_multi_parenthesized() const {
-    return IsMultiParenthesizedField::decode(bit_field_);
-  }
-  void increase_parenthesization_level() {
-    bit_field_ = IsMultiParenthesizedField::update(bit_field_,
-                                                   is_single_parenthesized());
-    bit_field_ = IsSingleParenthesizedField::update(bit_field_, true);
-  }
 
   // Type feedback information for assignments and properties.
   virtual bool IsMonomorphic() {
@@ -401,7 +392,7 @@ class Expression : public AstNode {
 
   // TODO(rossberg): this should move to its own AST node eventually.
   virtual void RecordToBooleanTypeFeedback(TypeFeedbackOracle* oracle);
-  byte to_boolean_types() const {
+  uint16_t to_boolean_types() const {
     return ToBooleanTypesField::decode(bit_field_);
   }
 
@@ -417,7 +408,7 @@ class Expression : public AstNode {
         bounds_(Bounds::Unbounded(zone)),
         bit_field_(0) {}
   static int parent_num_ids() { return 0; }
-  void set_to_boolean_types(byte types) {
+  void set_to_boolean_types(uint16_t types) {
     bit_field_ = ToBooleanTypesField::update(bit_field_, types);
   }
 
@@ -431,9 +422,7 @@ class Expression : public AstNode {
 
   int base_id_;
   Bounds bounds_;
-  class ToBooleanTypesField : public BitField16<byte, 0, 8> {};
-  class IsSingleParenthesizedField : public BitField16<bool, 8, 1> {};
-  class IsMultiParenthesizedField : public BitField16<bool, 9, 1> {};
+  class ToBooleanTypesField : public BitField16<uint16_t, 0, 9> {};
   uint16_t bit_field_;
   // Ends with 16-bit field; deriving classes in turn begin with
   // 16-bit fields for optimum packing efficiency.
@@ -502,7 +491,7 @@ class Block final : public BreakableStatement {
   }
 
   ZoneList<Statement*>* statements() { return &statements_; }
-  bool is_initializer_block() const { return is_initializer_block_; }
+  bool ignore_completion_value() const { return ignore_completion_value_; }
 
   static int num_ids() { return parent_num_ids() + 1; }
   BailoutId DeclsId() const { return BailoutId(local_id(0)); }
@@ -517,10 +506,10 @@ class Block final : public BreakableStatement {
 
  protected:
   Block(Zone* zone, ZoneList<const AstRawString*>* labels, int capacity,
-        bool is_initializer_block, int pos)
+        bool ignore_completion_value, int pos)
       : BreakableStatement(zone, labels, TARGET_FOR_NAMED_ONLY, pos),
         statements_(capacity, zone),
-        is_initializer_block_(is_initializer_block),
+        ignore_completion_value_(ignore_completion_value),
         scope_(NULL) {}
   static int parent_num_ids() { return BreakableStatement::num_ids(); }
 
@@ -528,7 +517,7 @@ class Block final : public BreakableStatement {
   int local_id(int n) const { return base_id() + parent_num_ids() + n; }
 
   ZoneList<Statement*> statements_;
-  bool is_initializer_block_;
+  bool ignore_completion_value_;
   Scope* scope_;
 };
 
@@ -815,13 +804,26 @@ class ForEachStatement : public IterationStatement {
   Expression* each() const { return each_; }
   Expression* subject() const { return subject_; }
 
+  FeedbackVectorRequirements ComputeFeedbackRequirements(
+      Isolate* isolate, const ICSlotCache* cache) override;
+  void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
+                              ICSlotCache* cache) override {
+    each_slot_ = slot;
+  }
+  Code::Kind FeedbackICSlotKind(int index) override;
+  FeedbackVectorICSlot EachFeedbackSlot() const { return each_slot_; }
+
  protected:
   ForEachStatement(Zone* zone, ZoneList<const AstRawString*>* labels, int pos)
-      : IterationStatement(zone, labels, pos), each_(NULL), subject_(NULL) {}
+      : IterationStatement(zone, labels, pos),
+        each_(NULL),
+        subject_(NULL),
+        each_slot_(FeedbackVectorICSlot::Invalid()) {}
 
  private:
   Expression* each_;
   Expression* subject_;
+  FeedbackVectorICSlot each_slot_;
 };
 
 
@@ -834,9 +836,12 @@ class ForInStatement final : public ForEachStatement {
   }
 
   // Type feedback information.
-  virtual FeedbackVectorRequirements ComputeFeedbackRequirements(
+  FeedbackVectorRequirements ComputeFeedbackRequirements(
       Isolate* isolate, const ICSlotCache* cache) override {
-    return FeedbackVectorRequirements(1, 0);
+    FeedbackVectorRequirements base =
+        ForEachStatement::ComputeFeedbackRequirements(isolate, cache);
+    DCHECK(base.slots() == 0 && base.ic_slots() <= 1);
+    return FeedbackVectorRequirements(1, base.ic_slots());
   }
   void SetFirstFeedbackSlot(FeedbackVectorSlot slot) override {
     for_in_feedback_slot_ = slot;
@@ -1163,18 +1168,29 @@ class IfStatement final : public Statement {
 
 class TryStatement : public Statement {
  public:
-  int index() const { return index_; }
   Block* try_block() const { return try_block_; }
 
+  void set_base_id(int id) { base_id_ = id; }
+  static int num_ids() { return parent_num_ids() + 1; }
+  BailoutId HandlerId() const { return BailoutId(local_id(0)); }
+
  protected:
-  TryStatement(Zone* zone, int index, Block* try_block, int pos)
-      : Statement(zone, pos), index_(index), try_block_(try_block) {}
+  TryStatement(Zone* zone, Block* try_block, int pos)
+      : Statement(zone, pos),
+        try_block_(try_block),
+        base_id_(BailoutId::None().ToInt()) {}
+  static int parent_num_ids() { return 0; }
+
+  int base_id() const {
+    DCHECK(!BailoutId(base_id_).IsNone());
+    return base_id_;
+  }
 
  private:
-  // Unique (per-function) index of this handler.  This is not an AST ID.
-  int index_;
+  int local_id(int n) const { return base_id() + parent_num_ids() + n; }
 
   Block* try_block_;
+  int base_id_;
 };
 
 
@@ -1187,18 +1203,12 @@ class TryCatchStatement final : public TryStatement {
   Block* catch_block() const { return catch_block_; }
 
  protected:
-  TryCatchStatement(Zone* zone,
-                    int index,
-                    Block* try_block,
-                    Scope* scope,
-                    Variable* variable,
-                    Block* catch_block,
-                    int pos)
-      : TryStatement(zone, index, try_block, pos),
+  TryCatchStatement(Zone* zone, Block* try_block, Scope* scope,
+                    Variable* variable, Block* catch_block, int pos)
+      : TryStatement(zone, try_block, pos),
         scope_(scope),
         variable_(variable),
-        catch_block_(catch_block) {
-  }
+        catch_block_(catch_block) {}
 
  private:
   Scope* scope_;
@@ -1214,10 +1224,9 @@ class TryFinallyStatement final : public TryStatement {
   Block* finally_block() const { return finally_block_; }
 
  protected:
-  TryFinallyStatement(
-      Zone* zone, int index, Block* try_block, Block* finally_block, int pos)
-      : TryStatement(zone, index, try_block, pos),
-        finally_block_(finally_block) { }
+  TryFinallyStatement(Zone* zone, Block* try_block, Block* finally_block,
+                      int pos)
+      : TryStatement(zone, try_block, pos), finally_block_(finally_block) {}
 
  private:
   Block* finally_block_;
@@ -1302,6 +1311,8 @@ class Literal final : public Expression {
 };
 
 
+class AstLiteralReindexer;
+
 // Base class for literals that needs space in the corresponding JSFunction.
 class MaterializedLiteral : public Expression {
  public:
@@ -1315,11 +1326,14 @@ class MaterializedLiteral : public Expression {
     return depth_;
   }
 
+  bool is_strong() const { return is_strong_; }
+
  protected:
-  MaterializedLiteral(Zone* zone, int literal_index, int pos)
+  MaterializedLiteral(Zone* zone, int literal_index, bool is_strong, int pos)
       : Expression(zone, pos),
         literal_index_(literal_index),
         is_simple_(false),
+        is_strong_(is_strong),
         depth_(0) {}
 
   // A materialized literal is simple if the values consist of only
@@ -1348,7 +1362,10 @@ class MaterializedLiteral : public Expression {
  private:
   int literal_index_;
   bool is_simple_;
+  bool is_strong_;
   int depth_;
+
+  friend class AstLiteralReindexer;
 };
 
 
@@ -1442,6 +1459,9 @@ class ObjectLiteral final : public MaterializedLiteral {
     if (disable_mementos) {
       flags |= kDisableMementos;
     }
+    if (is_strong()) {
+      flags |= kIsStrong;
+    }
     return flags;
   }
 
@@ -1450,7 +1470,8 @@ class ObjectLiteral final : public MaterializedLiteral {
     kFastElements = 1,
     kHasFunction = 1 << 1,
     kShallowProperties = 1 << 2,
-    kDisableMementos = 1 << 3
+    kDisableMementos = 1 << 3,
+    kIsStrong = 1 << 4
   };
 
   struct Accessors: public ZoneObject {
@@ -1468,16 +1489,44 @@ class ObjectLiteral final : public MaterializedLiteral {
   // ObjectLiteral can vary, so num_ids() is not a static method.
   int num_ids() const { return parent_num_ids() + 1 + properties()->length(); }
 
+  // Object literals need one feedback slot for each non-trivial value, as well
+  // as some slots for home objects.
+  FeedbackVectorRequirements ComputeFeedbackRequirements(
+      Isolate* isolate, const ICSlotCache* cache) override;
+  void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
+                              ICSlotCache* cache) override {
+    slot_ = slot;
+  }
+  Code::Kind FeedbackICSlotKind(int index) override { return Code::STORE_IC; }
+  FeedbackVectorICSlot GetNthSlot(int n) const {
+    return FeedbackVectorICSlot(slot_.ToInt() + n);
+  }
+
+  // If value needs a home object, returns a valid feedback vector ic slot
+  // given by slot_index, and increments slot_index.
+  FeedbackVectorICSlot SlotForHomeObject(Expression* value,
+                                         int* slot_index) const;
+
+#ifdef DEBUG
+  int slot_count() const { return slot_count_; }
+#endif
+
  protected:
   ObjectLiteral(Zone* zone, ZoneList<Property*>* properties, int literal_index,
-                int boilerplate_properties, bool has_function, int pos)
-      : MaterializedLiteral(zone, literal_index, pos),
+                int boilerplate_properties, bool has_function, bool is_strong,
+                int pos)
+      : MaterializedLiteral(zone, literal_index, is_strong, pos),
         properties_(properties),
         boilerplate_properties_(boilerplate_properties),
         fast_elements_(false),
         has_elements_(false),
         may_store_doubles_(false),
-        has_function_(has_function) {}
+        has_function_(has_function),
+#ifdef DEBUG
+        slot_count_(0),
+#endif
+        slot_(FeedbackVectorICSlot::Invalid()) {
+  }
   static int parent_num_ids() { return MaterializedLiteral::num_ids(); }
 
  private:
@@ -1489,6 +1538,12 @@ class ObjectLiteral final : public MaterializedLiteral {
   bool has_elements_;
   bool may_store_doubles_;
   bool has_function_;
+#ifdef DEBUG
+  // slot_count_ helps validate that the logic to allocate ic slots and the
+  // logic to use them are in sync.
+  int slot_count_;
+#endif
+  FeedbackVectorICSlot slot_;
 };
 
 
@@ -1502,8 +1557,9 @@ class RegExpLiteral final : public MaterializedLiteral {
 
  protected:
   RegExpLiteral(Zone* zone, const AstRawString* pattern,
-                const AstRawString* flags, int literal_index, int pos)
-      : MaterializedLiteral(zone, literal_index, pos),
+                const AstRawString* flags, int literal_index, bool is_strong,
+                int pos)
+      : MaterializedLiteral(zone, literal_index, is_strong, pos),
         pattern_(pattern),
         flags_(flags) {
     set_depth(1);
@@ -1548,19 +1604,26 @@ class ArrayLiteral final : public MaterializedLiteral {
     if (disable_mementos) {
       flags |= kDisableMementos;
     }
+    if (is_strong()) {
+      flags |= kIsStrong;
+    }
     return flags;
   }
 
   enum Flags {
     kNoFlags = 0,
     kShallowElements = 1,
-    kDisableMementos = 1 << 1
+    kDisableMementos = 1 << 1,
+    kIsStrong = 1 << 2
   };
 
  protected:
-  ArrayLiteral(Zone* zone, ZoneList<Expression*>* values, int literal_index,
+  ArrayLiteral(Zone* zone, ZoneList<Expression*>* values,
+               int first_spread_index, int literal_index, bool is_strong,
                int pos)
-      : MaterializedLiteral(zone, literal_index, pos), values_(values) {}
+      : MaterializedLiteral(zone, literal_index, is_strong, pos),
+        values_(values),
+        first_spread_index_(first_spread_index) {}
   static int parent_num_ids() { return MaterializedLiteral::num_ids(); }
 
  private:
@@ -1568,6 +1631,7 @@ class ArrayLiteral final : public MaterializedLiteral {
 
   Handle<FixedArray> constant_elements_;
   ZoneList<Expression*>* values_;
+  int first_spread_index_;
 };
 
 
@@ -1575,7 +1639,9 @@ class VariableProxy final : public Expression {
  public:
   DECLARE_NODE_TYPE(VariableProxy)
 
-  bool IsValidReferenceExpression() const override { return !is_this(); }
+  bool IsValidReferenceExpression() const override {
+    return !is_this() && !is_new_target();
+  }
 
   bool IsArguments() const { return is_resolved() && var()->is_arguments(); }
 
@@ -1606,13 +1672,18 @@ class VariableProxy final : public Expression {
     bit_field_ = IsResolvedField::update(bit_field_, true);
   }
 
+  bool is_new_target() const { return IsNewTargetField::decode(bit_field_); }
+  void set_is_new_target() {
+    bit_field_ = IsNewTargetField::update(bit_field_, true);
+  }
+
   int end_position() const { return end_position_; }
 
   // Bind this proxy to the variable var.
   void BindTo(Variable* var);
 
   bool UsesVariableFeedbackSlot() const {
-    return FLAG_vector_ics && (var()->IsUnallocated() || var()->IsLookupSlot());
+    return var()->IsUnallocated() || var()->IsLookupSlot();
   }
 
   virtual FeedbackVectorRequirements ComputeFeedbackRequirements(
@@ -1622,9 +1693,11 @@ class VariableProxy final : public Expression {
                               ICSlotCache* cache) override;
   Code::Kind FeedbackICSlotKind(int index) override { return Code::LOAD_IC; }
   FeedbackVectorICSlot VariableFeedbackSlot() {
-    DCHECK(!UsesVariableFeedbackSlot() || !variable_feedback_slot_.IsInvalid());
     return variable_feedback_slot_;
   }
+
+  static int num_ids() { return parent_num_ids() + 1; }
+  BailoutId BeforeId() const { return BailoutId(local_id(0)); }
 
  protected:
   VariableProxy(Zone* zone, Variable* var, int start_position,
@@ -1633,10 +1706,13 @@ class VariableProxy final : public Expression {
   VariableProxy(Zone* zone, const AstRawString* name,
                 Variable::Kind variable_kind, int start_position,
                 int end_position);
+  static int parent_num_ids() { return Expression::num_ids(); }
+  int local_id(int n) const { return base_id() + parent_num_ids() + n; }
 
   class IsThisField : public BitField8<bool, 0, 1> {};
   class IsAssignedField : public BitField8<bool, 1, 1> {};
   class IsResolvedField : public BitField8<bool, 2, 1> {};
+  class IsNewTargetField : public BitField8<bool, 3, 1> {};
 
   // Start with 16-bit (or smaller) field, which should get packed together
   // with Expression's trailing 16-bit field.
@@ -1653,6 +1729,17 @@ class VariableProxy final : public Expression {
 };
 
 
+// Left-hand side can only be a property, a global or a (parameter or local)
+// slot.
+enum LhsKind {
+  VARIABLE,
+  NAMED_PROPERTY,
+  KEYED_PROPERTY,
+  NAMED_SUPER_PROPERTY,
+  KEYED_SUPER_PROPERTY
+};
+
+
 class Property final : public Expression {
  public:
   DECLARE_NODE_TYPE(Property)
@@ -1662,9 +1749,8 @@ class Property final : public Expression {
   Expression* obj() const { return obj_; }
   Expression* key() const { return key_; }
 
-  static int num_ids() { return parent_num_ids() + 2; }
+  static int num_ids() { return parent_num_ids() + 1; }
   BailoutId LoadId() const { return BailoutId(local_id(0)); }
-  TypeFeedbackId PropertyFeedbackId() { return TypeFeedbackId(local_id(1)); }
 
   bool IsStringAccess() const {
     return IsStringAccessField::decode(bit_field_);
@@ -1700,13 +1786,11 @@ class Property final : public Expression {
   }
   bool is_for_call() const { return IsForCallField::decode(bit_field_); }
 
-  bool IsSuperAccess() {
-    return obj()->IsSuperReference();
-  }
+  bool IsSuperAccess() { return obj()->IsSuperPropertyReference(); }
 
   virtual FeedbackVectorRequirements ComputeFeedbackRequirements(
       Isolate* isolate, const ICSlotCache* cache) override {
-    return FeedbackVectorRequirements(0, FLAG_vector_ics ? 1 : 0);
+    return FeedbackVectorRequirements(0, 1);
   }
   void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
                               ICSlotCache* cache) override {
@@ -1717,8 +1801,15 @@ class Property final : public Expression {
   }
 
   FeedbackVectorICSlot PropertyFeedbackSlot() const {
-    DCHECK(!FLAG_vector_ics || !property_feedback_slot_.IsInvalid());
     return property_feedback_slot_;
+  }
+
+  static LhsKind GetAssignType(Property* property) {
+    if (property == NULL) return VARIABLE;
+    bool super_access = property->IsSuperAccess();
+    return (property->key()->IsPropertyName())
+               ? (super_access ? NAMED_SUPER_PROPERTY : NAMED_PROPERTY)
+               : (super_access ? KEYED_SUPER_PROPERTY : KEYED_PROPERTY);
   }
 
  protected:
@@ -1759,22 +1850,14 @@ class Call final : public Expression {
       Isolate* isolate, const ICSlotCache* cache) override;
   void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
                               ICSlotCache* cache) override {
-    ic_slot_or_slot_ = slot.ToInt();
+    ic_slot_ = slot;
   }
-  void SetFirstFeedbackSlot(FeedbackVectorSlot slot) override {
-    ic_slot_or_slot_ = slot.ToInt();
-  }
+  void SetFirstFeedbackSlot(FeedbackVectorSlot slot) override { slot_ = slot; }
   Code::Kind FeedbackICSlotKind(int index) override { return Code::CALL_IC; }
 
-  FeedbackVectorSlot CallFeedbackSlot() const {
-    DCHECK(ic_slot_or_slot_ != FeedbackVectorSlot::Invalid().ToInt());
-    return FeedbackVectorSlot(ic_slot_or_slot_);
-  }
+  FeedbackVectorSlot CallFeedbackSlot() const { return slot_; }
 
-  FeedbackVectorICSlot CallFeedbackICSlot() const {
-    DCHECK(ic_slot_or_slot_ != FeedbackVectorICSlot::Invalid().ToInt());
-    return FeedbackVectorICSlot(ic_slot_or_slot_);
-  }
+  FeedbackVectorICSlot CallFeedbackICSlot() const { return ic_slot_; }
 
   SmallMapList* GetReceiverTypes() override {
     if (expression()->IsProperty()) {
@@ -1792,7 +1875,7 @@ class Call final : public Expression {
 
   bool global_call() const {
     VariableProxy* proxy = expression_->AsVariableProxy();
-    return proxy != NULL && proxy->var()->IsUnallocated();
+    return proxy != NULL && proxy->var()->IsUnallocatedOrGlobalSlot();
   }
 
   bool known_global_function() const {
@@ -1812,9 +1895,10 @@ class Call final : public Expression {
     allocation_site_ = site;
   }
 
-  static int num_ids() { return parent_num_ids() + 2; }
+  static int num_ids() { return parent_num_ids() + 3; }
   BailoutId ReturnId() const { return BailoutId(local_id(0)); }
-  BailoutId EvalOrLookupId() const { return BailoutId(local_id(1)); }
+  BailoutId EvalId() const { return BailoutId(local_id(1)); }
+  BailoutId LookupId() const { return BailoutId(local_id(2)); }
 
   bool is_uninitialized() const {
     return IsUninitializedField::decode(bit_field_);
@@ -1846,7 +1930,8 @@ class Call final : public Expression {
   Call(Zone* zone, Expression* expression, ZoneList<Expression*>* arguments,
        int pos)
       : Expression(zone, pos),
-        ic_slot_or_slot_(FeedbackVectorICSlot::Invalid().ToInt()),
+        ic_slot_(FeedbackVectorICSlot::Invalid()),
+        slot_(FeedbackVectorSlot::Invalid()),
         expression_(expression),
         arguments_(arguments),
         bit_field_(IsUninitializedField::encode(false)) {
@@ -1859,9 +1944,8 @@ class Call final : public Expression {
  private:
   int local_id(int n) const { return base_id() + parent_num_ids() + n; }
 
-  // We store this as an integer because we don't know if we have a slot or
-  // an ic slot until scoping time.
-  int ic_slot_or_slot_;
+  FeedbackVectorICSlot ic_slot_;
+  FeedbackVectorSlot slot_;
   Expression* expression_;
   ZoneList<Expression*>* arguments_;
   Handle<JSFunction> target_;
@@ -1954,9 +2038,7 @@ class CallRuntime final : public Expression {
   bool is_jsruntime() const { return function_ == NULL; }
 
   // Type feedback information.
-  bool HasCallRuntimeFeedbackSlot() const {
-    return FLAG_vector_ics && is_jsruntime();
-  }
+  bool HasCallRuntimeFeedbackSlot() const { return is_jsruntime(); }
   virtual FeedbackVectorRequirements ComputeFeedbackRequirements(
       Isolate* isolate, const ICSlotCache* cache) override {
     return FeedbackVectorRequirements(0, HasCallRuntimeFeedbackSlot() ? 1 : 0);
@@ -1974,9 +2056,7 @@ class CallRuntime final : public Expression {
   }
 
   static int num_ids() { return parent_num_ids() + 1; }
-  TypeFeedbackId CallRuntimeFeedbackId() const {
-    return TypeFeedbackId(local_id(0));
-  }
+  BailoutId CallId() { return BailoutId(local_id(0)); }
 
  protected:
   CallRuntime(Zone* zone, const AstRawString* name,
@@ -2127,16 +2207,25 @@ class CountOperation final : public Expression {
     return TypeFeedbackId(local_id(3));
   }
 
+  FeedbackVectorRequirements ComputeFeedbackRequirements(
+      Isolate* isolate, const ICSlotCache* cache) override;
+  void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
+                              ICSlotCache* cache) override {
+    slot_ = slot;
+  }
+  Code::Kind FeedbackICSlotKind(int index) override;
+  FeedbackVectorICSlot CountSlot() const { return slot_; }
+
  protected:
   CountOperation(Zone* zone, Token::Value op, bool is_prefix, Expression* expr,
                  int pos)
       : Expression(zone, pos),
-        bit_field_(IsPrefixField::encode(is_prefix) |
-                   KeyTypeField::encode(ELEMENT) |
-                   StoreModeField::encode(STANDARD_STORE) |
-                   TokenField::encode(op)),
+        bit_field_(
+            IsPrefixField::encode(is_prefix) | KeyTypeField::encode(ELEMENT) |
+            StoreModeField::encode(STANDARD_STORE) | TokenField::encode(op)),
         type_(NULL),
-        expression_(expr) {}
+        expression_(expr),
+        slot_(FeedbackVectorICSlot::Invalid()) {}
   static int parent_num_ids() { return Expression::num_ids(); }
 
  private:
@@ -2153,6 +2242,7 @@ class CountOperation final : public Expression {
   Type* type_;
   Expression* expression_;
   SmallMapList receiver_types_;
+  FeedbackVectorICSlot slot_;
 };
 
 
@@ -2295,6 +2385,15 @@ class Assignment final : public Expression {
     bit_field_ = StoreModeField::update(bit_field_, mode);
   }
 
+  FeedbackVectorRequirements ComputeFeedbackRequirements(
+      Isolate* isolate, const ICSlotCache* cache) override;
+  void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
+                              ICSlotCache* cache) override {
+    slot_ = slot;
+  }
+  Code::Kind FeedbackICSlotKind(int index) override;
+  FeedbackVectorICSlot AssignmentSlot() const { return slot_; }
+
  protected:
   Assignment(Zone* zone, Token::Value op, Expression* target, Expression* value,
              int pos);
@@ -2315,6 +2414,7 @@ class Assignment final : public Expression {
   Expression* value_;
   BinaryOperation* binary_operation_;
   SmallMapList receiver_types_;
+  FeedbackVectorICSlot slot_;
 };
 
 
@@ -2333,22 +2433,8 @@ class Yield final : public Expression {
   Expression* expression() const { return expression_; }
   Kind yield_kind() const { return yield_kind_; }
 
-  // Delegating yield surrounds the "yield" in a "try/catch".  This index
-  // locates the catch handler in the handler table, and is equivalent to
-  // TryCatchStatement::index().
-  int index() const {
-    DCHECK_EQ(kDelegating, yield_kind());
-    return index_;
-  }
-  void set_index(int index) {
-    DCHECK_EQ(kDelegating, yield_kind());
-    index_ = index;
-  }
-
   // Type feedback information.
-  bool HasFeedbackSlots() const {
-    return FLAG_vector_ics && (yield_kind() == kDelegating);
-  }
+  bool HasFeedbackSlots() const { return yield_kind() == kDelegating; }
   virtual FeedbackVectorRequirements ComputeFeedbackRequirements(
       Isolate* isolate, const ICSlotCache* cache) override {
     return FeedbackVectorRequirements(0, HasFeedbackSlots() ? 3 : 0);
@@ -2379,14 +2465,12 @@ class Yield final : public Expression {
         generator_object_(generator_object),
         expression_(expression),
         yield_kind_(yield_kind),
-        index_(-1),
         yield_first_feedback_slot_(FeedbackVectorICSlot::Invalid()) {}
 
  private:
   Expression* generator_object_;
   Expression* expression_;
   Kind yield_kind_;
-  int index_;
   FeedbackVectorICSlot yield_first_feedback_slot_;
 };
 
@@ -2448,22 +2532,15 @@ class FunctionLiteral final : public Expression {
   bool is_expression() const { return IsExpression::decode(bitfield_); }
   bool is_anonymous() const { return IsAnonymous::decode(bitfield_); }
   LanguageMode language_mode() const;
-  bool uses_super_property() const;
 
-  static bool NeedsHomeObject(Expression* literal) {
-    return literal != NULL && literal->IsFunctionLiteral() &&
-           literal->AsFunctionLiteral()->uses_super_property();
-  }
+  static bool NeedsHomeObject(Expression* expr);
 
   int materialized_literal_count() { return materialized_literal_count_; }
   int expected_property_count() { return expected_property_count_; }
-  int handler_count() { return handler_count_; }
   int parameter_count() { return parameter_count_; }
 
   bool AllowsLazyCompilation();
   bool AllowsLazyCompilationWithoutContext();
-
-  void InitializeSharedInfo(Handle<Code> code);
 
   Handle<String> debug_name() const {
     if (raw_name_ != NULL && !raw_name_->IsEmpty()) {
@@ -2499,9 +2576,6 @@ class FunctionLiteral final : public Expression {
     inferred_name_ = Handle<String>();
   }
 
-  // shared_info may be null if it's not cached in full code.
-  Handle<SharedFunctionInfo> shared_info() { return shared_info_; }
-
   bool pretenure() { return Pretenure::decode(bitfield_); }
   void set_pretenure() { bitfield_ |= Pretenure::encode(true); }
 
@@ -2532,10 +2606,10 @@ class FunctionLiteral final : public Expression {
     bitfield_ = ShouldBeUsedOnceHintBit::update(bitfield_, kShouldBeUsedOnce);
   }
 
-  FunctionKind kind() { return FunctionKindBits::decode(bitfield_); }
+  FunctionKind kind() const { return FunctionKindBits::decode(bitfield_); }
 
   int ast_node_count() { return ast_properties_.node_count(); }
-  AstProperties::Flags* flags() { return ast_properties_.flags(); }
+  AstProperties::Flags flags() const { return ast_properties_.flags(); }
   void set_ast_properties(AstProperties* ast_properties) {
     ast_properties_ = *ast_properties;
   }
@@ -2552,8 +2626,8 @@ class FunctionLiteral final : public Expression {
   FunctionLiteral(Zone* zone, const AstRawString* name,
                   AstValueFactory* ast_value_factory, Scope* scope,
                   ZoneList<Statement*>* body, int materialized_literal_count,
-                  int expected_property_count, int handler_count,
-                  int parameter_count, FunctionType function_type,
+                  int expected_property_count, int parameter_count,
+                  FunctionType function_type,
                   ParameterFlag has_duplicate_parameters,
                   IsFunctionFlag is_function,
                   EagerCompileHint eager_compile_hint, FunctionKind kind,
@@ -2567,7 +2641,6 @@ class FunctionLiteral final : public Expression {
         dont_optimize_reason_(kNoReason),
         materialized_literal_count_(materialized_literal_count),
         expected_property_count_(expected_property_count),
-        handler_count_(handler_count),
         parameter_count_(parameter_count),
         function_token_position_(RelocInfo::kNoPosition) {
     bitfield_ = IsExpression::encode(function_type != DECLARATION) |
@@ -2584,7 +2657,6 @@ class FunctionLiteral final : public Expression {
  private:
   const AstRawString* raw_name_;
   Handle<String> name_;
-  Handle<SharedFunctionInfo> shared_info_;
   Scope* scope_;
   ZoneList<Statement*>* body_;
   const AstString* raw_inferred_name_;
@@ -2594,7 +2666,6 @@ class FunctionLiteral final : public Expression {
 
   int materialized_literal_count_;
   int expected_property_count_;
-  int handler_count_;
   int parameter_count_;
   int function_token_position_;
 
@@ -2639,6 +2710,28 @@ class ClassLiteral final : public Expression {
   // ClassLiteral can vary, so num_ids() is not a static method.
   int num_ids() const { return parent_num_ids() + 4 + properties()->length(); }
 
+  // Object literals need one feedback slot for each non-trivial value, as well
+  // as some slots for home objects.
+  FeedbackVectorRequirements ComputeFeedbackRequirements(
+      Isolate* isolate, const ICSlotCache* cache) override;
+  void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
+                              ICSlotCache* cache) override {
+    slot_ = slot;
+  }
+  Code::Kind FeedbackICSlotKind(int index) override { return Code::STORE_IC; }
+  FeedbackVectorICSlot GetNthSlot(int n) const {
+    return FeedbackVectorICSlot(slot_.ToInt() + n);
+  }
+
+  // If value needs a home object, returns a valid feedback vector ic slot
+  // given by slot_index, and increments slot_index.
+  FeedbackVectorICSlot SlotForHomeObject(Expression* value,
+                                         int* slot_index) const;
+
+#ifdef DEBUG
+  int slot_count() const { return slot_count_; }
+#endif
+
  protected:
   ClassLiteral(Zone* zone, const AstRawString* name, Scope* scope,
                VariableProxy* class_variable_proxy, Expression* extends,
@@ -2651,7 +2744,13 @@ class ClassLiteral final : public Expression {
         extends_(extends),
         constructor_(constructor),
         properties_(properties),
-        end_position_(end_position) {}
+        end_position_(end_position),
+#ifdef DEBUG
+        slot_count_(0),
+#endif
+        slot_(FeedbackVectorICSlot::Invalid()) {
+  }
+
   static int parent_num_ids() { return Expression::num_ids(); }
 
  private:
@@ -2664,6 +2763,12 @@ class ClassLiteral final : public Expression {
   FunctionLiteral* constructor_;
   ZoneList<Property*>* properties_;
   int end_position_;
+#ifdef DEBUG
+  // slot_count_ helps validate that the logic to allocate ic slots and the
+  // logic to use them are in sync.
+  int slot_count_;
+#endif
+  FeedbackVectorICSlot slot_;
 };
 
 
@@ -2694,45 +2799,52 @@ class ThisFunction final : public Expression {
 };
 
 
-class SuperReference final : public Expression {
+class SuperPropertyReference final : public Expression {
  public:
-  DECLARE_NODE_TYPE(SuperReference)
+  DECLARE_NODE_TYPE(SuperPropertyReference)
 
   VariableProxy* this_var() const { return this_var_; }
-
-  static int num_ids() { return parent_num_ids() + 1; }
-  TypeFeedbackId HomeObjectFeedbackId() { return TypeFeedbackId(local_id(0)); }
-
-  // Type feedback information.
-  virtual FeedbackVectorRequirements ComputeFeedbackRequirements(
-      Isolate* isolate, const ICSlotCache* cache) override {
-    return FeedbackVectorRequirements(0, FLAG_vector_ics ? 1 : 0);
-  }
-  void SetFirstFeedbackICSlot(FeedbackVectorICSlot slot,
-                              ICSlotCache* cache) override {
-    homeobject_feedback_slot_ = slot;
-  }
-  Code::Kind FeedbackICSlotKind(int index) override { return Code::LOAD_IC; }
-
-  FeedbackVectorICSlot HomeObjectFeedbackSlot() {
-    DCHECK(!FLAG_vector_ics || !homeobject_feedback_slot_.IsInvalid());
-    return homeobject_feedback_slot_;
-  }
+  Expression* home_object() const { return home_object_; }
 
  protected:
-  SuperReference(Zone* zone, VariableProxy* this_var, int pos)
-      : Expression(zone, pos),
-        this_var_(this_var),
-        homeobject_feedback_slot_(FeedbackVectorICSlot::Invalid()) {
+  SuperPropertyReference(Zone* zone, VariableProxy* this_var,
+                         Expression* home_object, int pos)
+      : Expression(zone, pos), this_var_(this_var), home_object_(home_object) {
     DCHECK(this_var->is_this());
+    DCHECK(home_object->IsProperty());
   }
-  static int parent_num_ids() { return Expression::num_ids(); }
 
  private:
-  int local_id(int n) const { return base_id() + parent_num_ids() + n; }
-
   VariableProxy* this_var_;
-  FeedbackVectorICSlot homeobject_feedback_slot_;
+  Expression* home_object_;
+};
+
+
+class SuperCallReference final : public Expression {
+ public:
+  DECLARE_NODE_TYPE(SuperCallReference)
+
+  VariableProxy* this_var() const { return this_var_; }
+  VariableProxy* new_target_var() const { return new_target_var_; }
+  VariableProxy* this_function_var() const { return this_function_var_; }
+
+ protected:
+  SuperCallReference(Zone* zone, VariableProxy* this_var,
+                     VariableProxy* new_target_var,
+                     VariableProxy* this_function_var, int pos)
+      : Expression(zone, pos),
+        this_var_(this_var),
+        new_target_var_(new_target_var),
+        this_function_var_(this_function_var) {
+    DCHECK(this_var->is_this());
+    DCHECK(new_target_var->raw_name()->IsOneByteEqualTo(".new.target"));
+    DCHECK(this_function_var->raw_name()->IsOneByteEqualTo(".this_function"));
+  }
+
+ private:
+  VariableProxy* this_var_;
+  VariableProxy* new_target_var_;
+  VariableProxy* this_function_var_;
 };
 
 
@@ -2793,6 +2905,9 @@ class RegExpDisjunction final : public RegExpTree {
   int max_match() override { return max_match_; }
   ZoneList<RegExpTree*>* alternatives() { return alternatives_; }
  private:
+  bool SortConsecutiveAtoms(RegExpCompiler* compiler);
+  void RationalizeConsecutiveAtoms(RegExpCompiler* compiler);
+  void FixSingleCharacterDisjunctions(RegExpCompiler* compiler);
   ZoneList<RegExpTree*>* alternatives_;
   int min_match_;
   int max_match_;
@@ -3156,14 +3271,15 @@ class AstVisitor BASE_EMBEDDED {
 class AstNodeFactory final BASE_EMBEDDED {
  public:
   explicit AstNodeFactory(AstValueFactory* ast_value_factory)
-      : zone_(ast_value_factory->zone()),
+      : local_zone_(ast_value_factory->zone()),
+        parser_zone_(ast_value_factory->zone()),
         ast_value_factory_(ast_value_factory) {}
 
   VariableDeclaration* NewVariableDeclaration(
       VariableProxy* proxy, VariableMode mode, Scope* scope, int pos,
       bool is_class_declaration = false, int declaration_group_start = -1) {
-    return new (zone_)
-        VariableDeclaration(zone_, proxy, mode, scope, pos,
+    return new (parser_zone_)
+        VariableDeclaration(parser_zone_, proxy, mode, scope, pos,
                             is_class_declaration, declaration_group_start);
   }
 
@@ -3172,34 +3288,34 @@ class AstNodeFactory final BASE_EMBEDDED {
                                               FunctionLiteral* fun,
                                               Scope* scope,
                                               int pos) {
-    return new (zone_) FunctionDeclaration(zone_, proxy, mode, fun, scope, pos);
+    return new (parser_zone_)
+        FunctionDeclaration(parser_zone_, proxy, mode, fun, scope, pos);
   }
 
   ImportDeclaration* NewImportDeclaration(VariableProxy* proxy,
                                           const AstRawString* import_name,
                                           const AstRawString* module_specifier,
                                           Scope* scope, int pos) {
-    return new (zone_) ImportDeclaration(zone_, proxy, import_name,
-                                         module_specifier, scope, pos);
+    return new (parser_zone_) ImportDeclaration(
+        parser_zone_, proxy, import_name, module_specifier, scope, pos);
   }
 
   ExportDeclaration* NewExportDeclaration(VariableProxy* proxy,
                                           Scope* scope,
                                           int pos) {
-    return new (zone_) ExportDeclaration(zone_, proxy, scope, pos);
+    return new (parser_zone_)
+        ExportDeclaration(parser_zone_, proxy, scope, pos);
   }
 
-  Block* NewBlock(ZoneList<const AstRawString*>* labels,
-                  int capacity,
-                  bool is_initializer_block,
-                  int pos) {
-    return new (zone_)
-        Block(zone_, labels, capacity, is_initializer_block, pos);
+  Block* NewBlock(ZoneList<const AstRawString*>* labels, int capacity,
+                  bool ignore_completion_value, int pos) {
+    return new (local_zone_)
+        Block(local_zone_, labels, capacity, ignore_completion_value, pos);
   }
 
 #define STATEMENT_WITH_LABELS(NodeType)                                     \
   NodeType* New##NodeType(ZoneList<const AstRawString*>* labels, int pos) { \
-    return new (zone_) NodeType(zone_, labels, pos);                        \
+    return new (local_zone_) NodeType(local_zone_, labels, pos);            \
   }
   STATEMENT_WITH_LABELS(DoWhileStatement)
   STATEMENT_WITH_LABELS(WhileStatement)
@@ -3212,10 +3328,10 @@ class AstNodeFactory final BASE_EMBEDDED {
                                         int pos) {
     switch (visit_mode) {
       case ForEachStatement::ENUMERATE: {
-        return new (zone_) ForInStatement(zone_, labels, pos);
+        return new (local_zone_) ForInStatement(local_zone_, labels, pos);
       }
       case ForEachStatement::ITERATE: {
-        return new (zone_) ForOfStatement(zone_, labels, pos);
+        return new (local_zone_) ForOfStatement(local_zone_, labels, pos);
       }
     }
     UNREACHABLE();
@@ -3223,100 +3339,102 @@ class AstNodeFactory final BASE_EMBEDDED {
   }
 
   ExpressionStatement* NewExpressionStatement(Expression* expression, int pos) {
-    return new (zone_) ExpressionStatement(zone_, expression, pos);
+    return new (local_zone_) ExpressionStatement(local_zone_, expression, pos);
   }
 
   ContinueStatement* NewContinueStatement(IterationStatement* target, int pos) {
-    return new (zone_) ContinueStatement(zone_, target, pos);
+    return new (local_zone_) ContinueStatement(local_zone_, target, pos);
   }
 
   BreakStatement* NewBreakStatement(BreakableStatement* target, int pos) {
-    return new (zone_) BreakStatement(zone_, target, pos);
+    return new (local_zone_) BreakStatement(local_zone_, target, pos);
   }
 
   ReturnStatement* NewReturnStatement(Expression* expression, int pos) {
-    return new (zone_) ReturnStatement(zone_, expression, pos);
+    return new (local_zone_) ReturnStatement(local_zone_, expression, pos);
   }
 
   WithStatement* NewWithStatement(Scope* scope,
                                   Expression* expression,
                                   Statement* statement,
                                   int pos) {
-    return new (zone_) WithStatement(zone_, scope, expression, statement, pos);
+    return new (local_zone_)
+        WithStatement(local_zone_, scope, expression, statement, pos);
   }
 
   IfStatement* NewIfStatement(Expression* condition,
                               Statement* then_statement,
                               Statement* else_statement,
                               int pos) {
-    return new (zone_)
-        IfStatement(zone_, condition, then_statement, else_statement, pos);
+    return new (local_zone_) IfStatement(local_zone_, condition, then_statement,
+                                         else_statement, pos);
   }
 
-  TryCatchStatement* NewTryCatchStatement(int index,
-                                          Block* try_block,
-                                          Scope* scope,
+  TryCatchStatement* NewTryCatchStatement(Block* try_block, Scope* scope,
                                           Variable* variable,
-                                          Block* catch_block,
-                                          int pos) {
-    return new (zone_) TryCatchStatement(zone_, index, try_block, scope,
-                                         variable, catch_block, pos);
+                                          Block* catch_block, int pos) {
+    return new (local_zone_) TryCatchStatement(local_zone_, try_block, scope,
+                                               variable, catch_block, pos);
   }
 
-  TryFinallyStatement* NewTryFinallyStatement(int index,
-                                              Block* try_block,
-                                              Block* finally_block,
-                                              int pos) {
-    return new (zone_)
-        TryFinallyStatement(zone_, index, try_block, finally_block, pos);
+  TryFinallyStatement* NewTryFinallyStatement(Block* try_block,
+                                              Block* finally_block, int pos) {
+    return new (local_zone_)
+        TryFinallyStatement(local_zone_, try_block, finally_block, pos);
   }
 
   DebuggerStatement* NewDebuggerStatement(int pos) {
-    return new (zone_) DebuggerStatement(zone_, pos);
+    return new (local_zone_) DebuggerStatement(local_zone_, pos);
   }
 
   EmptyStatement* NewEmptyStatement(int pos) {
-    return new(zone_) EmptyStatement(zone_, pos);
+    return new (local_zone_) EmptyStatement(local_zone_, pos);
   }
 
   CaseClause* NewCaseClause(
       Expression* label, ZoneList<Statement*>* statements, int pos) {
-    return new (zone_) CaseClause(zone_, label, statements, pos);
+    return new (local_zone_) CaseClause(local_zone_, label, statements, pos);
   }
 
   Literal* NewStringLiteral(const AstRawString* string, int pos) {
-    return new (zone_)
-        Literal(zone_, ast_value_factory_->NewString(string), pos);
+    return new (local_zone_)
+        Literal(local_zone_, ast_value_factory_->NewString(string), pos);
   }
 
   // A JavaScript symbol (ECMA-262 edition 6).
   Literal* NewSymbolLiteral(const char* name, int pos) {
-    return new (zone_) Literal(zone_, ast_value_factory_->NewSymbol(name), pos);
+    return new (local_zone_)
+        Literal(local_zone_, ast_value_factory_->NewSymbol(name), pos);
   }
 
-  Literal* NewNumberLiteral(double number, int pos) {
-    return new (zone_)
-        Literal(zone_, ast_value_factory_->NewNumber(number), pos);
+  Literal* NewNumberLiteral(double number, int pos, bool with_dot = false) {
+    return new (local_zone_) Literal(
+        local_zone_, ast_value_factory_->NewNumber(number, with_dot), pos);
   }
 
   Literal* NewSmiLiteral(int number, int pos) {
-    return new (zone_) Literal(zone_, ast_value_factory_->NewSmi(number), pos);
+    return new (local_zone_)
+        Literal(local_zone_, ast_value_factory_->NewSmi(number), pos);
   }
 
   Literal* NewBooleanLiteral(bool b, int pos) {
-    return new (zone_) Literal(zone_, ast_value_factory_->NewBoolean(b), pos);
+    return new (local_zone_)
+        Literal(local_zone_, ast_value_factory_->NewBoolean(b), pos);
   }
 
   Literal* NewNullLiteral(int pos) {
-    return new (zone_) Literal(zone_, ast_value_factory_->NewNull(), pos);
+    return new (local_zone_)
+        Literal(local_zone_, ast_value_factory_->NewNull(), pos);
   }
 
   Literal* NewUndefinedLiteral(int pos) {
-    return new (zone_) Literal(zone_, ast_value_factory_->NewUndefined(), pos);
+    return new (local_zone_)
+        Literal(local_zone_, ast_value_factory_->NewUndefined(), pos);
   }
 
   Literal* NewTheHoleLiteral(int pos) {
-    return new (zone_) Literal(zone_, ast_value_factory_->NewTheHole(), pos);
+    return new (local_zone_)
+        Literal(local_zone_, ast_value_factory_->NewTheHole(), pos);
   }
 
   ObjectLiteral* NewObjectLiteral(
@@ -3324,15 +3442,17 @@ class AstNodeFactory final BASE_EMBEDDED {
       int literal_index,
       int boilerplate_properties,
       bool has_function,
+      bool is_strong,
       int pos) {
-    return new (zone_) ObjectLiteral(zone_, properties, literal_index,
-                                     boilerplate_properties, has_function, pos);
+    return new (local_zone_)
+        ObjectLiteral(local_zone_, properties, literal_index,
+                      boilerplate_properties, has_function, is_strong, pos);
   }
 
   ObjectLiteral::Property* NewObjectLiteralProperty(
       Expression* key, Expression* value, ObjectLiteralProperty::Kind kind,
       bool is_static, bool is_computed_name) {
-    return new (zone_)
+    return new (local_zone_)
         ObjectLiteral::Property(key, value, kind, is_static, is_computed_name);
   }
 
@@ -3340,97 +3460,113 @@ class AstNodeFactory final BASE_EMBEDDED {
                                                     Expression* value,
                                                     bool is_static,
                                                     bool is_computed_name) {
-    return new (zone_) ObjectLiteral::Property(ast_value_factory_, key, value,
-                                               is_static, is_computed_name);
+    return new (local_zone_) ObjectLiteral::Property(
+        ast_value_factory_, key, value, is_static, is_computed_name);
   }
 
   RegExpLiteral* NewRegExpLiteral(const AstRawString* pattern,
                                   const AstRawString* flags,
                                   int literal_index,
+                                  bool is_strong,
                                   int pos) {
-    return new (zone_) RegExpLiteral(zone_, pattern, flags, literal_index, pos);
+    return new (local_zone_) RegExpLiteral(local_zone_, pattern, flags,
+                                           literal_index, is_strong, pos);
   }
 
   ArrayLiteral* NewArrayLiteral(ZoneList<Expression*>* values,
                                 int literal_index,
+                                bool is_strong,
                                 int pos) {
-    return new (zone_) ArrayLiteral(zone_, values, literal_index, pos);
+    return new (local_zone_)
+        ArrayLiteral(local_zone_, values, -1, literal_index, is_strong, pos);
+  }
+
+  ArrayLiteral* NewArrayLiteral(ZoneList<Expression*>* values,
+                                int first_spread_index, int literal_index,
+                                bool is_strong, int pos) {
+    return new (local_zone_) ArrayLiteral(
+        local_zone_, values, first_spread_index, literal_index, is_strong, pos);
   }
 
   VariableProxy* NewVariableProxy(Variable* var,
                                   int start_position = RelocInfo::kNoPosition,
                                   int end_position = RelocInfo::kNoPosition) {
-    return new (zone_) VariableProxy(zone_, var, start_position, end_position);
+    return new (parser_zone_)
+        VariableProxy(parser_zone_, var, start_position, end_position);
   }
 
   VariableProxy* NewVariableProxy(const AstRawString* name,
                                   Variable::Kind variable_kind,
                                   int start_position = RelocInfo::kNoPosition,
                                   int end_position = RelocInfo::kNoPosition) {
-    return new (zone_)
-        VariableProxy(zone_, name, variable_kind, start_position, end_position);
+    DCHECK_NOT_NULL(name);
+    return new (parser_zone_) VariableProxy(parser_zone_, name, variable_kind,
+                                            start_position, end_position);
   }
 
   Property* NewProperty(Expression* obj, Expression* key, int pos) {
-    return new (zone_) Property(zone_, obj, key, pos);
+    return new (local_zone_) Property(local_zone_, obj, key, pos);
   }
 
   Call* NewCall(Expression* expression,
                 ZoneList<Expression*>* arguments,
                 int pos) {
-    return new (zone_) Call(zone_, expression, arguments, pos);
+    return new (local_zone_) Call(local_zone_, expression, arguments, pos);
   }
 
   CallNew* NewCallNew(Expression* expression,
                       ZoneList<Expression*>* arguments,
                       int pos) {
-    return new (zone_) CallNew(zone_, expression, arguments, pos);
+    return new (local_zone_) CallNew(local_zone_, expression, arguments, pos);
   }
 
   CallRuntime* NewCallRuntime(const AstRawString* name,
                               const Runtime::Function* function,
                               ZoneList<Expression*>* arguments,
                               int pos) {
-    return new (zone_) CallRuntime(zone_, name, function, arguments, pos);
+    return new (local_zone_)
+        CallRuntime(local_zone_, name, function, arguments, pos);
   }
 
   UnaryOperation* NewUnaryOperation(Token::Value op,
                                     Expression* expression,
                                     int pos) {
-    return new (zone_) UnaryOperation(zone_, op, expression, pos);
+    return new (local_zone_) UnaryOperation(local_zone_, op, expression, pos);
   }
 
   BinaryOperation* NewBinaryOperation(Token::Value op,
                                       Expression* left,
                                       Expression* right,
                                       int pos) {
-    return new (zone_) BinaryOperation(zone_, op, left, right, pos);
+    return new (local_zone_) BinaryOperation(local_zone_, op, left, right, pos);
   }
 
   CountOperation* NewCountOperation(Token::Value op,
                                     bool is_prefix,
                                     Expression* expr,
                                     int pos) {
-    return new (zone_) CountOperation(zone_, op, is_prefix, expr, pos);
+    return new (local_zone_)
+        CountOperation(local_zone_, op, is_prefix, expr, pos);
   }
 
   CompareOperation* NewCompareOperation(Token::Value op,
                                         Expression* left,
                                         Expression* right,
                                         int pos) {
-    return new (zone_) CompareOperation(zone_, op, left, right, pos);
+    return new (local_zone_)
+        CompareOperation(local_zone_, op, left, right, pos);
   }
 
   Spread* NewSpread(Expression* expression, int pos) {
-    return new (zone_) Spread(zone_, expression, pos);
+    return new (local_zone_) Spread(local_zone_, expression, pos);
   }
 
   Conditional* NewConditional(Expression* condition,
                               Expression* then_expression,
                               Expression* else_expression,
                               int position) {
-    return new (zone_) Conditional(zone_, condition, then_expression,
-                                   else_expression, position);
+    return new (local_zone_) Conditional(
+        local_zone_, condition, then_expression, else_expression, position);
   }
 
   Assignment* NewAssignment(Token::Value op,
@@ -3438,7 +3574,8 @@ class AstNodeFactory final BASE_EMBEDDED {
                             Expression* value,
                             int pos) {
     DCHECK(Token::IsAssignmentOp(op));
-    Assignment* assign = new (zone_) Assignment(zone_, op, target, value, pos);
+    Assignment* assign =
+        new (local_zone_) Assignment(local_zone_, op, target, value, pos);
     if (assign->is_compound()) {
       DCHECK(Token::IsAssignmentOp(op));
       assign->binary_operation_ =
@@ -3452,28 +3589,28 @@ class AstNodeFactory final BASE_EMBEDDED {
                   Yield::Kind yield_kind,
                   int pos) {
     if (!expression) expression = NewUndefinedLiteral(pos);
-    return new (zone_)
-        Yield(zone_, generator_object, expression, yield_kind, pos);
+    return new (local_zone_)
+        Yield(local_zone_, generator_object, expression, yield_kind, pos);
   }
 
   Throw* NewThrow(Expression* exception, int pos) {
-    return new (zone_) Throw(zone_, exception, pos);
+    return new (local_zone_) Throw(local_zone_, exception, pos);
   }
 
   FunctionLiteral* NewFunctionLiteral(
       const AstRawString* name, AstValueFactory* ast_value_factory,
       Scope* scope, ZoneList<Statement*>* body, int materialized_literal_count,
-      int expected_property_count, int handler_count, int parameter_count,
+      int expected_property_count, int parameter_count,
       FunctionLiteral::ParameterFlag has_duplicate_parameters,
       FunctionLiteral::FunctionType function_type,
       FunctionLiteral::IsFunctionFlag is_function,
       FunctionLiteral::EagerCompileHint eager_compile_hint, FunctionKind kind,
       int position) {
-    return new (zone_) FunctionLiteral(
-        zone_, name, ast_value_factory, scope, body, materialized_literal_count,
-        expected_property_count, handler_count, parameter_count, function_type,
-        has_duplicate_parameters, is_function, eager_compile_hint, kind,
-        position);
+    return new (parser_zone_) FunctionLiteral(
+        parser_zone_, name, ast_value_factory, scope, body,
+        materialized_literal_count, expected_property_count, parameter_count,
+        function_type, has_duplicate_parameters, is_function,
+        eager_compile_hint, kind, position);
   }
 
   ClassLiteral* NewClassLiteral(const AstRawString* name, Scope* scope,
@@ -3481,27 +3618,65 @@ class AstNodeFactory final BASE_EMBEDDED {
                                 FunctionLiteral* constructor,
                                 ZoneList<ObjectLiteral::Property*>* properties,
                                 int start_position, int end_position) {
-    return new (zone_)
-        ClassLiteral(zone_, name, scope, proxy, extends, constructor,
+    return new (parser_zone_)
+        ClassLiteral(parser_zone_, name, scope, proxy, extends, constructor,
                      properties, start_position, end_position);
   }
 
   NativeFunctionLiteral* NewNativeFunctionLiteral(const AstRawString* name,
                                                   v8::Extension* extension,
                                                   int pos) {
-    return new (zone_) NativeFunctionLiteral(zone_, name, extension, pos);
+    return new (parser_zone_)
+        NativeFunctionLiteral(parser_zone_, name, extension, pos);
   }
 
   ThisFunction* NewThisFunction(int pos) {
-    return new (zone_) ThisFunction(zone_, pos);
+    return new (local_zone_) ThisFunction(local_zone_, pos);
   }
 
-  SuperReference* NewSuperReference(VariableProxy* this_var, int pos) {
-    return new (zone_) SuperReference(zone_, this_var, pos);
+  SuperPropertyReference* NewSuperPropertyReference(VariableProxy* this_var,
+                                                    Expression* home_object,
+                                                    int pos) {
+    return new (parser_zone_)
+        SuperPropertyReference(parser_zone_, this_var, home_object, pos);
   }
+
+  SuperCallReference* NewSuperCallReference(VariableProxy* this_var,
+                                            VariableProxy* new_target_var,
+                                            VariableProxy* this_function_var,
+                                            int pos) {
+    return new (parser_zone_) SuperCallReference(
+        parser_zone_, this_var, new_target_var, this_function_var, pos);
+  }
+
+  Zone* zone() const { return local_zone_; }
+
+  // Handles use of temporary zones when parsing inner function bodies.
+  class BodyScope {
+   public:
+    BodyScope(AstNodeFactory* factory, Zone* temp_zone, bool use_temp_zone)
+        : factory_(factory), prev_zone_(factory->local_zone_) {
+      if (use_temp_zone) {
+        factory->local_zone_ = temp_zone;
+      }
+    }
+
+    ~BodyScope() { factory_->local_zone_ = prev_zone_; }
+
+   private:
+    AstNodeFactory* factory_;
+    Zone* prev_zone_;
+  };
 
  private:
-  Zone* zone_;
+  // This zone may be deallocated upon returning from parsing a function body
+  // which we can guarantee is not going to be compiled or have its AST
+  // inspected.
+  // See ParseFunctionLiteral in parser.cc for preconditions.
+  Zone* local_zone_;
+  // ZoneObjects which need to persist until scope analysis must be allocated in
+  // the parser-level zone.
+  Zone* parser_zone_;
   AstValueFactory* ast_value_factory_;
 };
 

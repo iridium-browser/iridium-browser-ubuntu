@@ -293,11 +293,14 @@ bool VaapiVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
     return false;
   }
 
-  // TODO(posciak): add back VP8 (crbug.com/490233)
   if (profile >= media::H264PROFILE_MIN && profile <= media::H264PROFILE_MAX) {
     h264_accelerator_.reset(
         new VaapiH264Accelerator(this, vaapi_wrapper_.get()));
     decoder_.reset(new H264Decoder(h264_accelerator_.get()));
+  } else if (profile >= media::VP8PROFILE_MIN &&
+             profile <= media::VP8PROFILE_MAX) {
+    vp8_accelerator_.reset(new VaapiVP8Accelerator(this, vaapi_wrapper_.get()));
+    decoder_.reset(new VP8Decoder(vp8_accelerator_.get()));
   } else {
     DLOG(ERROR) << "Unsupported profile " << profile;
     return false;
@@ -335,10 +338,11 @@ void VaapiVideoDecodeAccelerator::OutputPicture(
   DVLOG(4) << "Notifying output picture id " << output_id
            << " for input "<< input_id << " is ready";
   // TODO(posciak): Use visible size from decoder here instead
-  // (crbug.com/402760).
+  // (crbug.com/402760). Passing (0, 0) results in the client using the
+  // visible size extracted from the container instead.
   if (client_)
     client_->PictureReady(media::Picture(output_id, input_id,
-                                         gfx::Rect(picture->size()),
+                                         gfx::Rect(0, 0),
                                          picture->AllowOverlay()));
 }
 
@@ -648,16 +652,15 @@ void VaapiVideoDecodeAccelerator::AssignPictureBuffers(
     output_buffers_.pop();
 
   RETURN_AND_NOTIFY_ON_FAILURE(
-      buffers.size() == requested_num_pics_,
+      buffers.size() >= requested_num_pics_,
       "Got an invalid number of picture buffers. (Got " << buffers.size()
       << ", requested " << requested_num_pics_ << ")", INVALID_ARGUMENT, );
   DCHECK(requested_pic_size_ == buffers[0].size());
 
   std::vector<VASurfaceID> va_surface_ids;
   RETURN_AND_NOTIFY_ON_FAILURE(
-      vaapi_wrapper_->CreateSurfaces(requested_pic_size_,
-                                     buffers.size(),
-                                     &va_surface_ids),
+      vaapi_wrapper_->CreateSurfaces(VA_RT_FORMAT_YUV420, requested_pic_size_,
+                                     buffers.size(), &va_surface_ids),
       "Failed creating VA Surfaces", PLATFORM_FAILURE, );
   DCHECK_EQ(va_surface_ids.size(), buffers.size());
 

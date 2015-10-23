@@ -41,6 +41,9 @@ class ScopedXI2Event {
   void InitKeyEvent(EventType type,
                     KeyboardCode key_code,
                     int flags);
+  void InitMotionEvent(const gfx::Point& location,
+                       const gfx::Point& root_location,
+                       int flags);
 
   // Initializes an Xinput2 key event.
   // |deviceid| is the master, and |sourceid| is the slave device.
@@ -94,6 +97,9 @@ void SetUpTouchPadForTest(int deviceid);
 
 // Initializes a list of touchscreen devices for touch events.
 void SetUpTouchDevicesForTest(const std::vector<int>& devices);
+
+// Initializes a list of non-touch, non-cmt pointer devices.
+void SetUpPointerDevicesForTest(const std::vector<int>& devices);
 
 }  // namespace ui
 

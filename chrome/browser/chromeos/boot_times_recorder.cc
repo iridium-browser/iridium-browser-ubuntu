@@ -15,12 +15,13 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/sys_info.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
@@ -80,6 +81,11 @@ const std::string GetTabUrl(RenderWidgetHost* rwh) {
 // written, or -1 on error.
 // TODO(satorux): Move this to file_util.
 int AppendFile(const base::FilePath& file_path, const char* data, int size) {
+  // Appending boot times to (probably) a symlink in /tmp is a security risk for
+  // developers with chromeos=1 builds.
+  if (!base::SysInfo::IsRunningOnChromeOS())
+    return -1;
+
   FILE* file = base::OpenFile(file_path, "a");
   if (!file)
     return -1;
@@ -152,7 +158,7 @@ std::string BootTimesRecorder::Stats::SerializeToString() const {
   dictionary.SetString(kDisk, disk_);
 
   std::string result;
-  if (!base::JSONWriter::Write(&dictionary, &result)) {
+  if (!base::JSONWriter::Write(dictionary, &result)) {
     LOG(WARNING) << "BootTimesRecorder::Stats::SerializeToString(): failed.";
     return std::string();
   }
@@ -166,7 +172,7 @@ BootTimesRecorder::Stats BootTimesRecorder::Stats::DeserializeFromString(
   if (source.empty())
     return Stats();
 
-  scoped_ptr<base::Value> value(base::JSONReader::Read(source));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(source);
   base::DictionaryValue* dictionary;
   if (!value || !value->GetAsDictionary(&dictionary)) {
     LOG(ERROR) << "BootTimesRecorder::Stats::DeserializeFromString(): not a "

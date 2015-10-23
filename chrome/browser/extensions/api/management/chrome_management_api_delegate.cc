@@ -6,13 +6,13 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/bookmark_app_helper.h"
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/chrome_requirements_checker.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/safe_json_parser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -24,6 +24,7 @@
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/web_application_info.h"
 #include "components/favicon/core/favicon_service.h"
+#include "components/safe_json/safe_json_parser.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/browser/utility_process_host_client.h"
@@ -77,27 +78,30 @@ class ManagementUninstallFunctionUninstallDialogDelegate
       const extensions::Extension* target_extension,
       bool show_programmatic_uninstall_ui)
       : function_(function) {
-    content::WebContents* web_contents = function->GetSenderWebContents();
+    ChromeExtensionFunctionDetails details(function);
     extension_uninstall_dialog_.reset(
         extensions::ExtensionUninstallDialog::Create(
-            Profile::FromBrowserContext(function->browser_context()),
-            web_contents ? web_contents->GetTopLevelNativeWindow() : nullptr,
-            this));
+            details.GetProfile(), details.GetNativeWindowForUI(), this));
+    extensions::UninstallSource source =
+        function->source_context_type() == extensions::Feature::WEBUI_CONTEXT
+            ? extensions::UNINSTALL_SOURCE_CHROME_EXTENSIONS_PAGE
+            : extensions::UNINSTALL_SOURCE_EXTENSION;
     if (show_programmatic_uninstall_ui) {
-      extension_uninstall_dialog_->ConfirmProgrammaticUninstall(
-          target_extension, function->extension());
+      extension_uninstall_dialog_->ConfirmUninstallByExtension(
+          target_extension, function->extension(),
+          extensions::UNINSTALL_REASON_MANAGEMENT_API, source);
     } else {
-      extension_uninstall_dialog_->ConfirmUninstall(target_extension);
+      extension_uninstall_dialog_->ConfirmUninstall(
+          target_extension, extensions::UNINSTALL_REASON_MANAGEMENT_API,
+          source);
     }
   }
   ~ManagementUninstallFunctionUninstallDialogDelegate() override {}
 
   // ExtensionUninstallDialog::Delegate implementation.
-  void ExtensionUninstallAccepted() override {
-    function_->ExtensionUninstallAccepted();
-  }
-  void ExtensionUninstallCanceled() override {
-    function_->ExtensionUninstallCanceled();
+  void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
+                                        const base::string16& error) override {
+    function_->OnExtensionUninstallDialogClosed(did_start_uninstall, error);
   }
 
  private:
@@ -184,7 +188,7 @@ void ChromeManagementAPIDelegate::
     GetPermissionWarningsByManifestFunctionDelegate(
         extensions::ManagementGetPermissionWarningsByManifestFunction* function,
         const std::string& manifest_str) const {
-  scoped_refptr<SafeJsonParser> parser(new SafeJsonParser(
+  safe_json::SafeJsonParser::Parse(
       manifest_str,
       base::Bind(
           &extensions::ManagementGetPermissionWarningsByManifestFunction::
@@ -193,8 +197,7 @@ void ChromeManagementAPIDelegate::
       base::Bind(
           &extensions::ManagementGetPermissionWarningsByManifestFunction::
               OnParseFailure,
-          function)));
-  parser->Start();
+          function));
 }
 
 scoped_ptr<extensions::InstallPromptDelegate>
@@ -267,6 +270,10 @@ ChromeManagementAPIDelegate::GenerateAppForLinkFunctionDelegate(
       &delegate->cancelable_task_tracker_);
 
   return scoped_ptr<extensions::AppForLinkDelegate>(delegate);
+}
+
+bool ChromeManagementAPIDelegate::CanHostedAppsOpenInWindows() const {
+  return extensions::util::CanHostedAppsOpenInWindows();
 }
 
 bool ChromeManagementAPIDelegate::IsNewBookmarkAppsEnabled() const {

@@ -17,18 +17,19 @@
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/drive/change_list_loader.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/fake_free_disk_space_getter.h"
-#include "chrome/browser/chromeos/drive/file_change.h"
 #include "chrome/browser/chromeos/drive/file_system_observer.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
 #include "chrome/browser/chromeos/drive/sync_client.h"
-#include "chrome/browser/chromeos/drive/test_util.h"
-#include "chrome/browser/drive/drive_api_util.h"
-#include "chrome/browser/drive/event_logger.h"
-#include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/drive/test_util.h"
+#include "components/drive/drive.pb.h"
+#include "components/drive/drive_api_util.h"
+#include "components/drive/drive_test_util.h"
+#include "components/drive/event_logger.h"
+#include "components/drive/fake_free_disk_space_getter.h"
+#include "components/drive/file_change.h"
+#include "components/drive/file_system_core_util.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/service/fake_drive_service.h"
+#include "components/drive/service/test_util.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/test_util.h"
@@ -141,14 +142,12 @@ class FileSystemTest : public testing::Test {
 
     const base::FilePath temp_file_dir = temp_dir_.path().AppendASCII("tmp");
     ASSERT_TRUE(base::CreateDirectory(temp_file_dir));
+    file_task_runner_ = content::BrowserThread::GetMessageLoopProxyForThread(
+        content::BrowserThread::FILE);
     file_system_.reset(new FileSystem(
-        pref_service_.get(),
-        logger_.get(),
-        cache_.get(),
-        scheduler_.get(),
-        resource_metadata_.get(),
-        base::ThreadTaskRunnerHandle::Get().get(),
-        temp_file_dir));
+        pref_service_.get(), logger_.get(), cache_.get(), scheduler_.get(),
+        resource_metadata_.get(), base::ThreadTaskRunnerHandle::Get().get(),
+        file_task_runner_.get(), temp_file_dir));
     file_system_->AddObserver(mock_directory_observer_.get());
 
     // Disable delaying so that the sync starts immediately.
@@ -325,6 +324,7 @@ class FileSystemTest : public testing::Test {
   scoped_ptr<internal::FileCache, test_util::DestroyHelperForTests> cache_;
   scoped_ptr<internal::ResourceMetadata, test_util::DestroyHelperForTests>
       resource_metadata_;
+  scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
   scoped_ptr<FileSystem> file_system_;
 };
 
@@ -690,9 +690,12 @@ TEST_F(FileSystemTest, ReadDirectory_Root) {
   for (size_t i = 0; i < entries->size(); ++i)
     found.insert(base::FilePath::FromUTF8Unsafe((*entries)[i].title()));
   EXPECT_EQ(3U, found.size());
-  EXPECT_EQ(1U, found.count(base::FilePath(util::kDriveMyDriveRootDirName)));
-  EXPECT_EQ(1U, found.count(base::FilePath(util::kDriveOtherDirName)));
-  EXPECT_EQ(1U, found.count(base::FilePath(util::kDriveTrashDirName)));
+  EXPECT_EQ(1U, found.count(base::FilePath::FromUTF8Unsafe(
+                    util::kDriveMyDriveRootDirName)));
+  EXPECT_EQ(1U, found.count(
+                    base::FilePath::FromUTF8Unsafe(util::kDriveOtherDirName)));
+  EXPECT_EQ(1U, found.count(
+                    base::FilePath::FromUTF8Unsafe(util::kDriveTrashDirName)));
 }
 
 TEST_F(FileSystemTest, ReadDirectory_NonRootDirectory) {

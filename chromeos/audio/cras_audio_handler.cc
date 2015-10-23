@@ -28,6 +28,9 @@ const int kDefaultUnmuteVolumePercent = 4;
 // Volume value which should be considered as muted in range [0, 100].
 const int kMuteThresholdPercent = 1;
 
+// The duration of HDMI output re-discover grace period in milliseconds.
+const int kHDMIRediscoverGracePeriodDurationInMs = 2000;
+
 static CrasAudioHandler* g_cras_audio_handler = NULL;
 
 bool IsSameAudioDevice(const AudioDevice& a, const AudioDevice& b) {
@@ -66,8 +69,9 @@ void CrasAudioHandler::AudioObserver::OnInputNodeGainChanged(
     int /* gain */) {
 }
 
-void CrasAudioHandler::AudioObserver::OnOutputMuteChanged(bool /* mute_on */) {
-}
+void CrasAudioHandler::AudioObserver::OnOutputMuteChanged(
+    bool /* mute_on */,
+    bool /* system_adjust */) {}
 
 void CrasAudioHandler::AudioObserver::OnInputMuteChanged(bool /* mute_on */) {
 }
@@ -367,8 +371,9 @@ void CrasAudioHandler::SetOutputMute(bool mute_on) {
     }
   }
 
-  FOR_EACH_OBSERVER(AudioObserver, observers_,
-                    OnOutputMuteChanged(output_mute_on_));
+  FOR_EACH_OBSERVER(
+      AudioObserver, observers_,
+      OnOutputMuteChanged(output_mute_on_, false /* system_adjust */));
 }
 
 void CrasAudioHandler::AdjustOutputVolumeToAudibleLevel() {
@@ -432,6 +437,26 @@ void CrasAudioHandler::LogErrors() {
   log_errors_ = true;
 }
 
+// If the HDMI device is the active output device, when the device enters/exits
+// docking mode, or HDMI display changes resolution, or chromeos device
+// suspends/resumes, cras will lose the HDMI output node for a short period of
+// time, then rediscover it. This hotplug behavior will cause the audio output
+// be leaked to the alternatvie active audio output during HDMI re-discovering
+// period. See crbug.com/503667.
+void CrasAudioHandler::SetActiveHDMIOutoutRediscoveringIfNecessary(
+    bool force_rediscovering) {
+  if (!GetDeviceFromId(active_output_node_id_))
+    return;
+
+  // Marks the start of the HDMI re-discovering grace period, during which we
+  // will mute the audio output to prevent it to be be leaked to the
+  // alternative output device.
+  if ((hdmi_rediscovering_ && force_rediscovering) ||
+      (!hdmi_rediscovering_ && IsHDMIPrimaryOutputDevice())) {
+    StartHDMIRediscoverGracePeriod();
+  }
+}
+
 CrasAudioHandler::CrasAudioHandler(
     scoped_refptr<AudioDevicesPrefHandler> audio_pref_handler)
     : audio_pref_handler_(audio_pref_handler),
@@ -445,6 +470,9 @@ CrasAudioHandler::CrasAudioHandler(
       has_alternative_output_(false),
       output_mute_locked_(false),
       log_errors_(false),
+      hdmi_rediscover_grace_period_duration_in_ms_(
+          kHDMIRediscoverGracePeriodDurationInMs),
+      hdmi_rediscovering_(false),
       weak_ptr_factory_(this) {
   if (!audio_pref_handler.get())
     return;
@@ -464,6 +492,7 @@ CrasAudioHandler::CrasAudioHandler(
 }
 
 CrasAudioHandler::~CrasAudioHandler() {
+  hdmi_rediscover_timer_.Stop();
   if (!chromeos::DBusThreadManager::IsInitialized() ||
       !chromeos::DBusThreadManager::Get() ||
       !chromeos::DBusThreadManager::Get()->GetCrasAudioClient())
@@ -570,7 +599,13 @@ void CrasAudioHandler::SetupAudioOutputState() {
     return;
   }
   DCHECK(!device->is_input);
-  output_mute_on_ = audio_pref_handler_->GetMuteValue(*device);
+  // Mute the output during HDMI re-discovering grace period.
+  if (hdmi_rediscovering_ && !IsHDMIPrimaryOutputDevice()) {
+    VLOG(1) << "Mute the output during HDMI re-discovering grace period";
+    output_mute_on_ = true;
+  } else {
+    output_mute_on_ = audio_pref_handler_->GetMuteValue(*device);
+  }
   output_volume_ = audio_pref_handler_->GetOutputVolumeValue(device);
 
   SetOutputMuteInternal(output_mute_on_);
@@ -974,6 +1009,41 @@ void CrasAudioHandler::RemoveActiveNodeInternal(uint64_t node_id, bool notify) {
     if (notify)
       NotifyActiveNodeChanged(false);
   }
+}
+
+void CrasAudioHandler::UpdateAudioAfterHDMIRediscoverGracePeriod() {
+  VLOG(1) << "HDMI output re-discover grace period ends.";
+  hdmi_rediscovering_ = false;
+  if (!IsOutputMutedForDevice(active_output_node_id_)) {
+    // Unmute the audio output after the HDMI transition period.
+    VLOG(1) << "Unmute output after HDMI rediscovering grace period.";
+    SetOutputMuteInternal(false);
+
+    // Notify UI about the mute state change.
+    FOR_EACH_OBSERVER(
+        AudioObserver, observers_,
+        OnOutputMuteChanged(output_mute_on_, true /* system adjustment */));
+  }
+}
+
+bool CrasAudioHandler::IsHDMIPrimaryOutputDevice() const {
+  const AudioDevice* device = GetDeviceFromId(active_output_node_id_);
+  return (device && device->type == chromeos::AUDIO_TYPE_HDMI);
+}
+
+void CrasAudioHandler::StartHDMIRediscoverGracePeriod() {
+  VLOG(1) << "Start HDMI rediscovering grace period.";
+  hdmi_rediscovering_ = true;
+  hdmi_rediscover_timer_.Stop();
+  hdmi_rediscover_timer_.Start(
+      FROM_HERE, base::TimeDelta::FromMilliseconds(
+                     hdmi_rediscover_grace_period_duration_in_ms_),
+      this, &CrasAudioHandler::UpdateAudioAfterHDMIRediscoverGracePeriod);
+}
+
+void CrasAudioHandler::SetHDMIRediscoverGracePeriodForTesting(
+    int duration_in_ms) {
+  hdmi_rediscover_grace_period_duration_in_ms_ = duration_in_ms;
 }
 
 }  // namespace chromeos

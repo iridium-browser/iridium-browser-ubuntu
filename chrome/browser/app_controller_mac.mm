@@ -92,8 +92,8 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/user_metrics.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_system.h"
 #include "net/base/filename_util.h"
 #include "ui/base/cocoa/focus_window_set.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -451,6 +451,12 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
         content::NotificationService::NoDetails());
     // This will close all browser sessions.
     chrome::CloseAllBrowsers();
+
+    // At this point, the user has already chosen to cancel downloads. If we
+    // were to shut down as usual, the downloads would be cancelled in
+    // DownloadService::Shutdown().
+    DownloadService::CancelAllDownloads();
+
     return NO;
   }
 

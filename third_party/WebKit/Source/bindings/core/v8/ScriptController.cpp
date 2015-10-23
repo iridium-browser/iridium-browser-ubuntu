@@ -106,6 +106,7 @@ DEFINE_TRACE(ScriptController)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_windowProxyManager);
+    visitor->trace(m_pluginObjects);
 #endif
 }
 
@@ -139,6 +140,10 @@ void ScriptController::clearForClose()
 void ScriptController::updateSecurityOrigin(SecurityOrigin* origin)
 {
     m_windowProxyManager->mainWorldProxy()->updateSecurityOrigin(origin);
+    Vector<std::pair<ScriptState*, SecurityOrigin*>> isolatedContexts;
+    m_windowProxyManager->collectIsolatedContexts(isolatedContexts);
+    for (auto isolatedContext : isolatedContexts)
+        m_windowProxyManager->windowProxy(isolatedContext.first->world())->updateSecurityOrigin(isolatedContext.second);
 }
 
 v8::MaybeLocal<v8::Value> ScriptController::callFunction(v8::Local<v8::Function> function, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[])
@@ -150,17 +155,16 @@ v8::MaybeLocal<v8::Value> ScriptController::callFunction(v8::Local<v8::Function>
 
 v8::MaybeLocal<v8::Value> ScriptController::callFunction(ExecutionContext* context, v8::Local<v8::Function> function, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[], v8::Isolate* isolate)
 {
-    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "FunctionCall", "data", devToolsTraceEventData(isolate, context, function));
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::willCallFunction(context, DevToolsFunctionInfo(function));
     v8::MaybeLocal<v8::Value> result = V8ScriptRunner::callFunction(function, context, receiver, argc, info, isolate);
     InspectorInstrumentation::didCallFunction(cookie);
     return result;
 }
 
-v8::Local<v8::Value> ScriptController::executeScriptAndReturnValue(v8::Local<v8::Context> context, const ScriptSourceCode& source, AccessControlStatus corsStatus, double* compilationFinishTime)
+v8::Local<v8::Value> ScriptController::executeScriptAndReturnValue(v8::Local<v8::Context> context, const ScriptSourceCode& source, AccessControlStatus accessControlStatus, double* compilationFinishTime)
 {
-    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "EvaluateScript", "data", InspectorEvaluateScriptEvent::data(frame(), source.url().string(), source.startLine()));
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willEvaluateScript(frame(), source.url().string(), source.startLine());
+    TRACE_EVENT1("devtools.timeline", "EvaluateScript", "data", InspectorEvaluateScriptEvent::data(frame(), source.url().string(), source.startLine()));
+    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willEvaluateScript(frame());
 
     v8::Local<v8::Value> result;
     {
@@ -176,7 +180,7 @@ v8::Local<v8::Value> ScriptController::executeScriptAndReturnValue(v8::Local<v8:
         tryCatch.SetVerbose(true);
 
         v8::Local<v8::Script> script;
-        if (!v8Call(V8ScriptRunner::compileScript(source, isolate(), corsStatus, v8CacheOptions), script, tryCatch))
+        if (!v8Call(V8ScriptRunner::compileScript(source, isolate(), accessControlStatus, v8CacheOptions), script, tryCatch))
             return result;
 
         if (compilationFinishTime) {
@@ -527,10 +531,10 @@ void ScriptController::executeScriptInMainWorld(const String& script, ExecuteScr
     evaluateScriptInMainWorld(ScriptSourceCode(script), NotSharableCrossOrigin, policy);
 }
 
-void ScriptController::executeScriptInMainWorld(const ScriptSourceCode& sourceCode, AccessControlStatus corsStatus, double* compilationFinishTime)
+void ScriptController::executeScriptInMainWorld(const ScriptSourceCode& sourceCode, AccessControlStatus accessControlStatus, double* compilationFinishTime)
 {
     v8::HandleScope handleScope(isolate());
-    evaluateScriptInMainWorld(sourceCode, corsStatus, DoNotExecuteScriptWhenScriptsDisabled, compilationFinishTime);
+    evaluateScriptInMainWorld(sourceCode, accessControlStatus, DoNotExecuteScriptWhenScriptsDisabled, compilationFinishTime);
 }
 
 v8::Local<v8::Value> ScriptController::executeScriptInMainWorldAndReturnValue(const ScriptSourceCode& sourceCode)
@@ -538,7 +542,7 @@ v8::Local<v8::Value> ScriptController::executeScriptInMainWorldAndReturnValue(co
     return evaluateScriptInMainWorld(sourceCode, NotSharableCrossOrigin, DoNotExecuteScriptWhenScriptsDisabled);
 }
 
-v8::Local<v8::Value> ScriptController::evaluateScriptInMainWorld(const ScriptSourceCode& sourceCode, AccessControlStatus corsStatus, ExecuteScriptPolicy policy, double* compilationFinishTime)
+v8::Local<v8::Value> ScriptController::evaluateScriptInMainWorld(const ScriptSourceCode& sourceCode, AccessControlStatus accessControlStatus, ExecuteScriptPolicy policy, double* compilationFinishTime)
 {
     if (policy == DoNotExecuteScriptWhenScriptsDisabled && !canExecuteScripts(AboutToExecuteScript))
         return v8::Local<v8::Value>();
@@ -547,19 +551,17 @@ v8::Local<v8::Value> ScriptController::evaluateScriptInMainWorld(const ScriptSou
     const String* savedSourceURL = m_sourceURL;
     m_sourceURL = &sourceURL;
 
-    v8::EscapableHandleScope handleScope(isolate());
-    v8::Local<v8::Context> context = toV8Context(frame(), DOMWrapperWorld::mainWorld());
-    if (context.IsEmpty())
+    ScriptState* scriptState = ScriptState::forMainWorld(frame());
+    if (!scriptState->contextIsValid())
         return v8::Local<v8::Value>();
-
-    ScriptState* scriptState = ScriptState::from(context);
+    v8::EscapableHandleScope handleScope(isolate());
     ScriptState::Scope scope(scriptState);
 
     RefPtrWillBeRawPtr<LocalFrame> protect(frame());
     if (frame()->loader().stateMachine()->isDisplayingInitialEmptyDocument())
         frame()->loader().didAccessInitialDocument();
 
-    v8::Local<v8::Value> object = executeScriptAndReturnValue(scriptState->context(), sourceCode, corsStatus, compilationFinishTime);
+    v8::Local<v8::Value> object = executeScriptAndReturnValue(scriptState->context(), sourceCode, accessControlStatus, compilationFinishTime);
     m_sourceURL = savedSourceURL;
 
     if (object.IsEmpty())

@@ -6,7 +6,8 @@ package org.chromium.media;
 
 import android.content.Context;
 import android.graphics.ImageFormat;
-import android.util.Log;
+
+import org.chromium.base.Log;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -61,7 +62,7 @@ public class VideoCaptureTango extends VideoCaptureCamera {
     private static final int SF_OFFSET_4MP_CHROMA = 112;
 
     private static final byte CHROMA_ZERO_LEVEL = 127;
-    private static final String TAG = "VideoCaptureTango";
+    private static final String TAG = "cr.media";
 
     static int numberOfCameras() {
         return CAM_PARAMS.length;
@@ -79,16 +80,16 @@ public class VideoCaptureTango extends VideoCaptureCamera {
         return CAM_PARAMS[index].mName;
     }
 
-    static CaptureFormat[] getDeviceSupportedFormats(int id) {
-        ArrayList<CaptureFormat> formatList = new ArrayList<CaptureFormat>();
+    static VideoCaptureFormat[] getDeviceSupportedFormats(int id) {
+        ArrayList<VideoCaptureFormat> formatList = new ArrayList<VideoCaptureFormat>();
         if (id == DEPTH_CAMERA_ID) {
-            formatList.add(new CaptureFormat(320, 180, 5, ImageFormat.YV12));
+            formatList.add(new VideoCaptureFormat(320, 180, 5, ImageFormat.YV12));
         } else if (id == FISHEYE_CAMERA_ID) {
-            formatList.add(new CaptureFormat(640, 480, 30, ImageFormat.YV12));
+            formatList.add(new VideoCaptureFormat(640, 480, 30, ImageFormat.YV12));
         } else if (id == FOURMP_CAMERA_ID) {
-            formatList.add(new CaptureFormat(1280, 720, 20, ImageFormat.YV12));
+            formatList.add(new VideoCaptureFormat(1280, 720, 20, ImageFormat.YV12));
         }
-        return formatList.toArray(new CaptureFormat[formatList.size()]);
+        return formatList.toArray(new VideoCaptureFormat[formatList.size()]);
     }
 
     VideoCaptureTango(Context context,
@@ -105,7 +106,7 @@ public class VideoCaptureTango extends VideoCaptureCamera {
             int height,
             int frameRate,
             android.hardware.Camera.Parameters cameraParameters) {
-        mCaptureFormat = new CaptureFormat(CAM_PARAMS[mTangoCameraId].mWidth,
+        mCaptureFormat = new VideoCaptureFormat(CAM_PARAMS[mTangoCameraId].mWidth,
                                            CAM_PARAMS[mTangoCameraId].mHeight,
                                            frameRate,
                                            ImageFormat.YV12);
@@ -180,7 +181,7 @@ public class VideoCaptureTango extends VideoCaptureCamera {
                     ByteBuffer.wrap(data, startV, sizeV)
                               .get(mFrameBuffer.array(), sizeY + sizeU, sizeV);
                 } else {
-                    Log.e(TAG, "Unknown camera, #id: " + mTangoCameraId);
+                    Log.e(TAG, "Unknown camera, #id: %d", mTangoCameraId);
                     return;
                 }
                 mFrameBuffer.rewind();  // Important!

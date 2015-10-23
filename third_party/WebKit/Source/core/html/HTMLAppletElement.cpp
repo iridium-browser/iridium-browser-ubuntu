@@ -27,14 +27,14 @@
 #include "core/HTMLNames.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
-#include "core/html/HTMLParamElement.h"
-#include "core/loader/FrameLoader.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/html/HTMLParamElement.h"
 #include "core/layout/LayoutApplet.h"
 #include "core/layout/LayoutBlockFlow.h"
+#include "core/loader/FrameLoader.h"
+#include "core/loader/FrameLoaderClient.h"
 #include "core/plugins/PluginPlaceholder.h"
 #include "platform/Widget.h"
 #include "platform/weborigin/KURL.h"
@@ -85,14 +85,14 @@ bool HTMLAppletElement::hasLegalLinkAttribute(const QualifiedName& name) const
 
 bool HTMLAppletElement::layoutObjectIsNeeded(const ComputedStyle& style)
 {
-    if (!fastHasAttribute(codeAttr) && !hasOpenShadowRoot())
+    if (!fastHasAttribute(codeAttr) && !openShadowRoot())
         return false;
     return HTMLPlugInElement::layoutObjectIsNeeded(style);
 }
 
 LayoutObject* HTMLAppletElement::createLayoutObject(const ComputedStyle& style)
 {
-    if (!canEmbedJava() || hasOpenShadowRoot())
+    if (!canEmbedJava() || openShadowRoot())
         return LayoutObject::createObject(this, style);
 
     if (usePlaceholderContent())

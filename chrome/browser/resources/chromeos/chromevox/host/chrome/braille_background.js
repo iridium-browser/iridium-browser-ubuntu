@@ -13,6 +13,7 @@ goog.require('cvox.BrailleDisplayManager');
 goog.require('cvox.BrailleInputHandler');
 goog.require('cvox.BrailleKeyEvent');
 goog.require('cvox.BrailleTranslatorManager');
+goog.require('global');
 
 
 /**
@@ -64,11 +65,7 @@ goog.inherits(cvox.BrailleBackground, cvox.AbstractBraille);
 
 /** @override */
 cvox.BrailleBackground.prototype.write = function(params) {
-  this.lastContentId_ = null;
-  this.lastContent_ = null;
-  this.inputHandler_.onDisplayContentChanged(params.text);
-  this.displayManager_.setContent(
-      params, this.inputHandler_.getExpansionType());
+  this.setContent_(params, null);
 };
 
 
@@ -94,25 +91,44 @@ cvox.BrailleBackground.prototype.getTranslatorManager = function() {
  */
 cvox.BrailleBackground.prototype.onBrailleMessage = function(msg) {
   if (msg['action'] == 'write') {
-    this.lastContentId_ = msg['contentId'];
-    this.lastContent_ = cvox.NavBraille.fromJson(msg['params']);
-    this.inputHandler_.onDisplayContentChanged(this.lastContent_.text);
-    this.displayManager_.setContent(
-        this.lastContent_, this.inputHandler_.getExpansionType());
+    this.setContent_(cvox.NavBraille.fromJson(msg['params']),
+                     msg['contentId']);
   }
 };
 
 
 /**
- * Handles braille key events by dispatching either to the input handler or
- * a content script.
+ * @param {!cvox.NavBraille} newContent
+ * @param {?string} newContentId
+ * @private
+ */
+cvox.BrailleBackground.prototype.setContent_ = function(
+    newContent, newContentId) {
+  var updateContent = function() {
+    this.lastContent_ = newContentId ? newContent : null;
+    this.lastContentId_ = newContentId;
+    this.displayManager_.setContent(
+        newContent, this.inputHandler_.getExpansionType());
+  }.bind(this);
+  this.inputHandler_.onDisplayContentChanged(newContent.text, updateContent);
+  updateContent();
+};
+
+
+/**
+ * Handles braille key events by dispatching either to the input handler,
+ * ChromeVox next's background object or ChromeVox classic's content script.
  * @param {!cvox.BrailleKeyEvent} brailleEvt The event.
- * @param {cvox.NavBraille} content Content of display when event fired.
+ * @param {!cvox.NavBraille} content Content of display when event fired.
  * @private
  */
 cvox.BrailleBackground.prototype.onBrailleKeyEvent_ = function(
     brailleEvt, content) {
   if (this.inputHandler_.onBrailleKeyEvent(brailleEvt)) {
+    return;
+  }
+  if (global.backgroundObj &&
+      global.backgroundObj.onBrailleKeyEvent(brailleEvt, content)) {
     return;
   }
   this.sendCommand_(brailleEvt, content);

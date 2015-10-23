@@ -44,7 +44,6 @@
 #include "core/StylePropertyShorthand.h"
 #include "core/css/BasicShapeFunctions.h"
 #include "core/css/CSSCursorImageValue.h"
-#include "core/css/CSSFontValue.h"
 #include "core/css/CSSGradientValue.h"
 #include "core/css/CSSGridTemplateAreasValue.h"
 #include "core/css/CSSHelper.h"
@@ -572,7 +571,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyWebkitClipPath(StyleResolverSta
             state.style()->setClipPath(nullptr);
         } else if (primitiveValue->isShape()) {
             state.style()->setClipPath(ShapeClipPathOperation::create(basicShapeForValue(state, primitiveValue->getShapeValue())));
-        } else if (primitiveValue->primitiveType() == CSSPrimitiveValue::CSS_URI) {
+        } else if (primitiveValue->isURI()) {
             String cssURLValue = primitiveValue->getStringValue();
             KURL url = state.document().completeURL(cssURLValue);
             // FIXME: It doesn't work with forward or external SVG references (see https://bugs.webkit.org/show_bug.cgi?id=90405)
@@ -583,9 +582,10 @@ void StyleBuilderFunctions::applyValueCSSPropertyWebkitClipPath(StyleResolverSta
 
 void StyleBuilderFunctions::applyValueCSSPropertyWebkitFilter(StyleResolverState& state, CSSValue* value)
 {
+    // FIXME: We should just make this a converter
     FilterOperations operations;
-    if (FilterOperationResolver::createFilterOperations(value, state.cssToLengthConversionData(), operations, state))
-        state.style()->setFilter(operations);
+    FilterOperationResolver::createFilterOperations(*value, state.cssToLengthConversionData(), operations, state);
+    state.style()->setFilter(operations);
 }
 
 void StyleBuilderFunctions::applyInitialCSSPropertyWebkitTextEmphasisStyle(StyleResolverState& state)
@@ -663,8 +663,8 @@ void StyleBuilderFunctions::applyValueCSSPropertyWillChange(StyleResolverState& 
 
     for (auto& willChangeValue : toCSSValueList(*value)) {
         CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(willChangeValue.get());
-        if (CSSPropertyID propertyID = primitiveValue->getPropertyID())
-            willChangeProperties.append(propertyID);
+        if (primitiveValue->isPropertyID())
+            willChangeProperties.append(primitiveValue->getPropertyID());
         else if (primitiveValue->getValueID() == CSSValueContents)
             willChangeContents = true;
         else if (primitiveValue->getValueID() == CSSValueScrollPosition)

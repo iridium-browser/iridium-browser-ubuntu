@@ -6,7 +6,7 @@
 
 #include "base/message_loop/message_loop.h"
 #include "content/public/common/url_constants.h"
-#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_frame.h"
 #include "extensions/common/extension.h"
 #include "extensions/renderer/extension_groups.h"
 #include "extensions/renderer/script_context.h"
@@ -17,12 +17,19 @@
 
 namespace extensions {
 
-ScriptContextSet::ScriptContextSet(ExtensionSet* extensions,
-                                   ExtensionIdSet* active_extension_ids)
-    : extensions_(extensions), active_extension_ids_(active_extension_ids) {
+namespace {
+// There is only ever one instance of the ScriptContextSet.
+ScriptContextSet* g_context_set = nullptr;
+}
+
+ScriptContextSet::ScriptContextSet(ExtensionIdSet* active_extension_ids)
+    : active_extension_ids_(active_extension_ids) {
+  DCHECK(!g_context_set);
+  g_context_set = this;
 }
 
 ScriptContextSet::~ScriptContextSet() {
+  g_context_set = nullptr;
 }
 
 ScriptContext* ScriptContextSet::Register(
@@ -79,9 +86,15 @@ ScriptContext* ScriptContextSet::GetByV8Context(
   return nullptr;
 }
 
+ScriptContext* ScriptContextSet::GetContextByV8Context(
+    const v8::Local<v8::Context>& v8_context) {
+  // g_context_set can be null in unittests.
+  return g_context_set ? g_context_set->GetByV8Context(v8_context) : nullptr;
+}
+
 void ScriptContextSet::ForEach(
     const std::string& extension_id,
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     const base::Callback<void(ScriptContext*)>& callback) const {
   // We copy the context list, because calling into javascript may modify it
   // out from under us.
@@ -98,11 +111,11 @@ void ScriptContextSet::ForEach(
         continue;
     }
 
-    content::RenderView* context_render_view = context->GetRenderView();
-    if (!context_render_view)
+    content::RenderFrame* context_render_frame = context->GetRenderFrame();
+    if (!context_render_frame)
       continue;
 
-    if (render_view && render_view != context_render_view)
+    if (render_frame && render_frame != context_render_frame)
       continue;
 
     callback.Run(context);
@@ -132,13 +145,15 @@ const Extension* ScriptContextSet::GetExtensionFromFrameAndWorld(
     GURL frame_url = ScriptContext::GetDataSourceURLForFrame(frame);
     frame_url = ScriptContext::GetEffectiveDocumentURL(frame, frame_url,
                                                        use_effective_url);
-    extension_id = extensions_->GetExtensionOrAppIDByURL(frame_url);
+    extension_id =
+        RendererExtensionRegistry::Get()->GetExtensionOrAppIDByURL(frame_url);
   }
 
   // There are conditions where despite a context being associated with an
   // extension, no extension actually gets found. Ignore "invalid" because CSP
   // blocks extension page loading by switching the extension ID to "invalid".
-  const Extension* extension = extensions_->GetByID(extension_id);
+  const Extension* extension =
+      RendererExtensionRegistry::Get()->GetByID(extension_id);
   if (!extension && !extension_id.empty() && extension_id != "invalid") {
     // TODO(kalman): Do something here?
   }
@@ -168,7 +183,7 @@ Feature::Context ScriptContextSet::ClassifyJavaScriptContext(
   //    before the SecurityContext is updated with the sandbox flags (after
   //    reading the CSP header), so the caller can't check if the context's
   //    security origin is unique yet.
-  if (ScriptContext::IsSandboxedPage(*extensions_, url))
+  if (ScriptContext::IsSandboxedPage(url))
     return Feature::WEB_PAGE_CONTEXT;
 
   if (extension && active_extension_ids_->count(extension->id()) > 0) {
@@ -185,7 +200,8 @@ Feature::Context ScriptContextSet::ClassifyJavaScriptContext(
 
   // TODO(kalman): This isUnique() check is wrong, it should be performed as
   // part of ScriptContext::IsSandboxedPage().
-  if (!origin.isUnique() && extensions_->ExtensionBindingsAllowed(url)) {
+  if (!origin.isUnique() &&
+      RendererExtensionRegistry::Get()->ExtensionBindingsAllowed(url)) {
     if (!extension)  // TODO(kalman): when does this happen?
       return Feature::UNSPECIFIED_CONTEXT;
     return extension->is_hosted_app() ? Feature::BLESSED_WEB_PAGE_CONTEXT

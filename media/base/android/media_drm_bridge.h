@@ -139,22 +139,31 @@ class MEDIA_EXPORT MediaDrmBridge : public BrowserCdm {
   // Session event callbacks.
   // Note: Session expiration update is not supported by MediaDrm.
 
+  // TODO(xhwang): Remove |j_legacy_destination_url| when prefixed EME support
+  // is removed.
   void OnSessionMessage(JNIEnv* env,
                         jobject j_media_drm,
                         jbyteArray j_session_id,
+                        jint j_message_type,
                         jbyteArray j_message,
                         jstring j_legacy_destination_url);
   void OnSessionClosed(JNIEnv* env,
                        jobject j_media_drm,
                        jbyteArray j_session_id);
 
-  // Note: Key ID is not available in MediaDrm, so only a generic |j_key_status|
-  // and |has_additional_usable_key| are returned.
   void OnSessionKeysChange(JNIEnv* env,
                            jobject j_media_drm,
                            jbyteArray j_session_id,
-                           bool has_additional_usable_key,
-                           jint j_key_status);
+                           jobjectArray j_keys_info,
+                           bool has_additional_usable_key);
+
+  // |expiry_time_ms| is the new expiration time for the keys in the session.
+  // The time is in milliseconds, relative to the Unix epoch. A time of 0
+  // indicates that the keys never expire.
+  void OnSessionExpirationUpdate(JNIEnv* env,
+                                 jobject j_media_drm,
+                                 jbyteArray j_session_id,
+                                 jlong expiry_time_ms);
 
   // Called by the CDM when an error occurred in session |j_session_id|
   // unrelated to one of the MediaKeys calls that accept a |promise|.
@@ -182,7 +191,8 @@ class MEDIA_EXPORT MediaDrmBridge : public BrowserCdm {
                  const SessionMessageCB& session_message_cb,
                  const SessionClosedCB& session_closed_cb,
                  const LegacySessionErrorCB& legacy_session_error_cb,
-                 const SessionKeysChangeCB& session_keys_change_cb);
+                 const SessionKeysChangeCB& session_keys_change_cb,
+                 const SessionExpirationUpdateCB& session_expiration_update_cb);
 
   static bool IsSecureDecoderRequired(SecurityLevel security_level);
 
@@ -200,6 +210,7 @@ class MEDIA_EXPORT MediaDrmBridge : public BrowserCdm {
   SessionClosedCB session_closed_cb_;
   LegacySessionErrorCB legacy_session_error_cb_;
   SessionKeysChangeCB session_keys_change_cb_;
+  SessionExpirationUpdateCB session_expiration_update_cb_;
 
   base::Closure media_crypto_ready_cb_;
 

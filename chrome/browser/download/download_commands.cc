@@ -4,7 +4,7 @@
 
 #include "chrome/browser/download/download_commands.h"
 
-#include "base/strings/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_extensions.h"
@@ -38,7 +38,7 @@ int DownloadCommands::GetCommandIconId(Command command) const {
     case PAUSE:
       return IDR_DOWNLOAD_NOTIFICATION_MENU_PAUSE;
     case RESUME:
-      return IDR_DOWNLOAD_NOTIFICATION_MENU_RESUME;
+      return IDR_DOWNLOAD_NOTIFICATION_MENU_DOWNLOAD;
     case SHOW_IN_FOLDER:
       return IDR_DOWNLOAD_NOTIFICATION_MENU_FOLDER;
     case KEEP:
@@ -46,14 +46,12 @@ int DownloadCommands::GetCommandIconId(Command command) const {
     case DISCARD:
       return IDR_DOWNLOAD_NOTIFICATION_MENU_DELETE;
     case CANCEL:
-      // TODO(yoshiki): This is a temporary image for Download Notification
-      // feature behind the flag. We have to replace the image with proper one
-      // before the feature launch. http://crbug.com/468559
-      return IDR_DOWNLOAD_NOTIFICATION_MENU_DELETE;
+      return IDR_DOWNLOAD_NOTIFICATION_MENU_CANCEL;
+    case LEARN_MORE_SCANNING:
+      return IDR_NOTIFICATION_WELCOME_LEARN_MORE;
     case OPEN_WHEN_COMPLETE:
     case ALWAYS_OPEN_TYPE:
     case PLATFORM_OPEN:
-    case LEARN_MORE_SCANNING:
     case LEARN_MORE_INTERRUPTED:
       return -1;
   }
@@ -67,8 +65,7 @@ GURL DownloadCommands::GetLearnMoreURLForInterruptedDownload() const {
       learn_more_url, g_browser_process->GetApplicationLocale());
   return net::AppendQueryParameter(
       learn_more_url, "ctx",
-      base::StringPrintf("%d",
-                         static_cast<int>(download_item_->GetLastReason())));
+      base::IntToString(static_cast<int>(download_item_->GetLastReason())));
 }
 
 gfx::Image DownloadCommands::GetCommandIcon(Command command) {

@@ -163,14 +163,26 @@ NetworkManager::NetworkManager() {
 NetworkManager::~NetworkManager() {
 }
 
+NetworkManager::EnumerationPermission NetworkManager::enumeration_permission()
+    const {
+  return kEnumerationAllowed;
+}
+
 NetworkManagerBase::NetworkManagerBase()
-    : max_ipv6_networks_(kMaxIPv6Networks), ipv6_enabled_(true) {
+    : enumeration_permission_(NetworkManager::kEnumerationAllowed),
+      max_ipv6_networks_(kMaxIPv6Networks),
+      ipv6_enabled_(true) {
 }
 
 NetworkManagerBase::~NetworkManagerBase() {
   for (const auto& kv : networks_map_) {
     delete kv.second;
   }
+}
+
+NetworkManager::EnumerationPermission
+NetworkManagerBase::enumeration_permission() const {
+  return enumeration_permission_;
 }
 
 void NetworkManagerBase::GetAnyAddressNetworks(NetworkList* networks) {

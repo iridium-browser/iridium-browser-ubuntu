@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "components/guest_view/browser/guest_view.h"
 #include "extensions/browser/extension_function_dispatcher.h"
-#include "extensions/browser/guest_view/extension_view/extension_view_guest_delegate.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -18,15 +17,15 @@ class BrowserContext;
 namespace extensions {
 
 class ExtensionViewGuest
-    : public guest_view::GuestView<ExtensionViewGuest>,
-      public ExtensionFunctionDispatcher::Delegate {
+    : public guest_view::GuestView<ExtensionViewGuest> {
  public:
   static const char Type[];
   static guest_view::GuestViewBase* Create(
       content::WebContents* owner_web_contents);
 
   // Request navigating the guest to the provided |src| URL.
-  void NavigateGuest(const std::string& src, bool force_navigation);
+  // Returns true if the navigation is successful.
+  bool NavigateGuest(const std::string& src, bool force_navigation);
 
   // GuestViewBase implementation.
   bool CanRunInDetachedState() const override;
@@ -45,21 +44,18 @@ class ExtensionViewGuest
   void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) override;
-  bool OnMessageReceived(const IPC::Message& message) override;
 
  private:
   ExtensionViewGuest(content::WebContents* owner_web_contents);
   ~ExtensionViewGuest() override;
-  void OnRequest(const ExtensionHostMsg_Request_Params& params);
 
   // Applies attributes to the extensionview.
   void ApplyAttributes(const base::DictionaryValue& params);
 
-  scoped_ptr<extensions::ExtensionFunctionDispatcher>
-      extension_function_dispatcher_;
-  scoped_ptr<extensions::ExtensionViewGuestDelegate>
-      extension_view_guest_delegate_;
-  GURL view_page_;
+  // The full URL that the extensionview is currently navigated to.
+  GURL url_;
+
+  // The extension URL, including the extension scheme and extension ID.
   GURL extension_url_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionViewGuest);

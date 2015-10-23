@@ -33,6 +33,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/system/statistics_provider.h"
 #include "chromeos/timezone/timezone_resolver.h"
+#include "components/drive/drive_pref_names.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/user_manager/user.h"
@@ -143,8 +144,11 @@ void Preferences::RegisterProfilePrefs(
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kAccessibilityScreenMagnifierEnabled,
-      false,
+      prefs::kAccessibilityScreenMagnifierCenterFocus,
+      true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilityScreenMagnifierEnabled, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kAccessibilityScreenMagnifierType,
@@ -181,16 +185,13 @@ void Preferences::RegisterProfilePrefs(
       base::GetHourClockType() == base::k24HourClock,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kDisableDrive,
-      false,
+      drive::prefs::kDisableDrive, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kDisableDriveOverCellular,
-      true,
+      drive::prefs::kDisableDriveOverCellular, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kDisableDriveHostedFiles,
-      false,
+      drive::prefs::kDisableDriveHostedFiles, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   // We don't sync prefs::kLanguageCurrentInputMethod and PreviousInputMethod
   // because they're just used to track the logout state of the device.
@@ -243,17 +244,14 @@ void Preferences::RegisterProfilePrefs(
   // We don't sync wake-on-wifi related prefs because they are device specific.
   registry->RegisterBooleanPref(prefs::kWakeOnWifiSsid, true);
 
-  // Mobile plan notifications default to on.
-  registry->RegisterBooleanPref(
-      prefs::kShowPlanNotifications,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-
   // 3G first-time usage promo will be shown at least once.
   registry->RegisterBooleanPref(prefs::kShow3gPromoNotification, true);
 
   // Number of times Data Saver prompt has been shown on 3G data network.
-  registry->RegisterIntegerPref(prefs::kDataSaverPromptsShown, 0);
+  registry->RegisterIntegerPref(
+      prefs::kDataSaverPromptsShown,
+      0,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 
   // Initially all existing users would see "What's new" for current version
   // after update.
@@ -321,6 +319,7 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
 
   pref_change_registrar_.Init(prefs);
   pref_change_registrar_.Add(prefs::kResolveTimezoneByGeolocation, callback);
+  pref_change_registrar_.Add(prefs::kUse24HourClock, callback);
 }
 
 void Preferences::Init(Profile* profile, const user_manager::User* user) {
@@ -555,9 +554,10 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     std::string value(enabled_extension_imes_.GetValue());
 
     std::vector<std::string> split_values;
-    if (!value.empty())
-      base::SplitString(value, ',', &split_values);
-
+    if (!value.empty()) {
+      split_values = base::SplitString(value, ",", base::TRIM_WHITESPACE,
+                                       base::SPLIT_WANT_ALL);
+    }
     ime_state_->SetEnabledExtensionImes(&split_values);
   }
 
@@ -600,6 +600,13 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       }
     }
   }
+
+  if (pref_name == prefs::kUse24HourClock ||
+      reason != REASON_ACTIVE_USER_CHANGED) {
+    const bool value = prefs_->GetBoolean(prefs::kUse24HourClock);
+    user_manager::UserManager::Get()->SetKnownUserBooleanPref(
+        user_->GetUserID(), prefs::kUse24HourClock, value);
+  }
 }
 
 void Preferences::OnIsSyncingChanged() {
@@ -624,12 +631,14 @@ void Preferences::SetLanguageConfigStringListAsCSV(const char* section,
   VLOG(1) << "Setting " << name << " to '" << value << "'";
 
   std::vector<std::string> split_values;
-  if (!value.empty())
-    base::SplitString(value, ',', &split_values);
+  if (!value.empty()) {
+    split_values = base::SplitString(value, ",", base::TRIM_WHITESPACE,
+                                     base::SPLIT_WANT_ALL);
+  }
 
   // Transfers the xkb id to extension-xkb id.
   if (input_method_manager_->MigrateInputMethods(&split_values))
-    preload_engines_.SetValue(JoinString(split_values, ','));
+    preload_engines_.SetValue(base::JoinString(split_values, ","));
 
   if (section == std::string(language_prefs::kGeneralSectionName) &&
       name == std::string(language_prefs::kPreloadEnginesConfigName)) {

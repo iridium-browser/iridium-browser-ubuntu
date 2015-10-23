@@ -6,6 +6,7 @@
 // Multiply-included message file, hence no include guard.
 
 #include "base/basictypes.h"
+#include "content/common/ax_content_node_data.h"
 #include "content/common/content_export.h"
 #include "content/common/view_message_enums.h"
 #include "content/public/common/common_param_traits.h"
@@ -17,30 +18,15 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_tree_update.h"
 
-// Singly-included section for custom types.
-#ifndef CONTENT_COMMON_ACCESSIBILITY_MESSAGES_H_
-#define CONTENT_COMMON_ACCESSIBILITY_MESSAGES_H_
-
-typedef std::map<int32, int> FrameIDMap;
-
-#endif  // CONTENT_COMMON_ACCESSIBILITY_MESSAGES_H_
-
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
 
 #define IPC_MESSAGE_START AccessibilityMsgStart
 
-IPC_ENUM_TRAITS_MAX_VALUE(ui::AXEvent, ui::AX_EVENT_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(ui::AXRole, ui::AX_ROLE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(content::AXContentIntAttribute,
+                          content::AX_CONTENT_INT_ATTRIBUTE_LAST)
 
-IPC_ENUM_TRAITS_MAX_VALUE(ui::AXBoolAttribute, ui::AX_BOOL_ATTRIBUTE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(ui::AXFloatAttribute, ui::AX_FLOAT_ATTRIBUTE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(ui::AXIntAttribute, ui::AX_INT_ATTRIBUTE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(ui::AXIntListAttribute,
-                          ui::AX_INT_LIST_ATTRIBUTE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(ui::AXStringAttribute, ui::AX_STRING_ATTRIBUTE_LAST)
-
-IPC_STRUCT_TRAITS_BEGIN(ui::AXNodeData)
+IPC_STRUCT_TRAITS_BEGIN(content::AXContentNodeData)
   IPC_STRUCT_TRAITS_MEMBER(id)
   IPC_STRUCT_TRAITS_MEMBER(role)
   IPC_STRUCT_TRAITS_MEMBER(state)
@@ -52,25 +38,17 @@ IPC_STRUCT_TRAITS_BEGIN(ui::AXNodeData)
   IPC_STRUCT_TRAITS_MEMBER(intlist_attributes)
   IPC_STRUCT_TRAITS_MEMBER(html_attributes)
   IPC_STRUCT_TRAITS_MEMBER(child_ids)
+  IPC_STRUCT_TRAITS_MEMBER(content_int_attributes)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(ui::AXTreeUpdate)
+IPC_STRUCT_TRAITS_BEGIN(ui::AXTreeUpdate<content::AXContentNodeData>)
   IPC_STRUCT_TRAITS_MEMBER(node_id_to_clear)
   IPC_STRUCT_TRAITS_MEMBER(nodes)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_BEGIN(AccessibilityHostMsg_EventParams)
   // The tree update.
-  IPC_STRUCT_MEMBER(ui::AXTreeUpdate, update)
-
-  // Mapping from node id to routing id of its child frame - either the
-  // routing id of a RenderFrame or a RenderFrameProxy for an out-of-process
-  // iframe.
-  IPC_STRUCT_MEMBER(FrameIDMap, node_to_frame_routing_id_map)
-
-  // Mapping from node id to the browser plugin instance id of a child
-  // browser plugin.
-  IPC_STRUCT_MEMBER(FrameIDMap, node_to_browser_plugin_instance_id_map)
+  IPC_STRUCT_MEMBER(ui::AXTreeUpdate<content::AXContentNodeData>, update)
 
   // Type of event.
   IPC_STRUCT_MEMBER(ui::AXEvent, event_type)
@@ -128,12 +106,23 @@ IPC_MESSAGE_ROUTED2(AccessibilityMsg_ScrollToMakeVisible,
                     int /* object id */,
                     gfx::Rect /* subfocus */)
 
+// Relay a request from assistive technology to show the context menu for a
+// given object.
+IPC_MESSAGE_ROUTED1(AccessibilityMsg_ShowContextMenu, int /* object id */)
+
 // Relay a request from assistive technology to move a given object
 // to a specific location, in the WebContents area coordinate space, i.e.
 // (0, 0) is the top-left corner of the WebContents.
 IPC_MESSAGE_ROUTED2(AccessibilityMsg_ScrollToPoint,
                     int /* object id */,
                     gfx::Point /* new location */)
+
+// Relay a request from assistive technology to set the scroll offset
+// of an accessibility object that's a scroll container, to a specific
+// offset.
+IPC_MESSAGE_ROUTED2(AccessibilityMsg_SetScrollOffset,
+                    int /* object id */,
+                    gfx::Point /* new offset */)
 
 // Relay a request from assistive technology to set the cursor or
 // selection within an editable text element.
@@ -212,4 +201,4 @@ IPC_MESSAGE_ROUTED1(
 // a standalone snapshot of the accessibility tree.
 IPC_MESSAGE_ROUTED2(AccessibilityHostMsg_SnapshotResponse,
                     int /* callback_id */,
-                    ui::AXTreeUpdate)
+                    ui::AXTreeUpdate<content::AXContentNodeData>)

@@ -83,16 +83,10 @@ def StepRunSelLdrTests(pepperdir, sanitizer):
       deps = True
       if sanitizer == 'valgrind':
         args += ['RUN_UNDER=valgrind']
-      else:
-        args += ['CC=clang', 'CXX=clang++',
-                 'LDFLAGS=-pie -fsanitize=' + sanitizer,
-                 'CFLAGS=-fPIC -fsanitize=' + sanitizer]
-      build_projects.BuildProjectsBranch(pepperdir, 'src', clean=False,
-                                         deps=deps, config=config,
-                                         args=args + ['clean'])
-      build_projects.BuildProjectsBranch(pepperdir, 'tests', clean=False,
-                                         deps=deps, config=config,
-                                         args=args + ['clean'])
+      elif sanitizer == 'address':
+        args += ['ASAN=1']
+      elif sanitizer == 'thread':
+        args += ['TSAN=1']
 
     build_projects.BuildProjectsBranch(pepperdir, test, clean=False,
                                        deps=deps, config=config,
@@ -106,8 +100,8 @@ def StepRunSelLdrTests(pepperdir, sanitizer):
     # We only ship 32-bit version of sel_ldr on mac.
     archs = ('x86_32',)
   else:
-    # On linux we can run both 32 and 64-bit
-    archs = ('x86_64', 'x86_32')
+    # On linux we can run both 32 and 64-bit, and arm (via qemu)
+    archs = ('x86_64', 'x86_32', 'arm')
 
   for root, projects in tree.iteritems():
     for project in projects:
@@ -134,6 +128,9 @@ def StepRunSelLdrTests(pepperdir, sanitizer):
 
       for toolchain in ('clang-newlib', 'newlib', 'glibc', 'pnacl'):
         for arch in archs:
+          # TODO(sbc): Remove this once we get elf_loader.nexe added to the SDK
+          if toolchain == 'glibc' and arch == 'arm':
+            continue
           for config in configs:
             RunTest(location, toolchain, config, arch)
 

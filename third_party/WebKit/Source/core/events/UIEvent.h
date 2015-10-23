@@ -29,6 +29,7 @@
 #include "core/events/EventDispatchMediator.h"
 #include "core/events/UIEventInit.h"
 #include "core/frame/DOMWindow.h"
+#include "core/input/InputDeviceCapabilities.h"
 
 namespace blink {
 
@@ -50,24 +51,17 @@ public:
     {
         return adoptRefWillBeNoop(new UIEvent(type, initializer));
     }
-    virtual ~UIEvent();
+    ~UIEvent() override;
 
     void initUIEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView>, int detail);
+    void initUIEventInternal(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView>, int detail, InputDeviceCapabilities* sourceCapabilities);
 
     AbstractView* view() const { return m_view.get(); }
     int detail() const { return m_detail; }
+    InputDeviceCapabilities* sourceCapabilities() const { return m_sourceCapabilities.get(); }
 
-    virtual const AtomicString& interfaceName() const override;
-    virtual bool isUIEvent() const override final;
-
-    virtual int keyCode() const;
-    virtual int charCode() const;
-
-    virtual int layerX();
-    virtual int layerY();
-
-    virtual int pageX() const;
-    virtual int pageY() const;
+    const AtomicString& interfaceName() const override;
+    bool isUIEvent() const final;
 
     virtual int which() const;
 
@@ -75,12 +69,13 @@ public:
 
 protected:
     UIEvent();
-    UIEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView>, int detail);
+    UIEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView>, int detail, InputDeviceCapabilities* sourceCapabilities = nullptr);
     UIEvent(const AtomicString&, const UIEventInit&);
 
 private:
     RefPtrWillBeMember<AbstractView> m_view;
     int m_detail;
+    PersistentWillBeMember<InputDeviceCapabilities> m_sourceCapabilities;
 };
 
 } // namespace blink

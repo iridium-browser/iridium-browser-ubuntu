@@ -138,7 +138,8 @@ class StartupObserver : public WebContentsObserver, public base::NonThreadSafe {
   void DidFailLoad(content::RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
                    int error_code,
-                   const base::string16& error_description) override {
+                   const base::string16& error_description,
+                   bool was_ignored_by_handler) override {
     if (!render_frame_host->GetParent())
       OnStartupComplete();
   }
@@ -173,10 +174,10 @@ void StartupObserver::Start() {
     delay = base::TimeDelta::FromMinutes(kLongerDelayMins);
   }
 #else
-  // TODO(michaeln): We should probably monitor the initial page load here too,
-  // but since ChromeBrowserMainExtraPartsMetrics doesn't, not doing that yet.
-  const int kAndroidDelaySecs = 10;
-  delay = base::TimeDelta::FromSeconds(kAndroidDelaySecs);
+  // Startup completion is signaled via AfterStartupTaskUtils.java,
+  // this is just a failsafe timeout.
+  const int kLongerDelayMins = 3;
+  delay = base::TimeDelta::FromMinutes(kLongerDelayMins);
 #endif  // !defined(OS_ANDROID)
 
   BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,

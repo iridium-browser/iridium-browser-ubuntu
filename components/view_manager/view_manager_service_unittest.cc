@@ -10,12 +10,15 @@
 #include "components/view_manager/connection_manager.h"
 #include "components/view_manager/connection_manager_delegate.h"
 #include "components/view_manager/display_manager.h"
+#include "components/view_manager/display_manager_factory.h"
 #include "components/view_manager/ids.h"
 #include "components/view_manager/public/cpp/types.h"
 #include "components/view_manager/public/cpp/util.h"
 #include "components/view_manager/public/interfaces/view_manager.mojom.h"
 #include "components/view_manager/server_view.h"
+#include "components/view_manager/surfaces/surfaces_state.h"
 #include "components/view_manager/test_change_tracker.h"
+#include "components/view_manager/view_manager_root_connection.h"
 #include "components/view_manager/view_manager_service_impl.h"
 #include "mojo/application/public/interfaces/service_provider.mojom.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
@@ -47,18 +50,20 @@ class TestViewManagerClient : public mojo::ViewManagerClient {
  private:
   // ViewManagerClient:
   void OnEmbed(uint16_t connection_id,
-               const String& embedder_url,
                ViewDataPtr root,
                mojo::ViewManagerServicePtr view_manager_service,
-               InterfaceRequest<ServiceProvider> services,
-               ServiceProviderPtr exposed_services,
                mojo::Id focused_view_id) override {
     // TODO(sky): add test coverage of |focused_view_id|.
-    tracker_.OnEmbed(connection_id, embedder_url, root.Pass());
+    tracker_.OnEmbed(connection_id, root.Pass());
   }
+  void OnEmbedForDescendant(
+      uint32_t view,
+      mojo::URLRequestPtr request,
+      const OnEmbedForDescendantCallback& callback) override {}
   void OnEmbeddedAppDisconnected(uint32_t view) override {
     tracker_.OnEmbeddedAppDisconnected(view);
   }
+  void OnUnembed() override { tracker_.OnUnembed(); }
   void OnViewBoundsChanged(uint32_t view,
                            mojo::RectPtr old_bounds,
                            mojo::RectPtr new_bounds) override {
@@ -114,11 +119,12 @@ class TestClientConnection : public ClientConnection {
  public:
   explicit TestClientConnection(scoped_ptr<ViewManagerServiceImpl> service_impl)
       : ClientConnection(service_impl.Pass(), &client_) {}
-  ~TestClientConnection() override {}
 
   TestViewManagerClient* client() { return &client_; }
 
  private:
+  ~TestClientConnection() override {}
+
   TestViewManagerClient client_;
 
   DISALLOW_COPY_AND_ASSIGN(TestClientConnection);
@@ -140,17 +146,16 @@ class TestConnectionManagerDelegate : public ConnectionManagerDelegate {
 
  private:
   // ConnectionManagerDelegate:
-  void OnLostConnectionToWindowManager() override {}
+  void OnNoMoreRootConnections() override {}
 
   ClientConnection* CreateClientConnectionForEmbedAtView(
       ConnectionManager* connection_manager,
       mojo::InterfaceRequest<mojo::ViewManagerService> service_request,
       mojo::ConnectionSpecificId creator_id,
-      const std::string& creator_url,
-      const std::string& url,
+      mojo::URLRequestPtr request,
       const ViewId& root_id) override {
-    scoped_ptr<ViewManagerServiceImpl> service(new ViewManagerServiceImpl(
-        connection_manager, creator_id, creator_url, url, root_id));
+    scoped_ptr<ViewManagerServiceImpl> service(
+        new ViewManagerServiceImpl(connection_manager, creator_id, root_id));
     last_connection_ = new TestClientConnection(service.Pass());
     return last_connection_;
   }
@@ -158,11 +163,13 @@ class TestConnectionManagerDelegate : public ConnectionManagerDelegate {
       ConnectionManager* connection_manager,
       mojo::InterfaceRequest<mojo::ViewManagerService> service_request,
       mojo::ConnectionSpecificId creator_id,
-      const std::string& creator_url,
       const ViewId& root_id,
       mojo::ViewManagerClientPtr client) override {
-    NOTIMPLEMENTED();
-    return nullptr;
+    // Used by ConnectionManager::AddRoot.
+    scoped_ptr<ViewManagerServiceImpl> service(
+        new ViewManagerServiceImpl(connection_manager, creator_id, root_id));
+    last_connection_ = new TestClientConnection(service.Pass());
+    return last_connection_;
   }
 
   TestClientConnection* last_connection_;
@@ -172,6 +179,26 @@ class TestConnectionManagerDelegate : public ConnectionManagerDelegate {
 
 // -----------------------------------------------------------------------------
 
+class TestViewManagerRootConnection : public ViewManagerRootConnection {
+ public:
+  TestViewManagerRootConnection(scoped_ptr<ViewManagerRootImpl> root,
+                                ConnectionManager* manager)
+      : ViewManagerRootConnection(root.Pass(), manager) {}
+  ~TestViewManagerRootConnection() override {}
+
+ private:
+  // ViewManagerRootDelegate:
+  void OnDisplayInitialized() override {
+    connection_manager()->AddRoot(this);
+    set_view_manager_service(connection_manager()->EmbedAtView(
+        kInvalidConnectionId,
+        view_manager_root()->root_view()->id(),
+        mojo::ViewManagerClientPtr()));
+  }
+  DISALLOW_COPY_AND_ASSIGN(TestViewManagerRootConnection);
+};
+
+// -----------------------------------------------------------------------------
 // Empty implementation of DisplayManager.
 class TestDisplayManager : public DisplayManager {
  public:
@@ -179,19 +206,45 @@ class TestDisplayManager : public DisplayManager {
   ~TestDisplayManager() override {}
 
   // DisplayManager:
-  void Init(ConnectionManager* connection_manager,
-            mojo::NativeViewportEventDispatcherPtr event_dispatcher) override {}
+  void Init(DisplayManagerDelegate* delegate) override {
+    // It is necessary to tell the delegate about the ViewportMetrics to make
+    // sure that the ViewManagerRootConnection is correctly initialized (and a
+    // root-view is created).
+    mojo::ViewportMetrics metrics;
+    metrics.size_in_pixels = mojo::Size::From(gfx::Size(400, 300));
+    metrics.device_pixel_ratio = 1.f;
+    delegate->OnViewportMetricsChanged(mojo::ViewportMetrics(), metrics);
+  }
   void SchedulePaint(const ServerView* view, const gfx::Rect& bounds) override {
   }
   void SetViewportSize(const gfx::Size& size) override {}
   const mojo::ViewportMetrics& GetViewportMetrics() override {
     return display_metrices_;
   }
+  void UpdateTextInputState(const ui::TextInputState& state) override {}
+  void SetImeVisibility(bool visible) override {}
 
  private:
   mojo::ViewportMetrics display_metrices_;
 
   DISALLOW_COPY_AND_ASSIGN(TestDisplayManager);
+};
+
+// Factory that dispenses TestDisplayManagers.
+class TestDisplayManagerFactory : public DisplayManagerFactory {
+ public:
+  TestDisplayManagerFactory() {}
+  ~TestDisplayManagerFactory() {}
+  DisplayManager* CreateDisplayManager(
+      bool is_headless,
+      mojo::ApplicationImpl* app_impl,
+      const scoped_refptr<gles2::GpuState>& gpu_state,
+      const scoped_refptr<surfaces::SurfacesState>& surfaces_state) override {
+    return new TestDisplayManager();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestDisplayManagerFactory);
 };
 
 mojo::EventPtr CreatePointerDownEvent(int x, int y) {
@@ -240,29 +293,32 @@ class ViewManagerServiceTest : public testing::Test {
 
   TestViewManagerClient* wm_client() { return wm_client_; }
 
+  TestViewManagerRootConnection* root_connection() { return root_connection_; }
+
  protected:
   // testing::Test:
   void SetUp() override {
-    connection_manager_.reset(new ConnectionManager(
-        &delegate_, scoped_ptr<DisplayManager>(new TestDisplayManager)));
-    scoped_ptr<ViewManagerServiceImpl> service(new ViewManagerServiceImpl(
-        connection_manager_.get(), kInvalidConnectionId, std::string(),
-        std::string("mojo:window_manager"), RootViewId()));
-    scoped_ptr<TestClientConnection> client_connection(
-        new TestClientConnection(service.Pass()));
-    wm_client_ = client_connection->client();
-    ASSERT_TRUE(wm_client_ != nullptr);
-    connection_manager_->SetWindowManagerClientConnection(
-        client_connection.Pass());
-    ASSERT_TRUE(wm_connection() != nullptr);
-    ASSERT_TRUE(wm_connection()->root() != nullptr);
+    DisplayManager::set_factory_for_testing(&display_manager_factory_);
+    // TODO(fsamuel): This is probably broken. We need a root.
+    connection_manager_.reset(new ConnectionManager(&delegate_));
+    ViewManagerRootImpl* root = new ViewManagerRootImpl(
+        connection_manager_.get(), true /* is_headless */, nullptr,
+        scoped_refptr<gles2::GpuState>(),
+        scoped_refptr<surfaces::SurfacesState>());
+    // TODO(fsamuel): This is way too magical. We need to find a better way to
+    // manage lifetime.
+    root_connection_ = new TestViewManagerRootConnection(
+        make_scoped_ptr(root), connection_manager_.get());
+    root->Init(root_connection_);
+    wm_client_ = delegate_.last_client();
   }
 
  private:
   // TestViewManagerClient that is used for the WM connection.
   TestViewManagerClient* wm_client_;
-
+  TestDisplayManagerFactory display_manager_factory_;
   TestConnectionManagerDelegate delegate_;
+  TestViewManagerRootConnection* root_connection_;
   scoped_ptr<ConnectionManager> connection_manager_;
   base::MessageLoop message_loop_;
 
@@ -292,8 +348,9 @@ void SetUpAnimate1(ViewManagerServiceTest* test, ViewId* embed_view_id) {
   EXPECT_TRUE(test->wm_connection()->SetViewVisibility(*embed_view_id, true));
   EXPECT_TRUE(test->wm_connection()->AddView(*(test->wm_connection()->root()),
                                              *embed_view_id));
-  test->wm_connection()->EmbedUrl(std::string(), *embed_view_id, nullptr,
-                                  nullptr);
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  test->wm_connection()->EmbedAllowingReembed(*embed_view_id, request.Pass(),
+                                              mojo::Callback<void(bool)>());
   ViewManagerServiceImpl* connection1 =
       test->connection_manager()->GetConnectionWithRoot(*embed_view_id);
   ASSERT_TRUE(connection1 != nullptr);
@@ -429,7 +486,9 @@ TEST_F(ViewManagerServiceTest, CloneAndAnimateLargerDepth) {
   EXPECT_TRUE(wm_connection()->SetViewVisibility(embed_view_id, true));
   EXPECT_TRUE(
       wm_connection()->AddView(*(wm_connection()->root()), embed_view_id));
-  wm_connection()->EmbedUrl(std::string(), embed_view_id, nullptr, nullptr);
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  wm_connection()->EmbedAllowingReembed(embed_view_id, request.Pass(),
+                                        mojo::Callback<void(bool)>());
   ViewManagerServiceImpl* connection1 =
       connection_manager()->GetConnectionWithRoot(embed_view_id);
   ASSERT_TRUE(connection1 != nullptr);
@@ -475,8 +534,11 @@ TEST_F(ViewManagerServiceTest, FocusOnPointer) {
   EXPECT_TRUE(wm_connection()->SetViewVisibility(embed_view_id, true));
   EXPECT_TRUE(
       wm_connection()->AddView(*(wm_connection()->root()), embed_view_id));
-  connection_manager()->root()->SetBounds(gfx::Rect(0, 0, 100, 100));
-  wm_connection()->EmbedUrl(std::string(), embed_view_id, nullptr, nullptr);
+  root_connection()->view_manager_root()->root_view()->
+      SetBounds(gfx::Rect(0, 0, 100, 100));
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  wm_connection()->EmbedAllowingReembed(embed_view_id, request.Pass(),
+                                        mojo::Callback<void(bool)>());
   ViewManagerServiceImpl* connection1 =
       connection_manager()->GetConnectionWithRoot(embed_view_id);
   ASSERT_TRUE(connection1 != nullptr);
@@ -497,7 +559,8 @@ TEST_F(ViewManagerServiceTest, FocusOnPointer) {
   connection1_client->tracker()->changes()->clear();
   wm_client()->tracker()->changes()->clear();
 
-  connection_manager()->ProcessEvent(CreatePointerDownEvent(21, 22));
+  connection_manager()->OnEvent(root_connection()->view_manager_root(),
+                                CreatePointerDownEvent(21, 22));
   // Focus should go to child1. This results in notifying both the window
   // manager and client connection being notified.
   EXPECT_EQ(v1, connection_manager()->GetFocusedView());
@@ -509,38 +572,41 @@ TEST_F(ViewManagerServiceTest, FocusOnPointer) {
       "Focused id=2,1",
       ChangesToDescription1(*connection1_client->tracker()->changes())[0]);
 
-  connection_manager()->ProcessEvent(CreatePointerUpEvent(21, 22));
+  connection_manager()->OnEvent(root_connection()->view_manager_root(),
+                                CreatePointerUpEvent(21, 22));
   wm_client()->tracker()->changes()->clear();
   connection1_client->tracker()->changes()->clear();
 
   // Press outside of the embedded view. Focus should go to the root. Notice
   // the client1 doesn't see who has focus as the focused view (root) isn't
   // visible to it.
-  connection_manager()->ProcessEvent(CreatePointerDownEvent(61, 22));
-  EXPECT_EQ(connection_manager()->root(),
+  connection_manager()->OnEvent(root_connection()->view_manager_root(),
+                                CreatePointerDownEvent(61, 22));
+  EXPECT_EQ(root_connection()->view_manager_root()->root_view(),
             connection_manager()->GetFocusedView());
   ASSERT_GE(wm_client()->tracker()->changes()->size(), 1u);
-  EXPECT_EQ("Focused id=0,1",
+  EXPECT_EQ("Focused id=0,2",
             ChangesToDescription1(*wm_client()->tracker()->changes())[0]);
   ASSERT_GE(connection1_client->tracker()->changes()->size(), 1u);
   EXPECT_EQ(
       "Focused id=null",
       ChangesToDescription1(*connection1_client->tracker()->changes())[0]);
 
-  connection_manager()->ProcessEvent(CreatePointerUpEvent(21, 22));
+  connection_manager()->OnEvent(root_connection()->view_manager_root(),
+                                CreatePointerUpEvent(21, 22));
   wm_client()->tracker()->changes()->clear();
   connection1_client->tracker()->changes()->clear();
 
   // Press in the same location. Should not get a focus change event (only input
   // event).
-  connection_manager()->ProcessEvent(CreatePointerDownEvent(61, 22));
-  EXPECT_EQ(connection_manager()->root(),
+  connection_manager()->OnEvent(root_connection()->view_manager_root(),
+                                CreatePointerDownEvent(61, 22));
+  EXPECT_EQ(root_connection()->view_manager_root()->root_view(),
             connection_manager()->GetFocusedView());
   ASSERT_EQ(wm_client()->tracker()->changes()->size(), 1u);
-  EXPECT_EQ("InputEvent view=0,1 event_action=4",
+  EXPECT_EQ("InputEvent view=0,2 event_action=4",
             ChangesToDescription1(*wm_client()->tracker()->changes())[0]);
   EXPECT_TRUE(connection1_client->tracker()->changes()->empty());
-  ;
 }
 
 }  // namespace view_manager

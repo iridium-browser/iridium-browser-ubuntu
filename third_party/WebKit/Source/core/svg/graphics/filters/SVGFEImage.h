@@ -38,21 +38,21 @@ public:
     static PassRefPtrWillBeRawPtr<FEImage> createWithImage(Filter*, PassRefPtr<Image>, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio>);
     static PassRefPtrWillBeRawPtr<FEImage> createWithIRIReference(Filter*, TreeScope&, const String&, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio>);
 
-    virtual FloatRect determineAbsolutePaintRect(const FloatRect& requestedRect) override;
+    FloatRect determineAbsolutePaintRect(const FloatRect& requestedRect) override;
 
-    virtual FilterEffectType filterEffectType() const override { return FilterEffectTypeImage; }
+    FilterEffectType filterEffectType() const override { return FilterEffectTypeImage; }
 
     // feImage does not perform color interpolation of any kind, so doesn't
     // depend on the value of color-interpolation-filters.
-    virtual void setOperatingColorSpace(ColorSpace) override { }
+    void setOperatingColorSpace(ColorSpace) override { }
 
-    virtual TextStream& externalRepresentation(TextStream&, int indention) const override;
-    virtual PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder*) override;
+    TextStream& externalRepresentation(TextStream&, int indention) const override;
+    PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder*) override;
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
-    virtual ~FEImage() { }
+    ~FEImage() override {}
     FEImage(Filter*, PassRefPtr<Image>, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio>);
     FEImage(Filter*, TreeScope&, const String&, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio>);
     LayoutObject* referencedLayoutObject() const;
@@ -62,8 +62,7 @@ private:
     RefPtr<Image> m_image;
 
     // m_treeScope will never be a dangling reference. See https://bugs.webkit.org/show_bug.cgi?id=99243
-    // FIXME: Oilpan: turn into a (weak) member?
-    TreeScope* m_treeScope;
+    RawPtrWillBeMember<TreeScope> m_treeScope;
     String m_href;
     RefPtrWillBeMember<SVGPreserveAspectRatio> m_preserveAspectRatio;
 };

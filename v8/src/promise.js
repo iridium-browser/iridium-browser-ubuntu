@@ -2,21 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var $promiseCreate;
-var $promiseResolve;
-var $promiseReject;
-var $promiseChain;
-var $promiseCatch;
-var $promiseThen;
 var $promiseHasUserDefinedRejectHandler;
 var $promiseStatus;
 var $promiseValue;
 
-(function(global, shared, exports) {
+(function(global, utils) {
 
 "use strict";
 
 %CheckIsBootstrapping();
+
+// -------------------------------------------------------------------
+// Imports
+
+var InternalArray = utils.InternalArray;
 
 // -------------------------------------------------------------------
 
@@ -184,11 +183,11 @@ function PromiseDeferred() {
       reject: function(r) { PromiseReject(promise, r) }
     };
   } else {
-    var result = {};
+    var result = {promise: UNDEFINED, reject: UNDEFINED, resolve: UNDEFINED};
     result.promise = new this(function(resolve, reject) {
       result.resolve = resolve;
       result.reject = reject;
-    })
+    });
     return result;
   }
 }
@@ -366,7 +365,7 @@ function PromiseHasUserDefinedRejectHandler() {
 %AddNamedProperty(GlobalPromise.prototype, symbolToStringTag, "Promise",
                   DONT_ENUM | READ_ONLY);
 
-$installFunctions(GlobalPromise, DONT_ENUM, [
+utils.InstallFunctions(GlobalPromise, DONT_ENUM, [
   "defer", PromiseDeferred,
   "accept", PromiseResolved,
   "reject", PromiseRejected,
@@ -375,20 +374,25 @@ $installFunctions(GlobalPromise, DONT_ENUM, [
   "resolve", PromiseCast
 ]);
 
-$installFunctions(GlobalPromise.prototype, DONT_ENUM, [
+utils.InstallFunctions(GlobalPromise.prototype, DONT_ENUM, [
   "chain", PromiseChain,
   "then", PromiseThen,
   "catch", PromiseCatch
 ]);
 
-$promiseCreate = PromiseCreate;
-$promiseResolve = PromiseResolve;
-$promiseReject = PromiseReject;
-$promiseChain = PromiseChain;
-$promiseCatch = PromiseCatch;
-$promiseThen = PromiseThen;
-$promiseHasUserDefinedRejectHandler = PromiseHasUserDefinedRejectHandler;
 $promiseStatus = promiseStatus;
 $promiseValue = promiseValue;
+
+utils.ExportToRuntime(function(to) {
+  to.promiseStatus = promiseStatus;
+  to.promiseValue = promiseValue;
+  to.PromiseCreate = PromiseCreate;
+  to.PromiseResolve = PromiseResolve;
+  to.PromiseReject = PromiseReject;
+  to.PromiseChain = PromiseChain;
+  to.PromiseCatch = PromiseCatch;
+  to.PromiseThen = PromiseThen;
+  to.PromiseHasUserDefinedRejectHandler = PromiseHasUserDefinedRejectHandler;
+});
 
 })

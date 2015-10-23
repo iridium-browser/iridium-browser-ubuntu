@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 
 class KeySilkCasesPage(page_module.Page):
@@ -15,8 +16,8 @@ class KeySilkCasesPage(page_module.Page):
         navigate steps.
     """
     super(KeySilkCasesPage, self).__init__(
-        url=url, page_set=page_set, credentials_path = 'data/credentials.json')
-    self.user_agent_type = 'mobile'
+        url=url, page_set=page_set, credentials_path = 'data/credentials.json',
+        shared_page_state_class=shared_page_state.SharedMobilePageState)
     self.archive_data_file = 'data/key_silk_cases.json'
     self._run_no_page_interactions = run_no_page_interactions
 
@@ -704,50 +705,50 @@ class Masonry(KeySilkCasesPage):
       action_runner.WaitForJavaScriptCondition('window.done')
 
 
-class KeySilkCasesPageSet(page_set_module.PageSet):
+class KeySilkCasesPageSet(story.StorySet):
 
   """ Pages hand-picked for project Silk. """
 
   def __init__(self, run_no_page_interactions=False):
     super(KeySilkCasesPageSet, self).__init__(
-      user_agent_type='mobile',
       archive_data_file='data/key_silk_cases.json',
-      bucket=page_set_module.PARTNER_BUCKET)
+      cloud_storage_bucket=story.PARTNER_BUCKET)
 
-    self.AddUserStory(Page1(self, run_no_page_interactions))
-    self.AddUserStory(Page2(self, run_no_page_interactions))
-    self.AddUserStory(Page3(self, run_no_page_interactions))
-    self.AddUserStory(Page4(self, run_no_page_interactions))
-    self.AddUserStory(Page5(self, run_no_page_interactions))
-    self.AddUserStory(Page6(self, run_no_page_interactions))
-    self.AddUserStory(Page7(self, run_no_page_interactions))
-    self.AddUserStory(Page8(self, run_no_page_interactions))
-    self.AddUserStory(Page9(self, run_no_page_interactions))
-    self.AddUserStory(Page10(self, run_no_page_interactions))
-    self.AddUserStory(Page11(self, run_no_page_interactions))
-    self.AddUserStory(Page12(self, run_no_page_interactions))
-    self.AddUserStory(Page13(self, run_no_page_interactions))
-    self.AddUserStory(Page14(self, run_no_page_interactions))
-    self.AddUserStory(Page15(self, run_no_page_interactions))
-    self.AddUserStory(Page16(self, run_no_page_interactions))
-    self.AddUserStory(Page17(self, run_no_page_interactions))
-    self.AddUserStory(Page18(self, run_no_page_interactions))
+    self.AddStory(Page1(self, run_no_page_interactions))
+    self.AddStory(Page2(self, run_no_page_interactions))
+    self.AddStory(Page3(self, run_no_page_interactions))
+    self.AddStory(Page4(self, run_no_page_interactions))
+    self.AddStory(Page5(self, run_no_page_interactions))
+    self.AddStory(Page6(self, run_no_page_interactions))
+    self.AddStory(Page7(self, run_no_page_interactions))
+    self.AddStory(Page8(self, run_no_page_interactions))
+    self.AddStory(Page9(self, run_no_page_interactions))
+    self.AddStory(Page10(self, run_no_page_interactions))
+    self.AddStory(Page11(self, run_no_page_interactions))
+    self.AddStory(Page12(self, run_no_page_interactions))
+    self.AddStory(Page13(self, run_no_page_interactions))
+    self.AddStory(Page14(self, run_no_page_interactions))
+    self.AddStory(Page15(self, run_no_page_interactions))
+    self.AddStory(Page16(self, run_no_page_interactions))
+    self.AddStory(Page17(self, run_no_page_interactions))
+    self.AddStory(Page18(self, run_no_page_interactions))
     # Missing frames during tap interaction; crbug.com/446332
-    # self.AddUserStory(Page19(self, run_no_page_interactions))
-    self.AddUserStory(Page20(self, run_no_page_interactions))
-    self.AddUserStory(GwsGoogleExpansion(self, run_no_page_interactions))
-    self.AddUserStory(GwsBoogieExpansion(self, run_no_page_interactions))
+    # self.AddStory(Page19(self, run_no_page_interactions))
+    self.AddStory(Page20(self, run_no_page_interactions))
+    self.AddStory(GwsGoogleExpansion(self, run_no_page_interactions))
+    self.AddStory(GwsBoogieExpansion(self, run_no_page_interactions))
     # Times out on Windows; crbug.com/338838
-    # self.AddUserStory(Page22(self, run_no_page_interactions))
-    self.AddUserStory(Page23(self, run_no_page_interactions))
-    self.AddUserStory(Page24(self, run_no_page_interactions))
-    self.AddUserStory(Page25(self, run_no_page_interactions))
-    self.AddUserStory(Page26(self, run_no_page_interactions))
-    self.AddUserStory(SVGIconRaster(self, run_no_page_interactions))
-    self.AddUserStory(UpdateHistoryState(self, run_no_page_interactions))
-    self.AddUserStory(SilkFinance(self, run_no_page_interactions))
-    self.AddUserStory(PolymerTopeka(self, run_no_page_interactions))
-    self.AddUserStory(Masonry(self, run_no_page_interactions))
+    # self.AddStory(Page22(self, run_no_page_interactions))
+    self.AddStory(Page23(self, run_no_page_interactions))
+    self.AddStory(Page24(self, run_no_page_interactions))
+    self.AddStory(Page25(self, run_no_page_interactions))
+    self.AddStory(Page26(self, run_no_page_interactions))
+    self.AddStory(SVGIconRaster(self, run_no_page_interactions))
+    self.AddStory(UpdateHistoryState(self, run_no_page_interactions))
+    self.AddStory(SilkFinance(self, run_no_page_interactions))
+    # Flaky interaction steps on Android; crbug.com/507865
+    # self.AddStory(PolymerTopeka(self, run_no_page_interactions))
+    self.AddStory(Masonry(self, run_no_page_interactions))
 
     for page in self:
       assert (page.__class__.RunPageInteractions ==

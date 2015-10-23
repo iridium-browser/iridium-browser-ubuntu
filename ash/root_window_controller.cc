@@ -173,8 +173,9 @@ void ReparentAllWindows(aura::Window* src, aura::Window* dst) {
       kContainerIdsToMove + arraysize(kContainerIdsToMove));
   // Check the default_multi_display_mode because this is also necessary
   // in trasition between mirror <-> unified mode.
-  if (Shell::GetInstance()->display_manager()->default_multi_display_mode() ==
-      DisplayManager::UNIFIED) {
+  if (Shell::GetInstance()
+          ->display_manager()
+          ->current_default_multi_display_mode() == DisplayManager::UNIFIED) {
     for (int id : kExtraContainerIdsToMoveInUnifiedMode)
       container_ids.push_back(id);
   }
@@ -235,7 +236,6 @@ class EmptyWindowDelegate : public aura::WindowDelegate {
   gfx::Size GetMaximumSize() const override { return gfx::Size(); }
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
-  ui::TextInputClient* GetFocusedTextInputClient() override { return nullptr; }
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
@@ -595,9 +595,9 @@ void RootWindowController::UpdateShelfVisibility() {
   shelf_->shelf_layout_manager()->UpdateVisibilityState();
 }
 
-const aura::Window* RootWindowController::GetWindowForFullscreenMode() const {
-  const aura::Window* topmost_window = NULL;
-  const aura::Window* active_window = wm::GetActiveWindow();
+aura::Window* RootWindowController::GetWindowForFullscreenMode() {
+  aura::Window* topmost_window = NULL;
+  aura::Window* active_window = wm::GetActiveWindow();
   if (active_window && active_window->GetRootWindow() == GetRootWindow() &&
       IsSwitchableContainer(active_window->parent())) {
     // Use the active window when it is on the current root window to determine
@@ -613,8 +613,7 @@ const aura::Window* RootWindowController::GetWindowForFullscreenMode() const {
         GetContainer(kShellWindowId_DefaultContainer)->children();
     for (aura::Window::Windows::const_reverse_iterator iter = windows.rbegin();
          iter != windows.rend(); ++iter) {
-      if (((*iter)->type() == ui::wm::WINDOW_TYPE_NORMAL ||
-           (*iter)->type() == ui::wm::WINDOW_TYPE_PANEL) &&
+      if (wm::IsWindowUserPositionable(*iter) &&
           (*iter)->layer()->GetTargetVisibility()) {
         topmost_window = *iter;
         break;

@@ -61,12 +61,46 @@
             "defaultValue": false
         },
         {
-            "type": "setting",
-            "category": "Elements",
-            "title": "Highlight DOM updates",
-            "settingName": "highlightDOMUpdates",
-            "settingType": "boolean",
-            "defaultValue": true
+            "type": "@WebInspector.ToolbarItem.Provider",
+            "className": "WebInspector.StylesSidebarPane.AddNewRuleButtonProvider",
+            "order": 0,
+            "location": "styles-sidebarpane-toolbar"
+        },
+        {
+            "type": "@WebInspector.ToolbarItem.Provider",
+            "className": "WebInspector.ElementStatePaneWidget.ButtonProvider",
+            "order": 1,
+            "location": "styles-sidebarpane-toolbar"
+        },
+        {
+            "type": "@WebInspector.ActionDelegate",
+            "actionId": "elements.hide-element",
+            "className": "WebInspector.ElementsActionDelegate",
+            "bindings": [
+                {
+                    "shortcut": "H"
+                }
+            ]
+        },
+        {
+            "type": "@WebInspector.ActionDelegate",
+            "actionId": "elements.edit-as-html",
+            "className": "WebInspector.ElementsActionDelegate",
+            "bindings": [
+                {
+                    "shortcut": "F2"
+                }
+            ]
+        },
+        {
+            "type": "@WebInspector.DOMPresentationUtils.MarkerDecorator",
+            "className": "WebInspector.ElementsPanel.PseudoStateMarkerDecorator",
+            "marker": "pseudo-state-marker"
+        },
+        {
+            "type": "@WebInspector.DOMPresentationUtils.MarkerDecorator",
+            "className": "WebInspector.ElementsPanel.HiddenMarkerDecorator",
+            "marker": "hidden-marker"
         }
     ],
     "dependencies": [
@@ -75,8 +109,6 @@
     ],
     "scripts": [
         "BezierUI.js",
-        "AnimationControlPane.js",
-        "AnimationTimeline.js",
         "StylesPopoverHelper.js",
         "BezierEditor.js",
         "Spectrum.js",
@@ -85,18 +117,19 @@
         "ElementsSidebarView.js",
         "ElementsTreeElement.js",
         "ElementsTreeOutline.js",
-        "EventListenersSidebarPane.js",
+        "SharedSidebarModel.js",
+        "EventListenersWidget.js",
         "MetricsSidebarPane.js",
-        "PlatformFontsSidebarPane.js",
-        "PropertiesSidebarPane.js",
+        "PlatformFontsWidget.js",
+        "PropertiesWidget.js",
+        "PropertyChangeHighlighter.js",
         "StylesSectionModel.js",
         "StylesSidebarPane.js",
-        "ComputedStyleSidebarPane.js",
-        "ElementsPanel.js",
-        "AnimationsSidebarPane.js"
+        "ComputedStyleWidget.js",
+        "ElementStatePaneWidget.js",
+        "ElementsPanel.js"
     ],
     "resources": [
-        "animationTimeline.css",
         "bezierEditor.css",
         "breadcrumbs.css",
         "computedStyleSidebarPane.css",

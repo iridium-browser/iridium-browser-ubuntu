@@ -7,6 +7,7 @@
 #import <UIKit/UIKit.h>
 
 #include "base/ios/ios_util.h"
+#include "base/logging.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ui/gfx/ios/uikit_util.h"
 
@@ -14,6 +15,11 @@ bool IsIPadIdiom() {
   UIUserInterfaceIdiom idiom = [[UIDevice currentDevice] userInterfaceIdiom];
   return idiom == UIUserInterfaceIdiomPad;
 }
+
+const CGFloat kPortraitWidth[INTERFACE_IDIOM_COUNT] = {
+    320,  // IPHONE_IDIOM
+    768   // IPAD_IDIOM
+};
 
 bool IsHighResScreen() {
   return [[UIScreen mainScreen] scale] > 1.0;

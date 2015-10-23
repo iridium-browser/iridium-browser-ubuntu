@@ -17,22 +17,21 @@
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 
-class Pickle;
-class PickleIterator;
-
 namespace base {
 
 class DictionaryValue;
 class HistogramBase;
 class HistogramSamples;
 class ListValue;
+class Pickle;
+class PickleIterator;
 
 ////////////////////////////////////////////////////////////////////////////////
 // These enums are used to facilitate deserialization of histograms from other
 // processes into the browser. If you create another class that inherits from
 // HistogramBase, add new histogram types and names below.
 
-enum BASE_EXPORT HistogramType {
+enum HistogramType {
   HISTOGRAM,
   LINEAR_HISTOGRAM,
   BOOLEAN_HISTOGRAM,
@@ -45,7 +44,7 @@ std::string HistogramTypeToString(HistogramType type);
 // Create or find existing histogram that matches the pickled info.
 // Returns NULL if the pickled data has problems.
 BASE_EXPORT_PRIVATE HistogramBase* DeserializeHistogramInfo(
-    PickleIterator* iter);
+    base::PickleIterator* iter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -75,6 +74,12 @@ class BASE_EXPORT HistogramBase {
     // the source histogram!).
     kIPCSerializationSourceFlag = 0x10,
 
+    // Indicates that a callback exists for when a new sample is recorded on
+    // this histogram. We store this as a flag with the histogram since
+    // histograms can be in performance critical code, and this allows us
+    // to shortcut looking up the callback if it doesn't exist.
+    kCallbackExists = 0x20,
+
     // Only for Histogram and its sub classes: fancy bucket-naming support.
     kHexRangePrintingFlag = 0x8000,
   };
@@ -93,7 +98,7 @@ class BASE_EXPORT HistogramBase {
   explicit HistogramBase(const std::string& name);
   virtual ~HistogramBase();
 
-  std::string histogram_name() const { return histogram_name_; }
+  const std::string& histogram_name() const { return histogram_name_; }
 
   // Comapres |name| to the histogram name and triggers a DCHECK if they do not
   // match. This is a helper function used by histogram macros, which results in
@@ -116,17 +121,23 @@ class BASE_EXPORT HistogramBase {
 
   virtual void Add(Sample value) = 0;
 
+  // In Add function the |value| bucket is increased by one, but in some use
+  // cases we need to increase this value by an arbitrary integer. AddCount
+  // function increases the |value| bucket by |count|. |count| should be greater
+  // than or equal to 1.
+  virtual void AddCount(Sample value, int count) = 0;
+
   // 2 convenient functions that call Add(Sample).
   void AddTime(const TimeDelta& time);
   void AddBoolean(bool value);
 
   virtual void AddSamples(const HistogramSamples& samples) = 0;
-  virtual bool AddSamplesFromPickle(PickleIterator* iter) = 0;
+  virtual bool AddSamplesFromPickle(base::PickleIterator* iter) = 0;
 
   // Serialize the histogram info into |pickle|.
   // Note: This only serializes the construction arguments of the histogram, but
   // does not serialize the samples.
-  bool SerializeInfo(Pickle* pickle) const;
+  bool SerializeInfo(base::Pickle* pickle) const;
 
   // Try to find out data corruption from histogram and the samples.
   // The returned value is a combination of Inconsistency enum.
@@ -147,7 +158,7 @@ class BASE_EXPORT HistogramBase {
 
  protected:
   // Subclasses should implement this function to make SerializeInfo work.
-  virtual bool SerializeInfoImpl(Pickle* pickle) const = 0;
+  virtual bool SerializeInfoImpl(base::Pickle* pickle) const = 0;
 
   // Writes information about the construction parameters in |params|.
   virtual void GetParameters(DictionaryValue* params) const = 0;
@@ -172,6 +183,10 @@ class BASE_EXPORT HistogramBase {
   void WriteAsciiBucketValue(Count current,
                              double scaled_sum,
                              std::string* output) const;
+
+  // Retrieves the callback for this histogram, if one exists, and runs it
+  // passing |sample| as the parameter.
+  void FindAndRunCallback(Sample sample) const;
 
  private:
   const std::string histogram_name_;

@@ -33,7 +33,8 @@ class LayoutTableCell;
 
 enum CellsToProcess {
     AllCells,
-    NonEmptyCells
+    NonEmptyCells,
+    EmptyCells
 };
 
 enum DistributionMode {
@@ -50,12 +51,12 @@ enum DistributionDirection {
 class TableLayoutAlgorithmAuto final : public TableLayoutAlgorithm {
 public:
     TableLayoutAlgorithmAuto(LayoutTable*);
-    virtual ~TableLayoutAlgorithmAuto();
+    ~TableLayoutAlgorithmAuto() override;
 
-    virtual void computeIntrinsicLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth) override;
-    virtual void applyPreferredLogicalWidthQuirks(LayoutUnit& minWidth, LayoutUnit& maxWidth) const override;
-    virtual void layout() override;
-    virtual void willChangeTableLayout() override { }
+    void computeIntrinsicLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth) override;
+    void applyPreferredLogicalWidthQuirks(LayoutUnit& minWidth, LayoutUnit& maxWidth) const override;
+    void layout() override;
+    void willChangeTableLayout() override { }
 
 private:
     void fullRecalc();
@@ -75,6 +76,7 @@ private:
             , effectiveMaxLogicalWidth(0)
             , computedLogicalWidth(0)
             , emptyCellsOnly(true)
+            , columnHasNoCells(true)
         {
         }
 
@@ -86,6 +88,8 @@ private:
         int effectiveMaxLogicalWidth;
         int computedLogicalWidth;
         bool emptyCellsOnly;
+        bool columnHasNoCells;
+        int clampedEffectiveMaxLogicalWidth() { return std::max<int>(1, effectiveMaxLogicalWidth); }
     };
 
     Vector<Layout, 4> m_layoutStruct;

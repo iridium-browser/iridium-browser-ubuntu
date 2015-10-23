@@ -40,6 +40,8 @@ Widget* CreateBubbleWidget(BubbleDelegateView* bubble) {
       Widget::InitParams::ACTIVATABLE_YES : Widget::InitParams::ACTIVATABLE_NO;
   bubble->OnBeforeBubbleWidgetInit(&bubble_params, bubble_widget);
   bubble_widget->Init(bubble_params);
+  if (bubble_params.parent)
+    bubble_widget->StackAbove(bubble_params.parent);
   return bubble_widget;
 }
 
@@ -104,8 +106,9 @@ Widget* BubbleDelegateView::CreateBubble(BubbleDelegateView* bubble_delegate) {
   // the parent frame and let DWM handle compositing.  If not, then we don't
   // want to allow the bubble to extend the frame because it will be clipped.
   bubble_delegate->set_adjust_if_offscreen(ui::win::IsAeroGlassEnabled());
-#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#elif (defined(OS_LINUX) && !defined(OS_CHROMEOS)) || defined(OS_MACOSX)
   // Linux clips bubble windows that extend outside their parent window bounds.
+  // Mac never adjusts.
   bubble_delegate->set_adjust_if_offscreen(false);
 #endif
 
@@ -178,7 +181,7 @@ void BubbleDelegateView::OnWidgetActivationChanged(Widget* widget,
 
 void BubbleDelegateView::OnWidgetBoundsChanged(Widget* widget,
                                                const gfx::Rect& new_bounds) {
-  if (anchor_widget() == widget)
+  if (GetBubbleFrameView() && anchor_widget() == widget)
     SizeToContents();
 }
 

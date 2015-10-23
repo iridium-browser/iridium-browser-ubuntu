@@ -12,10 +12,23 @@ namespace switches {
 // all work out.
 // -----------------------------------------------------------------------------
 
-// Enables Open from Clipboard.
-const char kEnableIOSOpenFromClipboard[] = "enable-ios-open-from-clipboard";
+// Disables the blocking of external URL requests from sub-frames not initiated
+// by user interaction.
+const char kDisableIOSBlockUnpromptedExternalURLs[] =
+    "disable-block-external-urls";
 
-// Defines the value in MB of the memory wedge to insert at cold launch.
-const char kIOSMemoryWedgeSize[] = "ios-memory-wedge-size-mb";
+// Disables the use of WKWebView instead of UIWebView.
+const char kDisableIOSWKWebView[] = "disable-wkwebview";
+
+// Enables the blocking of external URL requests from sub-frames not initiated
+// by user interaction.
+const char kEnableIOSBlockUnpromptedExternalURLs[] =
+    "enable-block-external-urls";
+
+// Enables the use of WKWebView instead of UIWebView.
+const char kEnableIOSWKWebView[] = "enable-wkwebview";
+
+// Enables context-sensitive reader mode button in the toolbar.
+const char kEnableReaderModeToolbarIcon[] = "enable-reader-mode-toolbar-icon";
 
 }  // namespace switches

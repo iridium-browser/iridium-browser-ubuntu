@@ -45,6 +45,7 @@ namespace blink {
 
 class WebAXObject;
 class WebAutofillClient;
+class WebCompositedDisplayList;
 class WebCredentialManagerClient;
 class WebDragData;
 class WebFrame;
@@ -68,8 +69,6 @@ public:
     BLINK_EXPORT static const double textSizeMultiplierRatio;
     BLINK_EXPORT static const double minTextSizeMultiplier;
     BLINK_EXPORT static const double maxTextSizeMultiplier;
-    BLINK_EXPORT static const float minPageScaleFactor;
-    BLINK_EXPORT static const float maxPageScaleFactor;
 
     enum StyleInjectionTarget {
         InjectStyleInAllFrames,
@@ -178,6 +177,9 @@ public:
     // viewport space. Returns true if an animation was started.
     virtual bool scrollFocusedNodeIntoRect(const WebRect&) { return false; }
 
+    // Smooth scroll the root layer to |targetX|, |targetY| in |durationMs|.
+    virtual void smoothScroll(int targetX, int targetY, long durationMs) { }
+
     // Advance the focus of the WebView forward to the next element or to the
     // previous element in the tab sequence (if reverse is true).
     virtual void advanceFocus(bool reverse) { }
@@ -230,22 +232,24 @@ public:
     // On the other hand, zooming affects layout of the page.
     virtual void setPageScaleFactor(float scaleFactor, const WebPoint& origin) { setPageScaleFactor(scaleFactor); }
 
-    // TODO: Reevaluate if this is needed once all users are converted to using the
-    // virtual viewport pinch model.
-    // Temporary to keep old style pinch viewport working while we gradually bring up
-    // virtual viewport pinch.
-    virtual void setMainFrameScrollOffset(const WebPoint& origin) = 0;
-
-    // Scales the page without affecting layout by using the pinch-to-zoom viewport.
+    // Scales the page without affecting layout by using the visual viewport.
     virtual void setPageScaleFactor(float) = 0;
 
-    // Sets the offset of the pinch-to-zoom viewport within the main frame, in
-    // partial CSS pixels. The offset will be clamped so the pinch viewport
+    // Sets the offset of the visual viewport within the main frame, in
+    // partial CSS pixels. The offset will be clamped so the visual viewport
     // stays within the frame's bounds.
+    virtual void setVisualViewportOffset(const WebFloatPoint&) = 0;
+
+    // TODO(bokan): Renamed to VisualViewport above, remove once chromium
+    // side callers are renamed.
     virtual void setPinchViewportOffset(const WebFloatPoint&) = 0;
 
-    // Gets the pinch viewport's current offset within the page's main frame,
+    // Gets the visual viewport's current offset within the page's main frame,
     // in partial CSS pixels.
+    virtual WebFloatPoint visualViewportOffset() const = 0;
+
+    // TODO(bokan): Renamed to VisualViewport above, remove once chromium
+    // side callers are renamed.
     virtual WebFloatPoint pinchViewportOffset() const = 0;
 
     // Sets the default minimum, and maximum page scale. These will be overridden
@@ -434,7 +438,6 @@ public:
 
     virtual void setShowPaintRects(bool) = 0;
     virtual void setShowFPSCounter(bool) = 0;
-    virtual void setContinuousPaintingEnabled(bool) = 0;
     virtual void setShowScrollBottleneckRects(bool) = 0;
 
     // Visibility -----------------------------------------------------------
@@ -443,18 +446,14 @@ public:
     virtual void setVisibilityState(WebPageVisibilityState visibilityState,
                                     bool isInitialState) { }
 
+    // Graphics -------------------------------------------------------------
+
+    virtual WebCompositedDisplayList* compositedDisplayList() { return nullptr; }
+
     // PageOverlay ----------------------------------------------------------
 
-    // Adds/removes page overlay to this WebView. These functions change the
-    // graphical appearance of the WebView. WebPageOverlay paints the
-    // contents of the page overlay. It also provides an z-order number for
-    // the page overlay. The z-order number defines the paint order the page
-    // overlays. Page overlays with larger z-order number will be painted after
-    // page overlays with smaller z-order number. That is, they appear above
-    // the page overlays with smaller z-order number. If two page overlays have
-    // the same z-order number, the later added one will be on top.
-    virtual void addPageOverlay(WebPageOverlay*, int /*z-order*/) = 0;
-    virtual void removePageOverlay(WebPageOverlay*) = 0;
+    // Overlay this WebView with a solid color.
+    virtual void setPageOverlayColor(WebColor) = 0;
 
 
     // i18n -----------------------------------------------------------------
@@ -469,6 +468,10 @@ public:
     // Force the webgl context to fail so that webglcontextcreationerror
     // event gets generated/tested.
     virtual void forceNextWebGLContextCreationToFail() = 0;
+
+    // Force the drawing buffer used by webgl contexts to fail so that the webgl
+    // context's ability to deal with that failure gracefully can be tested.
+    virtual void forceNextDrawingBufferCreationToFail() = 0;
 
 protected:
     ~WebView() {}

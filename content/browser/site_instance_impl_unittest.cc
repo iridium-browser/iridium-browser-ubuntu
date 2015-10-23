@@ -24,6 +24,7 @@
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_utils.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
 #include "content/test/test_render_view_host.h"
@@ -74,8 +75,8 @@ class SiteInstanceTest : public testing::Test {
 
   void SetUp() override {
     old_browser_client_ = SetBrowserClientForTesting(&browser_client_);
-    url::AddStandardScheme(kPrivilegedScheme);
-    url::AddStandardScheme(kChromeUIScheme);
+    url::AddStandardScheme(kPrivilegedScheme, url::SCHEME_WITHOUT_PORT);
+    url::AddStandardScheme(kChromeUIScheme, url::SCHEME_WITHOUT_PORT);
 
     SiteInstanceImpl::set_render_process_host_factory(&rph_factory_);
   }
@@ -243,27 +244,27 @@ TEST_F(SiteInstanceTest, CloneNavigationEntry) {
       TestSiteInstance::CreateTestSiteInstance(NULL, &site_delete_counter2,
                                                &browsing_delete_counter);
 
-  NavigationEntryImpl* e1 = new NavigationEntryImpl(
+  scoped_ptr<NavigationEntryImpl> e1 = make_scoped_ptr(new NavigationEntryImpl(
       instance1, 0, url, Referrer(), base::string16(), ui::PAGE_TRANSITION_LINK,
-      false);
-  // Clone the entry
-  NavigationEntryImpl* e2 = e1->Clone();
+      false));
+  // Clone the entry.
+  scoped_ptr<NavigationEntryImpl> e2 = e1->Clone();
 
   // Should be able to change the SiteInstance of the cloned entry.
   e2->set_site_instance(instance2);
 
-  // The first SiteInstance should go away after deleting e1, since e2 should
+  // The first SiteInstance should go away after resetting e1, since e2 should
   // no longer be referencing it.
-  delete e1;
+  e1.reset();
   EXPECT_EQ(1, site_delete_counter1);
   EXPECT_EQ(0, site_delete_counter2);
 
-  // The second SiteInstance should go away after deleting e2.
-  delete e2;
+  // The second SiteInstance should go away after resetting e2.
+  e2.reset();
   EXPECT_EQ(1, site_delete_counter1);
   EXPECT_EQ(1, site_delete_counter2);
 
-  // Both BrowsingInstances are also now deleted
+  // Both BrowsingInstances are also now deleted.
   EXPECT_EQ(2, browsing_delete_counter);
 
   DrainMessageLoops();
@@ -567,13 +568,9 @@ static SiteInstanceImpl* CreateSiteInstance(BrowserContext* browser_context,
 // Test to ensure that pages that require certain privileges are grouped
 // in processes with similar pages.
 TEST_F(SiteInstanceTest, ProcessSharingByType) {
-  // This test shouldn't run with --site-per-process or
-  // --enable-strict-site-isolation modes, since they don't allow render
-  // process reuse, which this test explicitly exercises.
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kSitePerProcess) ||
-      command_line.HasSwitch(switches::kEnableStrictSiteIsolation))
+  // This test shouldn't run with --site-per-process mode, which prohibits
+  // the renderer process reuse this test explicitly exercises.
+  if (AreAllSitesIsolatedForTesting())
     return;
 
   // On Android by default the number of renderer hosts is unlimited and process
@@ -694,8 +691,7 @@ TEST_F(SiteInstanceTest, HasWrongProcessForURL) {
 // Test to ensure that HasWrongProcessForURL behaves properly even when
 // --site-per-process is used (http://crbug.com/160671).
 TEST_F(SiteInstanceTest, HasWrongProcessForURLInSitePerProcess) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kSitePerProcess);
+  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
 
   scoped_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
   scoped_ptr<RenderProcessHost> host;

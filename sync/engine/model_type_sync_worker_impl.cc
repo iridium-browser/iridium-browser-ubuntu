@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/format_macros.h"
+#include "base/guid.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "sync/engine/commit_contribution.h"
@@ -16,7 +17,13 @@
 #include "sync/util/cryptographer.h"
 #include "sync/util/time.h"
 
-namespace syncer {
+namespace syncer_v2 {
+
+using syncer::CommitContribution;
+using syncer::Cryptographer;
+using syncer::ModelType;
+using syncer::NudgeHandler;
+using syncer::SyncerError;
 
 ModelTypeSyncWorkerImpl::ModelTypeSyncWorkerImpl(
     ModelType type,
@@ -30,7 +37,6 @@ ModelTypeSyncWorkerImpl::ModelTypeSyncWorkerImpl(
       type_sync_proxy_(type_sync_proxy.Pass()),
       cryptographer_(cryptographer.Pass()),
       nudge_handler_(nudge_handler),
-      entities_deleter_(&entities_),
       weak_ptr_factory_(this) {
   // Request an initial sync if it hasn't been completed yet.
   if (!data_type_state_.initial_sync_done) {
@@ -39,12 +45,11 @@ ModelTypeSyncWorkerImpl::ModelTypeSyncWorkerImpl(
 
   for (UpdateResponseDataList::const_iterator it =
            saved_pending_updates.begin();
-       it != saved_pending_updates.end();
-       ++it) {
-    EntityTracker* entity_tracker = EntityTracker::FromServerUpdate(
+       it != saved_pending_updates.end(); ++it) {
+    scoped_ptr<EntityTracker> entity_tracker = EntityTracker::FromServerUpdate(
         it->id, it->client_tag_hash, it->response_version);
     entity_tracker->ReceivePendingUpdate(*it);
-    entities_.insert(std::make_pair(it->client_tag_hash, entity_tracker));
+    entities_.insert(it->client_tag_hash, entity_tracker.Pass());
   }
 
   if (cryptographer_) {
@@ -96,7 +101,7 @@ SyncerError ModelTypeSyncWorkerImpl::ProcessGetUpdatesResponse(
     const sync_pb::DataTypeProgressMarker& progress_marker,
     const sync_pb::DataTypeContext& mutated_context,
     const SyncEntityList& applicable_updates,
-    sessions::StatusController* status) {
+    syncer::sessions::StatusController* status) {
   DCHECK(CalledOnValidThread());
 
   // TODO(rlarocque): Handle data type context conflicts.
@@ -110,69 +115,68 @@ SyncerError ModelTypeSyncWorkerImpl::ProcessGetUpdatesResponse(
        update_it != applicable_updates.end();
        ++update_it) {
     const sync_pb::SyncEntity* update_entity = *update_it;
-    if (!update_entity->server_defined_unique_tag().empty()) {
-      // We can't commit an item unless we know its parent ID.  This is where
-      // we learn that ID and remember it forever.
-      DCHECK_EQ(ModelTypeToRootTag(type_),
-                update_entity->server_defined_unique_tag());
-      if (!data_type_state_.type_root_id.empty()) {
-        DCHECK_EQ(data_type_state_.type_root_id, update_entity->id_string());
-      }
-      data_type_state_.type_root_id = update_entity->id_string();
+
+    // Skip updates for permanent folders.
+    // TODO(stanisc): crbug.com/516866: might need to handle this for
+    // hierarchical datatypes.
+    if (!update_entity->server_defined_unique_tag().empty())
+      continue;
+
+    // Normal updates are handled here.
+    const std::string& client_tag_hash =
+        update_entity->client_defined_unique_tag();
+
+    // TODO(stanisc): crbug.com/516866: this wouldn't be true for bookmarks.
+    DCHECK(!client_tag_hash.empty());
+
+    EntityTracker* entity_tracker = NULL;
+    EntityMap::const_iterator map_it = entities_.find(client_tag_hash);
+    if (map_it == entities_.end()) {
+      scoped_ptr<EntityTracker> scoped_entity_tracker =
+          EntityTracker::FromServerUpdate(update_entity->id_string(),
+                                          client_tag_hash,
+                                          update_entity->version());
+      entity_tracker = scoped_entity_tracker.get();
+      entities_.insert(client_tag_hash, scoped_entity_tracker.Pass());
     } else {
-      // Normal updates are handled here.
-      const std::string& client_tag_hash =
-          update_entity->client_defined_unique_tag();
-      DCHECK(!client_tag_hash.empty());
+      entity_tracker = map_it->second;
+    }
 
-      EntityTracker* entity_tracker = NULL;
-      EntityMap::const_iterator map_it = entities_.find(client_tag_hash);
-      if (map_it == entities_.end()) {
-        entity_tracker =
-            EntityTracker::FromServerUpdate(update_entity->id_string(),
-                                            client_tag_hash,
-                                            update_entity->version());
-        entities_.insert(std::make_pair(client_tag_hash, entity_tracker));
-      } else {
-        entity_tracker = map_it->second;
-      }
+    // Prepare the message for the model thread.
+    UpdateResponseData response_data;
+    response_data.id = update_entity->id_string();
+    response_data.client_tag_hash = client_tag_hash;
+    response_data.response_version = update_entity->version();
+    response_data.ctime = syncer::ProtoTimeToTime(update_entity->ctime());
+    response_data.mtime = syncer::ProtoTimeToTime(update_entity->mtime());
+    response_data.non_unique_name = update_entity->name();
+    response_data.deleted = update_entity->deleted();
 
-      // Prepare the message for the model thread.
-      UpdateResponseData response_data;
-      response_data.id = update_entity->id_string();
-      response_data.client_tag_hash = client_tag_hash;
-      response_data.response_version = update_entity->version();
-      response_data.ctime = ProtoTimeToTime(update_entity->ctime());
-      response_data.mtime = ProtoTimeToTime(update_entity->mtime());
-      response_data.non_unique_name = update_entity->name();
-      response_data.deleted = update_entity->deleted();
+    const sync_pb::EntitySpecifics& specifics = update_entity->specifics();
 
-      const sync_pb::EntitySpecifics& specifics = update_entity->specifics();
-
-      if (!specifics.has_encrypted()) {
-        // No encryption.
+    if (!specifics.has_encrypted()) {
+      // No encryption.
+      entity_tracker->ReceiveUpdate(update_entity->version());
+      response_data.specifics = specifics;
+      response_datas.push_back(response_data);
+    } else if (specifics.has_encrypted() && cryptographer_ &&
+               cryptographer_->CanDecrypt(specifics.encrypted())) {
+      // Encrypted, but we know the key.
+      if (DecryptSpecifics(
+              cryptographer_.get(), specifics, &response_data.specifics)) {
         entity_tracker->ReceiveUpdate(update_entity->version());
-        response_data.specifics = specifics;
+        response_data.encryption_key_name = specifics.encrypted().key_name();
         response_datas.push_back(response_data);
-      } else if (specifics.has_encrypted() && cryptographer_ &&
-                 cryptographer_->CanDecrypt(specifics.encrypted())) {
-        // Encrypted, but we know the key.
-        if (DecryptSpecifics(
-                cryptographer_.get(), specifics, &response_data.specifics)) {
-          entity_tracker->ReceiveUpdate(update_entity->version());
-          response_data.encryption_key_name = specifics.encrypted().key_name();
-          response_datas.push_back(response_data);
-        }
-      } else if (specifics.has_encrypted() &&
-                 (!cryptographer_ ||
-                  !cryptographer_->CanDecrypt(specifics.encrypted()))) {
-        // Can't decrypt right now.  Ask the entity tracker to handle it.
-        response_data.specifics = specifics;
-        if (entity_tracker->ReceivePendingUpdate(response_data)) {
-          // Send to the model thread for safe-keeping across restarts if the
-          // tracker decides the update is worth keeping.
-          pending_updates.push_back(response_data);
-        }
+      }
+    } else if (specifics.has_encrypted() &&
+               (!cryptographer_ ||
+                !cryptographer_->CanDecrypt(specifics.encrypted()))) {
+      // Can't decrypt right now.  Ask the entity tracker to handle it.
+      response_data.specifics = specifics;
+      if (entity_tracker->ReceivePendingUpdate(response_data)) {
+        // Send to the model thread for safe-keeping across restarts if the
+        // tracker decides the update is worth keeping.
+        pending_updates.push_back(response_data);
       }
     }
   }
@@ -187,10 +191,11 @@ SyncerError ModelTypeSyncWorkerImpl::ProcessGetUpdatesResponse(
   type_sync_proxy_->OnUpdateReceived(
       data_type_state_, response_datas, pending_updates);
 
-  return SYNCER_OK;
+  return syncer::SYNCER_OK;
 }
 
-void ModelTypeSyncWorkerImpl::ApplyUpdates(sessions::StatusController* status) {
+void ModelTypeSyncWorkerImpl::ApplyUpdates(
+    syncer::sessions::StatusController* status) {
   DCHECK(CalledOnValidThread());
   // This function is called only when we've finished a download cycle, ie. we
   // got a response with changes_remaining == 0.  If this is our first download
@@ -207,7 +212,7 @@ void ModelTypeSyncWorkerImpl::ApplyUpdates(sessions::StatusController* status) {
 }
 
 void ModelTypeSyncWorkerImpl::PassiveApplyUpdates(
-    sessions::StatusController* status) {
+    syncer::sessions::StatusController* status) {
   NOTREACHED()
       << "Non-blocking types should never apply updates on sync thread.  "
       << "ModelType is: " << ModelTypeToString(type_);
@@ -222,8 +227,7 @@ void ModelTypeSyncWorkerImpl::EnqueueForCommit(
       << "ModelType is: " << ModelTypeToString(type_);
 
   for (CommitRequestDataList::const_iterator it = list.begin();
-       it != list.end();
-       ++it) {
+       it != list.end(); ++it) {
     StorePendingCommit(*it);
   }
 
@@ -270,22 +274,16 @@ scoped_ptr<CommitContribution> ModelTypeSyncWorkerImpl::GetContribution(
 void ModelTypeSyncWorkerImpl::StorePendingCommit(
     const CommitRequestData& request) {
   if (!request.deleted) {
-    DCHECK_EQ(type_, GetModelTypeFromSpecifics(request.specifics));
+    DCHECK_EQ(type_, syncer::GetModelTypeFromSpecifics(request.specifics));
   }
 
-  EntityMap::iterator map_it = entities_.find(request.client_tag_hash);
+  EntityMap::const_iterator map_it = entities_.find(request.client_tag_hash);
   if (map_it == entities_.end()) {
-    EntityTracker* entity =
-        EntityTracker::FromCommitRequest(request.id,
-                                         request.client_tag_hash,
-                                         request.sequence_number,
-                                         request.base_version,
-                                         request.ctime,
-                                         request.mtime,
-                                         request.non_unique_name,
-                                         request.deleted,
-                                         request.specifics);
-    entities_.insert(std::make_pair(request.client_tag_hash, entity));
+    scoped_ptr<EntityTracker> entity = EntityTracker::FromCommitRequest(
+        request.id, request.client_tag_hash, request.sequence_number,
+        request.base_version, request.ctime, request.mtime,
+        request.non_unique_name, request.deleted, request.specifics);
+    entities_.insert(request.client_tag_hash, entity.Pass());
   } else {
     EntityTracker* entity = map_it->second;
     entity->RequestCommit(request.id,
@@ -304,10 +302,9 @@ void ModelTypeSyncWorkerImpl::OnCommitResponse(
     const CommitResponseDataList& response_list) {
   for (CommitResponseDataList::const_iterator response_it =
            response_list.begin();
-       response_it != response_list.end();
-       ++response_it) {
+       response_it != response_list.end(); ++response_it) {
     const std::string client_tag_hash = response_it->client_tag_hash;
-    EntityMap::iterator map_it = entities_.find(client_tag_hash);
+    EntityMap::const_iterator map_it = entities_.find(client_tag_hash);
 
     // There's no way we could have committed an entry we know nothing about.
     if (map_it == entities_.end()) {
@@ -334,8 +331,8 @@ base::WeakPtr<ModelTypeSyncWorkerImpl> ModelTypeSyncWorkerImpl::AsWeakPtr() {
 }
 
 bool ModelTypeSyncWorkerImpl::IsTypeInitialized() const {
-  return !data_type_state_.type_root_id.empty() &&
-         data_type_state_.initial_sync_done;
+  return data_type_state_.initial_sync_done &&
+         !data_type_state_.progress_marker.token().empty();
 }
 
 bool ModelTypeSyncWorkerImpl::CanCommitItems() const {
@@ -360,9 +357,14 @@ void ModelTypeSyncWorkerImpl::HelpInitializeCommitEntity(
   // Initial commits need our help to generate a client ID.
   if (!sync_entity->has_id_string()) {
     DCHECK_EQ(kUncommittedVersion, sync_entity->version());
-    const int64 id = data_type_state_.next_client_id++;
-    sync_entity->set_id_string(
-        base::StringPrintf("%s-%" PRId64, ModelTypeToString(type_), id));
+    // TODO(stanisc): This is incorrect for bookmarks for two reasons:
+    // 1) Won't be able to match previously committed bookmarks to the ones
+    //    with server ID.
+    // 2) Recommitting an item in a case of failing to receive commit response
+    //    would result in generating a different client ID, which in turn
+    //    would result in a duplication.
+    // We should generate client ID on the frontend side instead.
+    sync_entity->set_id_string(base::GenerateGUID());
   }
 
   // Encrypt the specifics and hide the title if necessary.
@@ -381,8 +383,8 @@ void ModelTypeSyncWorkerImpl::HelpInitializeCommitEntity(
   // deletion requests, where the specifics are otherwise invalid.
   AddDefaultFieldValue(type_, sync_entity->mutable_specifics());
 
-  // We're always responsible for the parent ID.
-  sync_entity->set_parent_id_string(data_type_state_.type_root_id);
+  // TODO(stanisc): crbug.com/516866:
+  // Call sync_entity->set_parent_id_string(...) for hierarchical entities here.
 }
 
 void ModelTypeSyncWorkerImpl::OnCryptographerUpdated() {
@@ -430,8 +432,8 @@ void ModelTypeSyncWorkerImpl::OnCryptographerUpdated() {
              << base::StringPrintf(
                     "Delivering encryption key and %zd decrypted updates.",
                     response_datas.size());
-    type_sync_proxy_->OnUpdateReceived(
-        data_type_state_, response_datas, UpdateResponseDataList());
+    type_sync_proxy_->OnUpdateReceived(data_type_state_, response_datas,
+                                       UpdateResponseDataList());
   }
 }
 

@@ -29,13 +29,8 @@
 
 #include <Carbon/Carbon.h>
 #include "platform/PlatformMouseEvent.h"
-#include "platform/graphics/Gradient.h"
 #include "platform/graphics/GraphicsContext.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
-#include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
-#include "platform/graphics/ImageBuffer.h"
-#include "platform/graphics/Pattern.h"
 #include "platform/mac/ColorMac.h"
 #include "platform/mac/LocalCurrentGraphicsContext.h"
 #include "platform/mac/NSScrollerImpDetails.h"
@@ -72,6 +67,7 @@ static ScrollbarSet& scrollbarSet()
 static float gInitialButtonDelay = 0.5f;
 static float gAutoscrollButtonDelay = 0.05f;
 static NSScrollerStyle gPreferredScrollerStyle = NSScrollerStyleLegacy;
+static bool gScrollAnimationEnabledForSystem = false;
 
 ScrollbarTheme* ScrollbarTheme::nativeTheme()
 {
@@ -98,7 +94,7 @@ void ScrollbarThemeMacCommon::unregisterScrollbar(ScrollbarThemeClient* scrollba
     scrollbarSet().remove(scrollbar);
 }
 
-void ScrollbarThemeMacCommon::paintGivenTickmarks(GraphicsContext* context, ScrollbarThemeClient* scrollbar, const IntRect& rect, const Vector<IntRect>& tickmarks)
+void ScrollbarThemeMacCommon::paintGivenTickmarks(SkCanvas* canvas, ScrollbarThemeClient* scrollbar, const IntRect& rect, const Vector<IntRect>& tickmarks)
 {
     if (scrollbar->orientation() != VerticalScrollbar)
         return;
@@ -109,10 +105,17 @@ void ScrollbarThemeMacCommon::paintGivenTickmarks(GraphicsContext* context, Scro
     if (!tickmarks.size())
         return;
 
-    GraphicsContextStateSaver stateSaver(*context);
-    context->setShouldAntialias(false);
-    context->setStrokeColor(Color(0xCC, 0xAA, 0x00, 0xFF));
-    context->setFillColor(Color(0xFF, 0xDD, 0x00, 0xFF));
+    SkAutoCanvasRestore stateSaver(canvas, true);
+
+    SkPaint strokePaint;
+    strokePaint.setAntiAlias(false);
+    strokePaint.setColor(SkColorSetRGB(0xCC, 0xAA, 0x00));
+    strokePaint.setStyle(SkPaint::kStroke_Style);
+
+    SkPaint fillPaint;
+    fillPaint.setAntiAlias(false);
+    fillPaint.setColor(SkColorSetRGB(0xFF, 0xDD, 0x00));
+    fillPaint.setStyle(SkPaint::kFill_Style);
 
     for (Vector<IntRect>::const_iterator i = tickmarks.begin(); i != tickmarks.end(); ++i) {
         // Calculate how far down (in %) the tick-mark should appear.
@@ -125,8 +128,8 @@ void ScrollbarThemeMacCommon::paintGivenTickmarks(GraphicsContext* context, Scro
 
         // Paint.
         FloatRect tickRect(rect.x(), yPos, rect.width(), 2);
-        context->fillRect(tickRect);
-        context->strokeRect(tickRect, 1);
+        canvas->drawRect(tickRect, fillPaint);
+        canvas->drawRect(tickRect, strokePaint);
     }
 }
 
@@ -144,26 +147,28 @@ void ScrollbarThemeMacCommon::paintTickmarks(GraphicsContext* context, Scrollbar
     if (!tickmarks.size())
         return;
 
-    DrawingRecorder recorder(*context, *scrollbar, DisplayItem::ScrollbarTickmarks, rect);
-    if (recorder.canUseCachedDrawing())
+    if (DrawingRecorder::useCachedDrawingIfPossible(*context, *scrollbar, DisplayItem::ScrollbarTickmarks))
         return;
+
+    DrawingRecorder recorder(*context, *scrollbar, DisplayItem::ScrollbarTickmarks, rect);
 
     // Inset a bit.
     IntRect tickmarkTrackRect = rect;
     tickmarkTrackRect.setX(tickmarkTrackRect.x() + 1);
     tickmarkTrackRect.setWidth(tickmarkTrackRect.width() - 2);
-    paintGivenTickmarks(context, scrollbar, tickmarkTrackRect, tickmarks);
+    paintGivenTickmarks(context->canvas(), scrollbar, tickmarkTrackRect, tickmarks);
 }
 
 ScrollbarThemeMacCommon::~ScrollbarThemeMacCommon()
 {
 }
 
-void ScrollbarThemeMacCommon::preferencesChanged(float initialButtonDelay, float autoscrollButtonDelay, NSScrollerStyle preferredScrollerStyle, bool redraw)
+void ScrollbarThemeMacCommon::preferencesChanged(float initialButtonDelay, float autoscrollButtonDelay, NSScrollerStyle preferredScrollerStyle, bool redraw, bool scrollAnimationEnabled, ScrollbarButtonsPlacement buttonPlacement)
 {
-    updateButtonPlacement();
+    updateButtonPlacement(buttonPlacement);
     gInitialButtonDelay = initialButtonDelay;
     gAutoscrollButtonDelay = autoscrollButtonDelay;
+    gScrollAnimationEnabledForSystem = scrollAnimationEnabled;
     bool sendScrollerStyleNotification = gPreferredScrollerStyle != preferredScrollerStyle;
     gPreferredScrollerStyle = preferredScrollerStyle;
     if (redraw && !scrollbarSet().isEmpty()) {
@@ -179,6 +184,11 @@ void ScrollbarThemeMacCommon::preferencesChanged(float initialButtonDelay, float
                           object:nil
                         userInfo:@{ @"NSScrollerStyle" : @(gPreferredScrollerStyle) }];
     }
+}
+
+bool ScrollbarThemeMacCommon::scrollAnimationEnabledForSystem()
+{
+    return gScrollAnimationEnabledForSystem;
 }
 
 double ScrollbarThemeMacCommon::initialAutoscrollTimerDelay()

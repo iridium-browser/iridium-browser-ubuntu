@@ -8,7 +8,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
-#include "chrome/common/chrome_version_info.h"
 #include "components/gcm_driver/instance_id/instance_id_driver.h"
 
 namespace instance_id {
@@ -18,11 +17,6 @@ bool InstanceIDProfileService::IsInstanceIDEnabled(Profile* profile) {
   // Instance ID depends on GCM which has to been enabled.
   if (!gcm::GCMProfileService::IsGCMEnabled(profile))
     return false;
-
-  // Enabled for trunk build.
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_UNKNOWN)
-    return true;
 
   return InstanceIDDriver::IsInstanceIDEnabled();
 }

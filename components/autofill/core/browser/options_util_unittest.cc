@@ -22,16 +22,17 @@ namespace {
 class SyncServiceMock : public sync_driver::SyncService {
  public:
   MOCK_CONST_METHOD0(HasSyncSetupCompleted, bool());
-  MOCK_CONST_METHOD0(SyncActive, bool());
+  MOCK_CONST_METHOD0(IsSyncActive, bool());
+  MOCK_CONST_METHOD0(IsSyncAllowed, bool());
   MOCK_CONST_METHOD0(GetActiveDataTypes, syncer::ModelTypeSet());
   MOCK_METHOD1(AddObserver, void(sync_driver::SyncServiceObserver*));
   MOCK_METHOD1(RemoveObserver, void(sync_driver::SyncServiceObserver*));
   MOCK_CONST_METHOD1(HasObserver,
                      bool(const sync_driver::SyncServiceObserver*));
-  MOCK_METHOD0(IsSyncEnabledAndLoggedIn, bool());
-  MOCK_METHOD0(DisableForUser, void());
-  MOCK_METHOD0(StopAndSuppress, void());
-  MOCK_METHOD0(UnsuppressAndStart, void());
+  MOCK_METHOD1(OnDataTypeRequestsSyncStartup, void(syncer::ModelType type));
+  MOCK_CONST_METHOD0(CanSyncStart, bool());
+  MOCK_METHOD1(RequestStop, void(sync_driver::SyncService::SyncStopDataFate));
+  MOCK_METHOD0(RequestStart, void());
   MOCK_CONST_METHOD0(GetPreferredDataTypes, syncer::ModelTypeSet());
   MOCK_METHOD2(OnUserChoseDatatypes,
                void(bool sync_everything, syncer::ModelTypeSet chosen_types));
@@ -43,6 +44,7 @@ class SyncServiceMock : public sync_driver::SyncService {
   MOCK_CONST_METHOD0(GetAuthError, const GoogleServiceAuthError&());
   MOCK_CONST_METHOD0(HasUnrecoverableError, bool());
   MOCK_CONST_METHOD0(backend_initialized, bool());
+  MOCK_METHOD0(GetOpenTabsUIDelegate, sync_driver::OpenTabsUIDelegate*());
   MOCK_CONST_METHOD0(IsPassphraseRequiredForDecryption, bool());
   MOCK_CONST_METHOD0(GetExplicitPassphraseTime, base::Time());
   MOCK_CONST_METHOD0(IsUsingSecondaryPassphrase, bool());
@@ -50,6 +52,9 @@ class SyncServiceMock : public sync_driver::SyncService {
   MOCK_METHOD2(SetEncryptionPassphrase,
                void(const std::string& passphrase, PassphraseType type));
   MOCK_METHOD1(SetDecryptionPassphrase, bool(const std::string& passphrase));
+  MOCK_CONST_METHOD1(IsCryptographerReady,
+                     bool(const syncer::BaseTransaction* trans));
+  MOCK_CONST_METHOD0(GetUserShare, syncer::UserShare*());
 
   // DataTypeEncryptionHandler mocks.
   MOCK_CONST_METHOD0(IsPassphraseRequired, bool());
@@ -61,6 +66,8 @@ scoped_ptr<SyncServiceMock> CreateSyncService(bool has_autofill_profile,
                                               bool is_enabled_and_logged_in) {
   scoped_ptr<SyncServiceMock> sync(new SyncServiceMock());
 
+  ON_CALL(*sync, IsSyncAllowed()).WillByDefault(Return(true));
+
   syncer::ModelTypeSet type_set;
   if (has_autofill_profile)
     type_set.Put(syncer::AUTOFILL_PROFILE);
@@ -69,7 +76,7 @@ scoped_ptr<SyncServiceMock> CreateSyncService(bool has_autofill_profile,
   ON_CALL(*sync, GetActiveDataTypes()).WillByDefault(Return(type_set));
   ON_CALL(*sync, GetPreferredDataTypes()).WillByDefault(Return(type_set));
 
-  ON_CALL(*sync, IsSyncEnabledAndLoggedIn())
+  ON_CALL(*sync, CanSyncStart())
       .WillByDefault(Return(is_enabled_and_logged_in));
 
   return sync;

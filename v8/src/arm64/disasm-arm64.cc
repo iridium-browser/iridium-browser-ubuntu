@@ -7,8 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "src/v8.h"
-
 #if V8_TARGET_ARCH_ARM64
 
 #include "src/arm64/decoder-arm64-inl.h"
@@ -917,25 +915,6 @@ void Disassembler::VisitLoadStorePairOffset(Instruction* instr) {
 }
 
 
-void Disassembler::VisitLoadStorePairNonTemporal(Instruction* instr) {
-  const char *mnemonic = "unimplemented";
-  const char *form;
-
-  switch (instr->Mask(LoadStorePairNonTemporalMask)) {
-    case STNP_w: mnemonic = "stnp"; form = "'Wt, 'Wt2, ['Xns'ILP4]"; break;
-    case LDNP_w: mnemonic = "ldnp"; form = "'Wt, 'Wt2, ['Xns'ILP4]"; break;
-    case STNP_x: mnemonic = "stnp"; form = "'Xt, 'Xt2, ['Xns'ILP8]"; break;
-    case LDNP_x: mnemonic = "ldnp"; form = "'Xt, 'Xt2, ['Xns'ILP8]"; break;
-    case STNP_s: mnemonic = "stnp"; form = "'St, 'St2, ['Xns'ILP4]"; break;
-    case LDNP_s: mnemonic = "ldnp"; form = "'St, 'St2, ['Xns'ILP4]"; break;
-    case STNP_d: mnemonic = "stnp"; form = "'Dt, 'Dt2, ['Xns'ILP8]"; break;
-    case LDNP_d: mnemonic = "ldnp"; form = "'Dt, 'Dt2, ['Xns'ILP8]"; break;
-    default: form = "(LoadStorePairNonTemporal)";
-  }
-  Format(instr, mnemonic, form);
-}
-
-
 void Disassembler::VisitFPCompare(Instruction* instr) {
   const char *mnemonic = "unimplemented";
   const char *form = "'Fn, 'Fm";
@@ -1369,11 +1348,12 @@ int Disassembler::SubstituteImmediateField(Instruction* instr,
   switch (format[1]) {
     case 'M': {  // IMoveImm or IMoveLSL.
       if (format[5] == 'I') {
-        uint64_t imm = instr->ImmMoveWide() << (16 * instr->ShiftMoveWide());
+        uint64_t imm = static_cast<uint64_t>(instr->ImmMoveWide())
+                       << (16 * instr->ShiftMoveWide());
         AppendToOutput("#0x%" PRIx64, imm);
       } else {
         DCHECK(format[5] == 'L');
-        AppendToOutput("#0x%" PRIx64, instr->ImmMoveWide());
+        AppendToOutput("#0x%" PRIx32, instr->ImmMoveWide());
         if (instr->ShiftMoveWide() > 0) {
           AppendToOutput(", lsl #%d", 16 * instr->ShiftMoveWide());
         }
@@ -1383,13 +1363,13 @@ int Disassembler::SubstituteImmediateField(Instruction* instr,
     case 'L': {
       switch (format[2]) {
         case 'L': {  // ILLiteral - Immediate Load Literal.
-          AppendToOutput("pc%+" PRId64,
-                         instr->ImmLLiteral() << kLoadLiteralScaleLog2);
+          AppendToOutput("pc%+" PRId32, instr->ImmLLiteral()
+                                            << kLoadLiteralScaleLog2);
           return 9;
         }
         case 'S': {  // ILS - Immediate Load/Store.
           if (instr->ImmLS() != 0) {
-            AppendToOutput(", #%" PRId64, instr->ImmLS());
+            AppendToOutput(", #%" PRId32, instr->ImmLS());
           }
           return 3;
         }
@@ -1397,14 +1377,14 @@ int Disassembler::SubstituteImmediateField(Instruction* instr,
           if (instr->ImmLSPair() != 0) {
             // format[3] is the scale value. Convert to a number.
             int scale = format[3] - 0x30;
-            AppendToOutput(", #%" PRId64, instr->ImmLSPair() * scale);
+            AppendToOutput(", #%" PRId32, instr->ImmLSPair() * scale);
           }
           return 4;
         }
         case 'U': {  // ILU - Immediate Load/Store Unsigned.
           if (instr->ImmLSUnsigned() != 0) {
-            AppendToOutput(", #%" PRIu64,
-                           instr->ImmLSUnsigned() << instr->SizeLS());
+            AppendToOutput(", #%" PRId32, instr->ImmLSUnsigned()
+                                              << instr->SizeLS());
           }
           return 3;
         }
@@ -1427,7 +1407,7 @@ int Disassembler::SubstituteImmediateField(Instruction* instr,
         AppendToOutput("#%d", 64 - instr->FPScale());
         return 8;
       } else {
-        AppendToOutput("#0x%" PRIx64 " (%.4f)", instr->ImmFP(),
+        AppendToOutput("#0x%" PRIx32 " (%.4f)", instr->ImmFP(),
                        format[3] == 'S' ? instr->ImmFP32() : instr->ImmFP64());
         return 9;
       }
@@ -1538,7 +1518,7 @@ int Disassembler::SubstituteShiftField(Instruction* instr, const char* format) {
     case 'L': {  // HLo.
       if (instr->ImmDPShift() != 0) {
         const char* shift_type[] = {"lsl", "lsr", "asr", "ror"};
-        AppendToOutput(", %s #%" PRId64, shift_type[instr->ShiftDP()],
+        AppendToOutput(", %s #%" PRId32, shift_type[instr->ShiftDP()],
                        instr->ImmDPShift());
       }
       return 3;
@@ -1729,7 +1709,8 @@ void PrintDisassembler::ProcessOutput(Instruction* instr) {
           GetOutput());
 }
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 
 namespace disasm {

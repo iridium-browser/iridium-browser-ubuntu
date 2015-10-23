@@ -26,7 +26,7 @@
 #include "core/CoreExport.h"
 #include "core/dom/Text.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/line/FloatToLayoutUnit.h"
+#include "core/layout/TextRunConstructor.h"
 #include "platform/LengthFunctions.h"
 #include "platform/text/TextPath.h"
 #include "wtf/Forward.h"
@@ -44,10 +44,10 @@ public:
     // doesn't re-transform the string.
     LayoutText(Node*, PassRefPtr<StringImpl>);
 #if ENABLE(ASSERT)
-    virtual ~LayoutText();
+    ~LayoutText() override;
 #endif
 
-    virtual const char* name() const override { return "LayoutText"; }
+    const char* name() const override { return "LayoutText"; }
 
     virtual bool isTextFragment() const;
     virtual bool isWordBreak() const;
@@ -66,16 +66,16 @@ public:
     void dirtyOrDeleteLineBoxesIfNeeded(bool fullLayout);
     void dirtyLineBoxes();
 
-    virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const override final;
-    void absoluteRectsForRange(Vector<IntRect>&, unsigned startOffset = 0, unsigned endOffset = INT_MAX, bool useSelectionHeight = false, bool* wasFixed = 0);
+    void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const final;
+    void absoluteRectsForRange(Vector<IntRect>&, unsigned startOffset = 0, unsigned endOffset = INT_MAX, bool useSelectionHeight = false, bool* wasFixed = nullptr);
 
-    virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const override final;
-    void absoluteQuadsForRange(Vector<FloatQuad>&, unsigned startOffset = 0, unsigned endOffset = INT_MAX, bool useSelectionHeight = false, bool* wasFixed = 0);
+    void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const final;
+    void absoluteQuadsForRange(Vector<FloatQuad>&, unsigned startOffset = 0, unsigned endOffset = INT_MAX, bool useSelectionHeight = false, bool* wasFixed = nullptr);
 
     enum ClippingOption { NoClipping, ClipToEllipsis };
-    void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed = 0, ClippingOption = NoClipping) const;
+    void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed = nullptr, ClippingOption = NoClipping) const;
 
-    virtual PositionWithAffinity positionForPoint(const LayoutPoint&) override;
+    PositionWithAffinity positionForPoint(const LayoutPoint&) override;
 
     bool is8Bit() const { return m_text.is8Bit(); }
     const LChar* characters8() const { return m_text.impl()->characters8(); }
@@ -87,18 +87,18 @@ public:
     unsigned textLength() const { return m_text.length(); } // non virtual implementation of length()
     void positionLineBox(InlineBox*);
 
-    virtual float width(unsigned from, unsigned len, const Font&, float xPos, TextDirection, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* = 0) const;
-    virtual float width(unsigned from, unsigned len, float xPos, TextDirection, bool firstLine = false, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* = 0) const;
+    virtual float width(unsigned from, unsigned len, const Font&, LayoutUnit xPos, TextDirection, HashSet<const SimpleFontData*>* fallbackFonts = nullptr, FloatRect* glyphBounds = nullptr) const;
+    virtual float width(unsigned from, unsigned len, LayoutUnit xPos, TextDirection, bool firstLine = false, HashSet<const SimpleFontData*>* fallbackFonts = nullptr, FloatRect* glyphBounds = nullptr) const;
 
     float minLogicalWidth() const;
     float maxLogicalWidth() const;
 
-    void trimmedPrefWidths(FloatWillBeLayoutUnit leadWidth,
-        FloatWillBeLayoutUnit& firstLineMinWidth, bool& hasBreakableStart,
-        FloatWillBeLayoutUnit& lastLineMinWidth, bool& hasBreakableEnd,
+    void trimmedPrefWidths(LayoutUnit leadWidth,
+        LayoutUnit& firstLineMinWidth, bool& hasBreakableStart,
+        LayoutUnit& lastLineMinWidth, bool& hasBreakableEnd,
         bool& hasBreakableChar, bool& hasBreak,
-        FloatWillBeLayoutUnit& firstLineMaxWidth, FloatWillBeLayoutUnit& lastLineMaxWidth,
-        FloatWillBeLayoutUnit& minWidth, FloatWillBeLayoutUnit& maxWidth, bool& stripFrontSpaces,
+        LayoutUnit& firstLineMaxWidth, LayoutUnit& lastLineMaxWidth,
+        LayoutUnit& minWidth, LayoutUnit& maxWidth, bool& stripFrontSpaces,
         TextDirection);
 
     virtual IntRect linesBoundingBox() const;
@@ -113,21 +113,24 @@ public:
 
     virtual void transformText();
 
-    virtual bool canBeSelectionLeaf() const override { return true; }
-    virtual void setSelectionState(SelectionState) override final;
-    virtual LayoutRect selectionRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer) const override;
-    virtual LayoutRect localCaretRect(InlineBox*, int caretOffset, LayoutUnit* extraWidthToEndOfLine = 0) override;
+    bool canBeSelectionLeaf() const override { return true; }
+    void setSelectionState(SelectionState) final;
+    LayoutRect selectionRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer) const override;
+    LayoutRect localCaretRect(InlineBox*, int caretOffset, LayoutUnit* extraWidthToEndOfLine = nullptr) override;
 
     InlineTextBox* firstTextBox() const { return m_firstTextBox; }
     InlineTextBox* lastTextBox() const { return m_lastTextBox; }
 
-    virtual int caretMinOffset() const override;
-    virtual int caretMaxOffset() const override;
+    // True if we have inline text box children which implies rendered text (or whitespace) output.
+    bool hasTextBoxes() const { return firstTextBox(); }
+
+    int caretMinOffset() const override;
+    int caretMaxOffset() const override;
     unsigned resolvedTextLength() const;
 
-    virtual int previousOffset(int current) const override final;
-    virtual int previousOffsetForBackwardDeletion(int current) const override final;
-    virtual int nextOffset(int current) const override final;
+    int previousOffset(int current) const final;
+    int previousOffsetForBackwardDeletion(int current) const final;
+    int nextOffset(int current) const final;
 
     bool containsReversedText() const { return m_containsReversedText; }
 
@@ -135,6 +138,7 @@ public:
     void momentarilyRevealLastTypedCharacter(unsigned lastTypedCharacterOffset);
 
     bool isAllCollapsibleWhitespace() const;
+    bool isRenderedCharacter(int offsetInNode) const;
 
     bool canUseSimpleFontCodePath() const { return m_canUseSimpleFontCodePath; }
 
@@ -142,45 +146,47 @@ public:
 
     PassRefPtr<AbstractInlineTextBox> firstAbstractInlineTextBox();
 
-protected:
-    virtual void willBeDestroyed() override;
+    float hyphenWidth(const Font&, TextDirection);
 
-    virtual void styleWillChange(StyleDifference, const ComputedStyle&) override final { }
-    virtual void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+protected:
+    void willBeDestroyed() override;
+
+    void styleWillChange(StyleDifference, const ComputedStyle&) final { }
+    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
 
     virtual void setTextInternal(PassRefPtr<StringImpl>);
     virtual UChar previousCharacter() const;
 
-    virtual void addLayerHitTestRects(LayerHitTestRects&, const DeprecatedPaintLayer* currentLayer, const LayoutPoint& layerOffset, const LayoutRect& containerRect) const override;
+    void addLayerHitTestRects(LayerHitTestRects&, const DeprecatedPaintLayer* currentLayer, const LayoutPoint& layerOffset, const LayoutRect& containerRect) const override;
 
     virtual InlineTextBox* createTextBox(int start, unsigned short length); // Subclassed by SVG.
 
-    virtual void invalidateDisplayItemClients(const LayoutBoxModelObject& paintInvalidationContainer) const override;
+    void invalidateDisplayItemClients(const LayoutBoxModelObject& paintInvalidationContainer) const override;
 
 private:
     void computePreferredLogicalWidths(float leadWidth);
-    void computePreferredLogicalWidths(float leadWidth, HashSet<const SimpleFontData*>& fallbackFonts, GlyphOverflow&);
+    void computePreferredLogicalWidths(float leadWidth, HashSet<const SimpleFontData*>& fallbackFonts, FloatRect& glyphBounds);
 
     bool computeCanUseSimpleFontCodePath() const;
 
     // Make length() private so that callers that have a LayoutText*
     // will use the more efficient textLength() instead, while
     // callers with a LayoutObject* can continue to use length().
-    virtual unsigned length() const override final { return textLength(); }
+    unsigned length() const final { return textLength(); }
 
-    virtual void paint(const PaintInfo&, const LayoutPoint&) override final { ASSERT_NOT_REACHED(); }
-    virtual void layout() override final { ASSERT_NOT_REACHED(); }
-    virtual bool nodeAtPoint(HitTestResult&, const HitTestLocation&, const LayoutPoint&, HitTestAction) override final { ASSERT_NOT_REACHED(); return false; }
+    void paint(const PaintInfo&, const LayoutPoint&) final { ASSERT_NOT_REACHED(); }
+    void layout() final { ASSERT_NOT_REACHED(); }
+    bool nodeAtPoint(HitTestResult&, const HitTestLocation&, const LayoutPoint&, HitTestAction) final { ASSERT_NOT_REACHED(); return false; }
 
     void deleteTextBoxes();
     bool containsOnlyWhitespace(unsigned from, unsigned len) const;
-    float widthFromCache(const Font&, int start, int len, float xPos, TextDirection, HashSet<const SimpleFontData*>* fallbackFonts, GlyphOverflow*) const;
+    float widthFromFont(const Font&, int start, int len, float leadWidth, float textWidthSoFar, TextDirection, HashSet<const SimpleFontData*>* fallbackFonts, FloatRect* glyphBoundsAccumulation) const;
 
     void secureText(UChar mask);
 
     bool isText() const = delete; // This will catch anyone doing an unnecessary check.
 
-    virtual LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const override;
+    LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* = nullptr) const override;
 
     void checkConsistency() const;
 
@@ -223,6 +229,12 @@ inline UChar LayoutText::characterAt(unsigned i) const
         return 0;
 
     return uncheckedCharacterAt(i);
+}
+
+inline float LayoutText::hyphenWidth(const Font& font, TextDirection direction)
+{
+    const ComputedStyle& style = styleRef();
+    return font.width(constructTextRun(font, style.hyphenString().string(), style, direction));
 }
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutText, isText());

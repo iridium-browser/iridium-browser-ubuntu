@@ -5,17 +5,25 @@
 #ifndef EXTENSIONS_RENDERER_EXTENSION_FRAME_HELPER_H_
 #define EXTENSIONS_RENDERER_EXTENSION_FRAME_HELPER_H_
 
+#include <vector>
+
 #include "content/public/common/console_message_level.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
+#include "extensions/common/view_type.h"
 
 struct ExtensionMsg_ExternalConnectionInfo;
 struct ExtensionMsg_TabConnectionInfo;
+
+namespace base {
+class ListValue;
+}
 
 namespace extensions {
 
 class Dispatcher;
 struct Message;
+class ScriptContext;
 
 // RenderFrame-level plumbing for extension features.
 class ExtensionFrameHelper
@@ -26,8 +34,40 @@ class ExtensionFrameHelper
                        Dispatcher* extension_dispatcher);
   ~ExtensionFrameHelper() override;
 
+  // Returns a list of extension RenderFrames that match the given filter
+  // criteria. A |browser_window_id| of extension_misc::kUnknownWindowId
+  // specifies "all", as does a |view_type| of VIEW_TYPE_INVALID.
+  static std::vector<content::RenderFrame*> GetExtensionFrames(
+      const std::string& extension_id,
+      int browser_window_id,
+      ViewType view_type);
+
+  // Returns the main frame of the extension's background page, or null if there
+  // isn't one in this process.
+  static content::RenderFrame* GetBackgroundPageFrame(
+      const std::string& extension_id);
+
+  // Returns true if the given |context| is for any frame in the extension's
+  // event page.
+  // TODO(devlin): This isn't really used properly, and should probably be
+  // deleted.
+  static bool IsContextForEventPage(const ScriptContext* context);
+
+  ViewType view_type() const { return view_type_; }
+  int tab_id() const { return tab_id_; }
+  int browser_window_id() const { return browser_window_id_; }
+  bool did_create_current_document_element() const {
+    return did_create_current_document_element_;
+  }
+
  private:
   // RenderFrameObserver implementation.
+  void DidCreateDocumentElement() override;
+  void DidCreateNewDocument() override;
+  void DidMatchCSS(
+      const blink::WebVector<blink::WebString>& newly_matching_selectors,
+      const blink::WebVector<blink::WebString>& stopped_matching_selectors)
+          override;
   void DidCreateScriptContext(v8::Local<v8::Context>,
                               int extension_group,
                               int world_id) override;
@@ -35,8 +75,6 @@ class ExtensionFrameHelper
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // IPC handlers.
-  void OnAddMessageToConsole(content::ConsoleMessageLevel level,
-                             const std::string& message);
   void OnExtensionDispatchOnConnect(
       int target_port_id,
       const std::string& channel_name,
@@ -47,8 +85,32 @@ class ExtensionFrameHelper
                                  const Message& message);
   void OnExtensionDispatchOnDisconnect(int port_id,
                                        const std::string& error_message);
+  void OnExtensionSetTabId(int tab_id);
+  void OnUpdateBrowserWindowId(int browser_window_id);
+  void OnNotifyRendererViewType(ViewType view_type);
+  void OnExtensionResponse(int request_id,
+                           bool success,
+                           const base::ListValue& response,
+                           const std::string& error);
+  void OnExtensionMessageInvoke(const std::string& extension_id,
+                                const std::string& module_name,
+                                const std::string& function_name,
+                                const base::ListValue& args,
+                                bool user_gesture);
+
+  // Type of view associated with the RenderFrame.
+  ViewType view_type_;
+
+  // The id of the tab the render frame is attached to.
+  int tab_id_;
+
+  // The id of the browser window the render frame is attached to.
+  int browser_window_id_;
 
   Dispatcher* extension_dispatcher_;
+
+  // Whether or not the current document element has been created.
+  bool did_create_current_document_element_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionFrameHelper);
 };

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/extensions/dictionary_event_router.h"
 
+#include <string>
+
 #include "base/json/json_writer.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/extensions/input_method_api.h"
@@ -44,6 +46,7 @@ void ExtensionDictionaryEventRouter::DispatchLoadedEventIfLoaded() {
   scoped_ptr<base::ListValue> args(new base::ListValue());
   // The router will only send the event to extensions that are listening.
   scoped_ptr<extensions::Event> event(new extensions::Event(
+      extensions::events::INPUT_METHOD_PRIVATE_ON_DICTIONARY_LOADED,
       extensions::InputMethodAPI::kOnDictionaryLoaded, args.Pass()));
   event->restrict_to_browser_context = context_;
   router->BroadcastEvent(event.Pass());
@@ -63,16 +66,21 @@ void ExtensionDictionaryEventRouter::OnCustomDictionaryChanged(
     return;
   }
 
-  scoped_ptr<base::ListValue> args(new base::ListValue());
   scoped_ptr<base::ListValue> added_words(new base::ListValue());
+  for (const std::string& word : dictionary_change.to_add())
+    added_words->AppendString(word);
+
   scoped_ptr<base::ListValue> removed_words(new base::ListValue());
-  added_words->AppendStrings(dictionary_change.to_add());
-  removed_words->AppendStrings(dictionary_change.to_remove());
+  for (const std::string& word : dictionary_change.to_remove())
+    removed_words->AppendString(word);
+
+  scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(added_words.release());
   args->Append(removed_words.release());
 
   // The router will only send the event to extensions that are listening.
   scoped_ptr<extensions::Event> event(new extensions::Event(
+      extensions::events::INPUT_METHOD_PRIVATE_ON_DICTIONARY_CHANGED,
       extensions::InputMethodAPI::kOnDictionaryChanged, args.Pass()));
   event->restrict_to_browser_context = context_;
   router->BroadcastEvent(event.Pass());

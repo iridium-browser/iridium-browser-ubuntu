@@ -18,6 +18,7 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/pattern.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -64,6 +65,7 @@ const char kDefaultWallpaperAttr[] = "default_wallpaper";
 const char kDefaultAppsAttr[] = "default_apps";
 const char kLocalizedContent[] = "localized_content";
 const char kDefaultAppsFolderName[] = "default_apps_folder_name";
+const char kIdAttr[] = "id";
 
 const char kAcceptedManifestVersion[] = "1.0";
 
@@ -222,8 +224,8 @@ bool CustomizationDocument::LoadManifestFromString(
     const std::string& manifest) {
   int error_code = 0;
   std::string error;
-  scoped_ptr<base::Value> root(base::JSONReader::ReadAndReturnError(manifest,
-      base::JSON_ALLOW_TRAILING_COMMAS, &error_code, &error));
+  scoped_ptr<base::Value> root = base::JSONReader::ReadAndReturnError(
+      manifest, base::JSON_ALLOW_TRAILING_COMMAS, &error_code, &error);
   if (error_code != base::JSONReader::JSON_NO_ERROR)
     LOG(ERROR) << error;
   DCHECK(root.get() != NULL);
@@ -296,7 +298,7 @@ void StartupCustomizationDocument::Init(
           std::string hwid_mask;
           if (hwid_list->GetDictionary(i, &hwid_dictionary) &&
               hwid_dictionary->GetString(kHwidMaskAttr, &hwid_mask)) {
-            if (MatchPattern(hwid, hwid_mask)) {
+            if (base::MatchPattern(hwid, hwid_mask)) {
               // If HWID for this machine matches some mask, use HWID specific
               // settings.
               std::string result;
@@ -327,8 +329,8 @@ void StartupCustomizationDocument::Init(
                                            &initial_timezone_);
   statistics_provider->GetMachineStatistic(kKeyboardLayoutAttr,
                                            &keyboard_layout_);
-  configured_locales_.resize(0);
-  base::SplitString(initial_locale_, ',', &configured_locales_);
+  configured_locales_ = base::SplitString(
+      initial_locale_, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   // Convert ICU locale to chrome ("en_US" to "en-US", etc.).
   std::for_each(configured_locales_.begin(), configured_locales_.end(),
@@ -512,7 +514,7 @@ void ServicesCustomizationDocument::StartFetching() {
                                       &customization_id) &&
         !customization_id.empty()) {
       url_ = GURL(base::StringPrintf(
-          kManifestUrl, base::StringToLowerASCII(customization_id).c_str()));
+          kManifestUrl, base::ToLowerASCII(customization_id).c_str()));
     } else {
       // Remember that there is no customization ID in VPD.
       OnCustomizationNotFound();
@@ -662,27 +664,12 @@ bool ServicesCustomizationDocument::GetDefaultWallpaperUrl(
   return true;
 }
 
-bool ServicesCustomizationDocument::GetDefaultApps(
-    std::vector<std::string>* ids) const {
-  ids->clear();
+scoped_ptr<base::DictionaryValue>
+ServicesCustomizationDocument::GetDefaultApps() const {
   if (!IsReady())
-    return false;
+    return scoped_ptr<base::DictionaryValue>();
 
-  base::ListValue* apps_list = NULL;
-  if (!root_->GetList(kDefaultAppsAttr, &apps_list))
-    return false;
-
-  for (size_t i = 0; i < apps_list->GetSize(); ++i) {
-    std::string app_id;
-    if (apps_list->GetString(i, &app_id)) {
-      ids->push_back(app_id);
-    } else {
-      LOG(ERROR) << "Wrong format of default application list";
-      return false;
-    }
-  }
-
-  return true;
+  return GetDefaultAppsInProviderFormat(*root_);
 }
 
 std::string ServicesCustomizationDocument::GetOemAppsFolderName(
@@ -701,16 +688,29 @@ ServicesCustomizationDocument::GetDefaultAppsInProviderFormat(
   if (root.GetList(kDefaultAppsAttr, &apps_list)) {
     for (size_t i = 0; i < apps_list->GetSize(); ++i) {
       std::string app_id;
+      const base::DictionaryValue* app_entry = nullptr;
+      scoped_ptr<base::DictionaryValue> entry;
       if (apps_list->GetString(i, &app_id)) {
-        base::DictionaryValue* entry = new base::DictionaryValue;
-        entry->SetString(extensions::ExternalProviderImpl::kExternalUpdateUrl,
-                         extension_urls::GetWebstoreUpdateUrl().spec());
-        prefs->Set(app_id, entry);
+        entry.reset(new base::DictionaryValue());
+      } else if (apps_list->GetDictionary(i, &app_entry)) {
+        if (!app_entry->GetString(kIdAttr, &app_id)) {
+          LOG(ERROR) << "Wrong format of default application list";
+          prefs->Clear();
+          break;
+        }
+        entry = app_entry->CreateDeepCopy();
+        entry->Remove(kIdAttr, nullptr);
       } else {
         LOG(ERROR) << "Wrong format of default application list";
         prefs->Clear();
         break;
       }
+      if (!entry->HasKey(
+              extensions::ExternalProviderImpl::kExternalUpdateUrl)) {
+        entry->SetString(extensions::ExternalProviderImpl::kExternalUpdateUrl,
+                         extension_urls::GetWebstoreUpdateUrl().spec());
+      }
+      prefs->Set(app_id, entry.Pass());
     }
   }
 

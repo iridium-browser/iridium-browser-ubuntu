@@ -6,6 +6,8 @@
  */
 
 #include "GrAtlas.h"
+#include "GrContext.h"
+#include "GrDrawContext.h"
 #include "GrGpu.h"
 #include "GrLayerCache.h"
 #include "GrSurfacePriv.h"
@@ -126,7 +128,7 @@ GrCachedLayer* GrLayerCache::createLayer(uint32_t pictureID,
                                          const SkIRect& srcIR,
                                          const SkIRect& dstIR,
                                          const SkMatrix& initialMat,
-                                         const unsigned* key,
+                                         const int* key,
                                          int keySize,
                                          const SkPaint* paint) {
     SkASSERT(pictureID != SK_InvalidGenID && start >= 0 && stop > 0);
@@ -139,7 +141,7 @@ GrCachedLayer* GrLayerCache::createLayer(uint32_t pictureID,
 }
 
 GrCachedLayer* GrLayerCache::findLayer(uint32_t pictureID, const SkMatrix& initialMat,
-                                       const unsigned* key, int keySize) {
+                                       const int* key, int keySize) {
     SkASSERT(pictureID != SK_InvalidGenID);
     return fLayerHash.find(GrCachedLayer::Key(pictureID, initialMat, key, keySize));
 }
@@ -149,7 +151,7 @@ GrCachedLayer* GrLayerCache::findLayerOrCreate(uint32_t pictureID,
                                                const SkIRect& srcIR,
                                                const SkIRect& dstIR,
                                                const SkMatrix& initialMat,
-                                               const unsigned* key,
+                                               const int* key,
                                                int keySize,
                                                const SkPaint* paint) {
     SkASSERT(pictureID != SK_InvalidGenID && start >= 0 && stop > 0);
@@ -214,7 +216,7 @@ bool GrLayerCache::tryToAtlas(GrCachedLayer* layer,
                 pictInfo->incPlotUsage(plot->id());
 #endif
                 // The layer was successfully added to the atlas
-                const SkIRect bounds = SkIRect::MakeXYWH(loc.fX, loc.fY, 
+                const SkIRect bounds = SkIRect::MakeXYWH(loc.fX, loc.fY,
                                                          desc.fWidth, desc.fHeight);
                 layer->setTexture(fAtlas->getTexture(), bounds);
                 layer->setPlot(plot);
@@ -248,12 +250,13 @@ bool GrLayerCache::lock(GrCachedLayer* layer, const GrSurfaceDesc& desc, bool* n
     }
 
     // TODO: make the test for exact match depend on the image filters themselves
-    GrTextureProvider::ScratchTexMatch usage = GrTextureProvider::kApprox_ScratchTexMatch;
+    SkAutoTUnref<GrTexture> tex;
     if (layer->fFilter) {
-        usage = GrTextureProvider::kExact_ScratchTexMatch;
+        tex.reset(fContext->textureProvider()->createTexture(desc, true));
+    } else {
+        tex.reset(fContext->textureProvider()->createApproxTexture(desc));
     }
 
-    SkAutoTUnref<GrTexture> tex(fContext->textureProvider()->refScratchTexture(desc, usage));
     if (!tex) {
         return false;
     }
@@ -465,7 +468,11 @@ void GrLayerCache::purgeAll() {
 
     SkASSERT(0 == fPictureHash.count());
 
-    fContext->discardRenderTarget(fAtlas->getTexture()->asRenderTarget());
+    GrDrawContext* drawContext = fContext->drawContext();
+
+    if (drawContext) {
+        drawContext->discard(fAtlas->getTexture()->asRenderTarget());
+    }
 }
 #endif
 

@@ -2,7 +2,7 @@
  * jsimd_arm.c
  *
  * Copyright 2009 Pierre Ossman <ossman@cendio.se> for Cendio AB
- * Copyright 2009-2011 D. R. Commander
+ * Copyright 2009-2011, 2013-2014D. R. Commander
  *
  * Based on the x86 SIMD extension for IJG JPEG library,
  * Copyright (C) 1999-2006, MIYASAKA Masaru.
@@ -29,7 +29,7 @@
 
 static unsigned int simd_support = ~0;
 
-#if defined(__linux__) || defined(ANDROID) || defined(__ANDROID__)
+#if !defined(__ARM_NEON__) && (defined(__linux__) || defined(ANDROID) || defined(__ANDROID__))
 
 #define SOMEWHAT_SANE_PROC_CPUINFO_SIZE_LIMIT (1024 * 1024)
 
@@ -100,7 +100,7 @@ LOCAL(void)
 init_simd (void)
 {
   char *env = NULL;
-#if !defined(__ARM_NEON__) && defined(__linux__) || defined(ANDROID) || defined(__ANDROID__)
+#if !defined(__ARM_NEON__) && (defined(__linux__) || defined(ANDROID) || defined(__ANDROID__))
   int bufsize = 1024; /* an initial guess for the line buffer size limit */
 #endif
 
@@ -170,6 +170,23 @@ jsimd_can_ycc_rgb (void)
     return 0;
   if ((RGB_PIXELSIZE != 3) && (RGB_PIXELSIZE != 4))
     return 0;
+  if (simd_support & JSIMD_ARM_NEON)
+    return 1;
+
+  return 0;
+}
+
+GLOBAL(int)
+jsimd_can_ycc_rgb565 (void)
+{
+  init_simd();
+
+  /* The code is optimised for these values only */
+  if (BITS_IN_JSAMPLE != 8)
+    return 0;
+  if (sizeof(JDIMENSION) != 4)
+    return 0;
+
   if (simd_support & JSIMD_ARM_NEON)
     return 1;
 
@@ -255,7 +272,7 @@ jsimd_ycc_rgb_convert (j_decompress_ptr cinfo,
     case JCS_EXT_ARGB:
       neonfct=jsimd_ycc_extxrgb_convert_neon;
       break;
-  default:
+    default:
       neonfct=jsimd_ycc_extrgb_convert_neon;
       break;
   }
@@ -263,6 +280,16 @@ jsimd_ycc_rgb_convert (j_decompress_ptr cinfo,
   if (simd_support & JSIMD_ARM_NEON)
     neonfct(cinfo->output_width, input_buf,
         input_row, output_buf, num_rows);
+}
+
+GLOBAL(void)
+jsimd_ycc_rgb565_convert (j_decompress_ptr cinfo,
+                          JSAMPIMAGE input_buf, JDIMENSION input_row,
+                          JSAMPARRAY output_buf, int num_rows)
+{
+  if (simd_support & JSIMD_ARM_NEON)
+    jsimd_ycc_rgb565_convert_neon(cinfo->output_width, input_buf, input_row,
+                                  output_buf, num_rows);
 }
 
 GLOBAL(int)

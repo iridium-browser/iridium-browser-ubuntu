@@ -25,9 +25,12 @@ class GLImageImpl : public gfx::GLImage {
   // implement gfx::GLImage
   void Destroy(bool have_context) override;
   gfx::Size GetSize() override;
+  unsigned GetInternalFormat() override;
   bool BindTexImage(unsigned target) override;
   void ReleaseTexImage(unsigned target) override;
-  bool CopyTexImage(unsigned target) override;
+  bool CopyTexSubImage(unsigned target,
+                       const gfx::Point& offset,
+                       const gfx::Rect& rect) override;
   void WillUseTexImage() override;
   void DidUseTexImage() override {}
   void WillModifyTexImage() override {}
@@ -37,6 +40,9 @@ class GLImageImpl : public gfx::GLImage {
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
+                    uint64_t process_tracing_id,
+                    const std::string& dump_name) override;
 
  private:
   ~GLImageImpl() override;
@@ -64,6 +70,10 @@ gfx::Size GLImageImpl::GetSize() {
   return gfx::Size();
 }
 
+unsigned GLImageImpl::GetInternalFormat() {
+  return GL_RGBA;
+}
+
 bool GLImageImpl::BindTexImage(unsigned target) {
   NOTREACHED();
   return false;
@@ -73,7 +83,9 @@ void GLImageImpl::ReleaseTexImage(unsigned target) {
   NOTREACHED();
 }
 
-bool GLImageImpl::CopyTexImage(unsigned target) {
+bool GLImageImpl::CopyTexSubImage(unsigned target,
+                                  const gfx::Point& offset,
+                                  const gfx::Rect& rect) {
   return false;
 }
 
@@ -88,6 +100,12 @@ bool GLImageImpl::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                                        const gfx::RectF& crop_rect) {
   NOTREACHED();
   return false;
+}
+
+void GLImageImpl::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
+                               uint64_t process_tracing_id,
+                               const std::string& dump_name) {
+  // TODO(ericrk): Implement GLImage OnMemoryDump. crbug.com/514914
 }
 
 }  // anonymous namespace
@@ -126,17 +144,9 @@ GLuint StreamTextureManagerInProcess::CreateStreamTexture(
 
   gfx::Size size = gl_image->GetSize();
   texture_manager->SetTarget(texture, GL_TEXTURE_EXTERNAL_OES);
-  texture_manager->SetLevelInfo(texture,
-                                GL_TEXTURE_EXTERNAL_OES,
-                                0,
-                                GL_RGBA,
-                                size.width(),
-                                size.height(),
-                                1,
-                                0,
-                                GL_RGBA,
-                                GL_UNSIGNED_BYTE,
-                                true);
+  texture_manager->SetLevelInfo(texture, GL_TEXTURE_EXTERNAL_OES, 0, GL_RGBA,
+                                size.width(), size.height(), 1, 0, GL_RGBA,
+                                GL_UNSIGNED_BYTE, gfx::Rect(size));
   texture_manager->SetLevelImage(
       texture, GL_TEXTURE_EXTERNAL_OES, 0, gl_image.get());
 

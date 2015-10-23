@@ -6,6 +6,7 @@
 
 #include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "url/gurl.h"
 
@@ -17,7 +18,8 @@ bool IsPathNameValid(const std::string& name) {
     return false;
 
   for (auto c : name) {
-    if (!IsAsciiAlpha(c) && !IsAsciiDigit(c) && c != '_' && c != '.')
+    if (!base::IsAsciiAlpha(c) && !base::IsAsciiDigit(c) &&
+        c != '_' && c != '.')
       return false;
   }
   return true;
@@ -41,7 +43,7 @@ base::FilePath GetPathForApplicationUrl(const GURL& application_url) {
   // |base_path| on android has an additional path, need to go up a level to get
   // at other apps resources.
   base_path = base_path.DirName();
-  base_path = base_path.AppendASCII("app_local_apps");
+  base_path = base_path.AppendASCII("app_cached_apps");
 #else
   PathService::Get(base::DIR_EXE, &base_path);
 #endif
@@ -57,8 +59,8 @@ base::FilePath GetPathForResourceNamed(const base::FilePath& app_path,
       resource_path.find("//") != std::string::npos)
     return base::FilePath();
 
-  std::vector<std::string> path_components;
-  Tokenize(resource_path, "/", &path_components);
+  std::vector<std::string> path_components = base::SplitString(
+      resource_path, "/", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   if (path_components.empty())
     return base::FilePath();
 

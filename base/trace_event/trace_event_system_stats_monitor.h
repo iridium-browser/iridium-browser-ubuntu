@@ -11,7 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process/process_metrics.h"
 #include "base/timer/timer.h"
-#include "base/trace_event/trace_event_impl.h"
+#include "base/trace_event/trace_log.h"
 
 namespace base {
 
@@ -33,7 +33,7 @@ class BASE_EXPORT TraceEventSystemStatsMonitor
   explicit TraceEventSystemStatsMonitor(
       scoped_refptr<SingleThreadTaskRunner> task_runner);
 
-  virtual ~TraceEventSystemStatsMonitor();
+  ~TraceEventSystemStatsMonitor() override;
 
   // base::trace_event::TraceLog::EnabledStateChangedObserver overrides:
   void OnTraceLogEnabled() override;

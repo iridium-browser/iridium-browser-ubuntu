@@ -13,10 +13,11 @@ Octane 2.0 consists of 17 tests, four more than Octane v1.
 
 import os
 
-from telemetry import benchmark
+from core import perf_benchmark
+
 from telemetry import page as page_module
-from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry import story
 from telemetry.util import statistics
 from telemetry.value import scalar
 
@@ -115,7 +116,7 @@ class _OctaneMeasurement(page_test.PageTest):
         'Unexpected result format "%s"' % score_and_name
       if 'Skipped' not in score_and_name[1]:
         name = score_and_name[0]
-        score = int(score_and_name[1])
+        score = float(score_and_name[1])
         results.AddValue(scalar.ScalarValue(
             results.current_page, name, 'score', score, important=False,
             description=DESCRIPTIONS.get(name)))
@@ -130,7 +131,7 @@ class _OctaneMeasurement(page_test.PageTest):
                                        'benchmark collection.'))
 
 
-class Octane(benchmark.Benchmark):
+class Octane(perf_benchmark.PerfBenchmark):
   """Google's Octane JavaScript benchmark.
 
   http://octane-benchmark.googlecode.com/svn/latest/index.html
@@ -141,12 +142,12 @@ class Octane(benchmark.Benchmark):
   def Name(cls):
     return 'octane'
 
-  def CreatePageSet(self, options):
-    ps = page_set.PageSet(
+  def CreateStorySet(self, options):
+    ps = story.StorySet(
       archive_data_file='../page_sets/data/octane.json',
-      file_path=os.path.abspath(__file__),
-      bucket=page_set.PUBLIC_BUCKET)
-    ps.AddUserStory(page_module.Page(
+      base_dir=os.path.dirname(os.path.abspath(__file__)),
+      cloud_storage_bucket=story.PUBLIC_BUCKET)
+    ps.AddStory(page_module.Page(
         'http://octane-benchmark.googlecode.com/svn/latest/index.html?auto=1',
         ps, ps.base_dir, make_javascript_deterministic=False))
     return ps

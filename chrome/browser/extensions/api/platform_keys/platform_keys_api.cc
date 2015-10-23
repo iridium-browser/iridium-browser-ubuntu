@@ -8,13 +8,16 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/platform_keys/platform_keys.h"
 #include "chrome/browser/chromeos/platform_keys/platform_keys_service.h"
 #include "chrome/browser/chromeos/platform_keys/platform_keys_service_factory.h"
+#include "chrome/browser/extensions/api/platform_keys/verify_trust_api.h"
 #include "chrome/common/extensions/api/platform_keys_internal.h"
-#include "components/web_modal/popup_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
 
 namespace extensions {
@@ -27,8 +30,6 @@ namespace {
 const char kErrorAlgorithmNotSupported[] = "Algorithm not supported.";
 const char kErrorAlgorithmNotPermittedByCertificate[] =
     "The requested Algorithm is not permitted by the certificate.";
-const char kErrorInvalidX509Cert[] =
-    "Certificate is not a valid X.509 certificate.";
 const char kErrorInteractiveCallFromBackground[] =
     "Interactive calls must happen in the context of a browser tab or a "
     "window.";
@@ -67,11 +68,24 @@ void BuildWebCryptoRSAAlgorithmDictionary(const PublicKeyInfo& key_info,
           arraysize(defaultPublicExponent)));
 }
 
+const struct NameValuePair {
+  const char* const name;
+  const int value;
+} kCertStatusErrors[] = {
+#define CERT_STATUS_FLAG(name, value) \
+  { #name, value }                    \
+  ,
+#include "net/cert/cert_status_flags_list.h"
+#undef CERT_STATUS_FLAG
+};
+
 }  // namespace
 
 namespace platform_keys {
 
 const char kErrorInvalidToken[] = "The token is not valid.";
+const char kErrorInvalidX509Cert[] =
+    "Certificate is not a valid X.509 certificate.";
 const char kTokenIdUser[] = "user";
 const char kTokenIdSystem[] = "system";
 
@@ -114,12 +128,12 @@ PlatformKeysInternalGetPublicKeyFunction::Run() {
 
   const std::vector<char>& cert_der = params->certificate;
   if (cert_der.empty())
-    return RespondNow(Error(kErrorInvalidX509Cert));
+    return RespondNow(Error(platform_keys::kErrorInvalidX509Cert));
   scoped_refptr<net::X509Certificate> cert_x509 =
       net::X509Certificate::CreateFromBytes(vector_as_array(&cert_der),
                                             cert_der.size());
   if (!cert_x509)
-    return RespondNow(Error(kErrorInvalidX509Cert));
+    return RespondNow(Error(platform_keys::kErrorInvalidX509Cert));
 
   PublicKeyInfo key_info;
   key_info.public_key_spki_der =
@@ -168,6 +182,21 @@ PlatformKeysInternalSelectClientCertificatesFunction::Run() {
     request.certificate_authorities.push_back(
         std::string(cert_authority.begin(), cert_authority.end()));
   }
+  for (const api_pk::ClientCertificateType& cert_type :
+       params->details.request.certificate_types) {
+    switch (cert_type) {
+      case api_pk::CLIENT_CERTIFICATE_TYPE_ECDSASIGN:
+        request.certificate_key_types.push_back(
+            net::X509Certificate::kPublicKeyTypeECDSA);
+        break;
+      case api_pk::CLIENT_CERTIFICATE_TYPE_RSASIGN:
+        request.certificate_key_types.push_back(
+            net::X509Certificate::kPublicKeyTypeRSA);
+        break;
+      case api_pk::CLIENT_CERTIFICATE_TYPE_NONE:
+        NOTREACHED();
+    }
+  }
   content::WebContents* web_contents = nullptr;
   if (params->details.interactive) {
     web_contents = GetSenderWebContents();
@@ -175,7 +204,8 @@ PlatformKeysInternalSelectClientCertificatesFunction::Run() {
     // Ensure that this function is called in a context that allows opening
     // dialogs.
     if (!web_contents ||
-        !web_modal::PopupManager::FromWebContents(web_contents)) {
+        !web_modal::WebContentsModalDialogManager::FromWebContents(
+            web_contents)) {
       return RespondNow(Error(kErrorInteractiveCallFromBackground));
     }
   }
@@ -193,6 +223,7 @@ void PlatformKeysInternalSelectClientCertificatesFunction::
     OnSelectedCertificates(scoped_ptr<net::CertificateList> matches,
                            const std::string& error_message) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   if (!error_message.empty()) {
     Respond(Error(error_message));
     return;
@@ -282,11 +313,62 @@ void PlatformKeysInternalSignFunction::OnSigned(
     const std::string& signature,
     const std::string& error_message) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   if (error_message.empty())
     Respond(ArgumentList(api_pki::Sign::Results::Create(
         std::vector<char>(signature.begin(), signature.end()))));
   else
     Respond(Error(error_message));
+}
+
+PlatformKeysVerifyTLSServerCertificateFunction::
+    ~PlatformKeysVerifyTLSServerCertificateFunction() {
+}
+
+ExtensionFunction::ResponseAction
+PlatformKeysVerifyTLSServerCertificateFunction::Run() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  scoped_ptr<api_pk::VerifyTLSServerCertificate::Params> params(
+      api_pk::VerifyTLSServerCertificate::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  VerifyTrustAPI::GetFactoryInstance()
+      ->Get(browser_context())
+      ->Verify(params.Pass(), extension_id(),
+               base::Bind(&PlatformKeysVerifyTLSServerCertificateFunction::
+                              FinishedVerification,
+                          this));
+
+  return RespondLater();
+}
+
+void PlatformKeysVerifyTLSServerCertificateFunction::FinishedVerification(
+    const std::string& error,
+    int verify_result,
+    int cert_status) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  if (!error.empty()) {
+    Respond(Error(error));
+    return;
+  }
+
+  api_pk::VerificationResult result;
+  result.trusted = verify_result == net::OK;
+  if (net::IsCertificateError(verify_result)) {
+    // Only report errors, not internal informational statuses.
+    const int masked_cert_status = cert_status & net::CERT_STATUS_ALL_ERRORS;
+    for (size_t i = 0; i < arraysize(kCertStatusErrors); ++i) {
+      if ((masked_cert_status & kCertStatusErrors[i].value) ==
+          kCertStatusErrors[i].value) {
+        result.debug_errors.push_back(kCertStatusErrors[i].name);
+      }
+    }
+  }
+
+  Respond(ArgumentList(
+      api_pk::VerifyTLSServerCertificate::Results::Create(result)));
 }
 
 }  // namespace extensions

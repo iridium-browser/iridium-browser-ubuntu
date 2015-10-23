@@ -9,12 +9,14 @@
         'depends': [
           '<@(cws_widget_container)',
           '../../../../third_party/jstemplate/compiled_resources.gyp:jstemplate',
-          '../../../../ui/webui/resources/js/i18n_template_no_process.js',
+          '../../../../ui/webui/resources/js/compiled_resources.gyp:i18n_template_no_process',
           '../../../../ui/webui/resources/js/load_time_data.js',
         ],
         'externs': [
-          '<(CLOSURE_DIR)/externs/chrome_extensions.js',
-          '<(CLOSURE_DIR)/externs/file_manager_private.js',
+          '<(EXTERNS_DIR)/chrome_send.js',
+          '<(EXTERNS_DIR)/chrome_extensions.js',
+          '<(EXTERNS_DIR)/file_manager_private.js',
+          '<(EXTERNS_DIR)/metrics_private.js',
           '../externs/chrome_webstore_widget_private.js',
           '../externs/webview_tag.js'
         ]
@@ -28,7 +30,7 @@
       'target_name': 'background',
       'variables': {
         'externs': [
-          '<(CLOSURE_DIR)/externs/chrome_extensions.js',
+          '<(EXTERNS_DIR)/chrome_extensions.js',
           '../externs/chrome_webstore_widget_private.js'
         ]
       },

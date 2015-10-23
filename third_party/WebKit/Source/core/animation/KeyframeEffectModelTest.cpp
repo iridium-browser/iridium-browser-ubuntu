@@ -38,15 +38,13 @@
 #include "core/dom/Element.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 const double duration = 1.0;
 
 PassRefPtrWillBeRawPtr<AnimatableValue> unknownAnimatableValue(double n)
 {
-    return AnimatableUnknown::create(CSSPrimitiveValue::create(n, CSSPrimitiveValue::CSS_UNKNOWN).get());
+    return AnimatableUnknown::create(CSSPrimitiveValue::create(n, CSSPrimitiveValue::UnitType::Unknown).get());
 }
 
 PassRefPtrWillBeRawPtr<AnimatableValue> pixelAnimatableValue(double n)

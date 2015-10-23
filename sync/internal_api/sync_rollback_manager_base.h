@@ -66,10 +66,11 @@ class SYNC_EXPORT_PRIVATE SyncRollbackManagerBase :
   bool HasUnsyncedItems() override;
   SyncEncryptionHandler* GetEncryptionHandler() override;
   void RefreshTypes(ModelTypeSet types) override;
-  SyncContextProxy* GetSyncContextProxy() override;
+  syncer_v2::SyncContextProxy* GetSyncContextProxy() override;
   ScopedVector<ProtocolEvent> GetBufferedProtocolEvents() override;
   scoped_ptr<base::ListValue> GetAllNodesForType(
       syncer::ModelType type) override;
+  void ClearServerData(const ClearServerDataCallback& callback) override;
 
   // DirectoryChangeDelegate implementation.
   void HandleTransactionCompleteChangeEvent(
@@ -92,15 +93,15 @@ class SYNC_EXPORT_PRIVATE SyncRollbackManagerBase :
       ModelTypeSet models_with_changes) override;
 
  protected:
-  ObserverList<SyncManager::Observer>* GetObservers();
+  base::ObserverList<SyncManager::Observer>* GetObservers();
 
   // Initialize sync backup DB.
   bool InitInternal(
       const base::FilePath& database_location,
       InternalComponentsFactory* internal_components_factory,
       InternalComponentsFactory::StorageOption storage,
-      scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler,
-      ReportUnrecoverableErrorFunction report_unrecoverable_error_function);
+      const WeakHandle<UnrecoverableErrorHandler>& unrecoverable_error_handler,
+      const base::Closure& report_unrecoverable_error_function);
 
   void RegisterDirectoryTypeDebugInfoObserver(
       syncer::TypeDebugInfoObserver* observer) override;
@@ -126,10 +127,10 @@ class SYNC_EXPORT_PRIVATE SyncRollbackManagerBase :
   void InitBookmarkFolder(const std::string& folder);
 
   UserShare share_;
-  ObserverList<SyncManager::Observer> observers_;
+  base::ObserverList<SyncManager::Observer> observers_;
 
-  scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler_;
-  ReportUnrecoverableErrorFunction report_unrecoverable_error_function_;
+  WeakHandle<UnrecoverableErrorHandler> unrecoverable_error_handler_;
+  base::Closure report_unrecoverable_error_function_;
 
   scoped_ptr<SyncEncryptionHandler> dummy_handler_;
 

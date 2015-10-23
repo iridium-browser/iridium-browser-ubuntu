@@ -84,15 +84,15 @@ public:
         return adoptRefWillBeNoop(new CSSKeyframesRule(rule, sheet));
     }
 
-    virtual ~CSSKeyframesRule();
+    ~CSSKeyframesRule() override;
 
-    virtual String cssText() const override;
-    virtual void reattach(StyleRuleBase*) override;
+    String cssText() const override;
+    void reattach(StyleRuleBase*) override;
 
     String name() const { return m_keyframesRule->name(); }
     void setName(const String&);
 
-    CSSRuleList* cssRules();
+    CSSRuleList* cssRules() const override;
 
     void appendRule(const String& rule);
     void deleteRule(const String& key);
@@ -101,6 +101,7 @@ public:
     // For IndexedGetter and CSSRuleList.
     unsigned length() const;
     CSSKeyframeRule* item(unsigned index) const;
+    CSSKeyframeRule* anonymousIndexedGetter(unsigned index) const;
 
     bool isVendorPrefixed() const { return m_isPrefixed; }
     void setVendorPrefixed(bool isPrefixed) { m_isPrefixed = isPrefixed; }
@@ -112,7 +113,7 @@ public:
 private:
     CSSKeyframesRule(StyleRuleKeyframes*, CSSStyleSheet* parent);
 
-    virtual CSSRule::Type type() const override { return KEYFRAMES_RULE; }
+    CSSRule::Type type() const override { return KEYFRAMES_RULE; }
 
     RefPtrWillBeMember<StyleRuleKeyframes> m_keyframesRule;
     mutable WillBeHeapVector<RefPtrWillBeMember<CSSKeyframeRule>> m_childRuleCSSOMWrappers;

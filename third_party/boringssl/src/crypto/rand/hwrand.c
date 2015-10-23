@@ -14,43 +14,52 @@
 
 #include <openssl/rand.h>
 
-#include <stdlib.h>
+#include <assert.h>
 #include <string.h>
 
 #include <openssl/cpu.h>
 
+#include "internal.h"
+
 
 #if defined(OPENSSL_X86_64) && !defined(OPENSSL_NO_ASM)
 
-int CRYPTO_have_hwrand(void) {
+/* These functions are defined in asm/rdrand-x86_64.pl */
+extern int CRYPTO_rdrand(uint8_t out[8]);
+extern int CRYPTO_rdrand_multiple8_buf(uint8_t *buf, size_t len);
+
+static int have_rdrand(void) {
   return (OPENSSL_ia32cap_P[1] & (1u << 30)) != 0;
 }
 
-/* CRYPTO_rdrand is defined in asm/rdrand-x86_64.pl */
-extern uint64_t CRYPTO_rdrand(void);
-
-void CRYPTO_hwrand(uint8_t *buf, size_t len) {
-  while (len >= 8) {
-    uint64_t rand = CRYPTO_rdrand();
-    memcpy(buf, &rand, sizeof(rand));
-    len -= sizeof(rand);
-    buf += sizeof(rand);
+int CRYPTO_hwrand(uint8_t *buf, size_t len) {
+  if (!have_rdrand()) {
+    return 0;
   }
 
-  if (len > 0) {
-    uint64_t rand = CRYPTO_rdrand();
-    memcpy(buf, &rand, len);
+  const size_t len_multiple8 = len & ~7;
+  if (!CRYPTO_rdrand_multiple8_buf(buf, len_multiple8)) {
+    return 0;
   }
+  len -= len_multiple8;
+
+  if (len != 0) {
+    assert(len < 8);
+
+    uint8_t rand_buf[8];
+    if (!CRYPTO_rdrand(rand_buf)) {
+      return 0;
+    }
+    memcpy(buf + len_multiple8, rand_buf, len);
+  }
+
+  return 1;
 }
 
 #else
 
-int CRYPTO_have_hwrand(void) {
+int CRYPTO_hwrand(uint8_t *buf, size_t len) {
   return 0;
-}
-
-void CRYPTO_hwrand(uint8_t *buf, size_t len) {
-  abort();
 }
 
 #endif

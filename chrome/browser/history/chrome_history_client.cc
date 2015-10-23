@@ -4,62 +4,58 @@
 
 #include "chrome/browser/history/chrome_history_client.h"
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/logging.h"
+#include "chrome/browser/history/chrome_history_backend_client.h"
 #include "chrome/browser/history/history_utils.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-
-#if defined(OS_ANDROID)
-#include "base/files/file_path.h"
-#include "chrome/browser/history/android/android_provider_backend.h"
-#include "components/history/core/browser/history_backend.h"
-#endif
-
-#if defined(OS_ANDROID)
-namespace {
-
-const base::FilePath::CharType kAndroidCacheFilename[] =
-    FILE_PATH_LITERAL("AndroidCache");
-
-base::FilePath GetAndroidCacheFileName(const base::FilePath& history_dir) {
-  return history_dir.Append(kAndroidCacheFilename);
-}
-
-}  // namespace
-#endif
+#include "components/history/core/browser/history_service.h"
+#include "content/public/browser/browser_thread.h"
 
 ChromeHistoryClient::ChromeHistoryClient(
     bookmarks::BookmarkModel* bookmark_model)
-    : bookmark_model_(bookmark_model) {
-  DCHECK(bookmark_model_);
+    : bookmark_model_(bookmark_model), is_bookmark_model_observer_(false) {
 }
 
 ChromeHistoryClient::~ChromeHistoryClient() {
 }
 
-void ChromeHistoryClient::BlockUntilBookmarksLoaded() {
-  bookmark_model_->BlockTillLoaded();
+void ChromeHistoryClient::OnHistoryServiceCreated(
+    history::HistoryService* history_service) {
+  DCHECK(!is_bookmark_model_observer_);
+  if (bookmark_model_) {
+    on_bookmarks_removed_ =
+        base::Bind(&history::HistoryService::URLsNoLongerBookmarked,
+                   base::Unretained(history_service));
+    favicons_changed_subscription_ =
+        history_service->AddFaviconsChangedCallback(
+            base::Bind(&bookmarks::BookmarkModel::OnFaviconsChanged,
+                       base::Unretained(bookmark_model_)));
+    bookmark_model_->AddObserver(this);
+    is_bookmark_model_observer_ = true;
+  }
 }
 
-bool ChromeHistoryClient::IsBookmarked(const GURL& url) {
-  return bookmark_model_->IsBookmarked(url);
-}
-
-void ChromeHistoryClient::GetBookmarks(
-    std::vector<history::URLAndTitle>* bookmarks) {
-  std::vector<bookmarks::BookmarkModel::URLAndTitle> bookmarks_url_and_title;
-  bookmark_model_->GetBookmarks(&bookmarks_url_and_title);
-
-  bookmarks->reserve(bookmarks->size() + bookmarks_url_and_title.size());
-  for (size_t i = 0; i < bookmarks_url_and_title.size(); ++i) {
-    history::URLAndTitle value = {
-      bookmarks_url_and_title[i].url,
-      bookmarks_url_and_title[i].title,
-    };
-    bookmarks->push_back(value);
+void ChromeHistoryClient::Shutdown() {
+  // It's possible that bookmarks haven't loaded and history is waiting for
+  // bookmarks to complete loading. In such a situation history can't shutdown
+  // (meaning if we invoked HistoryService::Cleanup now, we would deadlock). To
+  // break the deadlock we tell BookmarkModel it's about to be deleted so that
+  // it can release the signal history is waiting on, allowing history to
+  // shutdown (HistoryService::Cleanup to complete). In such a scenario history
+  // sees an incorrect view of bookmarks, but it's better than a deadlock.
+  if (bookmark_model_) {
+    if (is_bookmark_model_observer_) {
+      is_bookmark_model_observer_ = false;
+      bookmark_model_->RemoveObserver(this);
+      favicons_changed_subscription_.reset();
+      on_bookmarks_removed_.Reset();
+    }
+    bookmark_model_->Shutdown();
   }
 }
 
@@ -74,45 +70,37 @@ void ChromeHistoryClient::NotifyProfileError(sql::InitStatus init_status) {
       IDS_COULDNT_OPEN_PROFILE_ERROR : IDS_PROFILE_TOO_NEW_ERROR);
 }
 
-bool ChromeHistoryClient::ShouldReportDatabaseError() {
-  // TODO(shess): For now, don't report on beta or stable so as not to
-  // overwhelm the crash server.  Once the big fish are fried,
-  // consider reporting at a reduced rate on the bigger channels.
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  return channel != chrome::VersionInfo::CHANNEL_STABLE &&
-      channel != chrome::VersionInfo::CHANNEL_BETA;
+void ChromeHistoryClient::PostAfterStartupTask(
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
+    const base::Closure& task) {
+  content::BrowserThread::PostAfterStartupTask(FROM_HERE, task_runner, task);
 }
 
-void ChromeHistoryClient::Shutdown() {
-  // It's possible that bookmarks haven't loaded and history is waiting for
-  // bookmarks to complete loading. In such a situation history can't shutdown
-  // (meaning if we invoked HistoryService::Cleanup now, we would deadlock). To
-  // break the deadlock we tell BookmarkModel it's about to be deleted so that
-  // it can release the signal history is waiting on, allowing history to
-  // shutdown (HistoryService::Cleanup to complete). In such a scenario history
-  // sees an incorrect view of bookmarks, but it's better than a deadlock.
-  bookmark_model_->Shutdown();
+scoped_ptr<history::HistoryBackendClient>
+ChromeHistoryClient::CreateBackendClient() {
+  return make_scoped_ptr(new ChromeHistoryBackendClient(bookmark_model_));
 }
 
-#if defined(OS_ANDROID)
-void ChromeHistoryClient::OnHistoryBackendInitialized(
-    history::HistoryBackend* history_backend,
-    history::HistoryDatabase* history_database,
-    history::ThumbnailDatabase* thumbnail_database,
-    const base::FilePath& history_dir) {
-  if (thumbnail_database) {
-    DCHECK(history_backend);
-    history_backend->SetUserData(
-        history::AndroidProviderBackend::GetUserDataKey(),
-        new history::AndroidProviderBackend(
-            GetAndroidCacheFileName(history_dir), history_database,
-            thumbnail_database, this, history_backend));
-  }
+void ChromeHistoryClient::BookmarkModelChanged() {
 }
 
-void ChromeHistoryClient::OnHistoryBackendDestroyed(
-    history::HistoryBackend* history_backend,
-    const base::FilePath& history_dir) {
-  sql::Connection::Delete(GetAndroidCacheFileName(history_dir));
+void ChromeHistoryClient::BookmarkNodeRemoved(
+    bookmarks::BookmarkModel* bookmark_model,
+    const bookmarks::BookmarkNode* parent,
+    int old_index,
+    const bookmarks::BookmarkNode* node,
+    const std::set<GURL>& removed_urls) {
+  BaseBookmarkModelObserver::BookmarkNodeRemoved(bookmark_model, parent,
+                                                 old_index, node, removed_urls);
+  DCHECK(!on_bookmarks_removed_.is_null());
+  on_bookmarks_removed_.Run(removed_urls);
 }
-#endif
+
+void ChromeHistoryClient::BookmarkAllUserNodesRemoved(
+    bookmarks::BookmarkModel* bookmark_model,
+    const std::set<GURL>& removed_urls) {
+  BaseBookmarkModelObserver::BookmarkAllUserNodesRemoved(bookmark_model,
+                                                         removed_urls);
+  DCHECK(!on_bookmarks_removed_.is_null());
+  on_bookmarks_removed_.Run(removed_urls);
+}

@@ -17,8 +17,11 @@ class CC_EXPORT RasterBuffer {
   virtual ~RasterBuffer();
 
   virtual void Playback(const RasterSource* raster_source,
-                        const gfx::Rect& rect,
-                        float scale) = 0;
+                        const gfx::Rect& raster_full_rect,
+                        const gfx::Rect& raster_dirty_rect,
+                        uint64_t new_content_id,
+                        float scale,
+                        bool include_images) = 0;
 };
 
 }  // namespace cc

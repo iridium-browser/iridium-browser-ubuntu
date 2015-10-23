@@ -59,7 +59,7 @@ static const DeprecatedPaintLayer* findParentLayerOnClippingContainerChain(const
         ASSERT(!current->hasClipOrOverflowClip());
     }
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 static const DeprecatedPaintLayer* findParentLayerOnContainingBlockChain(const LayoutObject* object)
@@ -69,21 +69,25 @@ static const DeprecatedPaintLayer* findParentLayerOnContainingBlockChain(const L
             return static_cast<const LayoutBoxModelObject*>(current)->layer();
     }
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 static bool hasClippedStackingAncestor(const DeprecatedPaintLayer* layer, const DeprecatedPaintLayer* clippingLayer)
 {
     if (layer == clippingLayer)
         return false;
+    bool foundInterveningClip = false;
     const LayoutObject* clippingLayoutObject = clippingLayer->layoutObject();
-    for (const DeprecatedPaintLayer* current = layer->compositingContainer(); current && current != clippingLayer; current = current->compositingContainer()) {
+    for (const DeprecatedPaintLayer* current = layer->compositingContainer(); current; current = current->compositingContainer()) {
+        if (current == clippingLayer)
+            return foundInterveningClip;
+
         if (current->layoutObject()->hasClipOrOverflowClip() && !clippingLayoutObject->isDescendantOf(current->layoutObject()))
-            return true;
+            foundInterveningClip = true;
 
         if (const LayoutObject* container = current->clippingContainer()) {
             if (clippingLayoutObject != container && !clippingLayoutObject->isDescendantOf(container))
-                return true;
+                foundInterveningClip = true;
         }
     }
     return false;
@@ -123,6 +127,8 @@ void CompositingInputsUpdater::updateRecursive(DeprecatedPaintLayer* layer, Upda
             properties.opacityAncestor = parent->isTransparent() ? parent : parent->opacityAncestor();
             properties.transformAncestor = parent->hasTransformRelatedProperty() ? parent : parent->transformAncestor();
             properties.filterAncestor = parent->hasFilter() ? parent : parent->filterAncestor();
+            bool layerIsFixedPosition = layer->layoutObject()->style()->position() == FixedPosition;
+            properties.nearestFixedPositionLayer = layerIsFixedPosition ? layer : parent->nearestFixedPositionLayer();
 
             if (info.hasAncestorWithClipOrOverflowClip) {
                 const DeprecatedPaintLayer* parentLayerOnClippingContainerChain = findParentLayerOnClippingContainerChain(layer);
@@ -144,7 +150,7 @@ void CompositingInputsUpdater::updateRecursive(DeprecatedPaintLayer* layer, Upda
                         properties.clipParent = clippingLayer;
                 }
 
-                if (!layer->stackingNode()->isNormalFlowOnly()
+                if (layer->stackingNode()->isTreatedAsStackingContextForPainting()
                     && properties.ancestorScrollingLayer
                     && !info.ancestorStackingContext->layoutObject()->isDescendantOf(properties.ancestorScrollingLayer->layoutObject()))
                     properties.scrollParent = properties.ancestorScrollingLayer;

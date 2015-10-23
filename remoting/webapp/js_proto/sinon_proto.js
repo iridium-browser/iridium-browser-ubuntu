@@ -29,10 +29,34 @@ sinon.assert.calledWith = function(f, data) {};
 sinon.assert.notCalled = function(f) {};
 
 /** @constructor */
+sinon.Clock = function() {};
+
+/** @param {number} ms */
+sinon.Clock.prototype.tick = function(ms) {};
+
+/** @return {void} */
+sinon.Clock.prototype.restore = function() {};
+
+/**
+ * @param {number=} opt_now
+ * @return {sinon.Clock}
+ */
+sinon.useFakeTimers = function(opt_now) {};
+
+/** @constructor */
 sinon.Expectation = function() {};
 
 /** @return {sinon.Expectation} */
 sinon.Expectation.prototype.once = function() {};
+
+/** @return {sinon.Expectation} */
+sinon.Expectation.prototype.never = function() {};
+
+/**
+ * @param {number} times
+ * @return {sinon.Expectation}
+ */
+sinon.Expectation.prototype.exactly = function(times) {};
 
 /**
  * @param {...} data
@@ -65,6 +89,11 @@ sinon.Mock.prototype.expects = function(method) {};
  * @return {void}
  */
 sinon.Mock.prototype.restore = function() {};
+
+/**
+ * @return {boolean}
+ */
+sinon.Mock.prototype.verify = function() {};
 
 /** @type {function(...):Function} */
 sinon.spy = function() {};
@@ -116,7 +145,7 @@ sinon.Spy.prototype.args;
 sinon.stub = function(opt_obj, opt_method, opt_stubFunction) {};
 
 /**
- * TODO(jrw): rename to |sinon.Stub| for consistency
+* TODO(jrw): rename to |sinon.Stub| for consistency
  * @interface
  * @extends {sinon.Spy}
  */
@@ -150,6 +179,11 @@ sinon.FakeXhrCtrl = function() {};
  */
 sinon.FakeXhrCtrl.prototype.onCreate;
 
+/**
+ * @type {function():void}
+ */
+sinon.FakeXhrCtrl.prototype.restore;
+
 /** @return {sinon.FakeXhrCtrl} */
 sinon.useFakeXMLHttpRequest = function() {};
 
@@ -171,12 +205,12 @@ sinon.FakeXhr.prototype.withCredentials;
 /** @type {?string} */
 sinon.FakeXhr.prototype.requestBody;
 
-/** @type {!Object<string,string>} */
+/** @type {!Object<string>} */
 sinon.FakeXhr.prototype.requestHeaders;
 
 /**
  * @param {number} status
- * @param {!Object<string,string>} headers
+ * @param {!Object<string>} headers
  * @param {?string} content
  */
 sinon.FakeXhr.prototype.respond;

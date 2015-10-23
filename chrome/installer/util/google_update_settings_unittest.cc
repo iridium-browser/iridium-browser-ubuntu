@@ -21,7 +21,6 @@
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/fake_installation_state.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/google_update_experiment_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,7 +31,10 @@ using installer::ChannelInfo;
 namespace {
 
 const wchar_t kTestProductGuid[] = L"{89F1B351-B15D-48D4-8F10-1298721CF13D}";
+
+#if defined(GOOGLE_CHROME_BUILD)
 const wchar_t kTestExperimentLabel[] = L"test_label_value";
+#endif
 
 // This test fixture redirects the HKLM and HKCU registry hives for
 // the duration of the test to make it independent of the machine

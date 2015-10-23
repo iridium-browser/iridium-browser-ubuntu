@@ -12,10 +12,10 @@ import android.text.TextUtils;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.privacy.CrashReportingPermissionManager;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
@@ -52,9 +52,7 @@ public class UmaSessionStats implements NetworkChangeNotifier.ConnectionTypeObse
         mReportingPermissionManager = PrivacyPreferencesManager.getInstance(context);
     }
 
-    private void recordPageLoadStats(int tabId) {
-        Tab tab = mTabModelSelector.getTabById(tabId);
-        if (tab == null) return;
+    private void recordPageLoadStats(Tab tab) {
         WebContents webContents = tab.getWebContents();
         boolean isDesktopUserAgent = webContents != null
                 && webContents.getNavigationController().getUseDesktopUserAgent();
@@ -62,6 +60,11 @@ public class UmaSessionStats implements NetworkChangeNotifier.ConnectionTypeObse
         if (mKeyboardConnected) {
             nativeRecordPageLoadedWithKeyboard();
         }
+
+        // If the session has ended (i.e. chrome is in the background), escape early. Ideally we
+        // could track this number as part of either the previous or next session but this isn't
+        // possible since the TabSelector is needed to figure out the current number of open tabs.
+        if (mTabModelSelector == null) return;
 
         TabModel regularModel = mTabModelSelector.getModel(false);
         nativeRecordTabCountPerLoad(getTabCountFromModel(regularModel));
@@ -98,7 +101,7 @@ public class UmaSessionStats implements NetworkChangeNotifier.ConnectionTypeObse
             mTabModelSelectorTabObserver = new TabModelSelectorTabObserver(mTabModelSelector) {
                 @Override
                 public void onPageLoadFinished(Tab tab) {
-                    recordPageLoadStats(tab.getId());
+                    recordPageLoadStats(tab);
                 }
             };
         }

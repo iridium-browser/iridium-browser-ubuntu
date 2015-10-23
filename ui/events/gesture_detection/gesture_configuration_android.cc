@@ -12,13 +12,13 @@ using gfx::ViewConfiguration;
 
 namespace ui {
 namespace {
-// This was the minimum tap/press size used on Android before the new gesture
-// detection pipeline.
-const float kMinGestureBoundsLengthDips = 24.f;
 
-// This value is somewhat arbitrary, but provides a reasonable maximum
-// approximating a large thumb depression.
-const float kMaxGestureBoundsLengthDips = kMinGestureBoundsLengthDips * 4.f;
+// Touch radii on Android can be both noisy and inaccurate. The old Java
+// gesture detection pipeline used a fixed value of 24 as the gesture bounds.
+// We relax that value somewhat, but not by much; there's a fairly small window
+// within which gesture bounds are useful for features like touch adjustment.
+const float kMinGestureBoundsLengthDips = 20.f;
+const float kMaxGestureBoundsLengthDips = 32.f;
 
 class GestureConfigurationAndroid : public GestureConfiguration {
  public:
@@ -31,35 +31,33 @@ class GestureConfigurationAndroid : public GestureConfiguration {
 
  private:
   GestureConfigurationAndroid() : GestureConfiguration() {
-    float raw_pixel_to_dip_ratio = 1.f / gfx::Screen::GetNativeScreen()
-                                       ->GetPrimaryDisplay()
-                                       .device_scale_factor();
     set_double_tap_enabled(true);
     set_double_tap_timeout_in_ms(ViewConfiguration::GetDoubleTapTimeoutInMs());
     set_gesture_begin_end_types_enabled(false);
     set_long_press_time_in_ms(ViewConfiguration::GetLongPressTimeoutInMs());
     set_max_distance_between_taps_for_double_tap(
-        ViewConfiguration::GetDoubleTapSlopInPixels() * raw_pixel_to_dip_ratio);
+        ViewConfiguration::GetDoubleTapSlopInDips());
     set_max_fling_velocity(
-        ViewConfiguration::GetMaximumFlingVelocityInPixelsPerSecond() *
-        raw_pixel_to_dip_ratio);
+        ViewConfiguration::GetMaximumFlingVelocityInDipsPerSecond());
     set_max_gesture_bounds_length(kMaxGestureBoundsLengthDips);
     set_max_touch_move_in_pixels_for_click(
-        ViewConfiguration::GetTouchSlopInPixels() * raw_pixel_to_dip_ratio);
+        ViewConfiguration::GetTouchSlopInDips());
     set_min_fling_velocity(
-        ViewConfiguration::GetMinimumFlingVelocityInPixelsPerSecond() *
-        raw_pixel_to_dip_ratio);
+        ViewConfiguration::GetMinimumFlingVelocityInDipsPerSecond());
     set_min_gesture_bounds_length(kMinGestureBoundsLengthDips);
     set_min_pinch_update_span_delta(0.f);
     set_min_scaling_span_in_pixels(
-        ViewConfiguration::GetMinScalingSpanInPixels() *
-        raw_pixel_to_dip_ratio);
+        ViewConfiguration::GetMinScalingSpanInDips());
     set_min_scaling_touch_major(
-        ViewConfiguration::GetMinScalingTouchMajorInPixels() *
-        raw_pixel_to_dip_ratio);
+        ViewConfiguration::GetMinScalingTouchMajorInDips());
     set_show_press_delay_in_ms(ViewConfiguration::GetTapTimeoutInMs());
-    set_span_slop(ViewConfiguration::GetTouchSlopInPixels() * 2.f *
-                  raw_pixel_to_dip_ratio);
+    set_span_slop(ViewConfiguration::GetTouchSlopInDips() * 2.f);
+    set_fling_touchscreen_tap_suppression_enabled(true);
+    set_fling_touchpad_tap_suppression_enabled(false);
+    set_fling_max_cancel_to_down_time_in_ms(
+        ViewConfiguration::GetTapTimeoutInMs());
+    set_fling_max_tap_gap_time_in_ms(
+        ViewConfiguration::GetLongPressTimeoutInMs());
   }
 
   friend struct DefaultSingletonTraits<GestureConfigurationAndroid>;

@@ -12,9 +12,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_service.h"
 #include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -22,7 +22,7 @@
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
-#include "chrome/browser/signin/android_profile_oauth2_token_service.h"
+#include "chrome/browser/signin/oauth2_token_service_delegate_android.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/pref_names.h"
@@ -148,30 +148,24 @@ void SigninManagerAndroid::OnSignInCompleted(JNIEnv* env,
                                              jobjectArray accountNames) {
   DVLOG(1) << "SigninManagerAndroid::OnSignInCompleted";
   // Seed the account tracker with id/email information if provided.
-  if (accountIds && accountNames) {
-    std::vector<std::string> gaia_ids;
-    std::vector<std::string> emails;
-    base::android::AppendJavaStringArrayToStringVector(env, accountIds,
-                                                       &gaia_ids);
-    base::android::AppendJavaStringArrayToStringVector(env, accountNames,
-                                                       &emails);
-    DCHECK_EQ(emails.size(), gaia_ids.size());
-    DVLOG(1) << "SigninManagerAndroid::OnSignInCompleted: seeding "
-             << emails.size() << " accounts";
+  DCHECK(accountIds && accountNames);
+  std::vector<std::string> gaia_ids;
+  std::vector<std::string> emails;
+  base::android::AppendJavaStringArrayToStringVector(env, accountIds,
+                                                     &gaia_ids);
+  base::android::AppendJavaStringArrayToStringVector(env, accountNames,
+                                                     &emails);
+  DCHECK_EQ(emails.size(), gaia_ids.size());
+  DVLOG(1) << "SigninManagerAndroid::OnSignInCompleted: seeding "
+           << emails.size() << " accounts";
 
-    AccountTrackerService* tracker =
-        AccountTrackerServiceFactory::GetForProfile(profile_);
-    for (size_t i = 0; i < emails.size(); ++i) {
-      DVLOG(1) << "SigninManagerAndroid::OnSignInCompleted: seeding"
-               << " gaia_id=" << gaia_ids[i]
-               << " email=" << emails[i];
-      if (!gaia_ids[i].empty() && !emails[i].empty())
-        tracker->SeedAccountInfo(gaia_ids[i], emails[i]);
-    }
-  } else {
-    DVLOG(1) << "SigninManagerAndroid::OnSignInCompleted: missing ids/email"
-             << " ids=" << (void*) accountIds
-             << " emails=" << (void*) accountNames;
+  AccountTrackerService* tracker =
+      AccountTrackerServiceFactory::GetForProfile(profile_);
+  for (size_t i = 0; i < emails.size(); ++i) {
+    DVLOG(1) << "SigninManagerAndroid::OnSignInCompleted: seeding"
+             << " gaia_id=" << gaia_ids[i] << " email=" << emails[i];
+    if (!gaia_ids[i].empty() && !emails[i].empty())
+      tracker->SeedAccountInfo(gaia_ids[i], emails[i]);
   }
 
   SigninManagerFactory::GetForProfile(profile_)->OnExternalSigninCompleted(
@@ -265,13 +259,14 @@ void SigninManagerAndroid::ClearLastSignedInUser() {
 void SigninManagerAndroid::LogInSignedInUser(JNIEnv* env, jobject obj) {
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(profile_);
-    // Just fire the events and let the Account Reconcilor handles everything.
-    AndroidProfileOAuth2TokenService* token_service =
-        ProfileOAuth2TokenServiceFactory::GetPlatformSpecificForProfile(
-            profile_);
-    const std::string& primary_acct =
-        signin_manager->GetAuthenticatedAccountId();
-    token_service->ValidateAccounts(primary_acct, true);
+  // With the account consistency enabled let the account Reconcilor handles
+  // everything.
+  ProfileOAuth2TokenService* token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
+  const std::string& primary_acct = signin_manager->GetAuthenticatedAccountId();
+
+  static_cast<OAuth2TokenServiceDelegateAndroid*>(token_service->GetDelegate())
+      ->ValidateAccounts(primary_acct, true);
 }
 
 jboolean SigninManagerAndroid::IsSigninAllowedByPolicy(JNIEnv* env,

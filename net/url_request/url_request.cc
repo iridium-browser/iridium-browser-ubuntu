@@ -688,8 +688,7 @@ void URLRequest::DoCancel(int error, const SSLInfo& ssl_info) {
   // If the URL request already has an error status, then canceling is a no-op.
   // Plus, we don't want to change the error status once it has been set.
   if (status_.is_success()) {
-    status_.set_status(URLRequestStatus::CANCELED);
-    status_.set_error(error);
+    status_ = URLRequestStatus(URLRequestStatus::CANCELED, error);
     response_info_.ssl_info = ssl_info;
 
     // If the request hasn't already been completed, log a cancellation event.
@@ -940,21 +939,20 @@ int URLRequest::Redirect(const RedirectInfo& redirect_info) {
   // not set to "null", a POST request from origin A to a malicious origin M
   // could be redirected by M back to A.
   //
-  // In the Section 4.2, Step 4.10 of the Fetch spec
-  // (https://fetch.spec.whatwg.org/#concept-http-fetch), it states that on
-  // cross-origin 301, 302, 303, 307, and 308 redirects, the user agent should
-  // set the request's origin to an "opaque identifier," which serializes to
-  // "null." This matches Firefox and IE behavior, although it supercedes the
-  // suggested behavior in RFC 6454, "The Web Origin Concept."
+  // This behavior is specified in step 1 of step 10 of the 301, 302, 303, 307,
+  // 308 block of step 5 of Section 4.2 of Fetch[1] (which supercedes the
+  // behavior outlined in RFC 6454[2].
   //
-  // See also https://crbug.com/465517.
+  // [1]: https://fetch.spec.whatwg.org/#concept-http-fetch
+  // [2]: https://tools.ietf.org/html/rfc6454#section-7
   //
-  // TODO(jww): This is probably layering violation and should be refactored
-  // into //content. See https://crbug.com/471397.
-  if (redirect_info.new_url.GetOrigin() != url().GetOrigin() &&
+  // TODO(jww): This is a layering violation and should be refactored somewhere
+  // up into //net's embedder. https://crbug.com/471397
+  if (!url::Origin(redirect_info.new_url)
+           .IsSameOriginWith(url::Origin(url())) &&
       extra_request_headers_.HasHeader(HttpRequestHeaders::kOrigin)) {
     extra_request_headers_.SetHeader(HttpRequestHeaders::kOrigin,
-                                     url::Origin().string());
+                                     url::Origin().Serialize());
   }
 
   referrer_ = redirect_info.new_referrer;
@@ -1180,10 +1178,7 @@ void URLRequest::OnCallToDelegateComplete() {
 }
 
 void URLRequest::set_stack_trace(const base::debug::StackTrace& stack_trace) {
-  base::debug::StackTrace* stack_trace_copy =
-      new base::debug::StackTrace(NULL, 0);
-  *stack_trace_copy = stack_trace;
-  stack_trace_.reset(stack_trace_copy);
+  stack_trace_.reset(new base::debug::StackTrace(stack_trace));
 }
 
 const base::debug::StackTrace* URLRequest::stack_trace() const {

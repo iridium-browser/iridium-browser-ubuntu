@@ -8,8 +8,9 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -98,17 +99,6 @@ bool FailedWithProxy(const net::URLFetcher* fetcher) {
   return false;
 }
 
-const char* UserAffiliationToString(UserAffiliation affiliation) {
-  switch (affiliation) {
-    case USER_AFFILIATION_MANAGED:
-      return dm_protocol::kValueUserAffiliationManaged;
-    case USER_AFFILIATION_NONE:
-      return dm_protocol::kValueUserAffiliationNone;
-  }
-  NOTREACHED() << "Invalid user affiliation " << affiliation;
-  return dm_protocol::kValueUserAffiliationNone;
-}
-
 const char* JobTypeToRequestType(DeviceManagementRequestJob::JobType type) {
   switch (type) {
     case DeviceManagementRequestJob::TYPE_AUTO_ENROLLMENT:
@@ -133,6 +123,8 @@ const char* JobTypeToRequestType(DeviceManagementRequestJob::JobType type) {
       return dm_protocol::kValueRequestDeviceAttributeUpdatePermission;
     case DeviceManagementRequestJob::TYPE_ATTRIBUTE_UPDATE:
       return dm_protocol::kValueRequestDeviceAttributeUpdate;
+    case DeviceManagementRequestJob::TYPE_GCM_ID_UPDATE:
+      return dm_protocol::kValueRequestGcmIdUpdate;
   }
   NOTREACHED() << "Invalid job type " << type;
   return "";
@@ -370,12 +362,6 @@ void DeviceManagementRequestJob::SetOAuthToken(const std::string& oauth_token) {
   AddParameter(dm_protocol::kParamOAuthToken, oauth_token);
 }
 
-void DeviceManagementRequestJob::SetUserAffiliation(
-    UserAffiliation user_affiliation) {
-  AddParameter(dm_protocol::kParamUserAffiliation,
-               UserAffiliationToString(user_affiliation));
-}
-
 void DeviceManagementRequestJob::SetDMToken(const std::string& dm_token) {
   dm_token_ = dm_token;
 }
@@ -437,10 +423,9 @@ DeviceManagementRequestJob* DeviceManagementService::CreateJob(
 void DeviceManagementService::ScheduleInitialization(int64 delay_milliseconds) {
   if (initialized_)
     return;
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&DeviceManagementService::Initialize,
-                 weak_ptr_factory_.GetWeakPtr()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&DeviceManagementService::Initialize,
+                            weak_ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(delay_milliseconds));
 }
 

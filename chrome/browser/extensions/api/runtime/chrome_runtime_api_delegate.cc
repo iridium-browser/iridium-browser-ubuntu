@@ -7,8 +7,10 @@
 #include <string>
 #include <utility>
 
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -35,7 +37,7 @@ using extensions::Extension;
 using extensions::ExtensionSystem;
 using extensions::ExtensionUpdater;
 
-using extensions::core_api::runtime::PlatformInfo;
+using extensions::api::runtime::PlatformInfo;
 
 namespace {
 
@@ -119,29 +121,23 @@ void ChromeRuntimeAPIDelegate::ReloadExtension(
     // extension function unloading the extension has to be done
     // asynchronously. Fortunately PostTask guarentees FIFO order so just
     // post both tasks.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ExtensionService::TerminateExtension,
-                   service->AsWeakPtr(),
-                   extension_id));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ExtensionService::TerminateExtension,
+                              service->AsWeakPtr(), extension_id));
     extensions::WarningSet warnings;
     warnings.insert(
         extensions::Warning::CreateReloadTooFrequentWarning(
             extension_id));
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&extensions::WarningService::NotifyWarningsOnUI,
-                   browser_context_,
-                   warnings));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&extensions::WarningService::NotifyWarningsOnUI,
+                              browser_context_, warnings));
   } else {
     // We can't call ReloadExtension directly, since when this method finishes
     // it tries to decrease the reference count for the extension, which fails
     // if the extension has already been reloaded; so instead we post a task.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ExtensionService::ReloadExtension,
-                   service->AsWeakPtr(),
-                   extension_id));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ExtensionService::ReloadExtension,
+                              service->AsWeakPtr(), extension_id));
   }
 }
 
@@ -159,7 +155,7 @@ bool ChromeRuntimeAPIDelegate::CheckForUpdates(
           base::Bind(&ChromeRuntimeAPIDelegate::UpdateCheckComplete,
                      base::Unretained(this),
                      extension_id))) {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(callback, UpdateCheckResult(true, kUpdateThrottled, "")));
   } else {
@@ -187,15 +183,15 @@ void ChromeRuntimeAPIDelegate::OpenURL(const GURL& uninstall_url) {
 bool ChromeRuntimeAPIDelegate::GetPlatformInfo(PlatformInfo* info) {
   const char* os = update_client::UpdateQueryParams::GetOS();
   if (strcmp(os, "mac") == 0) {
-    info->os = extensions::core_api::runtime::PLATFORM_OS_MAC;
+    info->os = extensions::api::runtime::PLATFORM_OS_MAC;
   } else if (strcmp(os, "win") == 0) {
-    info->os = extensions::core_api::runtime::PLATFORM_OS_WIN;
+    info->os = extensions::api::runtime::PLATFORM_OS_WIN;
   } else if (strcmp(os, "cros") == 0) {
-    info->os = extensions::core_api::runtime::PLATFORM_OS_CROS;
+    info->os = extensions::api::runtime::PLATFORM_OS_CROS;
   } else if (strcmp(os, "linux") == 0) {
-    info->os = extensions::core_api::runtime::PLATFORM_OS_LINUX;
+    info->os = extensions::api::runtime::PLATFORM_OS_LINUX;
   } else if (strcmp(os, "openbsd") == 0) {
-    info->os = extensions::core_api::runtime::PLATFORM_OS_OPENBSD;
+    info->os = extensions::api::runtime::PLATFORM_OS_OPENBSD;
   } else {
     NOTREACHED();
     return false;
@@ -203,11 +199,11 @@ bool ChromeRuntimeAPIDelegate::GetPlatformInfo(PlatformInfo* info) {
 
   const char* arch = update_client::UpdateQueryParams::GetArch();
   if (strcmp(arch, "arm") == 0) {
-    info->arch = extensions::core_api::runtime::PLATFORM_ARCH_ARM;
+    info->arch = extensions::api::runtime::PLATFORM_ARCH_ARM;
   } else if (strcmp(arch, "x86") == 0) {
-    info->arch = extensions::core_api::runtime::PLATFORM_ARCH_X86_32;
+    info->arch = extensions::api::runtime::PLATFORM_ARCH_X86_32;
   } else if (strcmp(arch, "x64") == 0) {
-    info->arch = extensions::core_api::runtime::PLATFORM_ARCH_X86_64;
+    info->arch = extensions::api::runtime::PLATFORM_ARCH_X86_64;
   } else {
     NOTREACHED();
     return false;
@@ -215,14 +211,11 @@ bool ChromeRuntimeAPIDelegate::GetPlatformInfo(PlatformInfo* info) {
 
   const char* nacl_arch = update_client::UpdateQueryParams::GetNaclArch();
   if (strcmp(nacl_arch, "arm") == 0) {
-    info->nacl_arch =
-        extensions::core_api::runtime::PLATFORM_NACL_ARCH_ARM;
+    info->nacl_arch = extensions::api::runtime::PLATFORM_NACL_ARCH_ARM;
   } else if (strcmp(nacl_arch, "x86-32") == 0) {
-    info->nacl_arch =
-        extensions::core_api::runtime::PLATFORM_NACL_ARCH_X86_32;
+    info->nacl_arch = extensions::api::runtime::PLATFORM_NACL_ARCH_X86_32;
   } else if (strcmp(nacl_arch, "x86-64") == 0) {
-    info->nacl_arch =
-        extensions::core_api::runtime::PLATFORM_NACL_ARCH_X86_64;
+    info->nacl_arch = extensions::api::runtime::PLATFORM_NACL_ARCH_X86_64;
   } else {
     NOTREACHED();
     return false;

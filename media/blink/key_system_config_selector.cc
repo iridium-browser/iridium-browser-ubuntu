@@ -11,8 +11,8 @@
 #include "media/base/cdm_config.h"
 #include "media/base/key_systems.h"
 #include "media/base/media_permission.h"
+#include "media/base/mime_util.h"
 #include "media/blink/webmediaplayer_util.h"
-#include "net/base/mime_util.h"
 #include "third_party/WebKit/public/platform/WebMediaKeySystemConfiguration.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -281,10 +281,10 @@ bool KeySystemConfigSelector::IsSupportedContentType(
     KeySystemConfigSelector::ConfigState* config_state) {
   // TODO(sandersd): Move contentType parsing from Blink to here so that invalid
   // parameters can be rejected. http://crbug.com/417561
-  std::string container_lower = base::StringToLowerASCII(container_mime_type);
+  std::string container_lower = base::ToLowerASCII(container_mime_type);
 
   // Check that |container_mime_type| is supported by Chrome.
-  if (!net::IsSupportedMediaMimeType(container_lower))
+  if (!media::IsSupportedMediaMimeType(container_lower))
     return false;
 
   // Check that |codecs| are supported by Chrome. This is done primarily to
@@ -292,10 +292,10 @@ bool KeySystemConfigSelector::IsSupportedContentType(
   // codecs that Chrome does not (which could complicate the robustness
   // algorithm).
   std::vector<std::string> codec_vector;
-  net::ParseCodecString(codecs, &codec_vector, false);
+  media::ParseCodecString(codecs, &codec_vector, false);
   if (!codec_vector.empty() &&
-      (net::IsSupportedStrictMediaMimeType(container_lower, codec_vector) !=
-       net::IsSupported)) {
+      (media::IsSupportedStrictMediaMimeType(container_lower, codec_vector) !=
+       media::IsSupported)) {
     return false;
   }
 
@@ -303,7 +303,7 @@ bool KeySystemConfigSelector::IsSupportedContentType(
   // This check does not handle extended codecs, so extended codec information
   // is stripped (extended codec information was checked above).
   std::vector<std::string> stripped_codec_vector;
-  net::ParseCodecString(codecs, &stripped_codec_vector, true);
+  media::ParseCodecString(codecs, &stripped_codec_vector, true);
   EmeConfigRule codecs_rule = key_systems_->GetContentTypeConfigRule(
       key_system, media_type, container_lower, stripped_codec_vector);
   if (!config_state->IsRuleSupported(codecs_rule))
@@ -347,8 +347,10 @@ bool KeySystemConfigSelector::GetSupportedCapabilities(
     if (!base::IsStringASCII(capability.mimeType) ||
         !base::IsStringASCII(capability.codecs) ||
         !IsSupportedContentType(key_system, media_type,
-                                base::UTF16ToASCII(capability.mimeType),
-                                base::UTF16ToASCII(capability.codecs),
+                                base::UTF16ToASCII(
+                                    base::StringPiece16(capability.mimeType)),
+                                base::UTF16ToASCII(
+                                    base::StringPiece16(capability.codecs)),
                                 &proposed_config_state)) {
       continue;
     }
@@ -360,7 +362,8 @@ bool KeySystemConfigSelector::GetSupportedCapabilities(
       if (!base::IsStringASCII(capability.robustness))
         continue;
       EmeConfigRule robustness_rule = key_systems_->GetRobustnessConfigRule(
-          key_system, media_type, base::UTF16ToASCII(capability.robustness));
+          key_system, media_type, base::UTF16ToASCII(
+              base::StringPiece16(capability.robustness)));
       if (!proposed_config_state.IsRuleSupported(robustness_rule))
         continue;
       proposed_config_state.AddRule(robustness_rule);
@@ -688,7 +691,8 @@ void KeySystemConfigSelector::SelectConfig(
     return;
   }
 
-  std::string key_system_ascii = base::UTF16ToASCII(key_system);
+  std::string key_system_ascii =
+      base::UTF16ToASCII(base::StringPiece16(key_system));
   if (!key_systems_->IsSupportedKeySystem(key_system_ascii)) {
     not_supported_cb.Run("Unsupported keySystem");
     return;

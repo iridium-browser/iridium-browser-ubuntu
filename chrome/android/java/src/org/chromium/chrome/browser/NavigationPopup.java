@@ -21,8 +21,8 @@ import android.widget.ListPopupWindow;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHistory;
@@ -214,7 +214,7 @@ public class NavigationPopup extends ListPopupWindow implements AdapterView.OnIt
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
             TextView view;
-            if (convertView != null && convertView instanceof TextView) {
+            if (convertView instanceof TextView) {
                 view = (TextView) convertView;
             } else {
                 view = mListItemFactory.createListItem();

@@ -80,7 +80,7 @@ const char* StringsStorage::GetName(Name* name) {
     String* str = String::cast(name);
     int length = Min(kMaxNameSize, str->length());
     int actual_length = 0;
-    SmartArrayPointer<char> data = str->ToCString(
+    base::SmartArrayPointer<char> data = str->ToCString(
         DISALLOW_NULLS, ROBUST_STRING_TRAVERSAL, 0, length, &actual_length);
     return AddOrDisposeString(data.Detach(), actual_length);
   } else if (name->IsSymbol()) {
@@ -119,5 +119,5 @@ HashMap::Entry* StringsStorage::GetEntry(const char* str, int len) {
   uint32_t hash = StringHasher::HashSequentialString(str, len, hash_seed_);
   return names_.LookupOrInsert(const_cast<char*>(str), hash);
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

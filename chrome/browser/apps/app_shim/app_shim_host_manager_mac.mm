@@ -17,11 +17,12 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/apps/app_shim/app_shim_handler_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_host_mac.h"
+#include "chrome/browser/apps/app_shim/extension_app_shim_handler_mac.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/mac/app_mode_common.h"
+#include "components/version_info/version_info.h"
 
 using content::BrowserThread;
 
@@ -55,14 +56,14 @@ void DeleteSocketFiles(const base::FilePath& directory_in_tmp,
 
 }  // namespace
 
-AppShimHostManager::AppShimHostManager()
-    : did_init_(false) {}
+AppShimHostManager::AppShimHostManager() {
+}
 
 void AppShimHostManager::Init() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(!did_init_);
-  did_init_ = true;
-  apps::AppShimHandler::SetDefaultHandler(&extension_app_shim_handler_);
+  DCHECK(!extension_app_shim_handler_);
+  extension_app_shim_handler_.reset(new apps::ExtensionAppShimHandler());
+  apps::AppShimHandler::SetDefaultHandler(extension_app_shim_handler_.get());
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&AppShimHostManager::InitOnFileThread, this));
@@ -70,7 +71,11 @@ void AppShimHostManager::Init() {
 
 AppShimHostManager::~AppShimHostManager() {
   acceptor_.reset();
-  if (!did_init_)
+
+  // The AppShimHostManager is only initialized if the Chrome process
+  // successfully took the singleton lock. If it was not initialized, do not
+  // delete existing app shim socket files as they belong to another process.
+  if (!extension_app_shim_handler_)
     return;
 
   apps::AppShimHandler::SetDefaultHandler(NULL);
@@ -135,7 +140,7 @@ void AppShimHostManager::InitOnFileThread() {
   base::FilePath version_path =
       user_data_dir.Append(app_mode::kRunningChromeVersionSymlinkName);
   base::DeleteFile(version_path, false);
-  base::CreateSymbolicLink(base::FilePath(chrome::VersionInfo().Version()),
+  base::CreateSymbolicLink(base::FilePath(version_info::GetVersionNumber()),
                            version_path);
 
   BrowserThread::PostTask(

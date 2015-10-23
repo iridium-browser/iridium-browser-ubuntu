@@ -15,6 +15,7 @@ from pylib.base import base_setup
 from pylib.base import base_test_result
 from pylib.base import test_dispatcher
 from pylib.device import device_utils
+from pylib.gtest import gtest_test_instance
 from pylib.gtest import test_package_apk
 from pylib.gtest import test_package_exe
 from pylib.gtest import test_runner
@@ -25,27 +26,8 @@ sys.path.insert(0,
 import unittest_util # pylint: disable=F0401
 
 
-ISOLATE_FILE_PATHS = {
-    'base_unittests': 'base/base_unittests.isolate',
-    'blink_heap_unittests':
-      'third_party/WebKit/Source/platform/heap/BlinkHeapUnitTests.isolate',
-    'breakpad_unittests': 'breakpad/breakpad_unittests.isolate',
-    'cc_perftests': 'cc/cc_perftests.isolate',
-    'components_browsertests': 'components/components_browsertests.isolate',
-    'components_unittests': 'components/components_unittests.isolate',
-    'content_browsertests': 'content/content_browsertests.isolate',
-    'content_unittests': 'content/content_unittests.isolate',
-    'media_perftests': 'media/media_perftests.isolate',
-    'media_unittests': 'media/media_unittests.isolate',
-    'midi_unittests': 'media/midi/midi_unittests.isolate',
-    'net_unittests': 'net/net_unittests.isolate',
-    'sql_unittests': 'sql/sql_unittests.isolate',
-    'sync_unit_tests': 'sync/sync_unit_tests.isolate',
-    'ui_base_unittests': 'ui/base/ui_base_tests.isolate',
-    'unit_tests': 'chrome/unit_tests.isolate',
-    'webkit_unit_tests':
-      'third_party/WebKit/Source/web/WebKitUnitTests.isolate',
-}
+ISOLATE_FILE_PATHS = gtest_test_instance._DEFAULT_ISOLATE_FILE_PATHS
+
 
 # Used for filtering large data deps at a finer grain than what's allowed in
 # isolate files since pushing deps to devices is expensive.
@@ -240,8 +222,7 @@ def Setup(test_options, devices):
     tests = unittest_util.FilterTestNames(tests, test_options.gtest_filter)
 
   # Coalesce unit tests into a single test per device
-  if (test_options.suite_name != 'content_browsertests' and
-      test_options.suite_name != 'components_browsertests'):
+  if test_options.suite_name not in gtest_test_instance.BROWSER_TEST_SUITES:
     num_devices = len(devices)
     tests = [':'.join(tests[i::num_devices]) for i in xrange(num_devices)]
     tests = [t for t in tests if t]

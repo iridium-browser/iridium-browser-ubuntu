@@ -12,11 +12,11 @@
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/chromeos/drive/fake_file_system.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/local_file_reader.h"
-#include "chrome/browser/chromeos/drive/test_util.h"
-#include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/drive/test_util.h"
+#include "components/drive/drive_test_util.h"
+#include "components/drive/file_system_core_util.h"
+#include "components/drive/local_file_reader.h"
+#include "components/drive/service/fake_drive_service.h"
+#include "components/drive/service/test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "google_apis/drive/drive_api_parser.h"
@@ -66,7 +66,7 @@ class LocalReaderProxyTest : public ::testing::Test {
 TEST_F(LocalReaderProxyTest, Read) {
   // Open the file first.
   scoped_ptr<util::LocalFileReader> file_reader(
-      new util::LocalFileReader(worker_thread_->message_loop_proxy().get()));
+      new util::LocalFileReader(worker_thread_->task_runner().get()));
   net::TestCompletionCallback callback;
   file_reader->Open(file_path_, 0, callback.callback());
   ASSERT_EQ(net::OK, callback.WaitForResult());
@@ -87,7 +87,7 @@ TEST_F(LocalReaderProxyTest, ReadWithLimit) {
 
   // Open the file first.
   scoped_ptr<util::LocalFileReader> file_reader(
-      new util::LocalFileReader(worker_thread_->message_loop_proxy().get()));
+      new util::LocalFileReader(worker_thread_->task_runner().get()));
   net::TestCompletionCallback callback;
   file_reader->Open(file_path_, 0, callback.callback());
   ASSERT_EQ(net::OK, callback.WaitForResult());
@@ -330,7 +330,7 @@ TEST_F(DriveFileStreamReaderTest, Read) {
   // Create the reader, and initialize it.
   // In this case, the file is not yet locally cached.
   scoped_ptr<DriveFileStreamReader> reader(new DriveFileStreamReader(
-      GetFileSystemGetter(), worker_thread_->message_loop_proxy().get()));
+      GetFileSystemGetter(), worker_thread_->task_runner().get()));
   EXPECT_FALSE(reader->IsInitialized());
 
   int error = net::ERR_FAILED;
@@ -357,8 +357,8 @@ TEST_F(DriveFileStreamReaderTest, Read) {
 
   // Create second instance and initialize it.
   // In this case, the file should be cached one.
-  reader.reset(new DriveFileStreamReader(
-      GetFileSystemGetter(), worker_thread_->message_loop_proxy().get()));
+  reader.reset(new DriveFileStreamReader(GetFileSystemGetter(),
+                                         worker_thread_->task_runner().get()));
   EXPECT_FALSE(reader->IsInitialized());
 
   error = net::ERR_FAILED;
@@ -398,7 +398,7 @@ TEST_F(DriveFileStreamReaderTest, ReadRange) {
   // Create the reader, and initialize it.
   // In this case, the file is not yet locally cached.
   scoped_ptr<DriveFileStreamReader> reader(new DriveFileStreamReader(
-      GetFileSystemGetter(), worker_thread_->message_loop_proxy().get()));
+      GetFileSystemGetter(), worker_thread_->task_runner().get()));
   EXPECT_FALSE(reader->IsInitialized());
 
   int error = net::ERR_FAILED;
@@ -430,8 +430,8 @@ TEST_F(DriveFileStreamReaderTest, ReadRange) {
 
   // Create second instance and initialize it.
   // In this case, the file should be cached one.
-  reader.reset(new DriveFileStreamReader(
-      GetFileSystemGetter(), worker_thread_->message_loop_proxy().get()));
+  reader.reset(new DriveFileStreamReader(GetFileSystemGetter(),
+                                         worker_thread_->task_runner().get()));
   EXPECT_FALSE(reader->IsInitialized());
 
   error = net::ERR_FAILED;
@@ -467,7 +467,7 @@ TEST_F(DriveFileStreamReaderTest, OutOfRangeError) {
   // Create the reader, and initialize it.
   // In this case, the file is not yet locally cached.
   scoped_ptr<DriveFileStreamReader> reader(new DriveFileStreamReader(
-      GetFileSystemGetter(), worker_thread_->message_loop_proxy().get()));
+      GetFileSystemGetter(), worker_thread_->task_runner().get()));
   EXPECT_FALSE(reader->IsInitialized());
 
   int error = net::ERR_FAILED;
@@ -513,7 +513,7 @@ TEST_F(DriveFileStreamReaderTest, ZeroByteFileRead) {
   // Create the reader, and initialize it.
   // In this case, the file is not yet locally cached.
   scoped_ptr<DriveFileStreamReader> reader(new DriveFileStreamReader(
-      GetFileSystemGetter(), worker_thread_->message_loop_proxy().get()));
+      GetFileSystemGetter(), worker_thread_->task_runner().get()));
   EXPECT_FALSE(reader->IsInitialized());
 
   int error = net::ERR_FAILED;
@@ -540,8 +540,8 @@ TEST_F(DriveFileStreamReaderTest, ZeroByteFileRead) {
 
   // Create second instance and initialize it.
   // In this case, the file should be cached one.
-  reader.reset(new DriveFileStreamReader(
-      GetFileSystemGetter(), worker_thread_->message_loop_proxy().get()));
+  reader.reset(new DriveFileStreamReader(GetFileSystemGetter(),
+                                         worker_thread_->task_runner().get()));
   EXPECT_FALSE(reader->IsInitialized());
 
   error = net::ERR_FAILED;

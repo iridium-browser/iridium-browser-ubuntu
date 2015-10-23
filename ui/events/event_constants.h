@@ -25,8 +25,6 @@ enum EventType {
   ET_TOUCH_MOVED,
   ET_TOUCH_CANCELLED,
   ET_DROP_TARGET_EVENT,
-  ET_TRANSLATED_KEY_PRESS,
-  ET_TRANSLATED_KEY_RELEASE,
 
   // GestureEvent types
   ET_GESTURE_SCROLL_BEGIN,
@@ -146,6 +144,14 @@ enum EventPhase {
 // Device ID for Touch and Key Events.
 enum EventDeviceId {
   ED_UNKNOWN_DEVICE = -1
+};
+
+// Pointing device type.
+enum class EventPointerType : int {
+  POINTER_TYPE_UNKNOWN = 0,
+  POINTER_TYPE_MOUSE,
+  POINTER_TYPE_PEN,
+  POINTER_TYPE_TOUCH,
 };
 
 }  // namespace ui

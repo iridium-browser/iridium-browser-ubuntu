@@ -14,13 +14,13 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.Tab;
-import org.chromium.chrome.browser.TabObserver;
 import org.chromium.chrome.browser.banners.SwipableOverlayView;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -268,7 +268,7 @@ public class InfoBarContainer extends SwipableOverlayView {
     protected TabObserver createTabObserver() {
         return new SwipableOverlayViewTabObserver() {
             @Override
-            public void onPageLoadStarted(Tab tab) {
+            public void onPageLoadStarted(Tab tab, String url) {
                 onPageStarted();
             }
         };

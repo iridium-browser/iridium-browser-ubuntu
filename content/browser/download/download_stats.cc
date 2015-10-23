@@ -209,6 +209,10 @@ const base::FilePath::CharType* kDangerousFileTypes[] = {
   FILE_PATH_LITERAL(".psc1"),
   FILE_PATH_LITERAL(".psc2"),
   FILE_PATH_LITERAL(".xnk"),
+  FILE_PATH_LITERAL(".appref-ms"),
+  FILE_PATH_LITERAL(".gadget"),
+  FILE_PATH_LITERAL(".efi"),
+  FILE_PATH_LITERAL(".fon"),
 };
 
 // Maps extensions to their matching UMA histogram int value.
@@ -358,13 +362,13 @@ void RecordAcceptsRanges(const std::string& accepts_ranges,
   download_len /= 1024;  // In Kilobytes
   static const int kBuckets = 50;
 
-  if (LowerCaseEqualsASCII(accepts_ranges, "none")) {
+  if (base::LowerCaseEqualsASCII(accepts_ranges, "none")) {
     UMA_HISTOGRAM_CUSTOM_COUNTS("Download.AcceptRangesNone.KBytes",
                                 download_len,
                                 1,
                                 max,
                                 kBuckets);
-  } else if (LowerCaseEqualsASCII(accepts_ranges, "bytes")) {
+  } else if (base::LowerCaseEqualsASCII(accepts_ranges, "bytes")) {
     UMA_HISTOGRAM_CUSTOM_COUNTS("Download.AcceptRangesBytes.KBytes",
                                 download_len,
                                 1,
@@ -481,14 +485,18 @@ void RecordDownloadMimeType(const std::string& mime_type_string) {
 
   // Do partial matches.
   if (download_content == DOWNLOAD_CONTENT_UNRECOGNIZED) {
-    if (StartsWithASCII(mime_type_string, "text/", true)) {
+    if (base::StartsWith(mime_type_string, "text/",
+                         base::CompareCase::SENSITIVE)) {
       download_content = DOWNLOAD_CONTENT_TEXT;
-    } else if (StartsWithASCII(mime_type_string, "image/", true)) {
+    } else if (base::StartsWith(mime_type_string, "image/",
+                                base::CompareCase::SENSITIVE)) {
       download_content = DOWNLOAD_CONTENT_IMAGE;
       RecordDownloadImageType(mime_type_string);
-    } else if (StartsWithASCII(mime_type_string, "audio/", true)) {
+    } else if (base::StartsWith(mime_type_string, "audio/",
+                                base::CompareCase::SENSITIVE)) {
       download_content = DOWNLOAD_CONTENT_AUDIO;
-    } else if (StartsWithASCII(mime_type_string, "video/", true)) {
+    } else if (base::StartsWith(mime_type_string, "video/",
+                                base::CompareCase::SENSITIVE)) {
       download_content = DOWNLOAD_CONTENT_VIDEO;
     }
   }

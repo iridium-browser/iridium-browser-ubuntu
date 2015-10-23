@@ -7,14 +7,16 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/url_formatter/url_fixer.h"
 
 bool FixupBrowserAboutURL(GURL* url,
                           content::BrowserContext* browser_context) {
@@ -22,7 +24,7 @@ bool FixupBrowserAboutURL(GURL* url,
   // phase that determines the virtual URL, by including it in an initial
   // URLHandler.  This prevents minor changes from producing a virtual URL,
   // which could lead to a URL spoof.
-  *url = url_fixer::FixupURL(url->possibly_invalid_spec(), std::string());
+  *url = url_formatter::FixupURL(url->possibly_invalid_spec(), std::string());
   return true;
 }
 
@@ -32,11 +34,11 @@ bool WillHandleBrowserAboutURL(GURL* url,
   //            then hopefully we can remove this forced fixup.
   FixupBrowserAboutURL(url, browser_context);
 
-  // Check that about: URLs are fixed up to chrome: by url_fixer::FixupURL.
+  // Check that about: URLs are fixed up to chrome: by url_formatter::FixupURL.
   DCHECK((*url == GURL(url::kAboutBlankURL)) ||
          !url->SchemeIs(url::kAboutScheme));
 
-  // Only handle chrome://foo/, url_fixer::FixupURL translates about:foo.
+  // Only handle chrome://foo/, url_formatter::FixupURL translates about:foo.
   if (!url->SchemeIs(content::kChromeUIScheme))
     return false;
 
@@ -103,15 +105,15 @@ bool WillHandleBrowserAboutURL(GURL* url,
 bool HandleNonNavigationAboutURL(const GURL& url) {
   const std::string spec(url.spec());
 
-  if (LowerCaseEqualsASCII(spec, chrome::kChromeUIRestartURL)) {
+  if (base::LowerCaseEqualsASCII(spec, chrome::kChromeUIRestartURL)) {
     // Call AttemptRestart after chrome::Navigate() completes to avoid access of
     // gtk objects after they are destroyed by BrowserWindowGtk::Close().
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(&chrome::AttemptRestart));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&chrome::AttemptRestart));
     return true;
-  } else if (LowerCaseEqualsASCII(spec, chrome::kChromeUIQuitURL)) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(&chrome::AttemptExit));
+  } else if (base::LowerCaseEqualsASCII(spec, chrome::kChromeUIQuitURL)) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&chrome::AttemptExit));
     return true;
   }
 

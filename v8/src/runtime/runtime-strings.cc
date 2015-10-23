@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
+#include "src/runtime/runtime-utils.h"
 
 #include "src/arguments.h"
-#include "src/jsregexp-inl.h"
-#include "src/jsregexp.h"
-#include "src/runtime/runtime-utils.h"
+#include "src/conversions-inl.h"
+#include "src/regexp/jsregexp-inl.h"
+#include "src/regexp/jsregexp.h"
 #include "src/string-builder.h"
 #include "src/string-search.h"
 
@@ -121,11 +121,13 @@ RUNTIME_FUNCTION(Runtime_StringReplaceOneCharWithString) {
   if (isolate->has_pending_exception()) return isolate->heap()->exception();
 
   subject = String::Flatten(subject);
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-      isolate, result,
-      StringReplaceOneCharWithString(isolate, subject, search, replace, &found,
-                                     kRecursionLimit));
-  return *result;
+  if (StringReplaceOneCharWithString(isolate, subject, search, replace, &found,
+                                     kRecursionLimit).ToHandle(&result)) {
+    return *result;
+  }
+  if (isolate->has_pending_exception()) return isolate->heap()->exception();
+  // In case of empty handle and no pending exception we have stack overflow.
+  return isolate->StackOverflow();
 }
 
 
@@ -137,7 +139,7 @@ RUNTIME_FUNCTION(Runtime_StringIndexOf) {
   CONVERT_ARG_HANDLE_CHECKED(String, pat, 1);
   CONVERT_ARG_HANDLE_CHECKED(Object, index, 2);
 
-  uint32_t start_index;
+  uint32_t start_index = 0;
   if (!index->ToArrayIndex(&start_index)) return Smi::FromInt(-1);
 
   RUNTIME_ASSERT(start_index <= static_cast<uint32_t>(sub->length()));
@@ -188,7 +190,7 @@ RUNTIME_FUNCTION(Runtime_StringLastIndexOf) {
   CONVERT_ARG_HANDLE_CHECKED(String, pat, 1);
   CONVERT_ARG_HANDLE_CHECKED(Object, index, 2);
 
-  uint32_t start_index;
+  uint32_t start_index = 0;
   if (!index->ToArrayIndex(&start_index)) return Smi::FromInt(-1);
 
   uint32_t pat_length = pat->length();
@@ -279,7 +281,7 @@ RUNTIME_FUNCTION(Runtime_StringLocaleCompare) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_SubStringRT) {
+RUNTIME_FUNCTION(Runtime_SubString) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 3);
 
@@ -307,13 +309,7 @@ RUNTIME_FUNCTION(Runtime_SubStringRT) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_SubString) {
-  SealHandleScope shs(isolate);
-  return __RT_impl_Runtime_SubStringRT(args, isolate);
-}
-
-
-RUNTIME_FUNCTION(Runtime_StringAddRT) {
+RUNTIME_FUNCTION(Runtime_StringAdd) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 2);
   CONVERT_ARG_HANDLE_CHECKED(String, str1, 0);
@@ -323,12 +319,6 @@ RUNTIME_FUNCTION(Runtime_StringAddRT) {
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, result, isolate->factory()->NewConsString(str1, str2));
   return *result;
-}
-
-
-RUNTIME_FUNCTION(Runtime_StringAdd) {
-  SealHandleScope shs(isolate);
-  return __RT_impl_Runtime_StringAddRT(args, isolate);
 }
 
 
@@ -426,7 +416,7 @@ RUNTIME_FUNCTION(Runtime_CharFromCode) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_StringCompareRT) {
+RUNTIME_FUNCTION(Runtime_StringCompare) {
   HandleScope handle_scope(isolate);
   DCHECK(args.length() == 2);
 
@@ -492,12 +482,6 @@ RUNTIME_FUNCTION(Runtime_StringCompareRT) {
     result = (r < 0) ? Smi::FromInt(LESS) : Smi::FromInt(GREATER);
   }
   return result;
-}
-
-
-RUNTIME_FUNCTION(Runtime_StringCompare) {
-  SealHandleScope shs(isolate);
-  return __RT_impl_Runtime_StringCompareRT(args, isolate);
 }
 
 
@@ -1349,5 +1333,5 @@ RUNTIME_FUNCTION(Runtime_StringGetLength) {
   CONVERT_ARG_HANDLE_CHECKED(String, s, 0);
   return Smi::FromInt(s->length());
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

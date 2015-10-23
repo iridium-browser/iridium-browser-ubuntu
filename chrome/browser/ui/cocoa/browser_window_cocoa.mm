@@ -15,11 +15,12 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/signin/signin_header_helper.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
@@ -30,6 +31,7 @@
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
+#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
@@ -54,13 +56,14 @@
 #include "components/translate/core/browser/language_state.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -166,11 +169,11 @@ void BrowserWindowCocoa::Show() {
   }
 
   {
-    TRACE_EVENT0("ui", "BrowserWindowCocoa::Show Activate");
+    TRACE_EVENT0("ui", "BrowserWindowCocoa::Show makeKeyAndOrderFront");
     // This call takes up a substantial part of startup time, and an even more
     // substantial part of startup time when any CALayers are part of the
     // window's NSView heirarchy.
-    Activate();
+    [window() makeKeyAndOrderFront:controller_];
   }
 
   // When creating windows from nibs it is necessary to |makeKeyAndOrderFront:|
@@ -580,7 +583,11 @@ void BrowserWindowCocoa::ShowBookmarkAppBubble(
   base::scoped_nsobject<NSView> view([[NSView alloc]
       initWithFrame:NSMakeRect(0, 0, kBookmarkAppBubbleViewWidth,
                                kBookmarkAppBubbleViewHeight)]);
-  [view addSubview:open_as_window_checkbox];
+
+  // When CanHostedAppsOpenInWindows() returns false, do not show the open as
+  // window checkbox to avoid confusing users.
+  if (extensions::util::CanHostedAppsOpenInWindows())
+    [view addSubview:open_as_window_checkbox];
   [view addSubview:app_title];
   [alert setAccessoryView:view];
 
@@ -706,6 +713,11 @@ void BrowserWindowCocoa::ShowAppMenu() {
 
 bool BrowserWindowCocoa::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
+  // Handle ESC to dismiss permission bubbles, but still forward it
+  // to the window afterwards.
+  if (event.windowsKeyCode == ui::VKEY_ESCAPE)
+    [controller_ dismissPermissionBubble];
+
   if (![BrowserWindowUtils shouldHandleKeyboardEvent:event])
     return false;
 
@@ -764,7 +776,12 @@ FindBar* BrowserWindowCocoa::CreateFindBar() {
 
 web_modal::WebContentsModalDialogHost*
     BrowserWindowCocoa::GetWebContentsModalDialogHost() {
-  return NULL;
+  DCHECK([controller_ window]);
+  ConstrainedWindowSheetController* sheet_controller =
+      [ConstrainedWindowSheetController
+          controllerForParentWindow:[controller_ window]];
+  DCHECK(sheet_controller);
+  return [sheet_controller dialogHost];
 }
 
 extensions::ActiveTabPermissionGranter*

@@ -38,7 +38,8 @@ class UniqueClientEntity : public FakeServerEntity {
   ~UniqueClientEntity() override;
 
   // Factory function for creating a UniqueClientEntity.
-  static FakeServerEntity* Create(const sync_pb::SyncEntity& client_entity);
+  static scoped_ptr<FakeServerEntity> Create(
+      const sync_pb::SyncEntity& client_entity);
 
   // Factory function for creating a UniqueClientEntity for use in the
   // FakeServer injection API.
@@ -52,14 +53,11 @@ class UniqueClientEntity : public FakeServerEntity {
 
   // FakeServerEntity implementation.
   std::string GetParentId() const override;
-  void SerializeAsProto(sync_pb::SyncEntity* proto) override;
-  bool IsDeleted() const override;
-  bool IsFolder() const override;
+  void SerializeAsProto(sync_pb::SyncEntity* proto) const override;
 
  private:
   // These member values have equivalent fields in SyncEntity.
   std::string client_defined_unique_tag_;
-  sync_pb::EntitySpecifics specifics_;
   int64 creation_time_;
   int64 last_modified_time_;
 };

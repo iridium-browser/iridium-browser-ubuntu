@@ -5,15 +5,14 @@
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_util.h"
 
 #include "base/logging.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/drive/drive_api_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
 #include "chrome/browser/sync_file_system/drive_backend/leveldb_wrapper.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.pb.h"
 #include "chrome/browser/sync_file_system/logger.h"
+#include "components/drive/drive_api_util.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
 
@@ -130,6 +129,7 @@ SyncStatusCode DriveApiErrorCodeToSyncStatusCode(
     case google_apis::HTTP_LENGTH_REQUIRED:
     case google_apis::HTTP_NOT_IMPLEMENTED:
     case google_apis::DRIVE_PARSE_ERROR:
+    case google_apis::DRIVE_RESPONSE_TOO_LARGE:
     case google_apis::DRIVE_OTHER_ERROR:
       return SYNC_STATUS_FAILED;
 
@@ -137,23 +137,13 @@ SyncStatusCode DriveApiErrorCodeToSyncStatusCode(
       return SYNC_FILE_ERROR_NO_SPACE;
   }
 
-  // There's a case where DriveService layer returns DriveApiErrorCode==-1
-  // when network is unavailable. (http://crbug.com/223042)
-  // TODO(kinuko,nhiroki): We should identify from where this undefined error
-  // code is coming.
-  if (error == -1)
-    return SYNC_STATUS_NETWORK_ERROR;
-
-  util::Log(logging::LOG_WARNING,
-            FROM_HERE,
-            "Got unexpected error: %d",
-            static_cast<int>(error));
+  NOTREACHED();
   return SYNC_STATUS_FAILED;
 }
 
 bool RemovePrefix(const std::string& str, const std::string& prefix,
                   std::string* out) {
-  if (!StartsWithASCII(str, prefix, true)) {
+  if (!base::StartsWith(str, prefix, base::CompareCase::SENSITIVE)) {
     if (out)
       *out = str;
     return false;

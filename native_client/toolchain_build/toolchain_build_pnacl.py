@@ -118,7 +118,7 @@ SANDBOXED_TRANSLATOR_ARCHES = ('x86-32', 'x86-64', 'arm', 'mips32')
 BITCODE_BIASES = tuple(
     bias for bias in ('le32', 'i686_bc', 'x86_64_bc', 'arm_bc'))
 
-DIRECT_TO_NACL_ARCHES = ['x86_64', 'i686', 'arm']
+DIRECT_TO_NACL_ARCHES = ['x86_64', 'i686', 'arm', 'mipsel']
 
 MAKE_DESTDIR_CMD = ['make', 'DESTDIR=%(abs_output)s']
 
@@ -175,6 +175,28 @@ def CompilersForHost(host):
     })
   return compiler[host]
 
+def AflFuzzCompilers(afl_fuzz_dir):
+  """Returns the AFL (clang) compiler executables, assuming afl_fuzz_dir
+     is the directory containing the afl-fuzz compiler wrappers.
+  """
+  return ('%s/afl-%s' % (afl_fuzz_dir, 'clang'),
+          '%s/afl-%s' % (afl_fuzz_dir, 'clang++'))
+
+def AflFuzzEnvMap(host, options):
+  """Returns map of environment bindings for injecting afl-fuzz
+     compiler wrappers into the build for the given host.
+  """
+  if not options.afl_fuzz_dir:
+    return {}
+  cc, cxx, _, _ = CompilersForHost(host)
+  return {'AFL_CC': cc, 'AFL_CXX': cxx}
+
+def AflFuzzEnvList(host, options):
+  """Returns the list of variable bindings for injectiong afl-fuzz
+     compiler wrappers into the build for the given host.
+  """
+  arg_map = AflFuzzEnvMap(host, options)
+  return sorted([key + '=' + arg_map[key] for key in arg_map])
 
 def GSDJoin(*args):
   return '_'.join([pynacl.gsd_storage.LegalizeName(arg) for arg in args])
@@ -221,7 +243,8 @@ def HostArchToolFlags(host, extra_cflags, opts):
   return result
 
 
-def ConfigureHostArchFlags(host, extra_cflags, options, extra_configure=None):
+def ConfigureHostArchFlags(host, extra_cflags, options, extra_configure=None,
+                           use_afl_fuzz=False):
   """ Return flags passed to LLVM and binutils configure for compilers and
   compile flags. """
   configure_args = []
@@ -235,20 +258,27 @@ def ConfigureHostArchFlags(host, extra_cflags, options, extra_configure=None):
 
   native = pynacl.platform.PlatformTriple()
   is_cross = host != native
-  if is_cross:
-    if (pynacl.platform.IsLinux64() and
-        fnmatch.fnmatch(host, '*-linux*')):
-      # 64 bit linux can build 32 bit linux binaries while still being a native
-      # build for our purposes. But it's not what config.guess will yield, so
-      # use --build to force it and make sure things build correctly.
-      configure_args.append('--build=' + host)
-    else:
-      configure_args.append('--host=' + host)
+
+  if TripleIsLinux(host) and not TripleIsX8664(host):
+    assert TripleIsLinux(native)
+    # NaCl/Chrome buildbots run 32 bit userspace on a 64 bit kernel. configure
+    # guesses that the host is 64-bit even though we want a 32-bit build. But
+    # it's still "native enough", so force --build rather than --host.
+    # PlatformTriple() returns 32-bit, so this does not appear as a cross build
+    # here.
+    configure_args.append('--build=' + host)
+  elif is_cross:
+    configure_args.append('--host=' + host)
 
   extra_cxx_args = list(extra_cc_args)
 
   if not options.gcc:
     cc, cxx, ar, ranlib = CompilersForHost(host)
+
+    # Introduce afl-fuzz compiler wrappers if needed.
+    if use_afl_fuzz:
+      cc, cxx = AflFuzzCompilers(options.afl_fuzz_dir)
+
     if ProgramPath('ccache'):
       # Set CCACHE_CPP2 envvar, to avoid an error due to a strange
       # ccache/clang++ interaction.  Specifically, errors about
@@ -297,7 +327,10 @@ def LibCxxHostArchFlags(host):
 def CmakeHostArchFlags(host, options):
   """ Set flags passed to LLVM cmake for compilers and compile flags. """
   cmake_flags = []
-  cc, cxx, _, _ = CompilersForHost(host)
+  if options.afl_fuzz_dir:
+    cc, cxx = AflFuzzCompilers(options.afl_fuzz_dir)
+  else:
+    cc, cxx, _, _ = CompilersForHost(host)
 
   cmake_flags.extend(['-DCMAKE_C_COMPILER='+cc, '-DCMAKE_CXX_COMPILER='+cxx])
   if ProgramPath('ccache'):
@@ -309,9 +342,6 @@ def CmakeHostArchFlags(host, options):
   # undefined.
   cmake_flags.append('-DHAVE_SANITIZER_MSAN_INTERFACE_H=FALSE')
   tool_flags = HostArchToolFlags(host, [], options)
-  if options.sanitize:
-    for f in ['CFLAGS', 'CXXFLAGS', 'LDFLAGS']:
-      tool_flags[f] += '-fsanitize=%s' % options.sanitize
   cmake_flags.extend(['-DCMAKE_C_FLAGS=' + ' '.join(tool_flags['CFLAGS'])])
   cmake_flags.extend(['-DCMAKE_CXX_FLAGS=' + ' '.join(tool_flags['CXXFLAGS'])])
   for linker_type in ['EXE', 'SHARED', 'MODULE']:
@@ -625,6 +655,12 @@ def HostTools(host, options):
                   command.path.join('%(output)s', 'bin', 'le32-nacl-' + tool),
                   command.path.join('%(output)s', 'bin', 'arm-nacl-' + tool)])
                for tool in BINUTILS_PROGS] +
+              [command.Command([
+                  'ln', '-f',
+                   command.path.join('%(output)s', 'bin', 'le32-nacl-' + tool),
+                   command.path.join('%(output)s', 'bin',
+                                                   'mipsel-nacl-' + tool)])
+               for tool in BINUTILS_PROGS] +
                # Gold is the default linker for PNaCl, but BFD ld is the default
                # for nacl-clang, so re-link the version that arm-nacl-clang will
                # use.
@@ -636,6 +672,11 @@ def HostTools(host, options):
                     '%(macros)s',
                     os.path.join(
                         '%(output)s', 'arm-nacl', 'lib', 'nacl-arm-macros.s'))]
+               # Gold is the mipsel-nacl linker (do not rely on PNaCl default.)
+               + [command.Command([
+                 'ln', '-f',
+                  command.path.join('%(output)s', 'bin', 'mipsel-nacl-ld.gold'),
+                  command.path.join('%(output)s', 'bin', 'mipsel-nacl-ld')])]
 
       },
       H('driver'): {
@@ -653,28 +694,32 @@ def HostTools(host, options):
       },
   }
 
-  # TODO(kschimpf) Currently, there is a problem with the CMAKE scripts
-  # recognizing that clang 3.5.1 is newer than clang 3.1, when trying
-  # to build LLVM tools using the address sanitizer. The following
-  # flag fixes this problem. Fix the CMAKE scripts and remove this.
-  asan_fix = []
+  asan_flags = []
   if options.sanitize:
-    asan_fix = ['-DLLVM_FORCE_USE_OLD_TOOLCHAIN=TRUE']
+    asan_flags.append('-DLLVM_USE_SANITIZER=%s' % options.sanitize.capitalize())
 
   # TODO(jfb) Windows currently uses MinGW's GCC 4.8.1 which generates warnings
   #           on upstream LLVM code. Turn on -Werror once these are fixed.
   #           The same applies for the default GCC on current Ubuntu.
   llvm_do_werror = not (TripleIsWindows(host) or options.gcc)
 
+  # Older CMake ignore CMAKE_*_LINKER_FLAGS during config step.
+  # https://public.kitware.com/Bug/view.php?id=14066
+  # The workaround is to set LDFLAGS in the environment.
+  llvm_cmake_config_env = {'LDFLAGS': ' '.join(
+      HostArchToolFlags(host, [], options)['LDFLAGS'])}
+  llvm_cmake_config_env.update(AflFuzzEnvMap(host, options))
+
   llvm_cmake = {
       H('llvm'): {
           'dependencies': ['clang_src', 'llvm_src', 'binutils_pnacl_src',
                            'subzero_src'],
+          'inputs': {'test_xfails': os.path.join(NACL_DIR, 'pnacl', 'scripts')},
           'type': 'build',
           'commands': [
               command.SkipForIncrementalCommand([
                   'cmake', '-G', 'Ninja'] +
-                  CmakeHostArchFlags(host, options) + asan_fix +
+                  CmakeHostArchFlags(host, options) + asan_flags +
                   [
                   '-DBUILD_SHARED_LIBS=ON',
                   '-DCMAKE_BUILD_TYPE=' + ('Debug' if HostIsDebug(options)
@@ -692,18 +737,12 @@ def HostTools(host, options):
                   '-DLLVM_EXTERNAL_SUBZERO_SOURCE_DIR=%(subzero_src)s',
                   '-DLLVM_INSTALL_UTILS=ON',
                   '-DLLVM_TARGETS_TO_BUILD=X86;ARM;Mips;JSBackend',
-                  '-DSUBZERO_TARGETS_TO_BUILD=X8632;ARM32',
+                  '-DSUBZERO_TARGETS_TO_BUILD=ARM32;MIPS32;X8632;X8664',
                   '%(llvm_src)s'],
-                  # Older CMake ignore CMAKE_*_LINKER_FLAGS during config step.
-                  # https://public.kitware.com/Bug/view.php?id=14066
-                  # The workaround is to set LDFLAGS in the environment.
-                  # TODO(jvoung): remove the ability to override env vars
-                  # from "command" once the CMake fix propagates and we can
-                  # stop using this env var hack.
-                  env={'LDFLAGS' : ' '.join(
-                        HostArchToolFlags(host, [], options)['LDFLAGS'])})] +
+                  env=llvm_cmake_config_env)] +
               CopyHostLibcxxForLLVMBuild(host, 'lib', options) +
-              [command.Command(['ninja', '-v']),
+              [command.Command(['ninja', '-v'],
+                               env=AflFuzzEnvMap(host, options)),
                command.Command(['ninja', 'install'])] +
               CreateSymLinksToDirectToNaClTools(host)
       },
@@ -720,12 +759,15 @@ def HostTools(host, options):
       H('llvm'): {
           'dependencies': ['clang_src', 'llvm_src', 'binutils_pnacl_src',
                            'subzero_src'],
+          'inputs': {'test_xfails': os.path.join(NACL_DIR, 'pnacl', 'scripts')},
           'type': 'build',
           'commands': [
               command.SkipForIncrementalCommand([
                   'sh',
                   '%(llvm_src)s/configure'] +
-                  ConfigureHostArchFlags(host, [], options) +
+                  AflFuzzEnvList(host, options) +
+                  ConfigureHostArchFlags(host, [], options,
+                                         use_afl_fuzz=options.afl_fuzz_dir) +
                   LLVMConfigureAssertionsFlags(options) +
                   [
                    '--disable-bindings', # ocaml is currently the only binding.
@@ -737,8 +779,11 @@ def HostTools(host, options):
                    '--enable-debug=' + ('yes' if HostIsDebug(options)
                                         else 'no'),
                    '--enable-targets=x86,arm,mips,js',
-                   '--enable-subzero-targets=X8632,ARM32',
+                   '--enable-subzero-targets=ARM32,MIPS32,X8632,X8664',
                    '--enable-werror=' + ('yes' if llvm_do_werror else 'no'),
+                   # Backtraces require TLS, which is missing on OSX 10.6
+                   '--enable-backtraces=' + ('no' if TripleIsMac(host)
+                                             else 'yes'),
                    '--prefix=/',
                    '--program-prefix=',
                    '--with-binutils-include=%(abs_binutils_pnacl_src)s/include',
@@ -750,7 +795,8 @@ def HostTools(host, options):
                   os.path.join(('Debug+Asserts' if HostIsDebug(options)
                                 else 'Release+Asserts'), 'lib'),
                   options) +
-              [command.Command(MakeCommand(host) + [
+              [command.Command(MakeCommand(host) +
+                  AflFuzzEnvList(host, options) + [
                   'VERBOSE=1',
                   'PNACL_BROWSER_TRANSLATOR=0',
                   'SUBZERO_SRC_ROOT=%(abs_subzero_src)s',
@@ -959,17 +1005,6 @@ values.
   return deps
 
 
-def GetSyncPNaClReposSource(revisions, GetGitSyncCmds):
-  sources = {}
-  for repo, revision in revisions.iteritems():
-    sources['legacy_pnacl_%s_src' % repo] = {
-        'type': 'source',
-        'output_dirname': os.path.join(NACL_DIR, 'pnacl', 'git', repo),
-        'commands': GetGitSyncCmds(repo),
-    }
-  return sources
-
-
 def InstallMinGWHostCompiler():
   """Install the MinGW host compiler used to build the host tools on Windows.
 
@@ -1081,14 +1116,12 @@ def GetUploadPackageTargets():
 
   return package_targets
 
-if __name__ == '__main__':
+
+def main():
   # This sets the logging for gclient-alike repo sync. It will be overridden
   # by the package builder based on the command-line flags.
   logging.getLogger().setLevel(logging.DEBUG)
   parser = argparse.ArgumentParser(add_help=False)
-  parser.add_argument('--legacy-repo-sync', action='store_true',
-                      dest='legacy_repo_sync', default=False,
-                      help='Sync the git repo directories used by build.sh')
   parser.add_argument('--disable-llvm-assertions', action='store_false',
                       dest='enable_llvm_assertions', default=True)
   parser.add_argument('--cmake', action='store_true', default=False,
@@ -1105,6 +1138,13 @@ if __name__ == '__main__':
                       help='Build the sandboxed translators')
   parser.add_argument('--pnacl-in-pnacl', action='store_true', default=False,
                       help='Build with a PNaCl toolchain')
+  parser.add_argument('--no-sdk-libs', action='store_true',
+                      help='Don\'t build the core_sdk_libs scons target')
+  parser.add_argument('--no-nacl-gcc', action='store_true',
+                      help='Don\'t use nacl-gcc. This is normally used to '
+                           'build libgcc_eh on x86. '
+                           'WARNING: this results in an empty libgcc_eh '
+                           'on x86 and x86_64.')
   parser.add_argument('--extra-cc-args', default=None,
                       help='Extra arguments to pass to cc/cxx')
   parser.add_argument('--extra-configure-arg', dest='extra_configure_args',
@@ -1118,6 +1158,9 @@ if __name__ == '__main__':
                       dest='host_flavor',
                       default='release',
                       help='Flavor of the build of the host binaries.')
+  parser.add_argument('--afl-fuzz-dir',
+                      help='Compile using afl-fuzz compiler wrappers in'
+                      + ' given directory')
   args, leftover_args = parser.parse_known_args()
   if '-h' in leftover_args or '--help' in leftover_args:
     print 'The following arguments are specific to toolchain_build_pnacl.py:'
@@ -1132,71 +1175,74 @@ if __name__ == '__main__':
     print 'gcc build is not supported with cmake'
     sys.exit(1)
 
+  if args.afl_fuzz_dir and args.gcc:
+    print '--afl-fuzz-dir not allowed when using gcc'
+    sys.exit(1)
+
   packages = {}
   upload_packages = {}
 
   rev = ParseComponentRevisionsFile(GIT_DEPS_FILE)
-  if args.legacy_repo_sync:
-    packages = GetSyncPNaClReposSource(rev, GetGitSyncCmdsCallback(rev))
+  upload_packages = GetUploadPackageTargets()
+  if pynacl.platform.IsWindows():
+    InstallMinGWHostCompiler()
 
-    # Make sure sync is inside of the args to toolchain_main.
-    if not set(['-y', '--sync', '--sync-only']).intersection(leftover_args):
-      leftover_args.append('--sync-only')
+  packages.update(HostToolsSources(GetGitSyncCmdsCallback(rev)))
+  if args.testsuite_sync:
+    packages.update(TestsuiteSources(GetGitSyncCmdsCallback(rev)))
+
+  if args.pnacl_in_pnacl:
+    hosts = ['le32-nacl']
   else:
-    upload_packages = GetUploadPackageTargets()
-    if pynacl.platform.IsWindows():
-      InstallMinGWHostCompiler()
-
-    packages.update(HostToolsSources(GetGitSyncCmdsCallback(rev)))
-    if args.testsuite_sync:
-      packages.update(TestsuiteSources(GetGitSyncCmdsCallback(rev)))
-
-    if args.pnacl_in_pnacl:
-      hosts = ['le32-nacl']
-    else:
-      hosts = [pynacl.platform.PlatformTriple()]
-    if pynacl.platform.IsLinux() and BUILD_CROSS_MINGW:
-      hosts.append(pynacl.platform.PlatformTriple('win', 'x86-32'))
-    for host in hosts:
-      packages.update(HostTools(host, args))
-      if not args.pnacl_in_pnacl:
-        packages.update(HostLibs(host, args))
-        packages.update(HostToolsDirectToNacl(host, args))
+    hosts = [pynacl.platform.PlatformTriple()]
+  if pynacl.platform.IsLinux() and BUILD_CROSS_MINGW:
+    hosts.append(pynacl.platform.PlatformTriple('win', 'x86-32'))
+  for host in hosts:
+    packages.update(HostTools(host, args))
     if not args.pnacl_in_pnacl:
-      packages.update(TargetLibCompiler(pynacl.platform.PlatformTriple(), args))
-    # Don't build the target libs on Windows because of pathname issues.
-    # Only the linux64 bot is canonical (i.e. it will upload its packages).
-    # The other bots will use a 'work' target instead of a 'build' target for
-    # the target libs, so they will not be memoized, but can be used for tests.
-    # TODO(dschuff): Even better would be if we could memoize non-canonical
-    # build targets without doing things like mangling their names (and for e.g.
-    # scons tests, skip running them if their dependencies haven't changed, like
-    # build targets)
-    is_canonical = pynacl.platform.IsLinux64()
-    if ((pynacl.platform.IsLinux() or pynacl.platform.IsMac())
-        and not args.pnacl_in_pnacl):
-      packages.update(pnacl_targetlibs.TargetLibsSrc(
-        GetGitSyncCmdsCallback(rev)))
-      for bias in BITCODE_BIASES:
-        packages.update(pnacl_targetlibs.TargetLibs(bias, is_canonical))
-      for arch in DIRECT_TO_NACL_ARCHES:
-        packages.update(pnacl_targetlibs.TargetLibs(arch, is_canonical))
+      packages.update(HostLibs(host, args))
+      packages.update(HostToolsDirectToNacl(host, args))
+  if not args.pnacl_in_pnacl:
+    packages.update(TargetLibCompiler(pynacl.platform.PlatformTriple(), args))
+  # Don't build the target libs on Windows because of pathname issues.
+  # Only the linux64 bot is canonical (i.e. it will upload its packages).
+  # The other bots will use a 'work' target instead of a 'build' target for
+  # the target libs, so they will not be memoized, but can be used for tests.
+  # TODO(dschuff): Even better would be if we could memoize non-canonical
+  # build targets without doing things like mangling their names (and for e.g.
+  # scons tests, skip running them if their dependencies haven't changed, like
+  # build targets)
+  is_canonical = pynacl.platform.IsLinux64()
+  if ((pynacl.platform.IsLinux() or pynacl.platform.IsMac())
+      and not args.pnacl_in_pnacl):
+    packages.update(pnacl_targetlibs.TargetLibsSrc(
+      GetGitSyncCmdsCallback(rev)))
+    for bias in BITCODE_BIASES:
+      packages.update(pnacl_targetlibs.TargetLibs(bias, is_canonical))
+    for arch in DIRECT_TO_NACL_ARCHES:
+      packages.update(pnacl_targetlibs.TargetLibs(arch, is_canonical))
+      if not args.no_sdk_libs:
         packages.update(pnacl_targetlibs.SDKLibs(arch, is_canonical))
-      for arch in TRANSLATOR_ARCHES:
-        packages.update(pnacl_targetlibs.TranslatorLibs(arch, is_canonical))
-      packages.update(Metadata(rev, is_canonical))
-      packages.update(pnacl_targetlibs.SDKCompiler(
-                      ['le32'] + DIRECT_TO_NACL_ARCHES))
-      packages.update(pnacl_targetlibs.SDKLibs('le32', is_canonical))
-      unsandboxed_runtime_canonical = is_canonical or pynacl.platform.IsMac()
-      packages.update(pnacl_targetlibs.UnsandboxedRuntime(
-          'x86-32-%s' % pynacl.platform.GetOS(), unsandboxed_runtime_canonical))
+    for arch in TRANSLATOR_ARCHES:
+      packages.update(pnacl_targetlibs.TranslatorLibs(arch, is_canonical,
+        args.no_nacl_gcc))
+    packages.update(Metadata(rev, is_canonical))
+    packages.update(pnacl_targetlibs.SDKCompiler(
+                    ['le32'] + DIRECT_TO_NACL_ARCHES))
+    packages.update(pnacl_targetlibs.SDKLibs('le32', is_canonical))
+    unsandboxed_runtime_canonical = is_canonical or pynacl.platform.IsMac()
+    packages.update(pnacl_targetlibs.UnsandboxedRuntime(
+        'x86-32-%s' % pynacl.platform.GetOS(), unsandboxed_runtime_canonical))
 
-    if args.build_sbtc and not args.pnacl_in_pnacl:
-      packages.update(pnacl_sandboxed_translator.SandboxedTranslators(
-        SANDBOXED_TRANSLATOR_ARCHES))
+  if args.build_sbtc and not args.pnacl_in_pnacl:
+    packages.update(pnacl_sandboxed_translator.SandboxedTranslators(
+      SANDBOXED_TRANSLATOR_ARCHES))
 
   tb = toolchain_main.PackageBuilder(packages,
                                      upload_packages,
                                      leftover_args)
-  sys.exit(tb.Main())
+  return tb.Main()
+
+
+if __name__ == '__main__':
+  sys.exit(main())

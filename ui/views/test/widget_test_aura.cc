@@ -4,6 +4,7 @@
 
 #include "ui/views/test/widget_test.h"
 
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/views/widget/widget.h"
@@ -53,6 +54,12 @@ void WidgetTest::SimulateNativeDestroy(Widget* widget) {
 }
 
 // static
+void WidgetTest::SimulateNativeActivate(Widget* widget) {
+  gfx::NativeView native_view = widget->GetNativeView();
+  aura::client::GetFocusClient(native_view)->FocusWindow(native_view);
+}
+
+// static
 bool WidgetTest::IsNativeWindowVisible(gfx::NativeWindow window) {
   return window->IsVisible();
 }
@@ -88,12 +95,19 @@ gfx::Size WidgetTest::GetNativeWidgetMinimumContentSize(Widget* widget) {
   return gfx::Size(hints.min_width, hints.min_height);
 #else
   NOTREACHED();
+  return gfx::Size();
 #endif
 }
 
 // static
 ui::EventProcessor* WidgetTest::GetEventProcessor(Widget* widget) {
   return widget->GetNativeWindow()->GetHost()->event_processor();
+}
+
+// static
+ui::internal::InputMethodDelegate* WidgetTest::GetInputMethodDelegateForWidget(
+    Widget* widget) {
+  return widget->GetNativeWindow()->GetRootWindow()->GetHost();
 }
 
 }  // namespace test

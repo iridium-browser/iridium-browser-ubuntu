@@ -41,6 +41,7 @@ class URLRequestContextStorage;
 
 namespace data_reduction_proxy {
 
+class ClientConfig;
 class DataReductionProxyConfigurator;
 class DataReductionProxyEventCreator;
 class DataReductionProxyExperimentsStats;
@@ -70,9 +71,6 @@ class TestDataReductionProxyRequestOptions
   // Time after the unix epoch that Now() reports.
   void set_offset(const base::TimeDelta& now_offset);
 
-  // Visible for testing.
-  const std::string& GetSecureSession() const override;
-
  private:
   base::TimeDelta now_offset_;
 };
@@ -87,8 +85,7 @@ class MockDataReductionProxyRequestOptions
 
   ~MockDataReductionProxyRequestOptions();
 
-  MOCK_CONST_METHOD1(PopulateConfigResponse,
-                     void(base::DictionaryValue* response));
+  MOCK_CONST_METHOD1(PopulateConfigResponse, void(ClientConfig* config));
 };
 
 // Test version of |DataReductionProxyConfigServiceClient|, which permits
@@ -102,7 +99,8 @@ class TestDataReductionProxyConfigServiceClient
       DataReductionProxyMutableConfigValues* config_values,
       DataReductionProxyConfig* config,
       DataReductionProxyEventCreator* event_creator,
-      net::NetLog* net_log);
+      net::NetLog* net_log,
+      ConfigStorer config_storer);
 
   ~TestDataReductionProxyConfigServiceClient() override;
 
@@ -115,6 +113,9 @@ class TestDataReductionProxyConfigServiceClient
   int GetBackoffErrorCount();
 
   void SetConfigServiceURL(const GURL& service_url);
+
+  using DataReductionProxyConfigServiceClient::
+      minimum_refresh_interval_on_success;
 
  protected:
   // Overrides of DataReductionProxyConfigServiceClient
@@ -149,15 +150,13 @@ class TestDataReductionProxyConfigServiceClient
 class MockDataReductionProxyService : public DataReductionProxyService {
  public:
   MockDataReductionProxyService(
-      scoped_ptr<DataReductionProxyCompressionStats> compression_stats,
       DataReductionProxySettings* settings,
       PrefService* prefs,
       net::URLRequestContextGetter* request_context,
-      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
   ~MockDataReductionProxyService() override;
 
-  MOCK_METHOD3(SetProxyPrefs,
-               void(bool enabled, bool alternative_enabled, bool at_startup));
+  MOCK_METHOD2(SetProxyPrefs, void(bool enabled, bool at_startup));
 };
 
 // Test version of |DataReductionProxyIOData|, which bypasses initialization in
@@ -166,13 +165,14 @@ class MockDataReductionProxyService : public DataReductionProxyService {
 class TestDataReductionProxyIOData : public DataReductionProxyIOData {
  public:
   TestDataReductionProxyIOData(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       scoped_ptr<DataReductionProxyConfig> config,
       scoped_ptr<DataReductionProxyEventCreator> event_creator,
       scoped_ptr<DataReductionProxyRequestOptions> request_options,
       scoped_ptr<DataReductionProxyConfigurator> configurator,
       scoped_ptr<DataReductionProxyConfigServiceClient> config_client,
       scoped_ptr<DataReductionProxyExperimentsStats> experiments_stats,
+      net::NetLog* net_log,
       bool enabled);
   ~TestDataReductionProxyIOData() override;
 
@@ -288,6 +288,10 @@ class DataReductionProxyTestContext {
   // built with SkipSettingsInitialization.
   void InitSettings();
 
+  // Destroys the |DataReductionProxySettings| object and waits until objects on
+  // the DB task runner are destroyed.
+  void DestroySettings();
+
   // Creates a |DataReductionProxyService| object, or a
   // |MockDataReductionProxyService| if built with
   // WithMockDataReductionProxyService. Can only be called if built with
@@ -398,8 +402,21 @@ class DataReductionProxyTestContext {
     USE_TEST_CONFIG_CLIENT = 0x40,
   };
 
+  // Used to storage a serialized Data Reduction Proxy config.
+  class TestConfigStorer {
+   public:
+    // |prefs| must not be null and outlive |this|.
+    TestConfigStorer(PrefService* prefs);
+
+    // Stores |serialized_config| in |prefs_|.
+    void StoreSerializedConfig(const std::string& serialized_config);
+
+   private:
+    PrefService* prefs_;
+  };
+
   DataReductionProxyTestContext(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       scoped_ptr<TestingPrefServiceSimple> simple_pref_service,
       scoped_ptr<net::TestNetLog> net_log,
       scoped_refptr<net::URLRequestContextGetter> request_context_getter,
@@ -407,6 +424,7 @@ class DataReductionProxyTestContext {
       scoped_ptr<TestDataReductionProxyIOData> io_data,
       scoped_ptr<DataReductionProxySettings> settings,
       scoped_ptr<TestDataReductionProxyEventStorageDelegate> storage_delegate,
+      scoped_ptr<TestConfigStorer> config_storer,
       TestDataReductionProxyParams* params,
       unsigned int test_context_flags);
 
@@ -428,6 +446,7 @@ class DataReductionProxyTestContext {
   scoped_ptr<TestDataReductionProxyIOData> io_data_;
   scoped_ptr<DataReductionProxySettings> settings_;
   scoped_ptr<TestDataReductionProxyEventStorageDelegate> storage_delegate_;
+  scoped_ptr<TestConfigStorer> config_storer_;
 
   TestDataReductionProxyParams* params_;
 

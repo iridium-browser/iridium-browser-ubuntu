@@ -32,7 +32,8 @@
 #include "platform/graphics/GeneratedImage.h"
 
 #include "platform/geometry/FloatRect.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
+#include "platform/graphics/paint/SkPictureBuilder.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPicture.h"
 
 namespace blink {
@@ -50,10 +51,11 @@ void GeneratedImage::drawPattern(GraphicsContext* destContext, const FloatRect& 
     FloatRect tileRect = srcRect;
     tileRect.expand(repeatSpacing);
 
-    OwnPtr<GraphicsContext> recordingContext = GraphicsContext::deprecatedCreateWithCanvas(nullptr);
-    recordingContext->beginRecording(tileRect);
-    drawTile(recordingContext.get(), srcRect);
-    RefPtr<const SkPicture> tilePicture = recordingContext->endRecording();
+    SkPictureBuilder builder(tileRect, nullptr, destContext);
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled())
+        builder.context().beginRecording(tileRect);
+    drawTile(&builder.context(), srcRect);
+    RefPtr<const SkPicture> tilePicture = builder.endRecording();
 
     AffineTransform patternTransform;
     patternTransform.translate(phase.x(), phase.y());
@@ -63,9 +65,17 @@ void GeneratedImage::drawPattern(GraphicsContext* destContext, const FloatRect& 
     RefPtr<Pattern> picturePattern = Pattern::createPicturePattern(tilePicture);
     picturePattern->setPatternSpaceTransform(patternTransform);
 
-    GraphicsContextStateSaver saver(*destContext);
-    destContext->setFillPattern(picturePattern);
-    destContext->fillRect(destRect, destContext->fillColor(), compositeOp);
+    SkPaint fillPaint = destContext->fillPaint();
+    fillPaint.setShader(picturePattern->shader());
+    fillPaint.setColor(SK_ColorBLACK);
+    fillPaint.setXfermodeMode(compositeOp);
+
+    destContext->drawRect(destRect, fillPaint);
+}
+
+PassRefPtr<SkImage> GeneratedImage::imageForCurrentFrame()
+{
+    return nullptr;
 }
 
 } // namespace blink

@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2013 Google Inc.
  *
@@ -9,6 +8,7 @@
 #include "gm.h"
 #include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
+#include "SkPath.h"
 
 namespace skiagm {
 
@@ -19,7 +19,7 @@ namespace skiagm {
 class BigBlursGM : public GM {
 public:
     BigBlursGM() {
-        this->setBGColor(0xFFDDDDDD);
+        this->setBGColor(sk_tool_utils::color_to_565(0xFFDDDDDD));
     }
 
 protected:

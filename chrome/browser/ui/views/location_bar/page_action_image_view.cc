@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/common/constants.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/events/event.h"
@@ -104,21 +105,13 @@ void PageActionImageView::UpdateVisibility(content::WebContents* contents) {
   SetTooltipText(base::UTF8ToUTF16(tooltip_));
 
   // Set the image.
-  gfx::Image icon = view_controller_->GetIcon(contents);
+  gfx::Size size(extension_misc::EXTENSION_ICON_ACTION,
+                 extension_misc::EXTENSION_ICON_ACTION);
+  gfx::Image icon = view_controller_->GetIcon(contents, size);
   if (!icon.IsEmpty())
     SetImage(*icon.ToImageSkia());
 
   SetVisible(true);
-}
-
-void PageActionImageView::PaintChildren(const ui::PaintContext& context) {
-  View::PaintChildren(context);
-  int tab_id = SessionTabHelper::IdForTab(GetCurrentWebContents());
-  if (tab_id >= 0) {
-    ui::PaintRecorder recorder(context);
-    view_controller_->extension_action()->PaintBadge(recorder.canvas(),
-                                                     GetLocalBounds(), tab_id);
-  }
 }
 
 void PageActionImageView::UpdateState() {

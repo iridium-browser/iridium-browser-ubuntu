@@ -66,6 +66,13 @@ PeriodicSyncRegistration::PeriodicSyncRegistration(int64_t id, const PeriodicSyn
 
 PeriodicSyncRegistration::~PeriodicSyncRegistration()
 {
+    Platform* currentPlatform = Platform::current();
+    if (!currentPlatform)
+        return;
+    WebSyncProvider* syncProvider = currentPlatform->backgroundSyncProvider();
+    if (!syncProvider)
+        return;
+    syncProvider->releaseRegistration(m_id);
 }
 
 ScriptPromise PeriodicSyncRegistration::unregister(ScriptState* scriptState)
@@ -73,7 +80,7 @@ ScriptPromise PeriodicSyncRegistration::unregister(ScriptState* scriptState)
     if (m_id == WebSyncRegistration::UNREGISTERED_SYNC_ID)
         return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(AbortError, "Operation failed - not a valid registration object"));
 
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     WebSyncProvider* webSyncProvider = Platform::current()->backgroundSyncProvider();

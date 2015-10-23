@@ -63,8 +63,8 @@ const char kMediaProtocolAvpf[] = "RTP/AVPF";
 // RFC5124
 const char kMediaProtocolDtlsSavpf[] = "UDP/TLS/RTP/SAVPF";
 
-// This should be replaced by "UDP/TLS/RTP/SAVPF", but we need to support it for
-// now to be compatible with previous Chrome versions.
+// We always generate offers with "UDP/TLS/RTP/SAVPF" when using DTLS-SRTP,
+// but we tolerate "RTP/SAVPF" in offers we receive, for compatibility.
 const char kMediaProtocolSavpf[] = "RTP/SAVPF";
 
 const char kMediaProtocolRtpPrefix[] = "RTP/";
@@ -436,8 +436,8 @@ static bool AddStreamParams(
     StreamParamsVec* current_streams,
     MediaContentDescriptionImpl<C>* content_description,
     const bool add_legacy_stream) {
-  const bool include_rtx_stream =
-    ContainsRtxCodec(content_description->codecs());
+  const bool include_rtx_streams =
+      ContainsRtxCodec(content_description->codecs());
 
   if (streams.empty() && add_legacy_stream) {
     // TODO(perkj): Remove this legacy stream when all apps use StreamParams.
@@ -445,10 +445,10 @@ static bool AddStreamParams(
     if (IsSctp(content_description)) {
       GenerateSctpSids(*current_streams, &ssrcs);
     } else {
-      int num_ssrcs = include_rtx_stream ? 2 : 1;
+      int num_ssrcs = include_rtx_streams ? 2 : 1;
       GenerateSsrcs(*current_streams, num_ssrcs, &ssrcs);
     }
-    if (include_rtx_stream) {
+    if (include_rtx_streams) {
       content_description->AddLegacyStream(ssrcs[0], ssrcs[1]);
       content_description->set_multistream(true);
     } else {
@@ -492,11 +492,15 @@ static bool AddStreamParams(
         SsrcGroup group(kSimSsrcGroupSemantics, stream_param.ssrcs);
         stream_param.ssrc_groups.push_back(group);
       }
-      // Generate an extra ssrc for include_rtx_stream case.
-      if (include_rtx_stream) {
-        std::vector<uint32> rtx_ssrc;
-        GenerateSsrcs(*current_streams, 1, &rtx_ssrc);
-        stream_param.AddFidSsrc(ssrcs[0], rtx_ssrc[0]);
+      // Generate extra ssrcs for include_rtx_streams case.
+      if (include_rtx_streams) {
+        // Generate an RTX ssrc for every ssrc in the group.
+        std::vector<uint32> rtx_ssrcs;
+        GenerateSsrcs(*current_streams, static_cast<int>(ssrcs.size()),
+                      &rtx_ssrcs);
+        for (size_t i = 0; i < ssrcs.size(); ++i) {
+          stream_param.AddFidSsrc(ssrcs[i], rtx_ssrcs[i]);
+        }
         content_description->set_multistream(true);
       }
       stream_param.cname = cname;
@@ -525,7 +529,7 @@ static bool UpdateTransportInfoForBundle(const ContentGroup& bundle_group,
   }
 
   // We should definitely have a transport for the first content.
-  std::string selected_content_name = *bundle_group.FirstContentName();
+  const std::string& selected_content_name = *bundle_group.FirstContentName();
   const TransportInfo* selected_transport_info =
       sdesc->GetTransportInfoByName(selected_content_name);
   if (!selected_transport_info) {
@@ -533,9 +537,9 @@ static bool UpdateTransportInfoForBundle(const ContentGroup& bundle_group,
   }
 
   // Set the other contents to use the same ICE credentials.
-  const std::string selected_ufrag =
+  const std::string& selected_ufrag =
       selected_transport_info->description.ice_ufrag;
-  const std::string selected_pwd =
+  const std::string& selected_pwd =
       selected_transport_info->description.ice_pwd;
   for (TransportInfos::iterator it =
            sdesc->transport_infos().begin();
@@ -610,8 +614,8 @@ static bool IsRtpContent(SessionDescription* sdesc,
       return false;
     }
     is_rtp = media_desc->protocol().empty() ||
-             rtc::starts_with(media_desc->protocol().data(),
-                                    kMediaProtocolRtpPrefix);
+             (media_desc->protocol().find(cricket::kMediaProtocolRtpPrefix) !=
+              std::string::npos);
   }
   return is_rtp;
 }
@@ -1043,8 +1047,10 @@ static bool IsMediaProtocolSupported(MediaType type,
 
 static void SetMediaProtocol(bool secure_transport,
                              MediaContentDescription* desc) {
-  if (!desc->cryptos().empty() || secure_transport)
+  if (!desc->cryptos().empty())
     desc->set_protocol(kMediaProtocolSavpf);
+  else if (secure_transport)
+    desc->set_protocol(kMediaProtocolDtlsSavpf);
   else
     desc->set_protocol(kMediaProtocolAvpf);
 }

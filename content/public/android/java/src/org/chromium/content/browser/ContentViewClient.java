@@ -7,12 +7,11 @@ package org.chromium.content.browser;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.view.ActionMode;
 import android.view.KeyEvent;
-import android.view.View;
+import android.view.View.MeasureSpec;
 
 import org.chromium.base.Log;
-import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
+import org.chromium.content.browser.WebActionModeCallback.ActionHandler;
 
 /**
  *  Main callback class used by ContentView.
@@ -28,7 +27,11 @@ import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
  */
 public class ContentViewClient {
     // Tag used for logging.
-    private static final String TAG = "ContentViewClient";
+    private static final String TAG = "cr.ContentViewClient";
+
+    // Default value to signal that the ContentView's size should not be overridden.
+    private static final int UNSPECIFIED_MEASURE_SPEC =
+            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
 
     public void onUpdateTitle(String title) {
     }
@@ -73,36 +76,21 @@ public class ContentViewClient {
     }
 
     /**
-     * Notified when a change to the IME was requested.
+     * Notified when the editability of the focused node changes.
      *
-     * @param requestShow Whether the IME was requested to be shown (may already be showing
-     *                    though).
+     * @param editable Whether the focused node is editable.
      */
-    public void onImeStateChangeRequested(boolean requestShow) {
+    public void onFocusedNodeEditabilityChanged(boolean editable) {
     }
 
     /**
-     * Starts an ActionMode for in-page selection.
-     * @param view The associated View.
-     * @param actionHandler The associated ActionHandler.
-     * @param floating Whether to try creating a floating ActionMode. If this
-     *                 feature is unsupported, the return value will be null.
-     * @return the SelectActionMode if creation is successful, otherwise null.
+     * Returns a WebActionModeCallback for in-page text selection.
+     * @param context the associated context.
+     * @param actionHandler the associated selection action handler.
      */
-    public SelectActionMode startActionMode(
-            View view, ActionHandler actionHandler, boolean floating) {
-        if (floating) return null;
-        ActionMode.Callback callback =
-                new SelectActionModeCallback(view.getContext(), actionHandler);
-        ActionMode actionMode = view.startActionMode(callback);
-        return actionMode != null ? new SelectActionMode(actionMode) : null;
-    }
-
-    /**
-     * @return whether the client supports the creation of floating ActionMode instances.
-     */
-    public boolean supportsFloatingActionMode() {
-        return false;
+    public WebActionModeCallback getWebActionModeCallback(
+            Context context, ActionHandler actionHandler) {
+        return new WebActionModeCallback(context, actionHandler);
     }
 
     /**
@@ -144,14 +132,14 @@ public class ContentViewClient {
         try {
             intent = Intent.parseUri(intentUrl, Intent.URI_INTENT_SCHEME);
         } catch (Exception ex) {
-            Log.w(TAG, "Bad URI " + intentUrl, ex);
+            Log.w(TAG, "Bad URI %s", intentUrl, ex);
             return;
         }
 
         try {
             context.startActivity(intent);
         } catch (ActivityNotFoundException ex) {
-            Log.w(TAG, "No application can handle " + intentUrl);
+            Log.w(TAG, "No application can handle %s", intentUrl);
         }
     }
 
@@ -172,7 +160,7 @@ public class ContentViewClient {
      * @return Whether an externally managed (i.e., not compositor-driven) fling
      *         of this ContentView is active.
      */
-    public boolean isExternalFlingActive() {
+    public boolean isExternalScrollActive() {
         return false;
     }
 
@@ -202,5 +190,27 @@ public class ContentViewClient {
             return false;
         }
         return true;
+    }
+
+    /**
+     * ContentViewClient users can return a custom value to override the width of
+     * the ContentView. By default, this method returns MeasureSpec.UNSPECIFIED, which
+     * indicates that the value should not be overridden.
+     *
+     * @return The desired width of the ContentView.
+     */
+    public int getDesiredWidthMeasureSpec() {
+        return UNSPECIFIED_MEASURE_SPEC;
+    }
+
+    /**
+     * ContentViewClient users can return a custom value to override the height of
+     * the ContentView. By default, this method returns MeasureSpec.UNSPECIFIED, which
+     * indicates that the value should not be overridden.
+     *
+     * @return The desired height of the ContentView.
+     */
+    public int getDesiredHeightMeasureSpec() {
+        return UNSPECIFIED_MEASURE_SPEC;
     }
 }

@@ -31,6 +31,7 @@
 #ifndef InspectorBaseAgent_h
 #define InspectorBaseAgent_h
 
+#include "core/CoreExport.h"
 #include "core/InspectorBackendDispatcher.h"
 #include "core/inspector/InstrumentingAgents.h"
 #include "platform/heap/Handle.h"
@@ -46,7 +47,7 @@ class InspectorState;
 class InstrumentingAgents;
 class LocalFrame;
 
-class InspectorAgent : public NoBaseWillBeGarbageCollectedFinalized<InspectorAgent> {
+class CORE_EXPORT InspectorAgent : public NoBaseWillBeGarbageCollectedFinalized<InspectorAgent> {
 public:
     explicit InspectorAgent(const String&);
     virtual ~InspectorAgent();
@@ -73,8 +74,9 @@ private:
     String m_name;
 };
 
-class InspectorAgentRegistry final {
+class CORE_EXPORT InspectorAgentRegistry final {
     DISALLOW_ALLOCATION();
+    WTF_MAKE_NONCOPYABLE(InspectorAgentRegistry);
 public:
     InspectorAgentRegistry(InstrumentingAgents*, InspectorCompositeState*);
     void append(PassOwnPtrWillBeRawPtr<InspectorAgent>);
@@ -98,15 +100,15 @@ private:
 template<typename AgentClass, typename FrontendClass>
 class InspectorBaseAgent : public InspectorAgent {
 public:
-    virtual ~InspectorBaseAgent() { }
+    ~InspectorBaseAgent() override { }
 
-    void setFrontend(InspectorFrontend* frontend) override final
+    void setFrontend(InspectorFrontend* frontend) override
     {
         ASSERT(!m_frontend);
         m_frontend = FrontendClass::from(frontend);
     }
 
-    void clearFrontend() override final
+    void clearFrontend() override
     {
         ErrorString error;
         disable(&error);
@@ -114,7 +116,7 @@ public:
         m_frontend = nullptr;
     }
 
-    virtual void registerInDispatcher(InspectorBackendDispatcher* dispatcher) override final
+    void registerInDispatcher(InspectorBackendDispatcher* dispatcher) final
     {
         dispatcher->registerAgent(static_cast<AgentClass*>(this));
     }

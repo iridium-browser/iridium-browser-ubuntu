@@ -54,7 +54,7 @@ enum FetchResourceType {
     FetchSubresource
 };
 
-class CORE_EXPORT FetchContext : public NoBaseWillBeGarbageCollectedFinalized<FetchContext> {
+class CORE_EXPORT FetchContext : public GarbageCollectedFinalized<FetchContext> {
     WTF_MAKE_NONCOPYABLE(FetchContext);
 public:
     static FetchContext& nullInstance();
@@ -63,6 +63,9 @@ public:
     DEFINE_INLINE_VIRTUAL_TRACE() { }
 
     virtual bool isLiveContext() { return false; }
+    virtual void countClientHintsDPR() { }
+    virtual void countClientHintsResourceWidth() { }
+    virtual void countClientHintsViewportWidth() { }
 
     virtual void addAdditionalRequestHeaders(ResourceRequest&, FetchResourceType);
     virtual void setFirstPartyForCookies(ResourceRequest&);
@@ -71,20 +74,18 @@ public:
 
     virtual void dispatchDidChangeResourcePriority(unsigned long identifier, ResourceLoadPriority, int intraPriorityValue);
     virtual void dispatchWillSendRequest(unsigned long identifier, ResourceRequest&, const ResourceResponse& redirectResponse, const FetchInitiatorInfo& = FetchInitiatorInfo());
-    virtual void dispatchDidLoadResourceFromMemoryCache(const ResourceRequest&, const ResourceResponse&);
+    virtual void dispatchDidLoadResourceFromMemoryCache(const Resource*);
     virtual void dispatchDidReceiveResponse(unsigned long identifier, const ResourceResponse&, ResourceLoader* = 0);
     virtual void dispatchDidReceiveData(unsigned long identifier, const char* data, int dataLength, int encodedDataLength);
     virtual void dispatchDidDownloadData(unsigned long identifier, int dataLength, int encodedDataLength);
     virtual void dispatchDidFinishLoading(unsigned long identifier, double finishTime, int64_t encodedDataLength);
     virtual void dispatchDidFail(unsigned long identifier, const ResourceError&, bool isInternalRequest);
-    virtual void sendRemainingDelegateMessages(unsigned long identifier, const ResourceResponse&, int dataLength);
 
     virtual bool shouldLoadNewResource(Resource::Type) const { return false; }
-    virtual void dispatchWillRequestResource(FetchRequest*);
     virtual void willStartLoadingResource(ResourceRequest&);
     virtual void didLoadResource();
 
-    virtual void addResourceTiming(ResourceTimingInfo*, bool isMainResource);
+    virtual void addResourceTiming(const ResourceTimingInfo&);
     virtual bool allowImage(bool, const KURL&) const { return false; }
     virtual bool canRequest(Resource::Type, const ResourceRequest&, const KURL&, const ResourceLoaderOptions&, bool forPreload, FetchRequest::OriginRestriction) const { return false; }
 
@@ -92,7 +93,6 @@ public:
     virtual int64_t serviceWorkerID() const { return -1; }
 
     virtual bool isMainFrame() const { return true; }
-    virtual bool hasSubstituteData() const { return false; }
     virtual bool defersLoading() const { return false; }
     virtual bool isLoadComplete() const { return false; }
     virtual bool pageDismissalEventBeingDispatched() const { return false; }
@@ -100,10 +100,15 @@ public:
     virtual void sendImagePing(const KURL&);
     virtual void addConsoleMessage(const String&) const;
     virtual SecurityOrigin* securityOrigin() const { return nullptr; }
-    virtual String charset() const { return String(); }
     virtual void upgradeInsecureRequest(FetchRequest&);
     virtual void addClientHintsIfNecessary(FetchRequest&);
     virtual void addCSPHeaderIfNecessary(Resource::Type, FetchRequest&);
+    virtual bool isLowPriorityIframe() const { return false; }
+
+    virtual bool fetchDeferLateScripts() const { return false; }
+    virtual bool fetchIncreaseFontPriority() const { return false; }
+    virtual bool fetchIncreaseAsyncScriptPriority() const { return false; }
+    virtual bool fetchIncreasePriorities() const { return false; }
 
 protected:
     FetchContext() { }

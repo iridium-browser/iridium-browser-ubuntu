@@ -82,6 +82,8 @@ using media::VideoDecodeAccelerator;
 namespace content {
 namespace {
 
+using base::MakeTuple;
+
 // Values optionally filled in from flags; see main() below.
 // The syntax of multiple test videos is:
 //  test-video1;test-video2;test-video3
@@ -141,6 +143,9 @@ const int kMaxFramesToDelayReuse = 64;
 const base::TimeDelta kReuseDelay = base::TimeDelta::FromSeconds(1);
 // Simulate WebRTC and call VDA::Decode 30 times per second.
 const int kWebRtcDecodeCallsPerSecond = 30;
+// Simulate an adjustment to a larger number of pictures to make sure the
+// decoder supports an upwards adjustment.
+const int kExtraPictureBuffers = 2;
 
 struct TestVideoFile {
   explicit TestVideoFile(base::FilePath::StringType file_name)
@@ -178,23 +183,23 @@ void ReadGoldenThumbnailMD5s(const TestVideoFile* video_file,
   filepath = filepath.AddExtension(FILE_PATH_LITERAL(".md5"));
   std::string all_md5s;
   base::ReadFileToString(filepath, &all_md5s);
-  base::SplitString(all_md5s, '\n', md5_strings);
+  *md5_strings = base::SplitString(
+      all_md5s, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   // Check these are legitimate MD5s.
-  for (std::vector<std::string>::iterator md5_string = md5_strings->begin();
-      md5_string != md5_strings->end(); ++md5_string) {
+  for (const std::string& md5_string : *md5_strings) {
       // Ignore the empty string added by SplitString
-      if (!md5_string->length())
+      if (!md5_string.length())
         continue;
       // Ignore comments
-      if (md5_string->at(0) == '#')
+      if (md5_string.at(0) == '#')
         continue;
 
-      CHECK_EQ(static_cast<int>(md5_string->length()),
-               kMD5StringLength) << *md5_string;
-      bool hex_only = std::count_if(md5_string->begin(),
-                                    md5_string->end(), isxdigit) ==
+      CHECK_EQ(static_cast<int>(md5_string.length()),
+               kMD5StringLength) << md5_string;
+      bool hex_only = std::count_if(md5_string.begin(),
+                                    md5_string.end(), isxdigit) ==
                                     kMD5StringLength;
-      CHECK(hex_only) << *md5_string;
+      CHECK(hex_only) << md5_string;
   }
   CHECK_GE(md5_strings->size(), 1U) << "  MD5 checksum file ("
                                     << filepath.MaybeAsASCII()
@@ -612,6 +617,8 @@ void GLRenderingVDAClient::ProvidePictureBuffers(
   if (decoder_deleted())
     return;
   std::vector<media::PictureBuffer> buffers;
+
+  requested_num_of_buffers += kExtraPictureBuffers;
 
   texture_target_ = texture_target;
   for (uint32 i = 0; i < requested_num_of_buffers; ++i) {
@@ -1059,12 +1066,14 @@ void VideoDecodeAcceleratorTest::TearDown() {
 void VideoDecodeAcceleratorTest::ParseAndReadTestVideoData(
     base::FilePath::StringType data,
     std::vector<TestVideoFile*>* test_video_files) {
-  std::vector<base::FilePath::StringType> entries;
-  base::SplitString(data, ';', &entries);
+  std::vector<base::FilePath::StringType> entries = base::SplitString(
+      data, base::FilePath::StringType(1, ';'),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   CHECK_GE(entries.size(), 1U) << data;
   for (size_t index = 0; index < entries.size(); ++index) {
-    std::vector<base::FilePath::StringType> fields;
-    base::SplitString(entries[index], ':', &fields);
+    std::vector<base::FilePath::StringType> fields = base::SplitString(
+        entries[index], base::FilePath::StringType(1, ':'),
+        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     CHECK_GE(fields.size(), 1U) << entries[index];
     CHECK_LE(fields.size(), 8U) << entries[index];
     TestVideoFile* video_file = new TestVideoFile(fields[0]);
@@ -1177,17 +1186,18 @@ void VideoDecodeAcceleratorTest::OutputLogFile(
 class VideoDecodeAcceleratorParamTest
     : public VideoDecodeAcceleratorTest,
       public ::testing::WithParamInterface<
-        Tuple<int, int, int, ResetPoint, ClientState, bool, bool> > {
+        base::Tuple<int, int, int, ResetPoint, ClientState, bool, bool> > {
 };
 
 // Helper so that gtest failures emit a more readable version of the tuple than
 // its byte representation.
 ::std::ostream& operator<<(
     ::std::ostream& os,
-    const Tuple<int, int, int, ResetPoint, ClientState, bool, bool>& t) {
-  return os << get<0>(t) << ", " << get<1>(t) << ", " << get<2>(t) << ", "
-            << get<3>(t) << ", " << get<4>(t) << ", " << get<5>(t) << ", "
-            << get<6>(t);
+    const base::Tuple<int, int, int, ResetPoint, ClientState, bool, bool>& t) {
+  return os << base::get<0>(t) << ", " << base::get<1>(t) << ", "
+            << base::get<2>(t) << ", " << base::get<3>(t) << ", "
+            << base::get<4>(t) << ", " << base::get<5>(t) << ", "
+            << base::get<6>(t);
 }
 
 // Wait for |note| to report a state and if it's not |expected_state| then
@@ -1211,13 +1221,13 @@ enum { kMinSupportedNumConcurrentDecoders = 3 };
 // Test the most straightforward case possible: data is decoded from a single
 // chunk and rendered to the screen.
 TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
-  size_t num_concurrent_decoders = get<0>(GetParam());
-  const size_t num_in_flight_decodes = get<1>(GetParam());
-  int num_play_throughs = get<2>(GetParam());
-  const int reset_point = get<3>(GetParam());
-  const int delete_decoder_state = get<4>(GetParam());
-  bool test_reuse_delay = get<5>(GetParam());
-  const bool render_as_thumbnails = get<6>(GetParam());
+  size_t num_concurrent_decoders = base::get<0>(GetParam());
+  const size_t num_in_flight_decodes = base::get<1>(GetParam());
+  int num_play_throughs = base::get<2>(GetParam());
+  const int reset_point = base::get<3>(GetParam());
+  const int delete_decoder_state = base::get<4>(GetParam());
+  bool test_reuse_delay = base::get<5>(GetParam());
+  const bool render_as_thumbnails = base::get<6>(GetParam());
 
   if (test_video_files_.size() > 1)
     num_concurrent_decoders = test_video_files_.size();

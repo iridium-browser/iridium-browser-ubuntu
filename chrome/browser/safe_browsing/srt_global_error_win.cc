@@ -9,15 +9,17 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/process/launch.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/safe_browsing/srt_field_trial_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
+#include "components/component_updater/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -40,22 +42,6 @@ const base::FilePath::CharType kExecutableExtension[] = L"exe";
 
 // A switch to add to the command line when executing the SRT.
 const char kChromePromptSwitch[] = "chrome-prompt";
-
-// Enum values for the SRTPrompt histogram. Don't change order, always add
-// to the end, before SRT_PROMPT_MAX, of course.
-enum SRTPromptHistogramValue {
-  SRT_PROMPT_SHOWN = 0,
-  SRT_PROMPT_ACCEPTED = 1,
-  SRT_PROMPT_DENIED = 2,
-  SRT_PROMPT_FALLBACK = 3,
-
-  SRT_PROMPT_MAX,
-};
-
-void RecordSRTPromptHistogram(SRTPromptHistogramValue value) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "SoftwareReporter.PromptUsage", value, SRT_PROMPT_MAX);
-}
 
 void MaybeExecuteSRTFromBlockingPool(
     const base::FilePath& downloaded_path,
@@ -115,12 +101,19 @@ base::string16 SRTGlobalError::MenuItemLabel() {
 }
 
 void SRTGlobalError::ExecuteMenuItem(Browser* browser) {
+  safe_browsing::RecordSRTPromptHistogram(
+      safe_browsing::SRT_PROMPT_SHOWN_FROM_MENU);
+  show_dismiss_button_ = true;
   ShowBubbleView(browser);
 }
 
 void SRTGlobalError::ShowBubbleView(Browser* browser) {
-  RecordSRTPromptHistogram(SRT_PROMPT_SHOWN);
+  safe_browsing::RecordSRTPromptHistogram(safe_browsing::SRT_PROMPT_SHOWN);
   GlobalErrorWithStandardBubble::ShowBubbleView(browser);
+}
+
+bool SRTGlobalError::ShouldShowCloseButton() const {
+  return true;
 }
 
 base::string16 SRTGlobalError::GetBubbleViewTitle() {
@@ -145,20 +138,31 @@ bool SRTGlobalError::ShouldAddElevationIconToAcceptButton() {
 }
 
 base::string16 SRTGlobalError::GetBubbleViewCancelButtonLabel() {
-  return l10n_util::GetStringUTF16(IDS_SRT_BUBBLE_DISMISS);
+  if (show_dismiss_button_)
+    return l10n_util::GetStringUTF16(IDS_SRT_BUBBLE_DISMISS);
+  return base::string16();
 }
 
 void SRTGlobalError::OnBubbleViewDidClose(Browser* browser) {
+  // This won't happen when user interacted with the bubble since DestroySelf is
+  // called in those cases and will prevent the base class from calling virtual
+  // methods. This DCHECK makes sure that behavior won't change.
+  DCHECK(!interacted_);
+  safe_browsing::RecordSRTPromptHistogram(safe_browsing::SRT_PROMPT_CLOSED);
+  g_browser_process->local_state()->SetBoolean(prefs::kSwReporterPendingPrompt,
+                                               true);
 }
 
 void SRTGlobalError::BubbleViewAcceptButtonPressed(Browser* browser) {
-  RecordSRTPromptHistogram(SRT_PROMPT_ACCEPTED);
+  safe_browsing::RecordSRTPromptHistogram(safe_browsing::SRT_PROMPT_ACCEPTED);
+  interacted_ = true;
   global_error_service_->RemoveGlobalError(this);
   MaybeExecuteSRT();
 }
 
 void SRTGlobalError::BubbleViewCancelButtonPressed(Browser* browser) {
-  RecordSRTPromptHistogram(SRT_PROMPT_DENIED);
+  safe_browsing::RecordSRTPromptHistogram(safe_browsing::SRT_PROMPT_DENIED);
+  interacted_ = true;
   global_error_service_->RemoveGlobalError(this);
 
   BrowserThread::PostBlockingPoolTask(
@@ -188,7 +192,7 @@ void SRTGlobalError::MaybeExecuteSRT() {
 }
 
 void SRTGlobalError::FallbackToDownloadPage() {
-  RecordSRTPromptHistogram(SRT_PROMPT_FALLBACK);
+  safe_browsing::RecordSRTPromptHistogram(safe_browsing::SRT_PROMPT_FALLBACK);
 
   chrome::HostDesktopType desktop_type = chrome::GetActiveDesktop();
   Browser* browser = chrome::FindLastActiveWithHostDesktopType(desktop_type);
@@ -204,5 +208,9 @@ void SRTGlobalError::FallbackToDownloadPage() {
 }
 
 void SRTGlobalError::DestroySelf() {
+  // This should only happen when user interacted with the bubble.
+  DCHECK(interacted_);
+  g_browser_process->local_state()->SetBoolean(prefs::kSwReporterPendingPrompt,
+                                               false);
   delete this;
 }

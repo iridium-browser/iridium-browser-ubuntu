@@ -2,11 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core import wpr_modes
 from telemetry import decorators
 from telemetry.page import page
-from telemetry.unittest_util import options_for_unittests
-from telemetry.unittest_util import page_test_test_case
+from telemetry.testing import options_for_unittests
+from telemetry.testing import page_test_test_case
+from telemetry.util import wpr_modes
 
 from measurements import thread_times
 from metrics import timeline
@@ -29,7 +29,7 @@ class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
 
   @decorators.Disabled('android')
   def testBasic(self):
-    ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
+    ps = self.CreateStorySetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = thread_times.ThreadTimes()
     timeline_options = self._options
     results = self.RunMeasurement(measurement, ps, options = timeline_options)
@@ -41,24 +41,9 @@ class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
         cpu_time = results.FindAllPageSpecificValuesNamed(cpu_time_name)
         self.assertEquals(len(cpu_time), 1)
 
-  def testBasicForPageWithNoGesture(self):
-    ps = self.CreateEmptyPageSet()
-    ps.AddUserStory(AnimatedPage(ps))
-
-    measurement = thread_times.ThreadTimes()
-    timeline_options = self._options
-    results = self.RunMeasurement(measurement, ps, options = timeline_options)
-    self.assertEquals(0, len(results.failures))
-
-    for interval in timeline.IntervalNames:
-      for category in timeline.TimelineThreadCategories.values():
-        cpu_time_name = timeline.ThreadCpuTimeResultName(category, interval)
-        cpu_time = results.FindAllPageSpecificValuesNamed(cpu_time_name)
-        self.assertEquals(len(cpu_time), 1)
-
   @decorators.Disabled('chromeos')  # crbug.com/483212
   def testWithSilkDetails(self):
-    ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
+    ps = self.CreateStorySetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = thread_times.ThreadTimes(report_silk_details=True)
     results = self.RunMeasurement(measurement, ps, options = self._options)
     self.assertEquals(0, len(results.failures))

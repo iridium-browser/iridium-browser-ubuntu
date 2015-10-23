@@ -22,6 +22,7 @@
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/permission_broker_client.h"
+#include "dbus/file_descriptor.h"
 #endif  // defined(OS_CHROMEOS)
 
 namespace device {
@@ -88,117 +89,12 @@ UsbUsageType GetUsageType(const libusb_endpoint_descriptor* descriptor) {
   }
 }
 
-}  // namespace
-
-UsbDeviceImpl::UsbDeviceImpl(
-    scoped_refptr<UsbContext> context,
-    PlatformUsbDevice platform_device,
-    uint16 vendor_id,
-    uint16 product_id,
-    uint32 unique_id,
-    const base::string16& manufacturer_string,
-    const base::string16& product_string,
-    const base::string16& serial_number,
-    const std::string& device_node,
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
-    : UsbDevice(vendor_id,
-                product_id,
-                unique_id,
-                manufacturer_string,
-                product_string,
-                serial_number),
-      platform_device_(platform_device),
-#if defined(OS_CHROMEOS)
-      devnode_(device_node),
-#endif  // defined(OS_CHROMEOS)
-      context_(context),
-      task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      blocking_task_runner_(blocking_task_runner) {
-  CHECK(platform_device) << "platform_device cannot be NULL";
-  libusb_ref_device(platform_device);
-  RefreshConfiguration();
-}
-
-UsbDeviceImpl::~UsbDeviceImpl() {
-  // The destructor must be safe to call from any thread.
-  libusb_unref_device(platform_device_);
-}
-
-#if defined(OS_CHROMEOS)
-
-void UsbDeviceImpl::CheckUsbAccess(const ResultCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  chromeos::PermissionBrokerClient* client =
-      chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
-  DCHECK(client) << "Could not get permission broker client.";
-  client->CheckPathAccess(devnode_, callback);
-}
-
-void UsbDeviceImpl::RequestUsbAccess(int interface_id,
-                                     const ResultCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  chromeos::PermissionBrokerClient* client =
-      chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
-  DCHECK(client) << "Could not get permission broker client.";
-  client->RequestPathAccess(devnode_, interface_id, callback);
-}
-
-#endif
-
-void UsbDeviceImpl::Open(const OpenCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  blocking_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&UsbDeviceImpl::OpenOnBlockingThread, this, callback));
-}
-
-bool UsbDeviceImpl::Close(scoped_refptr<UsbDeviceHandle> handle) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  for (HandlesVector::iterator it = handles_.begin(); it != handles_.end();
-       ++it) {
-    if (it->get() == handle.get()) {
-      (*it)->InternalClose();
-      handles_.erase(it);
-      return true;
-    }
-  }
-  return false;
-}
-
-const UsbConfigDescriptor* UsbDeviceImpl::GetConfiguration() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return configuration_.get();
-}
-
-void UsbDeviceImpl::OnDisconnect() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  // Swap the list of handles into a local variable because closing all open
-  // handles may release the last reference to this object.
-  HandlesVector handles;
-  swap(handles, handles_);
-
-  for (const scoped_refptr<UsbDeviceHandleImpl>& handle : handles_) {
-    handle->InternalClose();
-  }
-}
-
-void UsbDeviceImpl::RefreshConfiguration() {
-  libusb_config_descriptor* platform_config;
-  int rv =
-      libusb_get_active_config_descriptor(platform_device_, &platform_config);
-  if (rv != LIBUSB_SUCCESS) {
-    USB_LOG(EVENT) << "Failed to get config descriptor: "
-                   << ConvertPlatformUsbErrorToString(rv);
-    return;
-  }
-
-  configuration_.reset(new UsbConfigDescriptor());
-  configuration_->configuration_value = platform_config->bConfigurationValue;
-  configuration_->self_powered = (platform_config->bmAttributes & 0x40) != 0;
-  configuration_->remote_wakeup = (platform_config->bmAttributes & 0x20) != 0;
-  configuration_->maximum_power = platform_config->MaxPower * 2;
+void ConvertConfigDescriptor(const libusb_config_descriptor* platform_config,
+                             UsbConfigDescriptor* configuration) {
+  configuration->configuration_value = platform_config->bConfigurationValue;
+  configuration->self_powered = (platform_config->bmAttributes & 0x40) != 0;
+  configuration->remote_wakeup = (platform_config->bmAttributes & 0x20) != 0;
+  configuration->maximum_power = platform_config->MaxPower * 2;
 
   for (size_t i = 0; i < platform_config->bNumInterfaces; ++i) {
     const struct libusb_interface* platform_interface =
@@ -214,6 +110,7 @@ void UsbDeviceImpl::RefreshConfiguration() {
       interface.interface_subclass = platform_alt_setting->bInterfaceSubClass;
       interface.interface_protocol = platform_alt_setting->bInterfaceProtocol;
 
+      interface.endpoints.reserve(platform_alt_setting->bNumEndpoints);
       for (size_t k = 0; k < platform_alt_setting->bNumEndpoints; ++k) {
         const struct libusb_endpoint_descriptor* platform_endpoint =
             &platform_alt_setting->endpoint[k];
@@ -238,16 +135,182 @@ void UsbDeviceImpl::RefreshConfiguration() {
           platform_alt_setting->extra,
           platform_alt_setting->extra + platform_alt_setting->extra_length);
 
-      configuration_->interfaces.push_back(interface);
+      configuration->interfaces.push_back(interface);
     }
   }
 
-  configuration_->extra_data = std::vector<uint8_t>(
+  configuration->extra_data = std::vector<uint8_t>(
       platform_config->extra,
       platform_config->extra + platform_config->extra_length);
+}
+
+}  // namespace
+
+UsbDeviceImpl::UsbDeviceImpl(
+    scoped_refptr<UsbContext> context,
+    PlatformUsbDevice platform_device,
+    uint16 vendor_id,
+    uint16 product_id,
+    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
+    : UsbDevice(vendor_id,
+                product_id,
+                base::string16(),
+                base::string16(),
+                base::string16()),
+      platform_device_(platform_device),
+      context_(context),
+      task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      blocking_task_runner_(blocking_task_runner) {
+  CHECK(platform_device) << "platform_device cannot be NULL";
+  libusb_ref_device(platform_device);
+  ReadAllConfigurations();
+  RefreshActiveConfiguration();
+}
+
+UsbDeviceImpl::~UsbDeviceImpl() {
+  // The destructor must be safe to call from any thread.
+  libusb_unref_device(platform_device_);
+}
+
+#if defined(OS_CHROMEOS)
+
+void UsbDeviceImpl::CheckUsbAccess(const ResultCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  chromeos::PermissionBrokerClient* client =
+      chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
+  DCHECK(client) << "Could not get permission broker client.";
+  client->CheckPathAccess(device_path_, callback);
+}
+
+#endif  // defined(OS_CHROMEOS)
+
+void UsbDeviceImpl::Open(const OpenCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+#if defined(OS_CHROMEOS)
+  chromeos::PermissionBrokerClient* client =
+      chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
+  DCHECK(client) << "Could not get permission broker client.";
+  client->OpenPath(
+      device_path_,
+      base::Bind(&UsbDeviceImpl::OnOpenRequestComplete, this, callback));
+#else
+  blocking_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&UsbDeviceImpl::OpenOnBlockingThread, this, callback));
+#endif  // defined(OS_CHROMEOS)
+}
+
+bool UsbDeviceImpl::Close(scoped_refptr<UsbDeviceHandle> handle) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  for (HandlesVector::iterator it = handles_.begin(); it != handles_.end();
+       ++it) {
+    if (it->get() == handle.get()) {
+      (*it)->InternalClose();
+      handles_.erase(it);
+      return true;
+    }
+  }
+  return false;
+}
+
+const UsbConfigDescriptor* UsbDeviceImpl::GetActiveConfiguration() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return active_configuration_;
+}
+
+void UsbDeviceImpl::OnDisconnect() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Swap the list of handles into a local variable because closing all open
+  // handles may release the last reference to this object.
+  HandlesVector handles;
+  swap(handles, handles_);
+
+  for (const scoped_refptr<UsbDeviceHandleImpl>& handle : handles_) {
+    handle->InternalClose();
+  }
+}
+
+void UsbDeviceImpl::ReadAllConfigurations() {
+  libusb_device_descriptor device_descriptor;
+  int rv = libusb_get_device_descriptor(platform_device_, &device_descriptor);
+  if (rv == LIBUSB_SUCCESS) {
+    uint8_t num_configurations = device_descriptor.bNumConfigurations;
+    configurations_.reserve(num_configurations);
+    for (uint8_t i = 0; i < num_configurations; ++i) {
+      libusb_config_descriptor* platform_config;
+      rv = libusb_get_config_descriptor(platform_device_, i, &platform_config);
+      if (rv != LIBUSB_SUCCESS) {
+        USB_LOG(EVENT) << "Failed to get config descriptor: "
+                       << ConvertPlatformUsbErrorToString(rv);
+        continue;
+      }
+
+      UsbConfigDescriptor config_descriptor;
+      ConvertConfigDescriptor(platform_config, &config_descriptor);
+      configurations_.push_back(config_descriptor);
+      libusb_free_config_descriptor(platform_config);
+    }
+  } else {
+    USB_LOG(EVENT) << "Failed to get device descriptor: "
+                   << ConvertPlatformUsbErrorToString(rv);
+  }
+}
+
+void UsbDeviceImpl::RefreshActiveConfiguration() {
+  active_configuration_ = nullptr;
+  libusb_config_descriptor* platform_config;
+  int rv =
+      libusb_get_active_config_descriptor(platform_device_, &platform_config);
+  if (rv != LIBUSB_SUCCESS) {
+    USB_LOG(EVENT) << "Failed to get config descriptor: "
+                   << ConvertPlatformUsbErrorToString(rv);
+    return;
+  }
+
+  for (const auto& config : configurations_) {
+    if (config.configuration_value == platform_config->bConfigurationValue) {
+      active_configuration_ = &config;
+      break;
+    }
+  }
 
   libusb_free_config_descriptor(platform_config);
 }
+
+#if defined(OS_CHROMEOS)
+
+void UsbDeviceImpl::OnOpenRequestComplete(const OpenCallback& callback,
+                                          dbus::FileDescriptor fd) {
+  blocking_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&UsbDeviceImpl::OpenOnBlockingThreadWithFd, this,
+                            base::Passed(&fd), callback));
+}
+
+void UsbDeviceImpl::OpenOnBlockingThreadWithFd(dbus::FileDescriptor fd,
+                                               const OpenCallback& callback) {
+  fd.CheckValidity();
+  if (!fd.is_valid()) {
+    USB_LOG(EVENT) << "Did not get valid device handle from permission broker.";
+    task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
+    return;
+  }
+
+  PlatformUsbDeviceHandle handle;
+  const int rv = libusb_open_fd(platform_device_, fd.TakeValue(), &handle);
+  if (LIBUSB_SUCCESS == rv) {
+    task_runner_->PostTask(
+        FROM_HERE, base::Bind(&UsbDeviceImpl::Opened, this, handle, callback));
+  } else {
+    USB_LOG(EVENT) << "Failed to open device: "
+                   << ConvertPlatformUsbErrorToString(rv);
+    task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
+  }
+}
+
+#endif  // defined(OS_CHROMEOS)
 
 void UsbDeviceImpl::OpenOnBlockingThread(const OpenCallback& callback) {
   PlatformUsbDeviceHandle handle;

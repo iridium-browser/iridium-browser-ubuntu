@@ -32,7 +32,6 @@
 //   ~CodeGenerator
 //   Generate
 //   ComputeLazyCompile
-//   BuildFunctionInfo
 //   ProcessDeclarations
 //   DeclareGlobals
 //   CheckForInlineRuntimeCall
@@ -42,8 +41,6 @@
 //   CodeForStatementPosition
 //   CodeForDoWhileConditionPosition
 //   CodeForSourcePosition
-
-enum TypeofState { INSIDE_TYPEOF, NOT_INSIDE_TYPEOF };
 
 #if V8_TARGET_ARCH_IA32
 #include "src/ia32/codegen-ia32.h"  // NOLINT
@@ -84,10 +81,6 @@ class CodeGenerator {
 
   // Print the code after compiling it.
   static void PrintCode(Handle<Code> code, CompilationInfo* info);
-
-  static bool RecordPositions(MacroAssembler* masm,
-                              int pos,
-                              bool right_here = false);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CodeGenerator);

@@ -2,8 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core.platform import tracing_category_filter
 from telemetry.page import page_test
+from telemetry.timeline import tracing_category_filter
 from telemetry.web_perf.metrics import layout
 
 from measurements import timeline_controller
@@ -17,7 +17,8 @@ class ThreadTimes(page_test.PageTest):
     self._report_silk_details = report_silk_details
 
   def WillNavigateToPage(self, page, tab):
-    self._timeline_controller = timeline_controller.TimelineController()
+    self._timeline_controller = timeline_controller.TimelineController(
+        enable_auto_issuing_record=False)
     if self._report_silk_details:
       # We need the other traces in order to have any details to report.
       self._timeline_controller.trace_categories = None
@@ -42,6 +43,6 @@ class ThreadTimes(page_test.PageTest):
     layout_metric.AddResults(self._timeline_controller.model, renderer_thread,
                              self._timeline_controller.smooth_records, results)
 
-  def CleanUpAfterPage(self, _, tab):
+  def DidRunPage(self, platform):
     if self._timeline_controller:
-      self._timeline_controller.CleanUp(tab)
+      self._timeline_controller.CleanUp(platform)

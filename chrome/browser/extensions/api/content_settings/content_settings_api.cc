@@ -10,8 +10,9 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api_constants.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_helpers.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/content_settings.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/plugin_service.h"
 #include "extensions/browser/extension_prefs_scope.h"
@@ -131,7 +133,7 @@ bool ContentSettingsContentSettingGetFunction::RunSync() {
   }
 
   HostContentSettingsMap* map;
-  CookieSettings* cookie_settings;
+  content_settings::CookieSettings* cookie_settings;
   if (incognito) {
     if (!GetProfile()->HasOffTheRecordProfile()) {
       // TODO(bauerb): Allow reading incognito content settings
@@ -140,12 +142,11 @@ bool ContentSettingsContentSettingGetFunction::RunSync() {
       return false;
     }
     map = GetProfile()->GetOffTheRecordProfile()->GetHostContentSettingsMap();
-    cookie_settings = CookieSettings::Factory::GetForProfile(
-        GetProfile()->GetOffTheRecordProfile()).get();
+    cookie_settings = CookieSettingsFactory::GetForProfile(
+                          GetProfile()->GetOffTheRecordProfile()).get();
   } else {
     map = GetProfile()->GetHostContentSettingsMap();
-    cookie_settings =
-        CookieSettings::Factory::GetForProfile(GetProfile()).get();
+    cookie_settings = CookieSettingsFactory::GetForProfile(GetProfile()).get();
   }
 
   ContentSetting setting;
@@ -208,6 +209,39 @@ bool ContentSettingsContentSettingSetFunction::RunSync() {
       helpers::StringToContentSetting(setting_str, &setting));
   EXTENSION_FUNCTION_VALIDATE(HostContentSettingsMap::IsSettingAllowedForType(
       GetProfile()->GetPrefs(), setting, content_type));
+
+  // Some content setting types support the full set of values listed in
+  // content_settings.json only for exceptions. For the default setting,
+  // some values might not be supported.
+  // For example, camera supports [allow, ask, block] for exceptions, but only
+  // [ask, block] for the default setting.
+  if (primary_pattern == ContentSettingsPattern::Wildcard() &&
+      secondary_pattern == ContentSettingsPattern::Wildcard() &&
+      !HostContentSettingsMap::IsDefaultSettingAllowedForType(
+          GetProfile()->GetPrefs(), setting, content_type)) {
+    static const char kUnsupportedDefaultSettingError[] =
+        "'%s' is not supported as the default setting of %s.";
+
+    // TODO(msramek): Get the same human readable name as is presented
+    // externally in the API, i.e. chrome.contentSettings.<name>.set().
+    std::string readable_type_name;
+    switch (content_type) {
+      case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+        readable_type_name = "microphone";
+        break;
+      case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
+        readable_type_name = "camera";
+        break;
+      default:
+        DCHECK(false) << "No human-readable type name defined for this type.";
+    }
+
+    error_ = base::StringPrintf(
+        kUnsupportedDefaultSettingError,
+        content_settings_helpers::ContentSettingToString(setting),
+        readable_type_name.c_str());
+    return false;
+  }
 
   ExtensionPrefsScope scope = kExtensionPrefsScopeRegular;
   bool incognito = false;

@@ -24,6 +24,7 @@ class DictionaryValue;
 
 namespace chromeos {
 class AppLaunchSplashScreenActor;
+class AutoEnrollmentCheckScreenActor;
 class BaseScreenHandler;
 class ControllerPairingScreenActor;
 class DeviceDisabledScreenActor;
@@ -39,7 +40,6 @@ class NetworkDropdownHandler;
 class NetworkStateInformer;
 class SigninScreenHandler;
 class SigninScreenHandlerDelegate;
-class UpdateScreenHandler;
 class UserBoardScreenHandler;
 
 // A custom WebUI that defines datasource for out-of-box-experience (OOBE) UI:
@@ -65,7 +65,6 @@ class OobeUI : public OobeDisplay,
   static const char kLockDisplay[];
   static const char kUserAddingDisplay[];
   static const char kAppLaunchSplashDisplay[];
-  static const char kNewOobeDisplay[];
 
   // JS oobe/login screens names.
   static const char kScreenOobeHIDDetection[];
@@ -192,7 +191,7 @@ class OobeUI : public OobeDisplay,
   NetworkDropdownHandler* network_dropdown_handler_;
 
   // Screens actors. Note, OobeUI owns them via |handlers_|, not directly here.
-  UpdateScreenHandler* update_screen_handler_;
+  UpdateView* update_view_;
   NetworkView* network_view_;
   EnableDebuggingScreenActor* debugging_screen_actor_;
   EulaView* eula_view_;
@@ -255,7 +254,7 @@ class OobeUI : public OobeDisplay,
   std::vector<base::Closure> ready_callbacks_;
 
   // List of registered observers.
-  ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer> observer_list_;
 
   // Observer of CrosSettings watching the kRebootOnShutdown policy.
   scoped_ptr<ShutdownPolicyHandler> shutdown_policy_handler_;

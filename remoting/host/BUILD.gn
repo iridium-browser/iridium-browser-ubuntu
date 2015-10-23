@@ -10,6 +10,30 @@ import("//remoting/remoting_srcs.gni")
 import("//remoting/remoting_version.gni")
 import("//remoting/tools/build/remoting_localize.gni")
 
+# GYP version: remoting/remoting_host:remoting_host_credits
+action("credits") {
+  about_credits_file = "$target_gen_dir/CREDITS.txt"
+  script = "//tools/licenses.py"
+
+  inputs = [
+    "installer/credits.tmpl",
+    "installer/credits_entry.tmpl",
+  ]
+
+  outputs = [
+    about_credits_file,
+  ]
+
+  args = [
+    "credits",
+    rebase_path(about_credits_file, root_build_dir),
+    "--file-template",
+    rebase_path("installer/credits.tmpl", root_build_dir),
+    "--entry-template",
+    rebase_path("installer/credits_entry.tmpl", root_build_dir),
+  ]
+}
+
 if (is_mac) {  # TODO(GYP) Mac build of remoting host.
   group("host") {
   }
@@ -78,6 +102,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       if (is_linux) {
         # These will already be filtered out on non-Linux.
         sources -= [
+          "linux/x11_util.cc",
           "linux/x_server_clipboard.cc",
           "linux/x_server_clipboard.h",
         ]
@@ -97,6 +122,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       ]
       deps += [
         "//cc",
+        "//gpu/command_buffer/common",
         "//ppapi/host",
         "//skia",
         "//ui/aura",
@@ -188,12 +214,18 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       "fake_host_status_monitor.h",
       "fake_mouse_cursor_monitor.cc",
       "fake_mouse_cursor_monitor.h",
+      "fake_oauth_token_getter.cc",
+      "fake_oauth_token_getter.h",
+      "host_mock_objects.cc",
+      "setup/mock_oauth_client.cc",
+      "setup/mock_oauth_client.h",
     ]
 
     configs += [ "//remoting:version" ]
 
     deps = [
       "//remoting/proto",
+      "//testing/gmock",
       "//testing/gtest",
     ]
     public_deps = [
@@ -215,6 +247,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
     sources = [
       "audio_pump_unittest.cc",
       "audio_silence_detector_unittest.cc",
+      "backoff_timer_unittest.cc",
       "capture_scheduler_unittest.cc",
       "chromeos/aura_desktop_capturer_unittest.cc",
       "chromeos/clipboard_aura_unittest.cc",
@@ -225,12 +258,13 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       "daemon_process_unittest.cc",
       "desktop_process_unittest.cc",
       "desktop_shape_tracker_unittest.cc",
+      "gcd_rest_client_unittest.cc",
+      "gcd_state_updater_unittest.cc",
       "gnubby_auth_handler_posix_unittest.cc",
       "heartbeat_sender_unittest.cc",
       "host_change_notification_listener_unittest.cc",
       "host_config_unittest.cc",
       "host_extension_session_manager_unittest.cc",
-      "host_mock_objects.cc",
       "host_status_logger_unittest.cc",
       "ipc_desktop_environment_unittest.cc",
       "it2me/it2me_confirmation_dialog_proxy_unittest.cc",
@@ -252,16 +286,15 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       "screen_resolution_unittest.cc",
       "server_log_entry_host_unittest.cc",
       "setup/me2me_native_messaging_host_unittest.cc",
-      "setup/mock_oauth_client.cc",
       "setup/oauth_helper_unittest.cc",
       "setup/pin_validator_unittest.cc",
       "shaped_desktop_capturer_unittest.cc",
+      "third_party_auth_config_unittest.cc",
       "token_validator_factory_impl_unittest.cc",
+      "touch_injector_win_unittest.cc",
       "video_frame_pump_unittest.cc",
       "video_frame_recorder_unittest.cc",
       "win/rdp_client_unittest.cc",
-      "win/worker_process_launcher.cc",
-      "win/worker_process_launcher.h",
       "win/worker_process_launcher_unittest.cc",
     ]
 
@@ -433,6 +466,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
 
         deps = [
           ":remoting_me2me_host_static",
+          ":credits",
         ]
       }
     }

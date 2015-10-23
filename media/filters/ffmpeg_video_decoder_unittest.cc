@@ -36,7 +36,7 @@ using ::testing::StrictMock;
 
 namespace media {
 
-static const VideoFrame::Format kVideoFormat = VideoFrame::YV12;
+static const VideoPixelFormat kVideoFormat = PIXEL_FORMAT_YV12;
 static const gfx::Size kCodedSize(320, 240);
 static const gfx::Rect kVisibleRect(320, 240);
 static const gfx::Size kNaturalSize(320, 240);
@@ -48,7 +48,7 @@ ACTION_P(ReturnBuffer, buffer) {
 class FFmpegVideoDecoderTest : public testing::Test {
  public:
   FFmpegVideoDecoderTest()
-      : decoder_(new FFmpegVideoDecoder(message_loop_.message_loop_proxy())),
+      : decoder_(new FFmpegVideoDecoder(message_loop_.task_runner())),
         decode_cb_(base::Bind(&FFmpegVideoDecoderTest::DecodeDone,
                               base::Unretained(this))) {
     FFmpegGlue::InitializeFFmpeg();
@@ -68,16 +68,16 @@ class FFmpegVideoDecoderTest : public testing::Test {
     InitializeWithConfig(TestVideoConfig::Normal());
   }
 
-  void InitializeWithConfigAndStatus(const VideoDecoderConfig& config,
-                                     PipelineStatus status) {
-    decoder_->Initialize(config, false, NewExpectedStatusCB(status),
+  void InitializeWithConfigWithResult(const VideoDecoderConfig& config,
+                                      bool success) {
+    decoder_->Initialize(config, false, NewExpectedBoolCB(success),
                          base::Bind(&FFmpegVideoDecoderTest::FrameReady,
                                     base::Unretained(this)));
     message_loop_.RunUntilIdle();
   }
 
   void InitializeWithConfig(const VideoDecoderConfig& config) {
-    InitializeWithConfigAndStatus(config, PIPELINE_OK);
+    InitializeWithConfigWithResult(config, true);
   }
 
   void Reinitialize() {
@@ -125,7 +125,6 @@ class FFmpegVideoDecoderTest : public testing::Test {
         case VideoDecoder::kAborted:
           NOTREACHED();
         case VideoDecoder::kDecodeError:
-        case VideoDecoder::kDecryptError:
           DCHECK(output_frames_.empty());
           return status;
       }
@@ -189,7 +188,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
   }
 
   void FrameReady(const scoped_refptr<VideoFrame>& frame) {
-    DCHECK(!frame->end_of_stream());
+    DCHECK(!frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM));
     output_frames_.push_back(frame);
   }
 
@@ -218,26 +217,25 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_Normal) {
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_UnsupportedDecoder) {
   // Test avcodec_find_decoder() returning NULL.
-  InitializeWithConfigAndStatus(TestVideoConfig::Invalid(),
-                                DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(TestVideoConfig::Invalid(), false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_UnsupportedPixelFormat) {
   // Ensure decoder handles unsupported pixel formats without crashing.
   VideoDecoderConfig config(kCodecVP8, VIDEO_CODEC_PROFILE_UNKNOWN,
-                            VideoFrame::UNKNOWN,
-                            kCodedSize, kVisibleRect, kNaturalSize,
-                            NULL, 0, false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+                            PIXEL_FORMAT_UNKNOWN, COLOR_SPACE_UNSPECIFIED,
+                            kCodedSize, kVisibleRect, kNaturalSize, NULL, 0,
+                            false);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_OpenDecoderFails) {
   // Specify Theora w/o extra data so that avcodec_open2() fails.
   VideoDecoderConfig config(kCodecTheora, VIDEO_CODEC_PROFILE_UNKNOWN,
-                            kVideoFormat,
+                            kVideoFormat, COLOR_SPACE_UNSPECIFIED,
                             kCodedSize, kVisibleRect, kNaturalSize,
                             NULL, 0, false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioNumeratorZero) {
@@ -245,13 +243,14 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioNumeratorZero) {
   VideoDecoderConfig config(kCodecVP8,
                             VP8PROFILE_ANY,
                             kVideoFormat,
+                            COLOR_SPACE_UNSPECIFIED,
                             kCodedSize,
                             kVisibleRect,
                             natural_size,
                             NULL,
                             0,
                             false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioDenominatorZero) {
@@ -259,13 +258,14 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioDenominatorZero) {
   VideoDecoderConfig config(kCodecVP8,
                             VP8PROFILE_ANY,
                             kVideoFormat,
+                            COLOR_SPACE_UNSPECIFIED,
                             kCodedSize,
                             kVisibleRect,
                             natural_size,
                             NULL,
                             0,
                             false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioNumeratorNegative) {
@@ -273,13 +273,14 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioNumeratorNegative) {
   VideoDecoderConfig config(kCodecVP8,
                             VP8PROFILE_ANY,
                             kVideoFormat,
+                            COLOR_SPACE_UNSPECIFIED,
                             kCodedSize,
                             kVisibleRect,
                             natural_size,
                             NULL,
                             0,
                             false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioDenominatorNegative) {
@@ -287,13 +288,14 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioDenominatorNegative) {
   VideoDecoderConfig config(kCodecVP8,
                             VP8PROFILE_ANY,
                             kVideoFormat,
+                            COLOR_SPACE_UNSPECIFIED,
                             kCodedSize,
                             kVisibleRect,
                             natural_size,
                             NULL,
                             0,
                             false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioNumeratorTooLarge) {
@@ -303,13 +305,14 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioNumeratorTooLarge) {
   VideoDecoderConfig config(kCodecVP8,
                             VP8PROFILE_ANY,
                             kVideoFormat,
+                            COLOR_SPACE_UNSPECIFIED,
                             kCodedSize,
                             kVisibleRect,
                             natural_size,
                             NULL,
                             0,
                             false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioDenominatorTooLarge) {
@@ -318,13 +321,14 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_AspectRatioDenominatorTooLarge) {
   VideoDecoderConfig config(kCodecVP8,
                             VP8PROFILE_ANY,
                             kVideoFormat,
+                            COLOR_SPACE_UNSPECIFIED,
                             kCodedSize,
                             kVisibleRect,
                             natural_size,
                             NULL,
                             0,
                             false);
-  InitializeWithConfigAndStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(config, false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Reinitialize_Normal) {
@@ -334,8 +338,7 @@ TEST_F(FFmpegVideoDecoderTest, Reinitialize_Normal) {
 
 TEST_F(FFmpegVideoDecoderTest, Reinitialize_Failure) {
   Initialize();
-  InitializeWithConfigAndStatus(TestVideoConfig::Invalid(),
-                                DECODER_ERROR_NOT_SUPPORTED);
+  InitializeWithConfigWithResult(TestVideoConfig::Invalid(), false);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Reinitialize_AfterDecodeFrame) {

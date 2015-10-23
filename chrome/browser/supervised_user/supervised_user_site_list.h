@@ -12,7 +12,6 @@
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 
 class Profile;
@@ -59,11 +58,6 @@ class SupervisedUserSiteList
   // Asynchronously loads the site list from |file| and calls |callback| with
   // the newly created object.
   static void Load(const base::FilePath& file, const LoadedCallback& callback);
-
-  // Sets whether the site list should be loaded in-process or out-of-process.
-  // In-process loading should only be used in tests (to avoid having to set up
-  // child process handling).
-  static void SetLoadInProcessForTesting(bool in_process);
 
   // Returns a list of all sites in this site list.
   const std::vector<Site>& sites() const { return sites_; }

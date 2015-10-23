@@ -8,6 +8,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -24,15 +25,15 @@
 
 using content::WebContents;
 using extensions::ExtensionResource;
-using extensions::core_api::web_view_internal::ContentScriptDetails;
-using extensions::core_api::web_view_internal::InjectionItems;
-using extensions::core_api::web_view_internal::SetPermission::Params;
-using extensions::core_api::extension_types::InjectDetails;
+using extensions::api::web_view_internal::ContentScriptDetails;
+using extensions::api::web_view_internal::InjectionItems;
+using extensions::api::web_view_internal::SetPermission::Params;
+using extensions::api::extension_types::InjectDetails;
 using extensions::UserScript;
 using ui_zoom::ZoomController;
 // error messages for content scripts:
 namespace errors = extensions::manifest_errors;
-namespace web_view_internal = extensions::core_api::web_view_internal;
+namespace web_view_internal = extensions::api::web_view_internal;
 
 namespace {
 
@@ -155,14 +156,14 @@ bool ParseContentScript(const ContentScriptDetails& script_value,
   if (script_value.run_at) {
     UserScript::RunLocation run_at = UserScript::UNDEFINED;
     switch (script_value.run_at) {
-      case extensions::core_api::extension_types::RUN_AT_NONE:
-      case extensions::core_api::extension_types::RUN_AT_DOCUMENT_IDLE:
+      case extensions::api::extension_types::RUN_AT_NONE:
+      case extensions::api::extension_types::RUN_AT_DOCUMENT_IDLE:
         run_at = UserScript::DOCUMENT_IDLE;
         break;
-      case extensions::core_api::extension_types::RUN_AT_DOCUMENT_START:
+      case extensions::api::extension_types::RUN_AT_DOCUMENT_START:
         run_at = UserScript::DOCUMENT_START;
         break;
-      case extensions::core_api::extension_types::RUN_AT_DOCUMENT_END:
+      case extensions::api::extension_types::RUN_AT_DOCUMENT_END:
         run_at = UserScript::DOCUMENT_END;
         break;
     }
@@ -249,7 +250,7 @@ bool WebViewInternalExtensionFunction::RunAsync() {
   int instance_id = 0;
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &instance_id));
   WebViewGuest* guest = WebViewGuest::From(
-      render_view_host()->GetProcess()->GetID(), instance_id);
+      render_frame_host()->GetProcess()->GetID(), instance_id);
   if (!guest)
     return false;
 
@@ -306,7 +307,7 @@ bool WebViewInternalExecuteCodeFunction::Init() {
 
   WebContents* web_contents = GetSenderWebContents();
   if (web_contents && web_contents->GetWebUI()) {
-    const GURL& url = render_view_host()->GetSiteInstance()->GetSiteURL();
+    const GURL& url = render_frame_host()->GetSiteInstance()->GetSiteURL();
     set_host_id(HostID(HostID::WEBUI, url.spec()));
     return true;
   }
@@ -323,10 +324,10 @@ bool WebViewInternalExecuteCodeFunction::CanExecuteScriptOnPage() {
 
 extensions::ScriptExecutor*
 WebViewInternalExecuteCodeFunction::GetScriptExecutor() {
-  if (!render_view_host() || !render_view_host()->GetProcess())
+  if (!render_frame_host() || !render_frame_host()->GetProcess())
     return NULL;
   WebViewGuest* guest = WebViewGuest::From(
-      render_view_host()->GetProcess()->GetID(), guest_instance_id_);
+      render_frame_host()->GetProcess()->GetID(), guest_instance_id_);
   if (!guest)
     return NULL;
 
@@ -344,10 +345,10 @@ const GURL& WebViewInternalExecuteCodeFunction::GetWebViewSrc() const {
 bool WebViewInternalExecuteCodeFunction::LoadFileForWebUI(
     const std::string& file_src,
     const WebUIURLFetcher::WebUILoadFileCallback& callback) {
-  if (!render_view_host() || !render_view_host()->GetProcess())
+  if (!render_frame_host() || !render_frame_host()->GetProcess())
     return false;
   WebViewGuest* guest = WebViewGuest::From(
-      render_view_host()->GetProcess()->GetID(), guest_instance_id_);
+      render_frame_host()->GetProcess()->GetID(), guest_instance_id_);
   if (!guest || host_id().type() != HostID::WEBUI)
     return false;
 
@@ -355,8 +356,8 @@ bool WebViewInternalExecuteCodeFunction::LoadFileForWebUI(
   GURL file_url(owner_base_url.Resolve(file_src));
 
   url_fetcher_.reset(new WebUIURLFetcher(
-      this->browser_context(), render_view_host()->GetProcess()->GetID(),
-      render_view_host()->GetRoutingID(), file_url, callback));
+      this->browser_context(), render_frame_host()->GetProcess()->GetID(),
+      render_view_host_do_not_use()->GetRoutingID(), file_url, callback));
   url_fetcher_->Start();
   return true;
 }
@@ -415,7 +416,7 @@ WebViewInternalAddContentScriptsFunction::Run() {
     return RespondNow(Error(kViewInstanceIdError));
 
   GURL owner_base_url(
-      render_view_host()->GetSiteInstance()->GetSiteURL().GetWithEmptyPath());
+      render_frame_host()->GetSiteInstance()->GetSiteURL().GetWithEmptyPath());
   std::set<UserScript> result;
 
   content::WebContents* sender_web_contents = GetSenderWebContents();
@@ -430,9 +431,9 @@ WebViewInternalAddContentScriptsFunction::Run() {
       WebViewContentScriptManager::Get(browser_context());
   DCHECK(manager);
 
-  manager->AddContentScripts(sender_web_contents,
-                             render_view_host()->GetRoutingID(),
-                             params->instance_id, host_id, result);
+  manager->AddContentScripts(
+      sender_web_contents->GetRenderProcessHost()->GetID(),
+      render_view_host_do_not_use(), params->instance_id, host_id, result);
 
   return RespondNow(NoArguments());
 }
@@ -464,8 +465,9 @@ WebViewInternalRemoveContentScriptsFunction::Run() {
   std::vector<std::string> script_name_list;
   if (params->script_name_list)
     script_name_list.swap(*params->script_name_list);
-  manager->RemoveContentScripts(GetSenderWebContents(), params->instance_id,
-                                host_id, script_name_list);
+  manager->RemoveContentScripts(
+      sender_web_contents->GetRenderProcessHost()->GetID(),
+      params->instance_id, host_id, script_name_list);
   return RespondNow(NoArguments());
 }
 
@@ -742,13 +744,13 @@ bool WebViewInternalSetPermissionFunction::RunAsyncSafe(WebViewGuest* guest) {
   WebViewPermissionHelper::PermissionResponseAction action =
       WebViewPermissionHelper::DEFAULT;
   switch (params->action) {
-    case core_api::web_view_internal::SET_PERMISSION_ACTION_ALLOW:
+    case api::web_view_internal::SET_PERMISSION_ACTION_ALLOW:
       action = WebViewPermissionHelper::ALLOW;
       break;
-    case core_api::web_view_internal::SET_PERMISSION_ACTION_DENY:
+    case api::web_view_internal::SET_PERMISSION_ACTION_DENY:
       action = WebViewPermissionHelper::DENY;
       break;
-    case core_api::web_view_internal::SET_PERMISSION_ACTION_DEFAULT:
+    case api::web_view_internal::SET_PERMISSION_ACTION_DEFAULT:
       break;
     default:
       NOTREACHED();

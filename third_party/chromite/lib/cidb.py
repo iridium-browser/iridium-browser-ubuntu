@@ -25,6 +25,7 @@ from chromite.cbuildbot import constants
 from chromite.lib import clactions
 from chromite.lib import cros_logging as logging
 from chromite.lib import factory
+from chromite.lib import graphite
 from chromite.lib import osutils
 from chromite.lib import retry_stats
 
@@ -57,9 +58,14 @@ def _IsRetryableException(e):
   Returns:
     True if the query should be retried, False otherwise.
   """
-  if isinstance(e, sqlalchemy.exc.OperationalError):
+  # Exceptions usually are raised as sqlalchemy.exc.OperationalError, but
+  # occasionally also escape as MySQLdb.OperationalError. Neither of those
+  # exception types inherit from one another, so we fall back to string matching
+  # on the exception name. See crbug.com/483654
+  if 'OperationalError' in str(type(e)):
     error_code = e.orig.args[0]
     if error_code in _RETRYABLE_OPERATIONAL_ERROR_CODES:
+      logging.info('Encountered retryable cidb exception %s, retrying....', e)
       return True
 
   return False
@@ -141,6 +147,17 @@ class SchemaVersionedMySQLConnection(object):
         self._ssl_args['ssl'] = {}
       self._ssl_args['ssl'][key] = file_path
 
+  def _UpdateConnectArgs(self, db_credentials_dir):
+    """Update all connection args from |db_credentials_dir|."""
+    self._UpdateConnectUrlArgs('host', db_credentials_dir, 'host.txt')
+    self._UpdateConnectUrlArgs('port', db_credentials_dir, 'port.txt')
+    self._UpdateConnectUrlArgs('username', db_credentials_dir, 'user.txt')
+    self._UpdateConnectUrlArgs('password', db_credentials_dir, 'password.txt')
+
+    self._UpdateSslArgs('cert', db_credentials_dir, 'client-cert.pem')
+    self._UpdateSslArgs('key', db_credentials_dir, 'client-key.pem')
+    self._UpdateSslArgs('ca', db_credentials_dir, 'server-ca.pem')
+
   def __init__(self, db_name, db_migrations_dir, db_credentials_dir,
                query_retry_args=SqlConnectionRetryArgs(8, 4, 2)):
     """SchemaVersionedMySQLConnection constructor.
@@ -176,14 +193,7 @@ class SchemaVersionedMySQLConnection(object):
     self._connect_url_args = {}
     self._ssl_args = {}
 
-    self._UpdateConnectUrlArgs('host', db_credentials_dir, 'host.txt')
-    self._UpdateConnectUrlArgs('port', db_credentials_dir, 'port.txt')
-    self._UpdateConnectUrlArgs('username', db_credentials_dir, 'user.txt')
-    self._UpdateConnectUrlArgs('password', db_credentials_dir, 'password.txt')
-
-    self._UpdateSslArgs('cert', db_credentials_dir, 'client-cert.pem')
-    self._UpdateSslArgs('key', db_credentials_dir, 'client-key.pem')
-    self._UpdateSslArgs('ca', db_credentials_dir, 'server-ca.pem')
+    self._UpdateConnectArgs(db_credentials_dir)
 
     connect_url = sqlalchemy.engine.url.URL('mysql', **self._connect_url_args)
 
@@ -622,7 +632,18 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
           'action': action,
           'reason': reason})
 
-    return self._InsertMany('clActionTable', values)
+    retval = self._InsertMany('clActionTable', values)
+
+    stats = graphite.StatsFactory.GetInstance()
+    for cl_action in cl_actions:
+      r = cl_action.reason or 'no_reason'
+      # TODO(akeshet) This is a slightly hacky workaround for the fact that our
+      # strategy reasons contain a ':', but statsd considers that character to
+      # be a name terminator.
+      r = r.replace(':', '_')
+      stats.Counter('.'.join(['cl_actions', cl_action.action])).increment(r)
+
+    return retval
 
   @minimum_schema(6)
   def InsertBoardPerBuild(self, build_id, board):
@@ -1105,6 +1126,16 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                                  'build_stage_id = %d' % build_stage_id,
                                  ['id'])
     return bool(failures)
+
+  @minimum_schema(40)
+  def GetKeyVals(self):
+    """Get key-vals from keyvalTable.
+
+    Returns:
+      A dictionary of {key: value} strings (values may also be None).
+    """
+    results = self._Execute('SELECT k, v FROM keyvalTable').fetchall()
+    return dict(results)
 
 
 def _INV():

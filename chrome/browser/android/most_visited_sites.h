@@ -7,8 +7,12 @@
 
 #include <jni.h>
 
+#include <string>
+#include <vector>
+
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -20,6 +24,9 @@
 namespace suggestions {
 class SuggestionsService;
 }
+
+class GURL;
+class PopularSites;
 
 // Provides the list of most visited sites and their thumbnails to Java.
 class MostVisitedSites : public sync_driver::SyncServiceObserver,
@@ -47,6 +54,8 @@ class MostVisitedSites : public sync_driver::SyncServiceObserver,
   static bool Register(JNIEnv* env);
 
  private:
+  friend class MostVisitedSitesTest;
+
   // The source of the Most Visited sites.
   enum MostVisitedSource {
     TOP_SITES,
@@ -68,9 +77,26 @@ class MostVisitedSites : public sync_driver::SyncServiceObserver,
   void OnSuggestionsProfileAvailable(
       const suggestions::SuggestionsProfile& suggestions_profile);
 
+  // Adds the suggestions from |popular_sites_| into |titles| and |urls|. This
+  // might reorder |titles| and |urls| to retain the absolute positions of the
+  // popular suggestions.
+  void AddPopularSites(std::vector<base::string16>* titles,
+                       std::vector<std::string>* urls) const;
+
+  // Workhorse for AddPopularSites above. Implemented as a separate static
+  // method for ease of testing.
+  static void AddPopularSitesImpl(
+      int num_sites,
+      std::vector<base::string16>* titles,
+      std::vector<std::string>* urls,
+      const std::vector<base::string16>& popular_titles,
+      const std::vector<std::string>& popular_urls);
+
   // Notify the Java side observer about the availability of Most Visited Urls.
   void NotifyMostVisitedURLsObserver(const std::vector<base::string16>& titles,
                                      const std::vector<std::string>& urls);
+
+  void OnPopularSitesAvailable(bool success);
 
   // Runs on the UI Thread.
   void OnLocalThumbnailFetched(
@@ -91,7 +117,8 @@ class MostVisitedSites : public sync_driver::SyncServiceObserver,
 
   // history::TopSitesObserver implementation.
   void TopSitesLoaded(history::TopSites* top_sites) override;
-  void TopSitesChanged(history::TopSites* top_sites) override;
+  void TopSitesChanged(history::TopSites* top_sites,
+                       ChangeReason change_reason) override;
 
   // The profile whose most visited sites will be queried.
   Profile* profile_;
@@ -121,6 +148,8 @@ class MostVisitedSites : public sync_driver::SyncServiceObserver,
   ScopedObserver<history::TopSites, history::TopSitesObserver> scoped_observer_;
 
   MostVisitedSource mv_source_;
+
+  scoped_ptr<PopularSites> popular_sites_;
 
   // For callbacks may be run after destruction.
   base::WeakPtrFactory<MostVisitedSites> weak_ptr_factory_;

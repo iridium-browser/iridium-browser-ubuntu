@@ -5,10 +5,12 @@
 #include "chrome/browser/browsing_data/browsing_data_channel_id_helper.h"
 
 #include "base/bind.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "crypto/ec_private_key.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -20,8 +22,7 @@ class BrowsingDataChannelIDHelperTest
     : public testing::Test,
       public net::SSLConfigService::Observer {
  public:
-  BrowsingDataChannelIDHelperTest() : ssl_config_changed_count_(0) {
-  }
+  BrowsingDataChannelIDHelperTest() {}
 
   void SetUp() override {
     testing_profile_.reset(new TestingProfile());
@@ -38,12 +39,14 @@ class BrowsingDataChannelIDHelperTest
         testing_profile_->GetRequestContext()->GetURLRequestContext();
     net::ChannelIDStore* channel_id_store =
         context->channel_id_service()->GetChannelIDStore();
-    channel_id_store->SetChannelID("https://www.google.com:443",
-                                   base::Time(), base::Time(),
-                                   "key", "cert");
-    channel_id_store->SetChannelID("https://www.youtube.com:443",
-                                   base::Time(), base::Time(),
-                                   "key", "cert");
+    channel_id_store->SetChannelID(
+        make_scoped_ptr(new net::ChannelIDStore::ChannelID(
+            "https://www.google.com:443", base::Time(),
+            make_scoped_ptr(crypto::ECPrivateKey::Create()))));
+    channel_id_store->SetChannelID(
+        make_scoped_ptr(new net::ChannelIDStore::ChannelID(
+            "https://www.youtube.com:443", base::Time(),
+            make_scoped_ptr(crypto::ECPrivateKey::Create()))));
   }
 
   void FetchCallback(
@@ -61,7 +64,7 @@ class BrowsingDataChannelIDHelperTest
 
   net::ChannelIDStore::ChannelIDList channel_id_list_;
 
-  int ssl_config_changed_count_;
+  int ssl_config_changed_count_ = 0;
 };
 
 TEST_F(BrowsingDataChannelIDHelperTest, FetchData) {
@@ -137,7 +140,7 @@ TEST_F(BrowsingDataChannelIDHelperTest, CannedEmpty) {
 
   ASSERT_TRUE(helper->empty());
   helper->AddChannelID(net::ChannelIDStore::ChannelID(
-      origin, base::Time(), base::Time(), "key", "cert"));
+      origin, base::Time(), make_scoped_ptr(crypto::ECPrivateKey::Create())));
   ASSERT_FALSE(helper->empty());
   helper->Reset();
   ASSERT_TRUE(helper->empty());

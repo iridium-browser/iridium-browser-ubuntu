@@ -5,10 +5,14 @@
 #ifndef MEDIA_BASE_FAKE_AUDIO_RENDERER_SINK_H_
 #define MEDIA_BASE_FAKE_AUDIO_RENDERER_SINK_H_
 
+#include <string>
+
 #include "media/audio/audio_parameters.h"
 #include "media/base/audio_renderer_sink.h"
 
 namespace media {
+
+class FakeOutputDevice;
 
 class FakeAudioRendererSink : public AudioRendererSink {
  public:
@@ -30,6 +34,7 @@ class FakeAudioRendererSink : public AudioRendererSink {
   void Pause() override;
   void Play() override;
   bool SetVolume(double volume) override;
+  OutputDevice* GetOutputDevice() override;
 
   // Attempts to call Render() on the callback provided to
   // Initialize() with |dest| and |audio_delay_milliseconds|.
@@ -52,6 +57,7 @@ class FakeAudioRendererSink : public AudioRendererSink {
 
   State state_;
   RenderCallback* callback_;
+  scoped_ptr<FakeOutputDevice> output_device_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAudioRendererSink);
 };

@@ -29,6 +29,7 @@
 #include "core/css/CSSValueList.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "platform/weborigin/Referrer.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
@@ -56,6 +57,7 @@ public:
     bool isPending() const { return !m_accessedBestFitImage; }
 
     struct ImageWithScale {
+        ALLOW_ONLY_INLINE_ALLOCATION();
         String imageURL;
         Referrer referrer;
         float scaleFactor;
@@ -63,7 +65,7 @@ public:
 
     bool hasFailedOrCanceledSubresources() const;
 
-    DEFINE_INLINE_TRACE_AFTER_DISPATCH() { CSSValueList::traceAfterDispatch(visitor); }
+    DECLARE_TRACE_AFTER_DISPATCH();
 
 protected:
     ImageWithScale bestImageForScaleFactor();
@@ -74,7 +76,7 @@ private:
     void fillImageSet();
     static inline bool compareByScaleFactor(ImageWithScale first, ImageWithScale second) { return first.scaleFactor < second.scaleFactor; }
 
-    RefPtr<StyleImage> m_imageSet;
+    RefPtrWillBeMember<StyleImage> m_imageSet;
     bool m_accessedBestFitImage;
 
     // This represents the scale factor that we used to find the best fit image. It does not necessarily

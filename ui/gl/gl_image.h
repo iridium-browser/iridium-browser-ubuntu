@@ -6,12 +6,19 @@
 #define UI_GL_GL_IMAGE_H_
 
 #include "base/memory/ref_counted.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/overlay_transform.h"
 #include "ui/gl/gl_export.h"
+
+namespace base {
+namespace trace_event {
+class ProcessMemoryDump;
+}
+}
 
 namespace gfx {
 
@@ -27,14 +34,19 @@ class GL_EXPORT GLImage : public base::RefCounted<GLImage> {
   // Get the size of the image.
   virtual gfx::Size GetSize() = 0;
 
+  // Get the internal format of the image.
+  virtual unsigned GetInternalFormat() = 0;
+
   // Bind image to texture currently bound to |target|.
   virtual bool BindTexImage(unsigned target) = 0;
 
   // Release image from texture currently bound to |target|.
   virtual void ReleaseTexImage(unsigned target) = 0;
 
-  // Copy image to texture currently bound to |target|.
-  virtual bool CopyTexImage(unsigned target) = 0;
+  // Copy |rect| of image to |offset| in texture currently bound to |target|.
+  virtual bool CopyTexSubImage(unsigned target,
+                               const Point& offset,
+                               const Rect& rect) = 0;
 
   // Called before the texture is used for drawing.
   virtual void WillUseTexImage() = 0;
@@ -54,6 +66,12 @@ class GL_EXPORT GLImage : public base::RefCounted<GLImage> {
                                     OverlayTransform transform,
                                     const Rect& bounds_rect,
                                     const RectF& crop_rect) = 0;
+
+  // Dumps information about the memory backing the GLImage to a dump named
+  // |dump_name|.
+  virtual void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
+                            uint64_t process_tracing_id,
+                            const std::string& dump_name) = 0;
 
  protected:
   virtual ~GLImage() {}

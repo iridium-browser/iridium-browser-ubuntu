@@ -23,6 +23,9 @@ class AXAuraObjWrapper;
 class View;
 }  // namespace views
 
+using AuraAXTreeSerializer =
+    ui::AXTreeSerializer<views::AXAuraObjWrapper*, ui::AXNodeData>;
+
 // Manages a tree of automation nodes.
 class AutomationManagerAura : public extensions::AutomationActionAdapter {
  public:
@@ -47,14 +50,13 @@ class AutomationManagerAura : public extensions::AutomationActionAdapter {
   void Focus(int32 id) override;
   void MakeVisible(int32 id) override;
   void SetSelection(int32 id, int32 start, int32 end) override;
-
- protected:
-  virtual ~AutomationManagerAura();
+  void ShowContextMenu(int32 id) override;
 
  private:
   friend struct DefaultSingletonTraits<AutomationManagerAura>;
 
   AutomationManagerAura();
+  virtual ~AutomationManagerAura();
 
   // Reset all state in this manager.
   void ResetSerializer();
@@ -73,14 +75,12 @@ class AutomationManagerAura : public extensions::AutomationActionAdapter {
 
   // Serializes incremental updates on the currently active tree
   // |current_tree_|.
-  scoped_ptr<ui::AXTreeSerializer<views::AXAuraObjWrapper*>>
-      current_tree_serializer_;
-
-  std::string pending_alert_text_;
+  scoped_ptr<AuraAXTreeSerializer> current_tree_serializer_;
 
   bool processing_events_;
 
   std::vector<std::pair<views::AXAuraObjWrapper*, ui::AXEvent>> pending_events_;
+
   DISALLOW_COPY_AND_ASSIGN(AutomationManagerAura);
 };
 

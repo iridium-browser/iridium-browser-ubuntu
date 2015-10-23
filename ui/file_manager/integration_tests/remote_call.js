@@ -31,7 +31,7 @@ RemoteCall.isStepByStepEnabled = function() {
  * @param {string} func Function name.
  * @param {?string} appId Target window's App ID or null for functions
  *     not requiring a window.
- * @param {Array.<*>} args Array of arguments.
+ * @param {Array<*>} args Array of arguments.
  * @param {function(*)=} opt_callback Callback handling the function's result.
  * @return {Promise} Promise to be fulfilled with the result of the remote
  *     utility.
@@ -222,13 +222,30 @@ RemoteCall.prototype.fakeKeyDown =
  * Gets file entries just under the volume.
  *
  * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
- * @param {Array.<string>} names File name list.
+ * @param {Array<string>} names File name list.
  * @return {Promise} Promise to be fulfilled with file entries or rejected
  *     depending on the result.
  */
 RemoteCall.prototype.getFilesUnderVolume = function(volumeType, names) {
   return this.callRemoteTestUtil(
       'getFilesUnderVolume', null, [volumeType, names]);
+};
+
+/**
+ * Waits for a single file.
+ * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
+ * @param {string} name File name.
+ * @return {!Promise} Promise to be fulfilled when the file had found.
+ */
+RemoteCall.prototype.waitForAFile = function(volumeType, name) {
+  return repeatUntil(function() {
+    return this.getFilesUnderVolume(volumeType, [name])
+        .then(function(urls) {
+          if (urls.length === 1)
+            return true;
+          return pending('"' + name + '" is not found.');
+        });
+  }.bind(this));
 };
 
 /**
@@ -247,7 +264,7 @@ RemoteCallFilesApp.prototype.__proto__ = RemoteCall.prototype;
 /**
  * Waits for the file list turns to the given contents.
  * @param {string} windowId Target window ID.
- * @param {Array.<Array.<string>>} expected Expected contents of file list.
+ * @param {Array<Array<string>>} expected Expected contents of file list.
  * @param {{orderCheck:boolean=, ignoreLastModifiedTime:boolean=}=} opt_options
  *     Options of the comparison. If orderCheck is true, it also compares the
  *     order of files. If ignoreLastModifiedTime is true, it compares the file
@@ -415,7 +432,7 @@ RemoteCallGallery.prototype.waitForSlideImage =
   return repeatUntil(function() {
     var query = '.gallery[mode="slide"] .content canvas.fullres';
     return Promise.all([
-        this.waitForElement(windowId, '.namebox'),
+        this.waitForElement(windowId, '.filename-spacer input'),
         this.waitForElement(windowId, query)
     ]).then(function(args) {
       var nameBox = args[0];
@@ -469,4 +486,17 @@ RemoteCallGallery.prototype.waitForPressEnterMessage = function(appId) {
         chrome.test.assertEq(
             'Press Enter when done', element.text.trim());
       });
+};
+
+/**
+ * Shorthand for selecting an image in thumbnail mode.
+ * @param {string} appId App id.
+ * @param {string} name File name to be selected.
+ * @return {!Promise<boolean>} A promise which will be resolved with true if the
+ *     thumbnail has clicked. This method does not guarantee whether the
+ *     thumbnail has actually selected or not.
+ */
+RemoteCallGallery.prototype.selectImageInThumbnailMode = function(appId, name) {
+  return this.callRemoteTestUtil('fakeMouseClick', appId,
+      ['.thumbnail-view > ul > li[title="' + name + '"] > .selection.frame']);
 };

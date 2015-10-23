@@ -6,11 +6,15 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -18,13 +22,15 @@
 #include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/net/certificate_error_reporter.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/safe_browsing/ping_manager.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ssl/cert_logger.pb.h"
+#include "chrome/browser/ssl/cert_report_helper.h"
+#include "chrome/browser/ssl/cert_verifier_browser_test.h"
 #include "chrome/browser/ssl/certificate_error_report.h"
+#include "chrome/browser/ssl/certificate_reporting_test_utils.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
+#include "chrome/browser/ssl/common_name_mismatch_handler.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
+#include "chrome/browser/ssl/ssl_error_handler.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -36,6 +42,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/security_interstitials/core/metrics_helper.h"
 #include "components/variations/variations_associated_data.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_context.h"
@@ -52,14 +59,19 @@
 #include "content/public/common/ssl_status.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_renderer_host.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/cert_status_flags.h"
+#include "net/cert/mock_cert_verifier.h"
 #include "net/cert/x509_certificate.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/ssl/ssl_info.h"
+#include "net/test/cert_test_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/test_certificate_data.h"
 #include "net/url_request/url_request_context.h"
 
 #if defined(USE_NSS_CERTS)
@@ -81,11 +93,12 @@ using web_modal::WebContentsModalDialogManager;
 const base::FilePath::CharType kDocRoot[] =
     FILE_PATH_LITERAL("chrome/test/data");
 
-// Const for the Finch group DontShowDontSend
-const char kHTTPSErrorReporterFinchGroupDontShowDontSend[] =
-    "DontShowAndDontSend";
-
 namespace {
+
+enum ProceedDecision {
+  SSL_INTERSTITIAL_PROCEED,
+  SSL_INTERSTITIAL_DO_NOT_PROCEED
+};
 
 class ProvisionalLoadWaiter : public content::WebContentsObserver {
  public:
@@ -104,7 +117,8 @@ class ProvisionalLoadWaiter : public content::WebContentsObserver {
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       int error_code,
-      const base::string16& error_description) override {
+      const base::string16& error_description,
+      bool was_ignored_by_handler) override {
     seen_ = true;
     if (waiting_)
       base::MessageLoopForUI::current()->Quit();
@@ -191,88 +205,42 @@ void CheckSecurityState(WebContents* tab,
   AuthState::Check(*entry, expected_authentication_state);
 }
 
-namespace CertificateReporting {
-
-enum OptIn { EXTENDED_REPORTING_OPT_IN, EXTENDED_REPORTING_DO_NOT_OPT_IN };
-
-enum Proceed { SSL_INTERSTITIAL_PROCEED, SSL_INTERSTITIAL_DO_NOT_PROCEED };
-
-enum ExpectReport { CERT_REPORT_EXPECTED, CERT_REPORT_NOT_EXPECTED };
-
-// This class is used to test invalid certificate chain reporting when
-// the user opts in to do so on the interstitial. It keeps track of the
-// most recent hostname for which a report would have been sent over the
-// network.
-class MockReporter : public CertificateErrorReporter {
+// This observer waits for the SSLErrorHandler to start an interstitial timer
+// for the given web contents.
+class SSLInterstitialTimerObserver {
  public:
-  explicit MockReporter(net::URLRequestContext* request_context,
-                        const GURL& upload_url,
-                        CookiesPreference cookies_preference)
-      : CertificateErrorReporter(request_context,
-                                 upload_url,
-                                 cookies_preference) {}
-
-  void SendReport(CertificateErrorReporter::ReportType type,
-                  const std::string& serialized_report) override {
-    CertificateErrorReport report;
-    ASSERT_TRUE(report.InitializeFromString(serialized_report));
-    EXPECT_EQ(CertificateErrorReporter::REPORT_TYPE_EXTENDED_REPORTING, type);
-    latest_hostname_reported_ = report.hostname();
+  explicit SSLInterstitialTimerObserver(content::WebContents* web_contents)
+      : web_contents_(web_contents), message_loop_runner_(new base::RunLoop) {
+    callback_ = base::Bind(&SSLInterstitialTimerObserver::OnTimerStarted,
+                           base::Unretained(this));
+    SSLErrorHandler::SetInterstitialTimerStartedCallbackForTest(&callback_);
   }
 
-  const std::string& latest_hostname_reported() {
-    return latest_hostname_reported_;
+  ~SSLInterstitialTimerObserver() {
+    SSLErrorHandler::SetInterstitialTimerStartedCallbackForTest(nullptr);
   }
+
+  // Waits until the interstitial delay timer in SSLErrorHandler is started.
+  void WaitForTimerStarted() { message_loop_runner_->Run(); }
 
  private:
-  std::string latest_hostname_reported_;
-};
-
-void SetUpMockReporter(SafeBrowsingService* safe_browsing_service,
-                       MockReporter* reporter) {
-  safe_browsing_service->ping_manager()->SetCertificateErrorReporterForTesting(
-      scoped_ptr<CertificateErrorReporter>(reporter));
-}
-
-// This is a test implementation of the interface that blocking pages
-// use to send certificate reports. It checks that the blocking page
-// calls the report method when a report should be sent.
-class MockSSLCertReporter : public SSLCertReporter {
- public:
-  MockSSLCertReporter(
-      const scoped_refptr<SafeBrowsingUIManager>& safe_browsing_ui_manager,
-      const base::Closure& report_sent_callback)
-      : safe_browsing_ui_manager_(safe_browsing_ui_manager),
-        reported_(false),
-        expect_report_(false),
-        report_sent_callback_(report_sent_callback) {}
-
-  ~MockSSLCertReporter() override { EXPECT_EQ(expect_report_, reported_); }
-
-  // SSLCertReporter implementation
-  void ReportInvalidCertificateChain(
-      const std::string& serialized_report) override {
-    reported_ = true;
-    if (expect_report_) {
-      safe_browsing_ui_manager_->ReportInvalidCertificateChain(
-          serialized_report, report_sent_callback_);
-    }
+  void OnTimerStarted(content::WebContents* web_contents) {
+    if (web_contents_ == web_contents)
+      message_loop_runner_->Quit();
   }
 
-  void set_expect_report(bool expect_report) { expect_report_ = expect_report; }
+  const content::WebContents* web_contents_;
+  SSLErrorHandler::TimerStartedCallback callback_;
 
- private:
-  const scoped_refptr<SafeBrowsingUIManager> safe_browsing_ui_manager_;
-  bool reported_;
-  bool expect_report_;
-  base::Closure report_sent_callback_;
+  scoped_ptr<base::RunLoop> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(SSLInterstitialTimerObserver);
 };
-
-}  // namespace CertificateReporting
 
 }  // namespace
 
-class SSLUITest : public InProcessBrowserTest {
+class SSLUITest
+    : public certificate_reporting_test_utils::CertificateReportingTest {
  public:
   SSLUITest()
       : https_server_(net::SpawnedTestServer::TYPE_HTTPS,
@@ -287,24 +255,6 @@ class SSLUITest : public InProcessBrowserTest {
         wss_server_expired_(net::SpawnedTestServer::TYPE_WSS,
                             SSLOptions(SSLOptions::CERT_EXPIRED),
                             net::GetWebSocketTestDataDirectory()) {}
-
-  void SetUpOnMainThread() override {
-    // Set up the mock reporter to track the hostnames that reports get
-    // sent for. The request_context argument is NULL here
-    // because the MockReporter doesn't actually use a
-    // request_context. (In order to pass a real request_context, the
-    // reporter would have to be constructed on the IO thread.)
-    reporter_ = new CertificateReporting::MockReporter(
-        NULL, GURL("http://example.test"),
-        CertificateReporting::MockReporter::DO_NOT_SEND_COOKIES);
-    scoped_refptr<SafeBrowsingService> safe_browsing_service =
-        g_browser_process->safe_browsing_service();
-    ASSERT_TRUE(safe_browsing_service);
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
-        base::Bind(CertificateReporting::SetUpMockReporter,
-                   safe_browsing_service, reporter_));
-  }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     // Browser will both run and display insecure content.
@@ -361,9 +311,8 @@ class SSLUITest : public InProcessBrowserTest {
         break;
 
       // Wait a bit.
-      base::MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::MessageLoop::QuitClosure(),
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::MessageLoop::QuitClosure(),
           base::TimeDelta::FromMilliseconds(kTimeoutMS));
       content::RunMessageLoop();
     }
@@ -472,19 +421,17 @@ class SSLUITest : public InProcessBrowserTest {
 
   // Helper function for testing invalid certificate chain reporting.
   void TestBrokenHTTPSReporting(
-      CertificateReporting::OptIn opt_in,
-      CertificateReporting::Proceed proceed,
-      CertificateReporting::ExpectReport expect_report,
+      certificate_reporting_test_utils::OptIn opt_in,
+      ProceedDecision proceed,
+      certificate_reporting_test_utils::ExpectReport expect_report,
       Browser* browser) {
     base::RunLoop run_loop;
-    bool report_expected =
-        expect_report == CertificateReporting::CERT_REPORT_EXPECTED;
     ASSERT_TRUE(https_server_expired_.Start());
 
+    ASSERT_NO_FATAL_FAILURE(SetUpMockReporter());
+
     // Opt in to sending reports for invalid certificate chains.
-    browser->profile()->GetPrefs()->SetBoolean(
-        prefs::kSafeBrowsingExtendedReportingEnabled,
-        opt_in == CertificateReporting::EXTENDED_REPORTING_OPT_IN);
+    certificate_reporting_test_utils::SetCertReportingOptIn(browser, opt_in);
 
     ui_test_utils::NavigateToURL(browser, https_server_expired_.GetURL("/"));
 
@@ -492,26 +439,18 @@ class SSLUITest : public InProcessBrowserTest {
     CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID,
                                    AuthState::SHOWING_INTERSTITIAL);
 
-    // Set up a MockSSLCertReporter to keep track of when the blocking
-    // page invokes the cert reporter.
-    SafeBrowsingService* sb_service =
-        g_browser_process->safe_browsing_service();
-    ASSERT_TRUE(sb_service);
-    scoped_ptr<CertificateReporting::MockSSLCertReporter> ssl_cert_reporter(
-        new CertificateReporting::MockSSLCertReporter(
-            sb_service->ui_manager(), report_expected
-                                          ? run_loop.QuitClosure()
-                                          : base::Bind(&base::DoNothing)));
-    ssl_cert_reporter->set_expect_report(report_expected);
+    scoped_ptr<SSLCertReporter> ssl_cert_reporter =
+        certificate_reporting_test_utils::SetUpMockSSLCertReporter(
+            &run_loop, expect_report);
 
     SSLBlockingPage* interstitial_page = static_cast<SSLBlockingPage*>(
         tab->GetInterstitialPage()->GetDelegateForTesting());
     interstitial_page->SetSSLCertReporterForTesting(ssl_cert_reporter.Pass());
 
-    EXPECT_EQ(std::string(), reporter_->latest_hostname_reported());
+    EXPECT_EQ(std::string(), GetLatestHostnameReported());
 
     // Leave the interstitial (either by proceeding or going back)
-    if (proceed == CertificateReporting::SSL_INTERSTITIAL_PROCEED) {
+    if (proceed == SSL_INTERSTITIAL_PROCEED) {
       ProceedThroughInterstitial(tab);
     } else {
       // Click "Take me back"
@@ -520,32 +459,15 @@ class SSLUITest : public InProcessBrowserTest {
       interstitial_page->DontProceed();
     }
 
-    if (expect_report == CertificateReporting::CERT_REPORT_EXPECTED) {
+    if (expect_report ==
+        certificate_reporting_test_utils::CERT_REPORT_EXPECTED) {
       // Check that the mock reporter received a request to send a report.
       run_loop.Run();
       EXPECT_EQ(https_server_expired_.GetURL("/").host(),
-                reporter_->latest_hostname_reported());
+                GetLatestHostnameReported());
     } else {
-      EXPECT_EQ(std::string(), reporter_->latest_hostname_reported());
+      EXPECT_EQ(std::string(), GetLatestHostnameReported());
     }
-  }
-
-  // Helper function to set the Finch options
-  void SetCertReportingFinchConfig(const std::string& group_name,
-                                   const std::string& param_value) {
-    base::FieldTrialList::CreateFieldTrial(
-        kHTTPSErrorReporterFinchExperimentName, group_name);
-    if (!param_value.empty()) {
-      std::map<std::string, std::string> params;
-      params[kHTTPSErrorReporterFinchParamName] = param_value;
-      variations::AssociateVariationParams(
-          kHTTPSErrorReporterFinchExperimentName, group_name, params);
-    }
-  }
-
-  // Helper function to set the Finch options in case we have no parameter
-  void SetCertReportingFinchConfig(const std::string& group_name) {
-    SetCertReportingFinchConfig(group_name, std::string());
   }
 
   net::SpawnedTestServer https_server_;
@@ -555,7 +477,6 @@ class SSLUITest : public InProcessBrowserTest {
 
  private:
   typedef net::SpawnedTestServer::SSLOptions SSLOptions;
-  CertificateReporting::MockReporter* reporter_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLUITest);
 };
@@ -649,6 +570,84 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestBrokenHTTPSWithInsecureContent) {
   CheckAuthenticationBrokenState(tab,
                                  net::CERT_STATUS_DATE_INVALID,
                                  AuthState::DISPLAYED_INSECURE_CONTENT);
+}
+
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestBrokenHTTPSMetricsReporting_Proceed) {
+  ASSERT_TRUE(https_server_expired_.Start());
+  ASSERT_NO_FATAL_FAILURE(SetUpMockReporter());
+  base::HistogramTester histograms;
+  const std::string decision_histogram =
+      "interstitial.ssl_overridable.decision";
+  const std::string interaction_histogram =
+      "interstitial.ssl_overridable.interaction";
+
+  // Histograms should start off empty.
+  histograms.ExpectTotalCount(decision_histogram, 0);
+  histograms.ExpectTotalCount(interaction_histogram, 0);
+
+  // After navigating to the page, the totals should be set.
+  ui_test_utils::NavigateToURL(browser(), https_server_expired_.GetURL("/"));
+  content::WaitForInterstitialAttach(
+      browser()->tab_strip_model()->GetActiveWebContents());
+  histograms.ExpectTotalCount(decision_histogram, 1);
+  histograms.ExpectBucketCount(decision_histogram,
+                               security_interstitials::MetricsHelper::SHOW, 1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
+
+  // Decision should be recorded.
+  ProceedThroughInterstitial(
+      browser()->tab_strip_model()->GetActiveWebContents());
+  histograms.ExpectTotalCount(decision_histogram, 2);
+  histograms.ExpectBucketCount(
+      decision_histogram, security_interstitials::MetricsHelper::PROCEED, 1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestBrokenHTTPSMetricsReporting_DontProceed) {
+  ASSERT_TRUE(https_server_expired_.Start());
+  ASSERT_NO_FATAL_FAILURE(SetUpMockReporter());
+  base::HistogramTester histograms;
+  const std::string decision_histogram =
+      "interstitial.ssl_overridable.decision";
+  const std::string interaction_histogram =
+      "interstitial.ssl_overridable.interaction";
+
+  // Histograms should start off empty.
+  histograms.ExpectTotalCount(decision_histogram, 0);
+  histograms.ExpectTotalCount(interaction_histogram, 0);
+
+  // After navigating to the page, the totals should be set.
+  ui_test_utils::NavigateToURL(browser(), https_server_expired_.GetURL("/"));
+  content::WaitForInterstitialAttach(
+      browser()->tab_strip_model()->GetActiveWebContents());
+  histograms.ExpectTotalCount(decision_histogram, 1);
+  histograms.ExpectBucketCount(decision_histogram,
+                               security_interstitials::MetricsHelper::SHOW, 1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
+
+  // Decision should be recorded.
+  InterstitialPage* interstitial_page = browser()
+                                            ->tab_strip_model()
+                                            ->GetActiveWebContents()
+                                            ->GetInterstitialPage();
+  interstitial_page->DontProceed();
+  histograms.ExpectTotalCount(decision_histogram, 2);
+  histograms.ExpectBucketCount(
+      decision_histogram, security_interstitials::MetricsHelper::DONT_PROCEED,
+      1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
 }
 
 // http://crbug.com/91745
@@ -938,7 +937,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestWSSInvalidCertAndClose) {
   // The title will be changed to 'PASS'.
   ui_test_utils::NavigateToURL(browser(), master_url);
   const base::string16 result = watcher.WaitAndGetTitle();
-  EXPECT_TRUE(LowerCaseEqualsASCII(result, "pass"));
+  EXPECT_TRUE(base::LowerCaseEqualsASCII(result, "pass"));
 
   // Close tabs which contains the test page.
   for (int i = 0; i < 16; ++i)
@@ -974,7 +973,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndGoForward) {
   // Test page run a WebSocket wss connection test. The result will be shown
   // as page title.
   const base::string16 result = watcher.WaitAndGetTitle();
-  EXPECT_TRUE(LowerCaseEqualsASCII(result, "pass"));
+  EXPECT_TRUE(base::LowerCaseEqualsASCII(result, "pass"));
 }
 
 #if defined(USE_NSS_CERTS)
@@ -1061,7 +1060,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITestWithClientCert, TestWSSClientCert) {
   // Test page runs a WebSocket wss connection test. The result will be shown
   // as page title.
   const base::string16 result = watcher.WaitAndGetTitle();
-  EXPECT_TRUE(LowerCaseEqualsASCII(result, "pass"));
+  EXPECT_TRUE(base::LowerCaseEqualsASCII(result, "pass"));
 }
 #endif  // defined(USE_NSS_CERTS)
 
@@ -1192,114 +1191,71 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestDisplaysInsecureContent) {
                           AuthState::DISPLAYED_INSECURE_CONTENT);
 }
 
-// User proceeds, checkbox is shown and checked, Finch parameter is set
-// -> we expect a report.
-IN_PROC_BROWSER_TEST_F(
-    SSLUITestWithExtendedReporting,
-    TestBrokenHTTPSProceedWithShowYesCheckYesParamYesReportYes) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "1.0");
-  TestBrokenHTTPSReporting(CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-                           CertificateReporting::SSL_INTERSTITIAL_PROCEED,
-                           CertificateReporting::CERT_REPORT_EXPECTED,
-                           browser());
-}
-
-// User goes back, checkbox is shown and checked, Finch parameter is set
-// -> we expect a report.
-IN_PROC_BROWSER_TEST_F(
-    SSLUITestWithExtendedReporting,
-    TestBrokenHTTPSGoBackWithShowYesCheckYesParamYesReportYes) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "1.0");
+// Test that if the user proceeds and the checkbox is checked, a report
+// is sent or not sent depending on the Finch config.
+IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
+                       TestBrokenHTTPSProceedReporting) {
+  certificate_reporting_test_utils::ExpectReport expect_report =
+      certificate_reporting_test_utils::GetReportExpectedFromFinch();
   TestBrokenHTTPSReporting(
-      CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-      CertificateReporting::SSL_INTERSTITIAL_DO_NOT_PROCEED,
-      CertificateReporting::CERT_REPORT_EXPECTED, browser());
+      certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN,
+      SSL_INTERSTITIAL_PROCEED, expect_report, browser());
 }
 
-// User proceeds, checkbox is shown but unchecked, Finch parameter is set
-// -> we expect no report.
-IN_PROC_BROWSER_TEST_F(
-    SSLUITestWithExtendedReporting,
-    TestBrokenHTTPSProceedWithShowYesCheckNoParamYesReportNo) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "1.0");
+// Test that if the user goes back and the checkbox is checked, a report
+// is sent or not sent depending on the Finch config.
+IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
+                       TestBrokenHTTPSGoBackReporting) {
+  certificate_reporting_test_utils::ExpectReport expect_report =
+      certificate_reporting_test_utils::GetReportExpectedFromFinch();
   TestBrokenHTTPSReporting(
-      CertificateReporting::EXTENDED_REPORTING_DO_NOT_OPT_IN,
-      CertificateReporting::SSL_INTERSTITIAL_PROCEED,
-      CertificateReporting::CERT_REPORT_NOT_EXPECTED, browser());
+      certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN,
+      SSL_INTERSTITIAL_DO_NOT_PROCEED, expect_report, browser());
 }
 
-// User goes back, checkbox is shown but unchecked, Finch parameter is set
-// -> we expect no report.
+// User proceeds, checkbox is shown but unchecked. Reports should never
+// be sent, regardless of Finch config.
+IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
+                       TestBrokenHTTPSProceedReportingWithNoOptIn) {
+  TestBrokenHTTPSReporting(
+      certificate_reporting_test_utils::EXTENDED_REPORTING_DO_NOT_OPT_IN,
+      SSL_INTERSTITIAL_PROCEED,
+      certificate_reporting_test_utils::CERT_REPORT_NOT_EXPECTED, browser());
+}
+
+// User goes back, checkbox is shown but unchecked. Reports should never
+// be sent, regardless of Finch config.
 IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
                        TestBrokenHTTPSGoBackShowYesCheckNoParamYesReportNo) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "1.0");
   TestBrokenHTTPSReporting(
-      CertificateReporting::EXTENDED_REPORTING_DO_NOT_OPT_IN,
-      CertificateReporting::SSL_INTERSTITIAL_DO_NOT_PROCEED,
-      CertificateReporting::CERT_REPORT_NOT_EXPECTED, browser());
+      certificate_reporting_test_utils::EXTENDED_REPORTING_DO_NOT_OPT_IN,
+      SSL_INTERSTITIAL_DO_NOT_PROCEED,
+      certificate_reporting_test_utils::CERT_REPORT_NOT_EXPECTED, browser());
 }
 
-// User proceeds, checkbox is shown and checked, Finch parameter is not
-// set -> we expect no report.
-IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
-                       TestBrokenHTTPSProceedShowYesCheckYesParamNoReportNo) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "-1.0");
-  TestBrokenHTTPSReporting(CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-                           CertificateReporting::SSL_INTERSTITIAL_PROCEED,
-                           CertificateReporting::CERT_REPORT_NOT_EXPECTED,
-                           browser());
-}
-
-// User goes back, checkbox is shown and checked, Finch parameter is not set
-// -> we expect no report.
-IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
-                       TestBrokenHTTPSGoBackShowYesCheckYesParamNoReportNo) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "-1.0");
-  TestBrokenHTTPSReporting(
-      CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-      CertificateReporting::SSL_INTERSTITIAL_DO_NOT_PROCEED,
-      CertificateReporting::CERT_REPORT_NOT_EXPECTED, browser());
-}
-
-// User proceeds, checkbox is not shown but checked -> we expect no report
+// User proceeds, checkbox is not shown but checked -> we expect no
+// report.
 IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
                        TestBrokenHTTPSProceedShowNoCheckYesReportNo) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupDontShowDontSend);
-  TestBrokenHTTPSReporting(CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-                           CertificateReporting::SSL_INTERSTITIAL_PROCEED,
-                           CertificateReporting::CERT_REPORT_NOT_EXPECTED,
-                           browser());
+  if (base::FieldTrialList::FindFullName(
+          CertReportHelper::kFinchExperimentName) ==
+      CertReportHelper::kFinchGroupDontShowDontSend) {
+    TestBrokenHTTPSReporting(
+        certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN,
+        SSL_INTERSTITIAL_PROCEED,
+        certificate_reporting_test_utils::CERT_REPORT_NOT_EXPECTED, browser());
+  }
 }
 
-// Browser is incognito, user proceeds, checkbox is shown and checked, Finch
-// parameter is set -> we expect no report
+// Browser is incognito, user proceeds, checkbox has previously opted in
+// -> no report, regardless of Finch config.
 IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
                        TestBrokenHTTPSInIncognitoReportNo) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "1.0");
-  TestBrokenHTTPSReporting(CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-                           CertificateReporting::SSL_INTERSTITIAL_PROCEED,
-                           CertificateReporting::CERT_REPORT_NOT_EXPECTED,
-                           CreateIncognitoBrowser());
-}
-
-// User proceeds, checkbox is shown and checked, Finch parameter is invalid
-// -> we expect no report.
-IN_PROC_BROWSER_TEST_F(
-    SSLUITestWithExtendedReporting,
-    TestBrokenHTTPSProceedWithShowYesCheckYesParamInvalidReportNo) {
-  SetCertReportingFinchConfig(kHTTPSErrorReporterFinchGroupShowPossiblySend,
-                              "abcdef");
-  TestBrokenHTTPSReporting(CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-                           CertificateReporting::SSL_INTERSTITIAL_PROCEED,
-                           CertificateReporting::CERT_REPORT_NOT_EXPECTED,
-                           browser());
+  TestBrokenHTTPSReporting(
+      certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN,
+      SSL_INTERSTITIAL_PROCEED,
+      certificate_reporting_test_utils::CERT_REPORT_NOT_EXPECTED,
+      CreateIncognitoBrowser());
 }
 
 // Test that reports don't get sent when extended reporting opt-in is
@@ -1308,10 +1264,10 @@ IN_PROC_BROWSER_TEST_F(SSLUITestWithExtendedReporting,
                        TestBrokenHTTPSNoReportingWhenDisallowed) {
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kSafeBrowsingExtendedReportingOptInAllowed, false);
-  TestBrokenHTTPSReporting(CertificateReporting::EXTENDED_REPORTING_OPT_IN,
-                           CertificateReporting::SSL_INTERSTITIAL_PROCEED,
-                           CertificateReporting::CERT_REPORT_NOT_EXPECTED,
-                           browser());
+  TestBrokenHTTPSReporting(
+      certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN,
+      SSL_INTERSTITIAL_PROCEED,
+      certificate_reporting_test_utils::CERT_REPORT_NOT_EXPECTED, browser());
 }
 
 // Visits a page that runs insecure content and tries to suppress the insecure
@@ -1660,9 +1616,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestCloseTabWithUnsafePopup) {
   for (int i = 0; i < 10; i++) {
     if (IsShowingWebContentsModalDialog())
       break;
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::MessageLoop::QuitClosure(),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::MessageLoop::QuitClosure(),
         base::TimeDelta::FromSeconds(1));
     content::RunMessageLoop();
   }
@@ -2211,7 +2166,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITestIgnoreCertErrors, TestWSS) {
   // Test page run a WebSocket wss connection test. The result will be shown
   // as page title.
   const base::string16 result = watcher.WaitAndGetTitle();
-  EXPECT_TRUE(LowerCaseEqualsASCII(result, "pass"));
+  EXPECT_TRUE(base::LowerCaseEqualsASCII(result, "pass"));
 }
 
 // Verifies that the interstitial can proceed, even if JavaScript is disabled.
@@ -2350,6 +2305,340 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, BadCertFollowedByGoodCert) {
   EXPECT_FALSE(state->HasAllowException(https_server_host));
 }
 
+class CommonNameMismatchBrowserTest : public CertVerifierBrowserTest {
+ public:
+  CommonNameMismatchBrowserTest() : CertVerifierBrowserTest(){};
+  ~CommonNameMismatchBrowserTest() override{};
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    // Enable finch experiment for SSL common name mismatch handling.
+    command_line->AppendSwitchASCII(switches::kForceFieldTrials,
+                                    "SSLCommonNameMismatchHandling/Enabled/");
+  }
+};
+
+// Visit the URL www.mail.example.com on a server that presents a valid
+// certificate for mail.example.com. Verify that the page navigates to
+// mail.example.com.
+IN_PROC_BROWSER_TEST_F(CommonNameMismatchBrowserTest,
+                       ShouldShowWWWSubdomainMismatchInterstitial) {
+  net::SpawnedTestServer https_server_example_domain_(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_OK),
+      base::FilePath(kDocRoot));
+  ASSERT_TRUE(https_server_example_domain_.Start());
+
+  host_resolver()->AddRule(
+      "mail.example.com", https_server_example_domain_.host_port_pair().host());
+  host_resolver()->AddRule(
+      "www.mail.example.com",
+      https_server_example_domain_.host_port_pair().host());
+
+  scoped_refptr<net::X509Certificate> cert =
+      https_server_example_domain_.GetCertificate();
+
+  // Use the "spdy_pooling.pem" cert which has "mail.example.com"
+  // as one of its SANs.
+  net::CertVerifyResult verify_result;
+  verify_result.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  verify_result.cert_status = net::CERT_STATUS_COMMON_NAME_INVALID;
+
+  // Request to "www.mail.example.com" should result in
+  // |net::ERR_CERT_COMMON_NAME_INVALID| error.
+  mock_cert_verifier()->AddResultForCertAndHost(
+      cert.get(), "www.mail.example.com", verify_result,
+      net::ERR_CERT_COMMON_NAME_INVALID);
+
+  net::CertVerifyResult verify_result_valid;
+  verify_result_valid.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  // Request to "www.mail.example.com" should not result in any error.
+  mock_cert_verifier()->AddResultForCertAndHost(cert.get(), "mail.example.com",
+                                                verify_result_valid, net::OK);
+
+  // Use a complex URL to ensure the path, etc., are preserved. The path itself
+  // does not matter.
+  GURL https_server_url =
+      https_server_example_domain_.GetURL("files/ssl/google.html?a=b#anchor");
+  GURL::Replacements replacements;
+  replacements.SetHostStr("www.mail.example.com");
+  GURL https_server_mismatched_url =
+      https_server_url.ReplaceComponents(replacements);
+
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  content::TestNavigationObserver observer(contents, 2);
+  ui_test_utils::NavigateToURL(browser(), https_server_mismatched_url);
+  observer.Wait();
+
+  CheckSecurityState(contents, CertError::NONE,
+                     content::SECURITY_STYLE_AUTHENTICATED, AuthState::NONE);
+  replacements.SetHostStr("mail.example.com");
+  GURL https_server_new_url = https_server_url.ReplaceComponents(replacements);
+  // Verify that the current URL is the suggested URL.
+  EXPECT_EQ(https_server_new_url.spec(),
+            contents->GetLastCommittedURL().spec());
+}
+
+// Visit the URL example.org on a server that presents a valid certificate
+// for www.example.org. Verify that the page redirects to www.example.org.
+IN_PROC_BROWSER_TEST_F(CommonNameMismatchBrowserTest,
+                       CheckWWWSubdomainMismatchInverse) {
+  net::SpawnedTestServer https_server_example_domain_(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_OK),
+      base::FilePath(kDocRoot));
+  ASSERT_TRUE(https_server_example_domain_.Start());
+
+  host_resolver()->AddRule(
+      "www.example.org", https_server_example_domain_.host_port_pair().host());
+  host_resolver()->AddRule(
+      "example.org", https_server_example_domain_.host_port_pair().host());
+
+  scoped_refptr<net::X509Certificate> cert =
+      https_server_example_domain_.GetCertificate();
+
+  net::CertVerifyResult verify_result;
+  verify_result.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  verify_result.cert_status = net::CERT_STATUS_COMMON_NAME_INVALID;
+
+  mock_cert_verifier()->AddResultForCertAndHost(
+      cert.get(), "example.org", verify_result,
+      net::ERR_CERT_COMMON_NAME_INVALID);
+
+  net::CertVerifyResult verify_result_valid;
+  verify_result_valid.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  mock_cert_verifier()->AddResultForCertAndHost(cert.get(), "www.example.org",
+                                                verify_result_valid, net::OK);
+
+  GURL https_server_url =
+      https_server_example_domain_.GetURL("files/ssl/google.html?a=b");
+  GURL::Replacements replacements;
+  replacements.SetHostStr("example.org");
+  GURL https_server_mismatched_url =
+      https_server_url.ReplaceComponents(replacements);
+
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  content::TestNavigationObserver observer(contents, 2);
+  ui_test_utils::NavigateToURL(browser(), https_server_mismatched_url);
+  observer.Wait();
+
+  CheckSecurityState(contents, CertError::NONE,
+                     content::SECURITY_STYLE_AUTHENTICATED, AuthState::NONE);
+}
+
+// Tests this scenario:
+// - |CommonNameMismatchHandler| does not give a callback as it's set into the
+//   state |IGNORE_REQUESTS_FOR_TESTING|. So no suggested URL check result can
+//   arrive.
+// - A cert error triggers an interstitial timer with a very long timeout.
+// - No suggested URL check results arrive, causing the tab to appear as loading
+//   indefinitely (also because the timer has a long timeout).
+// - Stopping the page load shouldn't result in any interstitials.
+IN_PROC_BROWSER_TEST_F(CommonNameMismatchBrowserTest,
+                       InterstitialStopNavigationWhileLoading) {
+  net::SpawnedTestServer https_server_example_domain_(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_OK),
+      base::FilePath(kDocRoot));
+  ASSERT_TRUE(https_server_example_domain_.Start());
+
+  host_resolver()->AddRule(
+      "mail.example.com", https_server_example_domain_.host_port_pair().host());
+  host_resolver()->AddRule(
+      "www.mail.example.com",
+      https_server_example_domain_.host_port_pair().host());
+
+  scoped_refptr<net::X509Certificate> cert =
+      https_server_example_domain_.GetCertificate();
+
+  net::CertVerifyResult verify_result;
+  verify_result.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  verify_result.cert_status = net::CERT_STATUS_COMMON_NAME_INVALID;
+
+  mock_cert_verifier()->AddResultForCertAndHost(
+      cert.get(), "www.mail.example.com", verify_result,
+      net::ERR_CERT_COMMON_NAME_INVALID);
+
+  net::CertVerifyResult verify_result_valid;
+  verify_result_valid.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  mock_cert_verifier()->AddResultForCertAndHost(cert.get(), "mail.example.com",
+                                                verify_result_valid, net::OK);
+
+  GURL https_server_url =
+      https_server_example_domain_.GetURL("files/ssl/google.html?a=b");
+  GURL::Replacements replacements;
+  replacements.SetHostStr("www.mail.example.com");
+  GURL https_server_mismatched_url =
+      https_server_url.ReplaceComponents(replacements);
+
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  CommonNameMismatchHandler::set_state_for_testing(
+      CommonNameMismatchHandler::IGNORE_REQUESTS_FOR_TESTING);
+  SSLErrorHandler::SetInterstitialDelayTypeForTest(SSLErrorHandler::LONG);
+  SSLInterstitialTimerObserver interstitial_timer_observer(contents);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), https_server_mismatched_url, CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  interstitial_timer_observer.WaitForTimerStarted();
+
+  EXPECT_TRUE(contents->IsLoading());
+  content::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::NotificationService::AllSources());
+  contents->Stop();
+  observer.Wait();
+
+  SSLErrorHandler* ssl_error_handler =
+      SSLErrorHandler::FromWebContents(contents);
+  // Make sure that the |SSLErrorHandler| is deleted.
+  EXPECT_FALSE(ssl_error_handler);
+  EXPECT_FALSE(contents->ShowingInterstitialPage());
+  EXPECT_FALSE(contents->IsLoading());
+}
+
+// Same as above, but instead of stopping, the loading page is reloaded. The end
+// result is the same. (i.e. page load stops, no interstitials shown)
+IN_PROC_BROWSER_TEST_F(CommonNameMismatchBrowserTest,
+                       InterstitialReloadNavigationWhileLoading) {
+  net::SpawnedTestServer https_server_example_domain_(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_OK),
+      base::FilePath(kDocRoot));
+  ASSERT_TRUE(https_server_example_domain_.Start());
+
+  host_resolver()->AddRule(
+      "mail.example.com", https_server_example_domain_.host_port_pair().host());
+  host_resolver()->AddRule(
+      "www.mail.example.com",
+      https_server_example_domain_.host_port_pair().host());
+
+  scoped_refptr<net::X509Certificate> cert =
+      https_server_example_domain_.GetCertificate();
+
+  net::CertVerifyResult verify_result;
+  verify_result.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  verify_result.cert_status = net::CERT_STATUS_COMMON_NAME_INVALID;
+
+  mock_cert_verifier()->AddResultForCertAndHost(
+      cert.get(), "www.mail.example.com", verify_result,
+      net::ERR_CERT_COMMON_NAME_INVALID);
+
+  net::CertVerifyResult verify_result_valid;
+  verify_result_valid.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  mock_cert_verifier()->AddResultForCertAndHost(cert.get(), "mail.example.com",
+                                                verify_result_valid, net::OK);
+
+  GURL https_server_url =
+      https_server_example_domain_.GetURL("files/ssl/google.html?a=b");
+  GURL::Replacements replacements;
+  replacements.SetHostStr("www.mail.example.com");
+  GURL https_server_mismatched_url =
+      https_server_url.ReplaceComponents(replacements);
+
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  CommonNameMismatchHandler::set_state_for_testing(
+      CommonNameMismatchHandler::IGNORE_REQUESTS_FOR_TESTING);
+  SSLErrorHandler::SetInterstitialDelayTypeForTest(SSLErrorHandler::LONG);
+  SSLInterstitialTimerObserver interstitial_timer_observer(contents);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), https_server_mismatched_url, CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  interstitial_timer_observer.WaitForTimerStarted();
+
+  EXPECT_TRUE(contents->IsLoading());
+  content::TestNavigationObserver observer(contents, 1);
+  chrome::Reload(browser(), CURRENT_TAB);
+  observer.Wait();
+
+  SSLErrorHandler* ssl_error_handler =
+      SSLErrorHandler::FromWebContents(contents);
+  // Make sure that the |SSLErrorHandler| is deleted.
+  EXPECT_FALSE(ssl_error_handler);
+  EXPECT_FALSE(contents->ShowingInterstitialPage());
+  EXPECT_FALSE(contents->IsLoading());
+}
+
+// Same as above, but instead of reloading, the page is navigated away. The
+// new page should load, and no interstitials should be shown.
+IN_PROC_BROWSER_TEST_F(CommonNameMismatchBrowserTest,
+                       InterstitialNavigateAwayWhileLoading) {
+  net::SpawnedTestServer https_server_example_domain_(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_OK),
+      base::FilePath(kDocRoot));
+  ASSERT_TRUE(https_server_example_domain_.Start());
+
+  host_resolver()->AddRule(
+      "mail.example.com", https_server_example_domain_.host_port_pair().host());
+  host_resolver()->AddRule(
+      "www.mail.example.com",
+      https_server_example_domain_.host_port_pair().host());
+
+  scoped_refptr<net::X509Certificate> cert =
+      https_server_example_domain_.GetCertificate();
+
+  net::CertVerifyResult verify_result;
+  verify_result.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  verify_result.cert_status = net::CERT_STATUS_COMMON_NAME_INVALID;
+
+  mock_cert_verifier()->AddResultForCertAndHost(
+      cert.get(), "www.mail.example.com", verify_result,
+      net::ERR_CERT_COMMON_NAME_INVALID);
+
+  net::CertVerifyResult verify_result_valid;
+  verify_result_valid.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "spdy_pooling.pem");
+  mock_cert_verifier()->AddResultForCertAndHost(cert.get(), "mail.example.com",
+                                                verify_result_valid, net::OK);
+
+  GURL https_server_url =
+      https_server_example_domain_.GetURL("files/ssl/google.html?a=b");
+  GURL::Replacements replacements;
+  replacements.SetHostStr("www.mail.example.com");
+  GURL https_server_mismatched_url =
+      https_server_url.ReplaceComponents(replacements);
+
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  CommonNameMismatchHandler::set_state_for_testing(
+      CommonNameMismatchHandler::IGNORE_REQUESTS_FOR_TESTING);
+  SSLErrorHandler::SetInterstitialDelayTypeForTest(SSLErrorHandler::LONG);
+  SSLInterstitialTimerObserver interstitial_timer_observer(contents);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), https_server_mismatched_url, CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  interstitial_timer_observer.WaitForTimerStarted();
+
+  EXPECT_TRUE(contents->IsLoading());
+  content::TestNavigationObserver observer(contents, 1);
+  browser()->OpenURL(content::OpenURLParams(GURL("https://google.com"),
+                                            content::Referrer(), CURRENT_TAB,
+                                            ui::PAGE_TRANSITION_TYPED, false));
+  observer.Wait();
+
+  SSLErrorHandler* ssl_error_handler =
+      SSLErrorHandler::FromWebContents(contents);
+  // Make sure that the |SSLErrorHandler| is deleted.
+  EXPECT_FALSE(ssl_error_handler);
+  EXPECT_FALSE(contents->ShowingInterstitialPage());
+  EXPECT_FALSE(contents->IsLoading());
+}
+
 class SSLBlockingPageIDNTest : public SecurityInterstitialIDNTest {
  protected:
   // SecurityInterstitialIDNTest implementation
@@ -2367,6 +2656,26 @@ class SSLBlockingPageIDNTest : public SecurityInterstitialIDNTest {
 
 IN_PROC_BROWSER_TEST_F(SSLBlockingPageIDNTest, SSLBlockingPageDecodesIDN) {
   EXPECT_TRUE(VerifyIDNDecoded());
+}
+
+IN_PROC_BROWSER_TEST_F(CertVerifierBrowserTest, MockCertVerifierSmokeTest) {
+  net::SpawnedTestServer https_server(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_OK),
+      base::FilePath(kDocRoot));
+  ASSERT_TRUE(https_server.Start());
+
+  mock_cert_verifier()->set_default_result(
+      net::ERR_CERT_NAME_CONSTRAINT_VIOLATION);
+
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server.GetURL("files/ssl/google.html"));
+
+  CheckSecurityState(browser()->tab_strip_model()->GetActiveWebContents(),
+                     net::CERT_STATUS_NAME_CONSTRAINT_VIOLATION,
+                     content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
+                     AuthState::SHOWING_INTERSTITIAL);
 }
 
 // TODO(jcampan): more tests to do below.

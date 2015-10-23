@@ -15,7 +15,6 @@
 #include "remoting/protocol/clipboard_filter.h"
 #include "remoting/protocol/cursor_shape_stub.h"
 #include "remoting/test/remote_connection_observer.h"
-#include "remoting/test/remote_host_info.h"
 
 namespace remoting {
 
@@ -27,26 +26,28 @@ namespace protocol {
 class ClipboardStub;
 class HostStub;
 class InputStub;
-}
+}  // namespace protocol
 
 namespace test {
+
+struct ConnectionSetupInfo;
 
 // Manages a chromoting connection to a remote host.  Destroying a
 // TestChromotingClient object with an active connection will close it.
 // Must be used from a thread running an IO message loop.
 // RemoteConnectionObserver objects must not destroy this class within a
 // callback.
+// A VideoRenderer can be passed in to customize the connection.
 class TestChromotingClient : public ClientUserInterface,
                              public protocol::ClipboardStub,
                              public protocol::CursorShapeStub {
  public:
   TestChromotingClient();
+  explicit TestChromotingClient(scoped_ptr<VideoRenderer> video_renderer);
   ~TestChromotingClient() override;
 
-  // Starts a chromoting connection with the specified remote host.
-  void StartConnection(const std::string& user_name,
-                       const std::string& access_token,
-                       const RemoteHostInfo& remote_host_info);
+  // Starts a Chromoting connection using the specified connection setup info.
+  void StartConnection(const ConnectionSetupInfo& connection_setup_info);
 
   // Ends the current remote connection and updates the connection state.
   void EndConnection();
@@ -99,7 +100,7 @@ class TestChromotingClient : public ClientUserInterface,
   // List of observers which are notified when remote connection events occur.
   // We specify true below for the 'check_empty' flag so the list will check to
   // see if all observers have been unregistered when it is destroyed.
-  ObserverList<RemoteConnectionObserver, true> connection_observers_;
+  base::ObserverList<RemoteConnectionObserver, true> connection_observers_;
 
   // ConnectionToHost used by TestChromotingClient tests.
   scoped_ptr<protocol::ConnectionToHost> test_connection_to_host_;

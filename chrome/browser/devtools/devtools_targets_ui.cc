@@ -4,14 +4,17 @@
 
 #include "chrome/browser/devtools/devtools_targets_ui.h"
 
+#include "base/location.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/devtools/device/devtools_android_bridge.h"
 #include "chrome/browser/devtools/devtools_target_impl.h"
-#include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
@@ -69,10 +72,9 @@ class CancelableTimer {
   CancelableTimer(base::Closure callback, base::TimeDelta delay)
       : callback_(callback),
         weak_factory_(this) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&CancelableTimer::Fire, weak_factory_.GetWeakPtr()),
-        delay);
+        base::Bind(&CancelableTimer::Fire, weak_factory_.GetWeakPtr()), delay);
   }
 
  private:
@@ -478,8 +480,7 @@ void PortForwardingStatusSerializer::PortStatusChanged(
     const PortStatusMap& port_status_map = sit->second;
     for (PortStatusMap::const_iterator it = port_status_map.begin();
          it != port_status_map.end(); ++it) {
-      port_status_dict->SetInteger(
-          base::StringPrintf("%d", it->first), it->second);
+      port_status_dict->SetInteger(base::IntToString(it->first), it->second);
     }
 
     base::DictionaryValue* device_status_dict = new base::DictionaryValue();

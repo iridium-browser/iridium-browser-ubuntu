@@ -15,10 +15,7 @@ namespace ui {
 
 HardwareDisplayPlane::HardwareDisplayPlane(uint32_t plane_id,
                                            uint32_t possible_crtcs)
-    : plane_id_(plane_id),
-      possible_crtcs_(possible_crtcs),
-      in_use_(false),
-      is_dummy_(false) {
+    : plane_id_(plane_id), possible_crtcs_(possible_crtcs) {
 }
 
 HardwareDisplayPlane::~HardwareDisplayPlane() {
@@ -28,7 +25,12 @@ bool HardwareDisplayPlane::CanUseForCrtc(uint32_t crtc_index) {
   return possible_crtcs_ & (1 << crtc_index);
 }
 
-bool HardwareDisplayPlane::Initialize(DrmDevice* drm) {
+bool HardwareDisplayPlane::Initialize(DrmDevice* drm,
+                                      const std::vector<uint32_t>& formats) {
+  return true;
+}
+
+bool HardwareDisplayPlane::IsSupportedFormat(uint32_t format) const {
   return true;
 }
 

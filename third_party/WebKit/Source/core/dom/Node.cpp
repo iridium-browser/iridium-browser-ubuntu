@@ -29,25 +29,21 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "core/HTMLNames.h"
-#include "core/XMLNames.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/Attr.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ChildListMutationScope.h"
 #include "core/dom/ChildNodeList.h"
-#include "core/dom/DOMImplementation.h"
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentFragment.h"
-#include "core/dom/DocumentMarkerController.h"
 #include "core/dom/DocumentType.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementRareData.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/LayoutTreeBuilderTraversal.h"
-#include "core/dom/LiveNodeList.h"
 #include "core/dom/NodeRareData.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/ProcessingInstruction.h"
@@ -62,8 +58,8 @@
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/InsertionPoint.h"
 #include "core/dom/shadow/ShadowRoot.h"
-#include "core/editing/htmlediting.h"
-#include "core/editing/markup.h"
+#include "core/editing/EditingUtilities.h"
+#include "core/editing/markers/DocumentMarkerController.h"
 #include "core/events/Event.h"
 #include "core/events/EventDispatchMediator.h"
 #include "core/events/EventDispatcher.h"
@@ -72,6 +68,7 @@
 #include "core/events/KeyboardEvent.h"
 #include "core/events/MouseEvent.h"
 #include "core/events/MutationEvent.h"
+#include "core/events/PointerEvent.h"
 #include "core/events/TextEvent.h"
 #include "core/events/TouchEvent.h"
 #include "core/events/UIEvent.h"
@@ -79,14 +76,11 @@
 #include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/Settings.h"
-#include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLDialogElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "core/html/HTMLStyleElement.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/LayoutBox.h"
 #include "core/page/ContextMenuController.h"
-#include "core/page/EventHandler.h"
 #include "core/page/Page.h"
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/EventDispatchForbiddenScope.h"
@@ -115,7 +109,7 @@ static_assert(sizeof(Node) <= sizeof(SameSizeAsNode), "Node should stay small");
 void* Node::operator new(size_t size)
 {
     ASSERT(isMainThread());
-    return partitionAlloc(WTF::Partitions::getObjectModelPartition(), size);
+    return partitionAlloc(WTF::Partitions::nodePartition(), size);
 }
 
 void Node::operator delete(void* ptr)
@@ -168,56 +162,56 @@ void Node::dumpStatistics()
         }
 
         switch (node->nodeType()) {
-            case ELEMENT_NODE: {
-                ++elementNodes;
+        case ELEMENT_NODE: {
+            ++elementNodes;
 
-                // Tag stats
-                Element* element = toElement(node);
-                HashMap<String, size_t>::AddResult result = perTagCount.add(element->tagName(), 1);
-                if (!result.isNewEntry)
-                    result.storedValue->value++;
+            // Tag stats
+            Element* element = toElement(node);
+            HashMap<String, size_t>::AddResult result = perTagCount.add(element->tagName(), 1);
+            if (!result.isNewEntry)
+                result.storedValue->value++;
 
-                if (const ElementData* elementData = element->elementData()) {
-                    attributes += elementData->attributes().size();
-                    ++elementsWithAttributeStorage;
-                }
-                break;
+            if (const ElementData* elementData = element->elementData()) {
+                attributes += elementData->attributes().size();
+                ++elementsWithAttributeStorage;
             }
-            case ATTRIBUTE_NODE: {
-                ++attrNodes;
-                break;
-            }
-            case TEXT_NODE: {
-                ++textNodes;
-                break;
-            }
-            case CDATA_SECTION_NODE: {
-                ++cdataNodes;
-                break;
-            }
-            case COMMENT_NODE: {
-                ++commentNodes;
-                break;
-            }
-            case PROCESSING_INSTRUCTION_NODE: {
-                ++piNodes;
-                break;
-            }
-            case DOCUMENT_NODE: {
-                ++documentNodes;
-                break;
-            }
-            case DOCUMENT_TYPE_NODE: {
-                ++docTypeNodes;
-                break;
-            }
-            case DOCUMENT_FRAGMENT_NODE: {
-                if (node->isShadowRoot())
-                    ++shadowRootNodes;
-                else
-                    ++fragmentNodes;
-                break;
-            }
+            break;
+        }
+        case ATTRIBUTE_NODE: {
+            ++attrNodes;
+            break;
+        }
+        case TEXT_NODE: {
+            ++textNodes;
+            break;
+        }
+        case CDATA_SECTION_NODE: {
+            ++cdataNodes;
+            break;
+        }
+        case COMMENT_NODE: {
+            ++commentNodes;
+            break;
+        }
+        case PROCESSING_INSTRUCTION_NODE: {
+            ++piNodes;
+            break;
+        }
+        case DOCUMENT_NODE: {
+            ++documentNodes;
+            break;
+        }
+        case DOCUMENT_TYPE_NODE: {
+            ++docTypeNodes;
+            break;
+        }
+        case DOCUMENT_FRAGMENT_NODE: {
+            if (node->isShadowRoot())
+                ++shadowRootNodes;
+            else
+                ++fragmentNodes;
+            break;
+        }
         }
     }
 
@@ -277,7 +271,7 @@ Node::Node(TreeScope* treeScope, ConstructionType type)
 #if !defined(NDEBUG) || (defined(DUMP_NODE_STATISTICS) && DUMP_NODE_STATISTICS)
     trackForDebugging();
 #endif
-    InspectorCounters::incrementCounter(InspectorCounters::NodeCounter);
+    InstanceCounters::incrementCounter(InstanceCounters::NodeCounter);
 }
 
 Node::~Node()
@@ -308,7 +302,7 @@ Node::~Node()
         m_treeScope->guardDeref();
 
     if (getFlag(HasWeakReferencesFlag))
-        WeakNodeMap::notifyObjectDestroyed(this);
+        WeakIdentifierMap<Node>::notifyObjectDestroyed(this);
 
     // clearEventTargetData() must be always done,
     // or eventTargetDataMap() may keep a raw pointer to a deleted object.
@@ -319,7 +313,7 @@ Node::~Node()
     RELEASE_ASSERT(hasRareData() || !layoutObject());
 #endif
 
-    InspectorCounters::decrementCounter(InspectorCounters::NodeCounter);
+    InstanceCounters::decrementCounter(InstanceCounters::NodeCounter);
 }
 
 #if !ENABLE(OILPAN)
@@ -336,9 +330,6 @@ void Node::willBeDeletedFromDocument()
 
     if (document.frameHost())
         document.frameHost()->eventHandlerRegistry().didRemoveAllEventHandlers(*this);
-
-    if (AXObjectCache* cache = document.existingAXObjectCache())
-        cache->remove(this);
 
     document.markers().removeMarkers(this);
 }
@@ -518,9 +509,6 @@ void Node::normalize()
     while (Node* firstChild = node->firstChild())
         node = firstChild;
     while (node) {
-        if (node->isElementNode())
-            toElement(node)->normalizeAttributes();
-
         if (node == this)
             break;
 
@@ -529,16 +517,6 @@ void Node::normalize()
         else
             node = NodeTraversal::nextPostOrder(*node);
     }
-}
-
-const AtomicString& Node::localName() const
-{
-    return nullAtom;
-}
-
-const AtomicString& Node::namespaceURI() const
-{
-    return nullAtom;
 }
 
 bool Node::isContentEditable(UserSelectAllTreatment treatment)
@@ -566,7 +544,7 @@ bool Node::hasEditableStyle(EditableLevel editableLevel, UserSelectAllTreatment 
         if ((node->isHTMLElement() || node->isDocumentNode()) && node->layoutObject()) {
             // Elements with user-select: all style are considered atomic
             // therefore non editable.
-            if (Position::nodeIsUserSelectAll(node) && treatment == UserSelectAllIsAlwaysNonEditable)
+            if (nodeIsUserSelectAll(node) && treatment == UserSelectAllIsAlwaysNonEditable)
                 return false;
             switch (node->layoutObject()->style()->userModify()) {
             case READ_ONLY:
@@ -633,9 +611,11 @@ bool Node::hasNonEmptyBoundingBox() const
     FloatPoint absPos = layoutObject()->localToAbsolute();
     layoutObject()->absoluteRects(rects, flooredLayoutPoint(absPos));
     size_t n = rects.size();
-    for (size_t i = 0; i < n; ++i)
-        if (!rects[i].isEmpty())
+    for (size_t i = 0; i < n; ++i) {
+        if (!rects[i].isEmpty()) {
             return true;
+        }
+    }
 
     return false;
 }
@@ -705,6 +685,7 @@ void Node::setIsLink(bool isLink)
 
 void Node::setNeedsStyleInvalidation()
 {
+    ASSERT(isElementNode());
     setFlag(NeedsStyleInvalidationFlag);
     markAncestorsWithChildNeedsStyleInvalidation();
 }
@@ -796,10 +777,10 @@ bool Node::isInert() const
 
 unsigned Node::nodeIndex() const
 {
-    Node *_tempNode = previousSibling();
+    Node* tempNode = previousSibling();
     unsigned count = 0;
-    for (count = 0; _tempNode; count++)
-        _tempNode = _tempNode->previousSibling();
+    for (count = 0; tempNode; count++)
+        tempNode = tempNode->previousSibling();
     return count;
 }
 
@@ -928,6 +909,7 @@ void Node::reattach(const AttachContext& context)
 void Node::attach(const AttachContext&)
 {
     ASSERT(document().inStyleRecalc() || isDocumentNode());
+    ASSERT(!document().lifecycle().inDetach());
     ASSERT(needsAttach());
     ASSERT(!layoutObject() || (layoutObject()->style() && (layoutObject()->parent() || layoutObject()->isLayoutView())));
 
@@ -937,56 +919,17 @@ void Node::attach(const AttachContext&)
         cache->updateCacheAfterNodeIsAttached(this);
 }
 
-#if ENABLE(ASSERT)
-static Node* detachingNode;
-
-bool Node::inDetach() const
-{
-    return detachingNode == this;
-}
-#endif
-
 void Node::detach(const AttachContext& context)
 {
     ASSERT(document().lifecycle().stateAllowsDetach());
     DocumentLifecycle::DetachScope willDetach(document().lifecycle());
 
-#if ENABLE(ASSERT)
-    // The detaching might trigger destruction of a popup menu window,
-    // with ensuing detachment of its Nodes. In a separate document, so
-    // don't assert for these, but do set detachingNode to the most recent
-    // Node being detached.
-    ASSERT(!detachingNode || detachingNode->document() != document());
-    detachingNode = this;
-#endif
-
     if (layoutObject())
         layoutObject()->destroyAndCleanupAnonymousWrappers();
     setLayoutObject(nullptr);
 
-    // Do not remove the element's hovered and active status
-    // if performing a reattach.
-    if (!context.performingReattach) {
-        Document& doc = document();
-        if (isUserActionElement()) {
-            if (hovered())
-                doc.hoveredNodeDetached(this);
-            if (inActiveChain())
-                doc.activeChainNodeDetached(this);
-            doc.userActionElements().didDetach(this);
-        }
-    }
-
     setStyleChange(NeedsReattachStyleChange);
-    setChildNeedsStyleRecalc();
-
-    document().styleEngine().styleInvalidator().clearInvalidation(*this);
     clearChildNeedsStyleInvalidation();
-    clearNeedsStyleInvalidation();
-
-#if ENABLE(ASSERT)
-    detachingNode = nullptr;
-#endif
 }
 
 void Node::reattachWhitespaceSiblingsIfNeeded(Text* start)
@@ -1003,59 +946,6 @@ void Node::reattachWhitespaceSiblingsIfNeeded(Text* start)
             return;
         }
     }
-}
-
-// FIXME: This code is used by editing.  Seems like it could move over there and not pollute Node.
-Node* Node::previousNodeConsideringAtomicNodes() const
-{
-    if (previousSibling()) {
-        Node* n = previousSibling();
-        while (!isAtomicNode(n) && n->lastChild())
-            n = n->lastChild();
-        return n;
-    }
-    else if (parentNode()) {
-        return parentNode();
-    }
-    else {
-        return nullptr;
-    }
-}
-
-Node* Node::nextNodeConsideringAtomicNodes() const
-{
-    if (!isAtomicNode(this) && hasChildren())
-        return firstChild();
-    if (nextSibling())
-        return nextSibling();
-    const Node* n = this;
-    while (n && !n->nextSibling())
-        n = n->parentNode();
-    if (n)
-        return n->nextSibling();
-    return nullptr;
-}
-
-Node* Node::previousLeafNode() const
-{
-    Node* node = previousNodeConsideringAtomicNodes();
-    while (node) {
-        if (isAtomicNode(node))
-            return node;
-        node = node->previousNodeConsideringAtomicNodes();
-    }
-    return nullptr;
-}
-
-Node* Node::nextLeafNode() const
-{
-    Node* node = nextNodeConsideringAtomicNodes();
-    while (node) {
-        if (isAtomicNode(node))
-            return node;
-        node = node->nextNodeConsideringAtomicNodes();
-    }
-    return nullptr;
 }
 
 const ComputedStyle* Node::virtualEnsureComputedStyle(PseudoId pseudoElementSpecifier)
@@ -1200,17 +1090,25 @@ bool Node::isEqualNode(Node* other) const
     if (nodeName() != other->nodeName())
         return false;
 
-    if (localName() != other->localName())
-        return false;
-
-    if (namespaceURI() != other->namespaceURI())
-        return false;
-
     if (nodeValue() != other->nodeValue())
         return false;
 
-    if (isElementNode() && !toElement(this)->hasEquivalentAttributes(toElement(other)))
-        return false;
+    if (isAttributeNode()) {
+        if (toAttr(this)->localName() != toAttr(other)->localName())
+            return false;
+
+        if (toAttr(this)->namespaceURI() != toAttr(other)->namespaceURI())
+            return false;
+    } else if (isElementNode()) {
+        if (toElement(this)->localName() != toElement(other)->localName())
+            return false;
+
+        if (toElement(this)->namespaceURI() != toElement(other)->namespaceURI())
+            return false;
+
+        if (!toElement(this)->hasEquivalentAttributes(toElement(other)))
+            return false;
+    }
 
     Node* child = firstChild();
     Node* otherChild = other->firstChild();
@@ -1245,40 +1143,40 @@ bool Node::isDefaultNamespace(const AtomicString& namespaceURIMaybeEmpty) const
     const AtomicString& namespaceURI = namespaceURIMaybeEmpty.isEmpty() ? nullAtom : namespaceURIMaybeEmpty;
 
     switch (nodeType()) {
-        case ELEMENT_NODE: {
-            const Element& element = toElement(*this);
+    case ELEMENT_NODE: {
+        const Element& element = toElement(*this);
 
-            if (element.prefix().isNull())
-                return element.namespaceURI() == namespaceURI;
+        if (element.prefix().isNull())
+            return element.namespaceURI() == namespaceURI;
 
-            AttributeCollection attributes = element.attributes();
-            for (const Attribute& attr : attributes) {
-                if (attr.localName() == xmlnsAtom)
-                    return attr.value() == namespaceURI;
-            }
-
-            if (Element* parent = parentElement())
-                return parent->isDefaultNamespace(namespaceURI);
-
-            return false;
+        AttributeCollection attributes = element.attributes();
+        for (const Attribute& attr : attributes) {
+            if (attr.localName() == xmlnsAtom)
+                return attr.value() == namespaceURI;
         }
-        case DOCUMENT_NODE:
-            if (Element* de = toDocument(this)->documentElement())
-                return de->isDefaultNamespace(namespaceURI);
-            return false;
-        case DOCUMENT_TYPE_NODE:
-        case DOCUMENT_FRAGMENT_NODE:
-            return false;
-        case ATTRIBUTE_NODE: {
-            const Attr* attr = toAttr(this);
-            if (attr->ownerElement())
-                return attr->ownerElement()->isDefaultNamespace(namespaceURI);
-            return false;
-        }
-        default:
-            if (Element* parent = parentElement())
-                return parent->isDefaultNamespace(namespaceURI);
-            return false;
+
+        if (Element* parent = parentElement())
+            return parent->isDefaultNamespace(namespaceURI);
+
+        return false;
+    }
+    case DOCUMENT_NODE:
+        if (Element* de = toDocument(this)->documentElement())
+            return de->isDefaultNamespace(namespaceURI);
+        return false;
+    case DOCUMENT_TYPE_NODE:
+    case DOCUMENT_FRAGMENT_NODE:
+        return false;
+    case ATTRIBUTE_NODE: {
+        const Attr* attr = toAttr(this);
+        if (attr->ownerElement())
+            return attr->ownerElement()->isDefaultNamespace(namespaceURI);
+        return false;
+    }
+    default:
+        if (Element* parent = parentElement())
+            return parent->isDefaultNamespace(namespaceURI);
+        return false;
     }
 }
 
@@ -1293,23 +1191,23 @@ const AtomicString& Node::lookupPrefix(const AtomicString& namespaceURI) const
     const Element* context;
 
     switch (nodeType()) {
-        case ELEMENT_NODE:
-            context = toElement(this);
-            break;
-        case DOCUMENT_NODE:
-            context = toDocument(this)->documentElement();
-            break;
-        case DOCUMENT_FRAGMENT_NODE:
-        case DOCUMENT_TYPE_NODE:
-            context = nullptr;
-            break;
-        // FIXME: Remove this when Attr no longer extends Node (CR305105)
-        case ATTRIBUTE_NODE:
-            context = toAttr(this)->ownerElement();
-            break;
-        default:
-            context = parentElement();
-            break;
+    case ELEMENT_NODE:
+        context = toElement(this);
+        break;
+    case DOCUMENT_NODE:
+        context = toDocument(this)->documentElement();
+        break;
+    case DOCUMENT_FRAGMENT_NODE:
+    case DOCUMENT_TYPE_NODE:
+        context = nullptr;
+        break;
+    // FIXME: Remove this when Attr no longer extends Node (CR305105)
+    case ATTRIBUTE_NODE:
+        context = toAttr(this)->ownerElement();
+        break;
+    default:
+        context = parentElement();
+        break;
     }
 
     if (!context)
@@ -1327,48 +1225,47 @@ const AtomicString& Node::lookupNamespaceURI(const String& prefix) const
         return nullAtom;
 
     switch (nodeType()) {
-        case ELEMENT_NODE: {
-            const Element& element = toElement(*this);
+    case ELEMENT_NODE: {
+        const Element& element = toElement(*this);
 
-            if (!element.namespaceURI().isNull() && element.prefix() == prefix)
-                return element.namespaceURI();
+        if (!element.namespaceURI().isNull() && element.prefix() == prefix)
+            return element.namespaceURI();
 
-            AttributeCollection attributes = element.attributes();
-            for (const Attribute& attr : attributes) {
-                if (attr.prefix() == xmlnsAtom && attr.localName() == prefix) {
-                    if (!attr.value().isEmpty())
-                        return attr.value();
-                    return nullAtom;
-                }
-                if (attr.localName() == xmlnsAtom && prefix.isNull()) {
-                    if (!attr.value().isEmpty())
-                        return attr.value();
-                    return nullAtom;
-                }
-            }
-
-            if (Element* parent = parentElement())
-                return parent->lookupNamespaceURI(prefix);
-            return nullAtom;
-        }
-        case DOCUMENT_NODE:
-            if (Element* de = toDocument(this)->documentElement())
-                return de->lookupNamespaceURI(prefix);
-            return nullAtom;
-        case DOCUMENT_TYPE_NODE:
-        case DOCUMENT_FRAGMENT_NODE:
-            return nullAtom;
-        case ATTRIBUTE_NODE: {
-            const Attr *attr = toAttr(this);
-            if (attr->ownerElement())
-                return attr->ownerElement()->lookupNamespaceURI(prefix);
-            else
+        AttributeCollection attributes = element.attributes();
+        for (const Attribute& attr : attributes) {
+            if (attr.prefix() == xmlnsAtom && attr.localName() == prefix) {
+                if (!attr.value().isEmpty())
+                    return attr.value();
                 return nullAtom;
+            }
+            if (attr.localName() == xmlnsAtom && prefix.isNull()) {
+                if (!attr.value().isEmpty())
+                    return attr.value();
+                return nullAtom;
+            }
         }
-        default:
-            if (Element* parent = parentElement())
-                return parent->lookupNamespaceURI(prefix);
-            return nullAtom;
+
+        if (Element* parent = parentElement())
+            return parent->lookupNamespaceURI(prefix);
+        return nullAtom;
+    }
+    case DOCUMENT_NODE:
+        if (Element* de = toDocument(this)->documentElement())
+            return de->lookupNamespaceURI(prefix);
+        return nullAtom;
+    case DOCUMENT_TYPE_NODE:
+    case DOCUMENT_FRAGMENT_NODE:
+        return nullAtom;
+    case ATTRIBUTE_NODE: {
+        const Attr *attr = toAttr(this);
+        if (attr->ownerElement())
+            return attr->ownerElement()->lookupNamespaceURI(prefix);
+        return nullAtom;
+    }
+    default:
+        if (Element* parent = parentElement())
+            return parent->lookupNamespaceURI(prefix);
+        return nullAtom;
     }
 }
 
@@ -1399,39 +1296,39 @@ String Node::textContent(bool convertBRsToNewlines) const
 void Node::setTextContent(const String& text)
 {
     switch (nodeType()) {
-        case TEXT_NODE:
-        case CDATA_SECTION_NODE:
-        case COMMENT_NODE:
-        case PROCESSING_INSTRUCTION_NODE:
-            setNodeValue(text);
-            return;
-        case ELEMENT_NODE:
-        case ATTRIBUTE_NODE:
-        case DOCUMENT_FRAGMENT_NODE: {
-            // FIXME: Merge this logic into replaceChildrenWithText.
-            RefPtrWillBeRawPtr<ContainerNode> container = toContainerNode(this);
+    case TEXT_NODE:
+    case CDATA_SECTION_NODE:
+    case COMMENT_NODE:
+    case PROCESSING_INSTRUCTION_NODE:
+        setNodeValue(text);
+        return;
+    case ELEMENT_NODE:
+    case DOCUMENT_FRAGMENT_NODE: {
+        // FIXME: Merge this logic into replaceChildrenWithText.
+        RefPtrWillBeRawPtr<ContainerNode> container = toContainerNode(this);
 
-            // Note: This is an intentional optimization.
-            // See crbug.com/352836 also.
-            // No need to do anything if the text is identical.
-            if (container->hasOneTextChild() && toText(container->firstChild())->data() == text)
-                return;
-
-            ChildListMutationScope mutation(*this);
-            // Note: This API will not insert empty text nodes:
-            // http://dom.spec.whatwg.org/#dom-node-textcontent
-            if (text.isEmpty()) {
-                container->removeChildren(DispatchSubtreeModifiedEvent);
-            } else {
-                container->removeChildren(OmitSubtreeModifiedEvent);
-                container->appendChild(document().createTextNode(text), ASSERT_NO_EXCEPTION);
-            }
+        // Note: This is an intentional optimization.
+        // See crbug.com/352836 also.
+        // No need to do anything if the text is identical.
+        if (container->hasOneTextChild() && toText(container->firstChild())->data() == text)
             return;
+
+        ChildListMutationScope mutation(*this);
+        // Note: This API will not insert empty text nodes:
+        // http://dom.spec.whatwg.org/#dom-node-textcontent
+        if (text.isEmpty()) {
+            container->removeChildren(DispatchSubtreeModifiedEvent);
+        } else {
+            container->removeChildren(OmitSubtreeModifiedEvent);
+            container->appendChild(document().createTextNode(text), ASSERT_NO_EXCEPTION);
         }
-        case DOCUMENT_NODE:
-        case DOCUMENT_TYPE_NODE:
-            // Do nothing.
-            return;
+        return;
+    }
+    case ATTRIBUTE_NODE:
+    case DOCUMENT_NODE:
+    case DOCUMENT_TYPE_NODE:
+        // Do nothing.
+        return;
     }
     ASSERT_NOT_REACHED();
 }
@@ -1530,9 +1427,11 @@ unsigned short Node::compareDocumentPosition(const Node* otherNode, ShadowTreesT
                 if (!child1->isShadowRoot())
                     return Node::DOCUMENT_POSITION_PRECEDING | connection;
 
-                for (ShadowRoot* child = toShadowRoot(child2)->olderShadowRoot(); child; child = child->olderShadowRoot())
-                    if (child == child1)
+                for (ShadowRoot* child = toShadowRoot(child2)->olderShadowRoot(); child; child = child->olderShadowRoot()) {
+                    if (child == child1) {
                         return Node::DOCUMENT_POSITION_FOLLOWING | connection;
+                    }
+                }
 
                 return Node::DOCUMENT_POSITION_PRECEDING | connection;
             }
@@ -1554,8 +1453,8 @@ unsigned short Node::compareDocumentPosition(const Node* otherNode, ShadowTreesT
     // There was no difference between the two parent chains, i.e., one was a subset of the other.  The shorter
     // chain is the ancestor.
     return index1 < index2 ?
-               DOCUMENT_POSITION_FOLLOWING | DOCUMENT_POSITION_CONTAINED_BY | connection :
-               DOCUMENT_POSITION_PRECEDING | DOCUMENT_POSITION_CONTAINS | connection;
+        DOCUMENT_POSITION_FOLLOWING | DOCUMENT_POSITION_CONTAINED_BY | connection :
+        DOCUMENT_POSITION_PRECEDING | DOCUMENT_POSITION_CONTAINS | connection;
 }
 
 String Node::debugName() const
@@ -1657,9 +1556,11 @@ void Node::showNodePathForThis() const
             bool hasIdAttr = !idattr.isNull() && !idattr.isEmpty();
             if (node->previousSibling() || node->nextSibling()) {
                 int count = 0;
-                for (Node* previous = node->previousSibling(); previous; previous = previous->previousSibling())
-                    if (previous->nodeName() == node->nodeName())
+                for (Node* previous = node->previousSibling(); previous; previous = previous->previousSibling()) {
+                    if (previous->nodeName() == node->nodeName()) {
                         ++count;
+                    }
+                }
                 if (hasIdAttr)
                     WTFLogAlways("[@id=\"%s\" and position()=%d]", idattr.utf8().data(), count);
                 else
@@ -1711,8 +1612,9 @@ static void traverseTreeAndMark(const String& baseIndent, const Node* rootNode, 
         if (node.isShadowRoot()) {
             if (ShadowRoot* youngerShadowRoot = toShadowRoot(node).youngerShadowRoot())
                 traverseTreeAndMark(indent.toString(), youngerShadowRoot, markedNode1, markedLabel1, markedNode2, markedLabel2);
-        } else if (ShadowRoot* oldestShadowRoot = oldestShadowRootFor(&node))
+        } else if (ShadowRoot* oldestShadowRoot = oldestShadowRootFor(&node)) {
             traverseTreeAndMark(indent.toString(), oldestShadowRoot, markedNode1, markedLabel1, markedNode2, markedLabel2);
+        }
     }
 }
 
@@ -1811,9 +1713,9 @@ void Node::showTreeForThisAcrossFrame() const
 
 // --------
 
-Element* Node::enclosingLinkEventParentOrSelf()
+Element* Node::enclosingLinkEventParentOrSelf() const
 {
-    for (Node* node = this; node; node = ComposedTreeTraversal::parent(*node)) {
+    for (Node* node = const_cast<Node*>(this); node; node = ComposedTreeTraversal::parent(*node)) {
         // For imagemaps, the enclosing link node is the associated area element not the image itself.
         // So we don't let images be the enclosingLinkNode, even though isLink sometimes returns true
         // for them.
@@ -1850,12 +1752,6 @@ void Node::didMoveToNewDocument(Document& oldDocument)
         }
     }
 
-    Settings* settings = document().settings();
-    if (settings && settings->accessibilityEnabled()) {
-        if (AXObjectCache* cache = oldDocument.existingAXObjectCache())
-            cache->remove(this);
-    }
-
     oldDocument.markers().removeMarkers(this);
     oldDocument.updateRangesAfterNodeMovedToAnotherDocument(*this);
     if (oldDocument.frameHost() && !document().frameHost())
@@ -1877,7 +1773,7 @@ void Node::didMoveToNewDocument(Document& oldDocument)
     }
 }
 
-static inline bool tryAddEventListener(Node* targetNode, const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
+static inline bool tryAddEventListener(Node* targetNode, const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener, bool useCapture)
 {
     if (!targetNode->EventTarget::addEventListener(eventType, listener, useCapture))
         return false;
@@ -1890,12 +1786,12 @@ static inline bool tryAddEventListener(Node* targetNode, const AtomicString& eve
     return true;
 }
 
-bool Node::addEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
+bool Node::addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener, bool useCapture)
 {
     return tryAddEventListener(this, eventType, listener, useCapture);
 }
 
-static inline bool tryRemoveEventListener(Node* targetNode, const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
+static inline bool tryRemoveEventListener(Node* targetNode, const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener, bool useCapture)
 {
     if (!targetNode->EventTarget::removeEventListener(eventType, listener, useCapture))
         return false;
@@ -1909,7 +1805,7 @@ static inline bool tryRemoveEventListener(Node* targetNode, const AtomicString& 
     return true;
 }
 
-bool Node::removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
+bool Node::removeEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> listener, bool useCapture)
 {
     return tryRemoveEventListener(this, eventType, listener, useCapture);
 }
@@ -1930,7 +1826,7 @@ void Node::removeAllEventListenersRecursively()
     }
 }
 
-using EventTargetDataMap = WillBeHeapHashMap<RawPtrWillBeWeakMember<Node>, OwnPtr<EventTargetData>>;
+using EventTargetDataMap = WillBeHeapHashMap<RawPtrWillBeWeakMember<Node>, OwnPtrWillBeMember<EventTargetData>>;
 static EventTargetDataMap& eventTargetDataMap()
 {
     DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<EventTargetDataMap>, map, (adoptPtrWillBeNoop(new EventTargetDataMap())));
@@ -1948,9 +1844,10 @@ EventTargetData& Node::ensureEventTargetData()
         return *eventTargetDataMap().get(this);
     ASSERT(!eventTargetDataMap().contains(this));
     setHasEventTargetData(true);
-    EventTargetData* data = new EventTargetData;
-    eventTargetDataMap().set(this, adoptPtr(data));
-    return *data;
+    OwnPtrWillBeRawPtr<EventTargetData> data = adoptPtrWillBeNoop(new EventTargetData);
+    EventTargetData* dataPtr = data.get();
+    eventTargetDataMap().set(this, data.release());
+    return *dataPtr;
 }
 
 #if !ENABLE(OILPAN)
@@ -2101,21 +1998,13 @@ void Node::handleLocalEvents(Event& event)
 
 void Node::dispatchScopedEvent(PassRefPtrWillBeRawPtr<Event> event)
 {
-    dispatchScopedEventDispatchMediator(EventDispatchMediator::create(event));
+    event->setTrusted(true);
+    EventDispatcher::dispatchScopedEvent(*this, event->createMediator());
 }
 
-void Node::dispatchScopedEventDispatchMediator(PassRefPtrWillBeRawPtr<EventDispatchMediator> eventDispatchMediator)
+bool Node::dispatchEventInternal(PassRefPtrWillBeRawPtr<Event> event)
 {
-    EventDispatcher::dispatchScopedEvent(*this, eventDispatchMediator);
-}
-
-bool Node::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
-{
-    if (event->isMouseEvent())
-        return EventDispatcher::dispatchEvent(*this, MouseEventDispatchMediator::create(static_pointer_cast<MouseEvent>(event), MouseEventDispatchMediator::SyntheticMouseEvent));
-    if (event->isTouchEvent())
-        return dispatchTouchEvent(static_pointer_cast<TouchEvent>(event));
-    return EventDispatcher::dispatchEvent(*this, EventDispatchMediator::create(event));
+    return EventDispatcher::dispatchEvent(*this, event->createMediator());
 }
 
 void Node::dispatchSubtreeModifiedEvent()
@@ -2140,15 +2029,16 @@ bool Node::dispatchDOMActivateEvent(int detail, PassRefPtrWillBeRawPtr<Event> un
     return event->defaultHandled();
 }
 
-bool Node::dispatchKeyEvent(const PlatformKeyboardEvent& event)
+bool Node::dispatchKeyEvent(const PlatformKeyboardEvent& nativeEvent)
 {
-    return EventDispatcher::dispatchEvent(*this, KeyboardEventDispatchMediator::create(KeyboardEvent::create(event, document().domWindow())));
+    return dispatchEvent(KeyboardEvent::create(nativeEvent, document().domWindow()));
 }
 
-bool Node::dispatchMouseEvent(const PlatformMouseEvent& event, const AtomicString& eventType,
+bool Node::dispatchMouseEvent(const PlatformMouseEvent& nativeEvent, const AtomicString& eventType,
     int detail, Node* relatedTarget)
 {
-    return EventDispatcher::dispatchEvent(*this, MouseEventDispatchMediator::create(MouseEvent::create(eventType, document().domWindow(), event, detail, relatedTarget)));
+    RefPtrWillBeRawPtr<MouseEvent> event = MouseEvent::create(eventType, document().domWindow(), nativeEvent, detail, relatedTarget);
+    return dispatchEvent(event);
 }
 
 bool Node::dispatchGestureEvent(const PlatformGestureEvent& event)
@@ -2156,22 +2046,17 @@ bool Node::dispatchGestureEvent(const PlatformGestureEvent& event)
     RefPtrWillBeRawPtr<GestureEvent> gestureEvent = GestureEvent::create(document().domWindow(), event);
     if (!gestureEvent.get())
         return false;
-    return EventDispatcher::dispatchEvent(*this, GestureEventDispatchMediator::create(gestureEvent));
+    return dispatchEvent(gestureEvent);
 }
 
-bool Node::dispatchTouchEvent(PassRefPtrWillBeRawPtr<TouchEvent> event)
+void Node::dispatchSimulatedClick(Event* underlyingEvent, SimulatedClickMouseEventOptions eventOptions, SimulatedClickCreationScope scope)
 {
-    return EventDispatcher::dispatchEvent(*this, TouchEventDispatchMediator::create(event));
-}
-
-void Node::dispatchSimulatedClick(Event* underlyingEvent, SimulatedClickMouseEventOptions eventOptions)
-{
-    EventDispatcher::dispatchSimulatedClick(*this, underlyingEvent, eventOptions);
+    EventDispatcher::dispatchSimulatedClick(*this, underlyingEvent, eventOptions, scope);
 }
 
 bool Node::dispatchWheelEvent(const PlatformWheelEvent& event)
 {
-    return EventDispatcher::dispatchEvent(*this, WheelEventDispatchMediator::create(event, document().domWindow()));
+    return dispatchEvent(WheelEvent::create(event, document().domWindow()));
 }
 
 void Node::dispatchInputEvent()
@@ -2350,8 +2235,9 @@ PassRefPtrWillBeRawPtr<StaticNodeList> Node::getDestinationInsertionPoints()
     for (size_t i = 0; i < insertionPoints.size(); ++i) {
         InsertionPoint* insertionPoint = insertionPoints[i];
         ASSERT(insertionPoint->containingShadowRoot());
-        if (insertionPoint->containingShadowRoot()->type() != ShadowRoot::UserAgentShadowRoot)
-            filteredInsertionPoints.append(insertionPoint);
+        if (!insertionPoint->containingShadowRoot()->isOpen())
+            break;
+        filteredInsertionPoints.append(insertionPoint);
     }
     return StaticNodeList::adopt(filteredInsertionPoints);
 }
@@ -2448,10 +2334,10 @@ unsigned Node::lengthOfContents() const
     case Node::PROCESSING_INSTRUCTION_NODE:
         return toProcessingInstruction(this)->data().length();
     case Node::ELEMENT_NODE:
-    case Node::ATTRIBUTE_NODE:
     case Node::DOCUMENT_NODE:
     case Node::DOCUMENT_FRAGMENT_NODE:
         return toContainerNode(this)->countChildren();
+    case Node::ATTRIBUTE_NODE:
     case Node::DOCUMENT_TYPE_NODE:
         return 0;
     }

@@ -20,14 +20,14 @@ import pickle
 import sys
 
 from chromite.cbuildbot import builders
-from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import cbuildbot_run
+from chromite.cbuildbot import config_lib
 from chromite.cbuildbot import constants
-from chromite.cbuildbot import generate_chromeos_config
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import remote_try
 from chromite.cbuildbot import repository
 from chromite.cbuildbot import tee
+from chromite.cbuildbot import topology
 from chromite.cbuildbot import tree_status
 from chromite.cbuildbot import trybot_patch_pool
 from chromite.cbuildbot.stages import completion_stages
@@ -55,37 +55,31 @@ _BUILDBOT_REQUIRED_BINARIES = ('pbzip2',)
 _API_VERSION_ATTR = 'api_version'
 
 
-def _PrintValidConfigs(display_all=False):
+def _PrintValidConfigs(site_config, display_all=False):
   """Print a list of valid buildbot configs.
 
   Args:
+    site_config: config_lib.SiteConfig containing all config info.
     display_all: Print all configs.  Otherwise, prints only configs with
                  trybot_list=True.
   """
   def _GetSortKey(config_name):
-    config_dict = cbuildbot_config.GetConfig()[config_name]
+    config_dict = site_config[config_name]
     return (not config_dict['trybot_list'], config_dict['description'],
             config_name)
 
   COLUMN_WIDTH = 45
-  print()
+  if not display_all:
+    print('Note: This is the common list; for all configs, use --all.')
   print('config'.ljust(COLUMN_WIDTH), 'description')
   print('------'.ljust(COLUMN_WIDTH), '-----------')
-  config_names = cbuildbot_config.GetConfig().keys()
+  config_names = site_config.keys()
   config_names.sort(key=_GetSortKey)
   for name in config_names:
-    if display_all or cbuildbot_config.GetConfig()[name]['trybot_list']:
-      desc = cbuildbot_config.GetConfig()[name].get('description')
+    if display_all or site_config[name]['trybot_list']:
+      desc = site_config[name].get('description')
       desc = desc if desc else ''
       print(name.ljust(COLUMN_WIDTH), desc)
-
-  print()
-
-
-def _GetConfig(config_name):
-  """Gets the configuration for the build if it exists, None otherwise."""
-  if cbuildbot_config.GetConfig().has_key(config_name):
-    return cbuildbot_config.GetConfig()[config_name]
 
 
 def _ConfirmBuildRoot(buildroot):
@@ -183,7 +177,7 @@ def _IsDistributedBuilder(options, chrome_rev, build_config):
   return False
 
 
-def _RunBuildStagesWrapper(options, build_config):
+def _RunBuildStagesWrapper(options, site_config, build_config):
   """Helper function that wraps RunBuildStages()."""
   logging.info('cbuildbot was executed with args %s' %
                cros_build_lib.CmdToStr(sys.argv))
@@ -227,12 +221,13 @@ def _RunBuildStagesWrapper(options, build_config):
   options.Freeze()
 
   with parallel.Manager() as manager:
-    builder_run = cbuildbot_run.BuilderRun(options, build_config, manager)
+    builder_run = cbuildbot_run.BuilderRun(
+        options, site_config, build_config, manager)
     if metadata_dump_dict:
       builder_run.attrs.metadata.UpdateWithDict(metadata_dump_dict)
 
     if builder_run.config.builder_class_name is None:
-      # TODO: This should get relocated to cbuildbot_config.
+      # TODO: This should get relocated to chromeos_config.
       if _IsDistributedBuilder(options, chrome_rev, build_config):
         builder_cls_name = 'simple_builders.DistributedBuilder'
       else:
@@ -412,6 +407,11 @@ def _CreateParser():
                           'where the build occurs. For external build configs, '
                           "defaults to 'trybot' directory at top level of your "
                           'repo-managed checkout.'))
+  parser.add_option('--bootstrap-dir', type='path', default=None,
+                    help='Bootstrapping cbuildbot may involve checking out '
+                         'multiple copies of chromite. All these checkouts '
+                         'will be contained in the directory specified here. '
+                         'Default:%s' % osutils.GetGlobalTempDir())
   parser.add_remote_option('--chrome_rev', default=None, type='string',
                            action='callback', dest='chrome_rev',
                            callback=_CheckChromeRevOption,
@@ -420,6 +420,9 @@ def _CreateParser():
   parser.add_remote_option('--profile', default=None, type='string',
                            action='store', dest='profile',
                            help='Name of profile to sub-specify board variant.')
+  parser.add_option('-c', '--config_repo',
+                    help=('Cloneable path to the git repository containing '
+                          'the site configuration to use.'))
 
   #
   # Patch selection options.
@@ -834,14 +837,19 @@ def _FinishParsing(options, args):
 
 
 # pylint: disable=W0613
-def _PostParseCheck(parser, options, args):
+def _PostParseCheck(parser, options, args, site_config):
   """Perform some usage validation after we've parsed the arguments
 
   Args:
     parser: Option parser that was used to parse arguments.
     options: The options returned by optparse.
     args: The args returned by optparse.
+    site_config: config_lib.SiteConfig containing all config info.
   """
+  if not args:
+    parser.error('Invalid usage: no configuration targets provided.'
+                 'Use -h to see usage.  Use -l to list supported configs.')
+
   if not options.branch:
     options.branch = git.GetChromiteTrackingBranch()
 
@@ -889,12 +897,12 @@ def _PostParseCheck(parser, options, args):
   # Ensure that all args are legitimate config targets.
   invalid_targets = []
   for arg in args:
-    build_config = _GetConfig(arg)
-
-    if not build_config:
+    if arg not in site_config:
       invalid_targets.append(arg)
       logging.error('No such configuraton target: "%s".', arg)
       continue
+
+    build_config = site_config[arg]
 
     is_payloads_build = build_config.build_type == constants.PAYLOADS_TYPE
 
@@ -935,18 +943,48 @@ def _ParseCommandLine(parser, argv):
     print(constants.REEXEC_API_VERSION)
     sys.exit(0)
 
-  if options.list:
-    if args:
-      cros_build_lib.Die('No arguments expected with the --list options.')
-    _PrintValidConfigs(options.print_all)
-    sys.exit(0)
-
-  if not args:
-    parser.error('Invalid usage: no configuration targets provided.'
-                 'Use -h to see usage.  Use -l to list supported configs.')
-
   _FinishParsing(options, args)
   return options, args
+
+
+_ENVIRONMENT_PROD = 'prod'
+_ENVIRONMENT_DEBUG = 'debug'
+_ENVIRONMENT_STANDALONE = 'standalone'
+
+
+def _GetRunEnvironment(options, build_config):
+  """Determine whether this is a prod/debug/standalone run."""
+  # TODO(akeshet): This is a temporary workaround to make sure that the cidb
+  # is not used on waterfalls that the db schema does not support (in particular
+  # the chromeos.chrome waterfall).
+  # See crbug.com/406940
+  waterfall = os.environ.get('BUILDBOT_MASTERNAME', '')
+  if not waterfall in constants.CIDB_KNOWN_WATERFALLS:
+    return _ENVIRONMENT_STANDALONE
+
+  # TODO(akeshet): Clean up this code once we have better defined flags to
+  # specify on-or-off waterfall and on-or-off production runs of cbuildbot.
+  # See crbug.com/331417
+
+  # --buildbot runs should use the production services, unless the --debug flag
+  # is also present.
+  if options.buildbot:
+    if options.debug:
+      return _ENVIRONMENT_DEBUG
+    else:
+      return _ENVIRONMENT_PROD
+
+  # --remote-trybot runs should use the debug services, with the exception of
+  # pre-cq builds, which should use the production services.
+  if options.remote_trybot:
+    if build_config['pre_cq']:
+      return _ENVIRONMENT_PROD
+    else:
+      return _ENVIRONMENT_DEBUG
+
+  # If neither --buildbot nor --remote-trybot flag was used, don't use external
+  # services.
+  return _ENVIRONMENT_STANDALONE
 
 
 def _SetupConnections(options, build_config):
@@ -956,56 +994,55 @@ def _SetupConnections(options, build_config):
     options: Command line options structure.
     build_config: Config object for this build.
   """
-  # TODO(akeshet): This is a temporary workaround to make sure that the cidb
-  # is not used on waterfalls that the db schema does not support (in particular
-  # the chromeos.chrome waterfall).
-  # See crbug.com/406940
-  waterfall = os.environ.get('BUILDBOT_MASTERNAME', '')
-  if not waterfall in constants.CIDB_KNOWN_WATERFALLS:
-    graphite.StatsFactory.SetupMock()
-    graphite.ESMetadataFactory.SetupReadOnly()
+  # Outline:
+  # 1) Based on options and build_config, decide whether we are a production
+  # run, debug run, or standalone run.
+  # 2) Set up cidb instance accordingly.
+  # 3) Update topology info from cidb, so that any other service set up can use
+  # topology.
+  # 4) Set up any other services.
+  run_type = _GetRunEnvironment(options, build_config)
+
+  if run_type == _ENVIRONMENT_PROD:
+    cidb.CIDBConnectionFactory.SetupProdCidb()
+  elif run_type == _ENVIRONMENT_DEBUG:
+    cidb.CIDBConnectionFactory.SetupDebugCidb()
+  else:
     cidb.CIDBConnectionFactory.SetupNoCidb()
-    return
 
-  # TODO(akeshet): Clean up this code once we have better defined flags to
-  # specify on-or-off waterfall and on-or-off production runs of cbuildbot.
-  # See crbug.com/331417
+  db = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
+  topology.FetchTopologyFromCIDB(db)
 
-  # --buildbot runs should use the production services, unless the --debug flag
-  # is also present in which case they should use the debug cidb and not emit
-  # stats.
-  if options.buildbot:
-    if options.debug:
-      graphite.StatsFactory.SetupDebug()
-      graphite.ESMetadataFactory.SetupReadOnly()
-      cidb.CIDBConnectionFactory.SetupDebugCidb()
-      return
-    else:
-      graphite.StatsFactory.SetupProd()
-      graphite.ESMetadataFactory.SetupProd()
-      cidb.CIDBConnectionFactory.SetupProdCidb()
-      return
+  if run_type == _ENVIRONMENT_PROD:
+    graphite.ESMetadataFactory.SetupProd()
+    graphite.StatsFactory.SetupProd()
+  elif run_type == _ENVIRONMENT_DEBUG:
+    graphite.ESMetadataFactory.SetupReadOnly()
+    graphite.StatsFactory.SetupDebug()
+  else:
+    graphite.ESMetadataFactory.SetupReadOnly()
+    graphite.StatsFactory.SetupMock()
 
-  # --remote-trybot runs should use the debug database and not emit stats.
-  # With the exception of pre-cq builds, which should use the production
-  # database and emit stats.
-  if options.remote_trybot:
-    if build_config['pre_cq']:
-      graphite.StatsFactory.SetupProd()
-      graphite.ESMetadataFactory.SetupProd()
-      cidb.CIDBConnectionFactory.SetupProdCidb()
-      return
-    else:
-      graphite.StatsFactory.SetupDebug()
-      graphite.ESMetadataFactory.SetupReadOnly()
-      cidb.CIDBConnectionFactory.SetupDebugCidb()
-      return
 
-  # If neither --buildbot nor --remote-trybot flag was used, don't use the
-  # database or emit stats.
-  cidb.CIDBConnectionFactory.SetupNoCidb()
-  graphite.StatsFactory.SetupMock()
-  graphite.ESMetadataFactory.SetupReadOnly()
+def _SetupSiteConfig(options):
+  """Setup our SiteConfig is specified or preset already.
+
+  Args:
+    options: Parsed command line options.
+
+  Returns:
+    SiteConfig instance to use for this build.
+  """
+  if options.config_repo:
+    raise NotImplementedError('Can\'t yet fetch a site configuration.')
+
+  # Use the site specific config, if we specified a site config, or if it
+  # is already present because we are in a repo checkout that specifies one.
+  if options.config_repo or os.path.exists(constants.SITE_CONFIG_FILE):
+    return config_lib.LoadConfigFromFile(constants.SITE_CONFIG_FILE)
+
+  # Fall back to default Chrome OS configuration.
+  return config_lib.LoadConfigFromFile(constants.CHROMEOS_CONFIG_FILE)
 
 
 # TODO(build): This function is too damn long.
@@ -1017,9 +1054,16 @@ def main(argv):
   os.umask(0o22)
 
   parser = _CreateParser()
-  (options, args) = _ParseCommandLine(parser, argv)
+  options, args = _ParseCommandLine(parser, argv)
 
-  _PostParseCheck(parser, options, args)
+  # Fetch our site_config now, because we need it to do anything else.
+  site_config = _SetupSiteConfig(options)
+
+  if options.list:
+    _PrintValidConfigs(site_config, options.print_all)
+    sys.exit(0)
+
+  _PostParseCheck(parser, options, args, site_config)
 
   cros_build_lib.AssertOutsideChroot()
 
@@ -1030,7 +1074,7 @@ def main(argv):
     # If hwtest flag is enabled, post a warning that HWTest step may fail if the
     # specified board is not a released platform or it is a generic overlay.
     for bot in args:
-      build_config = _GetConfig(bot)
+      build_config = site_config[bot]
       if options.hwtest:
         logging.warning(
             'If %s is not a released platform or it is a generic overlay, '
@@ -1063,7 +1107,7 @@ def main(argv):
 
   # Only one config arg is allowed in this mode, which was confirmed earlier.
   bot_id = args[-1]
-  build_config = _GetConfig(bot_id)
+  build_config = site_config[bot_id]
 
   # TODO: Re-enable this block when reference_repo support handles this
   #       properly. (see chromium:330775)
@@ -1134,8 +1178,7 @@ def main(argv):
     # https://chromium-review.googlesource.com/25359
     # is landed- it's sensitive to the manifest-versions cache path.
     options.preserve_paths = set(['manifest-versions', '.cache',
-                                  'manifest-versions-internal',
-                                  'chromite-bootstrap'])
+                                  'manifest-versions-internal'])
     if log_file is not None:
       # We don't want the critical section to try to clean up the tee process,
       # so we run Tee (forked off) outside of it. This prevents a deadlock
@@ -1163,7 +1206,7 @@ def main(argv):
     stack.Add(critical_section.ForkWatchdog)
 
     if not options.buildbot:
-      build_config = generate_chromeos_config.OverrideConfigForTrybot(
+      build_config = config_lib.OverrideConfigForTrybot(
           build_config, options)
 
     if options.mock_tree_status is not None:
@@ -1208,4 +1251,4 @@ def main(argv):
     if options.timeout > 0:
       stack.Add(timeout_util.FatalTimeout, options.timeout)
 
-    _RunBuildStagesWrapper(options, build_config)
+    _RunBuildStagesWrapper(options, site_config, build_config)

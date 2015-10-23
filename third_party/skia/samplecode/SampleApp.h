@@ -16,13 +16,13 @@
 #include "SkTDArray.h"
 #include "SkTouchGesture.h"
 #include "SkWindow.h"
+#include "timer/Timer.h"
 
 class GrContext;
 class GrRenderTarget;
 
 class SkCanvas;
 class SkData;
-class SkDeferredCanvas;
 class SkDocument;
 class SkEvent;
 class SkTypeface;
@@ -40,7 +40,6 @@ public:
         kANGLE_DeviceType,
 #endif // SK_ANGLE
 #endif // SK_SUPPORT_GPU
-        kDeferred_DeviceType,
         kDeviceTypeCnt
     };
 
@@ -68,7 +67,7 @@ public:
      */
     class DeviceManager : public SkRefCnt {
     public:
-        SK_DECLARE_INST_COUNT(DeviceManager)
+        
 
         virtual void setUpBackend(SampleWindow* win, int msaaSampleCount) = 0;
 
@@ -145,7 +144,6 @@ protected:
     SkCanvas* beforeChildren(SkCanvas*) override;
     void afterChildren(SkCanvas*) override;
     void beforeChild(SkView* child, SkCanvas* canvas) override;
-    void afterChild(SkView* child, SkCanvas* canvas) override;
 
     bool onEvent(const SkEvent& evt) override;
     bool onQuery(SkEvent* evt) override;
@@ -162,8 +160,7 @@ private:
     int fCurrIndex;
 
     SkPictureRecorder fRecorder;
-    SkAutoTDelete<SkSurface> fDeferredSurface;
-    SkAutoTDelete<SkDeferredCanvas> fDeferredCanvas;
+    SkAutoTDelete<SkCanvas> fFlagsFilterCanvas;
     SkPath fClipPath;
 
     SkTouchGesture fGesture;
@@ -174,6 +171,7 @@ private:
     DeviceManager* fDevManager;
 
     bool fSaveToPdf;
+    bool fSaveToSKP;
     SkAutoTUnref<SkDocument> fPDFDocument;
 
     bool fUseClip;
@@ -182,8 +180,8 @@ private:
     bool fPerspAnim;
     bool fRequestGrabImage;
     bool fMeasureFPS;
-    SkMSec fMeasureFPS_Time;
-    SkMSec fMeasureFPS_StartTime;
+    WallTimer fTimer;
+    double fMeasureFPS_Time;
     bool fMagnify;
     int fTilingMode;
 
@@ -218,9 +216,6 @@ private:
     //Stores slide specific settings
     SkOSMenu* fSlideMenu; // We pass ownership to SkWindow, when we call addMenu
 
-    int fTransitionNext;
-    int fTransitionPrev;
-
     void loadView(SkView*);
     void updateTitle();
     bool getRawTitle(SkString*);
@@ -232,7 +227,6 @@ private:
     void showZoomer(SkCanvas* canvas);
     void updateMatrix();
     void postAnimatingEvent();
-    void installDrawFilter(SkCanvas*);
     int findByTitle(const char*);
     void listTitles();
     SkSize tileSize() const;

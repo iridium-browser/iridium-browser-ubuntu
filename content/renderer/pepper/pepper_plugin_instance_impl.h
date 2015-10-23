@@ -28,9 +28,7 @@
 #include "gin/handle.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
-#include "ppapi/c/dev/ppp_selection_dev.h"
 #include "ppapi/c/dev/ppp_text_input_dev.h"
-#include "ppapi/c/dev/ppp_zoom_dev.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_time.h"
@@ -59,7 +57,6 @@
 #include "third_party/WebKit/public/web/WebPlugin.h"
 #include "third_party/WebKit/public/web/WebUserGestureToken.h"
 #include "ui/base/ime/text_input_type.h"
-#include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 #include "v8/include/v8.h"
@@ -248,7 +245,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   base::string16 GetSelectedText(bool html);
   base::string16 GetLinkAtPosition(const gfx::Point& point);
   void RequestSurroundingText(size_t desired_number_of_characters);
-  void Zoom(double factor, bool text_only);
   bool StartFind(const base::string16& search_text,
                  bool case_sensitive,
                  int identifier);
@@ -258,7 +254,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool SupportsPrintInterface();
   bool IsPrintScalingDisabled();
   int PrintBegin(const blink::WebPrintParams& print_params);
-  bool PrintPage(int page_number, blink::WebCanvas* canvas);
+  void PrintPage(int page_number, blink::WebCanvas* canvas);
   void PrintEnd();
   bool GetPrintPresetOptionsFromDocument(
       blink::WebPrintPresetOptions* preset_options);
@@ -425,11 +421,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
                                       uint32_t event_classes) override;
   void ClearInputEventRequest(PP_Instance instance,
                               uint32_t event_classes) override;
-  void StartTrackingLatency(PP_Instance instance) override;
-  void ZoomChanged(PP_Instance instance, double factor) override;
-  void ZoomLimitsChanged(PP_Instance instance,
-                         double minimum_factor,
-                         double maximum_factor) override;
   void PostMessage(PP_Instance instance, PP_Var message) override;
   int32_t RegisterMessageHandler(PP_Instance instance,
                                  void* user_data,
@@ -543,8 +534,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   void OnThrottleStateChange() override;
   void OnHiddenForPlaceholder(bool hidden) override;
 
-  void AddLatencyInfo(const std::vector<ui::LatencyInfo>& latency_info);
-
  private:
   friend class base::RefCounted<PepperPluginInstanceImpl>;
   friend class PpapiPluginInstanceTest;
@@ -563,15 +552,15 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
     void ReplayReceivedData(WebURLLoaderClient* document_loader);
 
     // blink::WebURLLoaderClient implementation.
-    virtual void didReceiveData(blink::WebURLLoader* loader,
-                                const char* data,
-                                int data_length,
-                                int encoded_data_length);
-    virtual void didFinishLoading(blink::WebURLLoader* loader,
-                                  double finish_time,
-                                  int64_t total_encoded_data_length);
-    virtual void didFail(blink::WebURLLoader* loader,
-                         const blink::WebURLError& error);
+    void didReceiveData(blink::WebURLLoader* loader,
+                        const char* data,
+                        int data_length,
+                        int encoded_data_length) override;
+    void didFinishLoading(blink::WebURLLoader* loader,
+                          double finish_time,
+                          int64_t total_encoded_data_length) override;
+    void didFail(blink::WebURLLoader* loader,
+                 const blink::WebURLError& error) override;
 
    private:
     std::list<std::string> data_;
@@ -610,7 +599,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool LoadPrintInterface();
   bool LoadPrivateInterface();
   bool LoadTextInputInterface();
-  bool LoadZoomInterface();
 
   // Update any transforms that should be applied to the texture layer.
   void UpdateLayerTransform();
@@ -652,7 +640,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   void UpdateLayer(bool device_changed);
 
   // Internal helper function for PrintPage().
-  bool PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
+  void PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
                        int num_ranges,
                        blink::WebCanvas* canvas);
 
@@ -777,7 +765,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   const PPP_Pdf* plugin_pdf_interface_;
   const PPP_Instance_Private* plugin_private_interface_;
   const PPP_TextInput_Dev* plugin_textinput_interface_;
-  const PPP_Zoom_Dev* plugin_zoom_interface_;
 
   // Flags indicating whether we have asked this plugin instance for the
   // corresponding interfaces, so that we can ask only once.
@@ -922,10 +909,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
 
   // The text that is currently selected in the plugin.
   base::string16 selected_text_;
-
-  int64 last_input_number_;
-
-  bool is_tracking_latency_;
 
   bool initialized_;
 

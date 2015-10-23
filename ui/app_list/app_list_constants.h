@@ -43,8 +43,7 @@ APP_LIST_EXPORT extern const SkColor kFolderTitleHintTextColor;
 APP_LIST_EXPORT extern const SkColor kFolderBubbleColor;
 APP_LIST_EXPORT extern const SkColor kFolderShadowColor;
 APP_LIST_EXPORT extern const float kFolderBubbleRadius;
-APP_LIST_EXPORT extern const float kFolderShadowRadius;
-APP_LIST_EXPORT extern const float kFolderShadowOffsetY;
+APP_LIST_EXPORT extern const float kFolderBubbleOffsetY;
 
 APP_LIST_EXPORT extern const SkColor kCardBackgroundColor;
 
@@ -61,6 +60,9 @@ APP_LIST_EXPORT extern const int kPreferredRows;
 APP_LIST_EXPORT extern const int kGridIconDimension;
 
 APP_LIST_EXPORT extern const int kListIconSize;
+APP_LIST_EXPORT extern const int kListBadgeIconSize;
+APP_LIST_EXPORT extern const int kListBadgeIconOffsetX;
+APP_LIST_EXPORT extern const int kListBadgeIconOffsetY;
 APP_LIST_EXPORT extern const int kTileIconSize;
 
 APP_LIST_EXPORT extern const int kCenteredPreferredCols;
@@ -91,7 +93,10 @@ APP_LIST_EXPORT extern const char kAppListWMClass[];
 #endif
 
 // Returns the shadow values for a view at |z_height|.
-gfx::ShadowValue APP_LIST_EXPORT GetShadowForZHeight(int z_height);
+APP_LIST_EXPORT gfx::ShadowValue GetShadowForZHeight(int z_height);
+
+APP_LIST_EXPORT const gfx::ShadowValues& IconStartShadows();
+APP_LIST_EXPORT const gfx::ShadowValues& IconEndShadows();
 
 }  // namespace app_list
 

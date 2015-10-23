@@ -14,52 +14,40 @@ namespace blink {
 
 class RoundedRect;
 
-class PLATFORM_EXPORT FloatClipDisplayItem : public PairedBeginDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(FloatClipDisplayItem);
+class PLATFORM_EXPORT FloatClipDisplayItem final : public PairedBeginDisplayItem {
 public:
-    static PassOwnPtr<FloatClipDisplayItem> create(const DisplayItemClientWrapper& client, Type type, const FloatRect& clipRect)
-    {
-        return adoptPtr(new FloatClipDisplayItem(client, type, clipRect));
-    }
-
     FloatClipDisplayItem(const DisplayItemClientWrapper& client, Type type, const FloatRect& clipRect)
-        : PairedBeginDisplayItem(client, type)
+        : PairedBeginDisplayItem(client, type, sizeof(*this))
         , m_clipRect(clipRect)
     {
         ASSERT(isFloatClipType(type));
     }
 
-    virtual void replay(GraphicsContext&) override;
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+    void replay(GraphicsContext&) override;
+    void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
 private:
 #ifndef NDEBUG
-    virtual void dumpPropertiesAsDebugString(WTF::StringBuilder&) const override;
+    void dumpPropertiesAsDebugString(WTF::StringBuilder&) const override;
 #endif
 
-    FloatRect m_clipRect;
+    const FloatRect m_clipRect;
 };
 
-class PLATFORM_EXPORT EndFloatClipDisplayItem : public PairedEndDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(EndFloatClipDisplayItem);
+class PLATFORM_EXPORT EndFloatClipDisplayItem final : public PairedEndDisplayItem {
 public:
-    static PassOwnPtr<EndFloatClipDisplayItem> create(const DisplayItemClientWrapper& client, Type type)
-    {
-        return adoptPtr(new EndFloatClipDisplayItem(client, type));
-    }
-
     EndFloatClipDisplayItem(const DisplayItemClientWrapper& client, Type type)
-        : PairedEndDisplayItem(client, type)
+        : PairedEndDisplayItem(client, type, sizeof(*this))
     {
         ASSERT(isEndFloatClipType(type));
     }
 
-    virtual void replay(GraphicsContext&) override;
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+    void replay(GraphicsContext&) override;
+    void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
 private:
 #if ENABLE(ASSERT)
-    virtual bool isEndAndPairedWith(const DisplayItem& other) const override final { return other.isFloatClip(); }
+    bool isEndAndPairedWith(DisplayItem::Type otherType) const final { return DisplayItem::isFloatClipType(otherType); }
 #endif
 };
 

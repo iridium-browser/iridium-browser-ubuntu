@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/containers/scoped_ptr_hash_map.h"
+#include "base/containers/scoped_ptr_map.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
@@ -31,7 +31,7 @@ class MediaScanManager;
 class Profile;
 
 namespace content {
-class RenderViewHost;
+class WebContents;
 }
 
 namespace extensions {
@@ -78,16 +78,16 @@ class MediaFileSystemRegistry
   ~MediaFileSystemRegistry() override;
 
   // Passes to |callback| the list of media filesystem IDs and paths for a
-  // given RVH.
+  // given WebContents.
   void GetMediaFileSystemsForExtension(
-      const content::RenderViewHost* rvh,
+      content::WebContents* contents,
       const extensions::Extension* extension,
       const MediaFileSystemsCallback& callback);
 
   // Attempt to register the file system for |pref_id|. If |extension| does not
   // have permission to |pref_id|, sends |callback| FILE_ERROR_NOT_FOUND.
   void RegisterMediaFileSystemForExtension(
-      const content::RenderViewHost* rvh,
+      content::WebContents* contents,
       const extensions::Extension* extension,
       MediaGalleryPrefId pref_id,
       const base::Callback<void(base::File::Error result)>& callback);
@@ -117,7 +117,7 @@ class MediaFileSystemRegistry
   // Map a profile and extension to the ExtensionGalleriesHost.
   typedef std::map<Profile*, ExtensionHostMap> ExtensionGalleriesHostMap;
   // Map a profile to a shutdown notification subscription.
-  typedef base::ScopedPtrHashMap<
+  typedef base::ScopedPtrMap<
       Profile*,
       scoped_ptr<KeyedServiceShutdownNotifier::Subscription>>
       ProfileSubscriptionMap;

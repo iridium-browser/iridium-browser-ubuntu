@@ -82,6 +82,18 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
   void GetCaptivePortalStatus(const std::string& guid,
                               const StringCallback& success_callback,
                               const FailureCallback& failure_callback) override;
+  void UnlockCellularSim(const std::string& guid,
+                         const std::string& pin,
+                         const std::string& puk,
+                         const VoidCallback& success_callback,
+                         const FailureCallback& failure_callback) override;
+  void SetCellularSimState(const std::string& guid,
+                           bool require_pin,
+                           const std::string& current_pin,
+                           const std::string& new_pin,
+                           const VoidCallback& success_callback,
+                           const FailureCallback& failure_callback) override;
+
   scoped_ptr<base::ListValue> GetEnabledNetworkTypes() override;
   scoped_ptr<DeviceStateList> GetDeviceStateList() override;
   bool EnableNetworkType(const std::string& type) override;
@@ -257,7 +269,8 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
   // Holds the current mapping of known networks. Only access on |dbus_thread_|.
   scoped_ptr<NetworkMap> network_map_;
   // Observers to Network Events.
-  ObserverList<NetworkingPrivateDelegateObserver> network_events_observers_;
+  base::ObserverList<NetworkingPrivateDelegateObserver>
+      network_events_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateLinux);
 };

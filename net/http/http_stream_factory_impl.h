@@ -50,7 +50,6 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
 
   void PreconnectStreams(int num_streams,
                          const HttpRequestInfo& info,
-                         RequestPriority priority,
                          const SSLConfig& server_ssl_config,
                          const SSLConfig& proxy_ssl_config) override;
   const HostMappingRules* GetHostMappingRules() const override;
@@ -75,7 +74,7 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
       WebSocketHandshakeStreamBase::CreateHelper* create_helper,
       const BoundNetLog& net_log);
 
-  AlternativeService GetAlternativeServiceFor(const GURL& original_url);
+  AlternativeServiceVector GetAlternativeServicesFor(const GURL& original_url);
 
   // Detaches |job| from |request|.
   void OrphanJob(Job* job, const Request* request);

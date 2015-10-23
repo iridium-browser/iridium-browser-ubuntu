@@ -11,8 +11,11 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/values.h"
@@ -36,6 +39,7 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/prerender_types.h"
+#include "components/search/search.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
@@ -122,7 +126,8 @@ class PrerenderManager::OnCloseWebContentsDeleter
         tab_(tab),
         suppressed_dialog_(false) {
     tab_->SetDelegate(this);
-    base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
         base::Bind(&OnCloseWebContentsDeleter::ScheduleWebContentsForDeletion,
                    AsWeakPtr(), true),
         base::TimeDelta::FromSeconds(kDeleteWithExtremePrejudiceSeconds));
@@ -297,7 +302,7 @@ PrerenderHandle* PrerenderManager::AddPrerenderForInstant(
     const GURL& url,
     content::SessionStorageNamespace* session_storage_namespace,
     const gfx::Size& size) {
-  DCHECK(chrome::ShouldPrefetchSearchResults());
+  DCHECK(search::ShouldPrefetchSearchResults());
   return AddPrerender(ORIGIN_INSTANT, url, content::Referrer(), size,
                       session_storage_namespace);
 }
@@ -740,7 +745,7 @@ bool PrerenderManager::HasRecentlyBeenNavigatedTo(Origin origin,
 bool PrerenderManager::IsValidHttpMethod(const std::string& method) {
   // method has been canonicalized to upper case at this point so we can just
   // compare them.
-  DCHECK_EQ(method, StringToUpperASCII(method));
+  DCHECK_EQ(method, base::ToUpperASCII(method));
   for (size_t i = 0; i < arraysize(kValidHttpMethods); ++i) {
     if (method.compare(kValidHttpMethods[i]) == 0)
       return true;
@@ -1041,9 +1046,8 @@ void PrerenderManager::PeriodicCleanup() {
 
 void PrerenderManager::PostCleanupTask() {
   DCHECK(CalledOnValidThread());
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PrerenderManager::PeriodicCleanup, AsWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PrerenderManager::PeriodicCleanup, AsWeakPtr()));
 }
 
 base::TimeTicks PrerenderManager::GetExpiryTimeForNewPrerender(

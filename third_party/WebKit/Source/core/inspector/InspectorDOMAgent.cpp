@@ -31,8 +31,9 @@
 #include "config.h"
 #include "core/inspector/InspectorDOMAgent.h"
 
+#include "bindings/core/v8/BindingSecurity.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ScriptEventListener.h"
+#include "bindings/core/v8/V8Node.h"
 #include "core/InputTypeNames.h"
 #include "core/dom/Attr.h"
 #include "core/dom/CharacterData.h"
@@ -50,7 +51,7 @@
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/InsertionPoint.h"
 #include "core/dom/shadow/ShadowRoot.h"
-#include "core/editing/markup.h"
+#include "core/editing/serializers/Serialization.h"
 #include "core/events/EventListener.h"
 #include "core/events/EventTarget.h"
 #include "core/fileapi/File.h"
@@ -64,17 +65,16 @@
 #include "core/html/imports/HTMLImportLoader.h"
 #include "core/inspector/DOMEditor.h"
 #include "core/inspector/DOMPatchSupport.h"
-#include "core/inspector/EventListenerInfo.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InjectedScriptManager.h"
 #include "core/inspector/InspectorHighlight.h"
 #include "core/inspector/InspectorHistory.h"
-#include "core/inspector/InspectorIdentifiers.h"
 #include "core/inspector/InspectorOverlay.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InspectorState.h"
 #include "core/inspector/InstrumentingAgents.h"
+#include "core/inspector/RemoteObjectId.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutView.h"
 #include "core/loader/DocumentLoader.h"
@@ -97,10 +97,12 @@ namespace DOMAgentState {
 static const char domAgentEnabled[] = "domAgentEnabled";
 };
 
-static const size_t maxTextSize = 10000;
-static const UChar ellipsisUChar[] = { 0x2026, 0 };
+namespace {
 
-static Color parseColor(const RefPtr<JSONObject>* colorObject)
+const size_t maxTextSize = 10000;
+const UChar ellipsisUChar[] = { 0x2026, 0 };
+
+Color parseColor(const RefPtr<JSONObject>* colorObject)
 {
     if (!colorObject || !(*colorObject))
         return Color::transparent;
@@ -128,13 +130,13 @@ static Color parseColor(const RefPtr<JSONObject>* colorObject)
     return Color(r, g, b, static_cast<int>(a * 255));
 }
 
-static Color parseConfigColor(const String& fieldName, JSONObject* configObject)
+Color parseConfigColor(const String& fieldName, JSONObject* configObject)
 {
     const RefPtr<JSONObject> colorObject = configObject->getObject(fieldName);
     return parseColor(&colorObject);
 }
 
-static bool parseQuad(const RefPtr<JSONArray>& quadArray, FloatQuad* quad)
+bool parseQuad(const RefPtr<JSONArray>& quadArray, FloatQuad* quad)
 {
     if (!quadArray)
         return false;
@@ -154,7 +156,7 @@ static bool parseQuad(const RefPtr<JSONArray>& quadArray, FloatQuad* quad)
     return true;
 }
 
-static Node* hoveredNodeForPoint(LocalFrame* frame, const IntPoint& pointInRootFrame, bool ignorePointerEventsNone)
+Node* hoveredNodeForPoint(LocalFrame* frame, const IntPoint& pointInRootFrame, bool ignorePointerEventsNone)
 {
     HitTestRequest::HitTestRequestType hitType = HitTestRequest::Move | HitTestRequest::ReadOnly | HitTestRequest::AllowChildFrameContent;
     if (ignorePointerEventsNone)
@@ -168,23 +170,35 @@ static Node* hoveredNodeForPoint(LocalFrame* frame, const IntPoint& pointInRootF
     return node;
 }
 
-static Node* hoveredNodeForEvent(LocalFrame* frame, const PlatformGestureEvent& event, bool ignorePointerEventsNone)
+Node* hoveredNodeForEvent(LocalFrame* frame, const PlatformGestureEvent& event, bool ignorePointerEventsNone)
 {
     return hoveredNodeForPoint(frame, event.position(), ignorePointerEventsNone);
 }
 
-static Node* hoveredNodeForEvent(LocalFrame* frame, const PlatformMouseEvent& event, bool ignorePointerEventsNone)
+Node* hoveredNodeForEvent(LocalFrame* frame, const PlatformMouseEvent& event, bool ignorePointerEventsNone)
 {
     return hoveredNodeForPoint(frame, event.position(), ignorePointerEventsNone);
 }
 
-static Node* hoveredNodeForEvent(LocalFrame* frame, const PlatformTouchEvent& event, bool ignorePointerEventsNone)
+Node* hoveredNodeForEvent(LocalFrame* frame, const PlatformTouchEvent& event, bool ignorePointerEventsNone)
 {
     const Vector<PlatformTouchPoint>& points = event.touchPoints();
     if (!points.size())
         return nullptr;
     return hoveredNodeForPoint(frame, roundedIntPoint(points[0].pos()), ignorePointerEventsNone);
 }
+
+ScriptValue nodeAsScriptValue(ScriptState* scriptState, Node* node)
+{
+    ScriptState::Scope scope(scriptState);
+    v8::Isolate* isolate = scriptState->isolate();
+    ExceptionState exceptionState(ExceptionState::ExecutionContext, "nodeAsScriptValue", "InjectedScriptHost", scriptState->context()->Global(), isolate);
+    if (!BindingSecurity::shouldAllowAccessToNode(isolate, node, exceptionState))
+        return ScriptValue(scriptState, v8::Null(isolate));
+    return ScriptValue(scriptState, toV8(node, scriptState->context()->Global(), isolate));
+}
+
+} // namespace
 
 class InspectorRevalidateDOMTask final : public NoBaseWillBeGarbageCollectedFinalized<InspectorRevalidateDOMTask> {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(InspectorRevalidateDOMTask);
@@ -302,7 +316,6 @@ InspectorDOMAgent::InspectorDOMAgent(InspectorPageAgent* pageAgent, InjectedScri
     , m_lastNodeId(1)
     , m_searchingForNode(NotSearching)
     , m_suppressAttributeModifiedEvent(false)
-    , m_listener(nullptr)
     , m_backendNodeIdToInspect(0)
 {
 }
@@ -473,7 +486,7 @@ static ShadowRoot* userAgentShadowRoot(Node* node)
     ASSERT(candidate);
     ShadowRoot* shadowRoot = toShadowRoot(candidate);
 
-    return shadowRoot->type() == ShadowRoot::UserAgentShadowRoot ? shadowRoot : nullptr;
+    return shadowRoot->type() == ShadowRootType::UserAgent ? shadowRoot : nullptr;
 }
 
 Node* InspectorDOMAgent::assertEditableNode(ErrorString* errorString, int nodeId)
@@ -539,8 +552,6 @@ void InspectorDOMAgent::innerEnable()
     m_domEditor = adoptPtrWillBeNoop(new DOMEditor(m_history.get()));
     m_document = m_pageAgent->inspectedFrame()->document();
     m_instrumentingAgents->setInspectorDOMAgent(this);
-    if (m_listener)
-        m_listener->domAgentWasEnabled();
     if (m_backendNodeIdToInspect)
         frontend()->inspectNodeRequested(m_backendNodeIdToInspect);
     m_backendNodeIdToInspect = 0;
@@ -571,8 +582,6 @@ void InspectorDOMAgent::disable(ErrorString* errorString)
     m_history.clear();
     m_domEditor.clear();
     setDocument(nullptr);
-    if (m_listener)
-        m_listener->domAgentWasDisabled();
 }
 
 void InspectorDOMAgent::getDocument(ErrorString* errorString, RefPtr<TypeBuilder::DOM::Node>& root)
@@ -933,25 +942,6 @@ void InspectorDOMAgent::setNodeValue(ErrorString* errorString, int nodeId, const
     m_domEditor->replaceWholeText(toText(node), value, errorString);
 }
 
-void InspectorDOMAgent::getEventListenersForNode(ErrorString* errorString, int nodeId, const String* objectGroup, RefPtr<TypeBuilder::Array<TypeBuilder::DOM::EventListener> >& listenersArray)
-{
-    listenersArray = TypeBuilder::Array<TypeBuilder::DOM::EventListener>::create();
-    Node* node = assertNode(errorString, nodeId);
-    if (!node)
-        return;
-    Vector<EventListenerInfo> eventInformation;
-    EventListenerInfo::getEventListeners(node, eventInformation, true);
-    if (!eventInformation.size())
-        return;
-    RegisteredEventListenerIterator iterator(eventInformation);
-    while (const RegisteredEventListener* listener = iterator.nextRegisteredEventListener()) {
-        const EventListenerInfo& info = iterator.currentEventListenerInfo();
-        RefPtr<TypeBuilder::DOM::EventListener> listenerObject = buildObjectForEventListener(*listener, info.eventType, info.eventTarget->toNode(), objectGroup);
-        if (listenerObject)
-            listenersArray->addItem(listenerObject);
-    }
-}
-
 static Node* nextNodeWithShadowDOMInMind(const Node& current, const Node* stayWithin, bool includeUserAgentShadowDOM)
 {
     // At first traverse the subtree.
@@ -961,7 +951,7 @@ static Node* nextNodeWithShadowDOMInMind(const Node& current, const Node* stayWi
         if (elementShadow) {
             ShadowRoot* shadowRoot = elementShadow->youngestShadowRoot();
             if (shadowRoot) {
-                if (shadowRoot->type() == ShadowRoot::OpenShadowRoot || includeUserAgentShadowDOM)
+                if (shadowRoot->type() != ShadowRootType::UserAgent || includeUserAgentShadowDOM)
                     return shadowRoot;
             }
         }
@@ -1203,7 +1193,7 @@ bool InspectorDOMAgent::handleMouseMove(LocalFrame* frame, const PlatformMouseEv
         return true;
     Node* node = hoveredNodeForEvent(frame, event, event.shiftKey());
 
-    // Do not highlight within closed shadow root unless requested.
+    // Do not highlight within user agent shadow root unless requested.
     if (m_searchingForNode != SearchingForUAShadow) {
         ShadowRoot* shadowRoot = userAgentShadowRoot(node);
         if (shadowRoot)
@@ -1230,15 +1220,10 @@ bool InspectorDOMAgent::handleMouseMove(LocalFrame* frame, const PlatformMouseEv
 
 void InspectorDOMAgent::setSearchingForNode(ErrorString* errorString, SearchMode searchMode, JSONObject* highlightInspectorObject)
 {
-    if (m_searchingForNode == searchMode)
-        return;
-
     m_searchingForNode = searchMode;
     m_overlay->setInspectModeEnabled(searchMode != NotSearching);
     if (searchMode != NotSearching) {
         m_inspectModeHighlightConfig = highlightConfigFromInspectorObject(errorString, highlightInspectorObject);
-        if (!m_inspectModeHighlightConfig)
-            return;
     } else {
         m_hoveredNodeForInspectMode.clear();
         hideHighlight(errorString);
@@ -1262,6 +1247,12 @@ PassOwnPtr<InspectorHighlightConfig> InspectorDOMAgent::highlightConfigFromInspe
     bool showExtensionLines = false; // Default: false (do not show extension lines).
     highlightInspectorObject->getBoolean("showExtensionLines", &showExtensionLines);
     highlightConfig->showExtensionLines = showExtensionLines;
+    bool showLayoutEditor = false;
+    highlightInspectorObject->getBoolean("showLayoutEditor", &showLayoutEditor);
+    highlightConfig->showLayoutEditor = showLayoutEditor;
+    bool displayAsMaterial = false;
+    highlightInspectorObject->getBoolean("displayAsMaterial", &displayAsMaterial);
+    highlightConfig->displayAsMaterial = displayAsMaterial;
     highlightConfig->content = parseConfigColor("contentColor", highlightInspectorObject);
     highlightConfig->contentOutline = parseConfigColor("contentOutlineColor", highlightInspectorObject);
     highlightConfig->padding = parseConfigColor("paddingColor", highlightInspectorObject);
@@ -1306,6 +1297,35 @@ void InspectorDOMAgent::innerHighlightQuad(PassOwnPtr<FloatQuad> quad, const Ref
     m_overlay->highlightQuad(quad, *highlightConfig);
 }
 
+Node* InspectorDOMAgent::nodeForRemoteId(ErrorString* errorString, const String& objectId)
+{
+    OwnPtr<RemoteObjectId> remoteId = RemoteObjectId::parse(objectId);
+    if (!remoteId) {
+        *errorString = "Invalid remote object id";
+        return nullptr;
+    }
+    InjectedScript injectedScript = m_injectedScriptManager->findInjectedScript(remoteId.get());
+    if (injectedScript.isEmpty()) {
+        *errorString = "Cannot find context for specified object id";
+        return nullptr;
+    }
+    ScriptState::Scope scope(injectedScript.scriptState());
+    v8::Local<v8::Value> value = injectedScript.findObject(*remoteId);
+    if (value.IsEmpty()) {
+        *errorString = "Node for given objectId not found";
+        return nullptr;
+    }
+    v8::Isolate* isolate = injectedScript.scriptState()->isolate();
+    if (!V8Node::hasInstance(value, isolate)) {
+        *errorString = "Object id doesn't reference a Node";
+        return nullptr;
+    }
+    Node* node = V8Node::toImpl(v8::Local<v8::Object>::Cast(value));
+    if (!node)
+        *errorString = "Couldn't convert object with given objectId to Node";
+    return node;
+}
+
 void InspectorDOMAgent::highlightNode(ErrorString* errorString, const RefPtr<JSONObject>& highlightInspectorObject, const int* nodeId, const int* backendNodeId, const String* objectId)
 {
     Node* node = nullptr;
@@ -1314,10 +1334,7 @@ void InspectorDOMAgent::highlightNode(ErrorString* errorString, const RefPtr<JSO
     } else if (backendNodeId) {
         node = DOMNodeIds::nodeForId(*backendNodeId);
     } else if (objectId) {
-        InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(*objectId);
-        node = injectedScript.nodeForObjectId(*objectId);
-        if (!node)
-            *errorString = "Node for given objectId not found";
+        node = nodeForRemoteId(errorString, *objectId);
     } else
         *errorString = "Either nodeId or objectId must be specified";
 
@@ -1337,7 +1354,7 @@ void InspectorDOMAgent::highlightFrame(
     const RefPtr<JSONObject>* color,
     const RefPtr<JSONObject>* outlineColor)
 {
-    LocalFrame* frame = m_pageAgent->frameForId(frameId);
+    LocalFrame* frame = IdentifiersFactory::frameById(m_pageAgent->inspectedFrame(), frameId);
     // FIXME: Inspector doesn't currently work cross process.
     if (frame && frame->deprecatedLocalOwner()) {
         OwnPtr<InspectorHighlightConfig> highlightConfig = adoptPtr(new InspectorHighlightConfig());
@@ -1522,10 +1539,9 @@ void InspectorDOMAgent::getAttributes(ErrorString* errorString, int nodeId, RefP
     result = buildArrayForElementAttributes(element);
 }
 
-void InspectorDOMAgent::requestNode(ErrorString*, const String& objectId, int* nodeId)
+void InspectorDOMAgent::requestNode(ErrorString* errorString, const String& objectId, int* nodeId)
 {
-    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(objectId);
-    Node* node = injectedScript.nodeForObjectId(objectId);
+    Node* node = nodeForRemoteId(errorString, objectId);
     if (node)
         *nodeId = pushNodePathToFrontend(node);
     else
@@ -1548,9 +1564,11 @@ static String documentBaseURLString(Document* document)
 static TypeBuilder::DOM::ShadowRootType::Enum shadowRootType(ShadowRoot* shadowRoot)
 {
     switch (shadowRoot->type()) {
-    case ShadowRoot::UserAgentShadowRoot:
+    case ShadowRootType::UserAgent:
         return TypeBuilder::DOM::ShadowRootType::User_agent;
-    case ShadowRoot::OpenShadowRoot:
+    case ShadowRootType::OpenByDefault:
+    case ShadowRootType::Open:
+    case ShadowRootType::Closed:
         return TypeBuilder::DOM::ShadowRootType::Author;
     }
     ASSERT_NOT_REACHED();
@@ -1572,11 +1590,12 @@ PassRefPtr<TypeBuilder::DOM::Node> InspectorDOMAgent::buildObjectForNode(Node* n
             nodeValue = nodeValue.left(maxTextSize) + ellipsisUChar;
         break;
     case Node::ATTRIBUTE_NODE:
-    case Node::DOCUMENT_FRAGMENT_NODE:
-    case Node::DOCUMENT_NODE:
+        localName = toAttr(node)->localName();
+        break;
     case Node::ELEMENT_NODE:
+        localName = toElement(node)->localName();
+        break;
     default:
-        localName = node->localName();
         break;
     }
 
@@ -1595,7 +1614,7 @@ PassRefPtr<TypeBuilder::DOM::Node> InspectorDOMAgent::buildObjectForNode(Node* n
         if (node->isFrameOwnerElement()) {
             HTMLFrameOwnerElement* frameOwner = toHTMLFrameOwnerElement(node);
             if (LocalFrame* frame = frameOwner->contentFrame() && frameOwner->contentFrame()->isLocalFrame() ? toLocalFrame(frameOwner->contentFrame()) : nullptr)
-                value->setFrameId(InspectorIdentifiers<LocalFrame>::identifier(frame));
+                value->setFrameId(IdentifiersFactory::frameId(frame));
             if (Document* doc = frameOwner->contentDocument())
                 value->setContentDocument(buildObjectForNode(doc, 0, nodesMap));
         }
@@ -1705,31 +1724,6 @@ PassRefPtr<TypeBuilder::Array<TypeBuilder::DOM::Node> > InspectorDOMAgent::build
         child = innerNextSibling(child);
     }
     return children.release();
-}
-
-PassRefPtr<TypeBuilder::DOM::EventListener> InspectorDOMAgent::buildObjectForEventListener(const RegisteredEventListener& registeredEventListener, const AtomicString& eventType, Node* node, const String* objectGroupId)
-{
-    RefPtr<EventListener> eventListener = registeredEventListener.listener;
-    String scriptId;
-    int lineNumber;
-    int columnNumber;
-    if (!eventListenerHandlerLocation(&node->document(), eventListener.get(), scriptId, lineNumber, columnNumber))
-        return nullptr;
-
-    Document& document = node->document();
-    RefPtr<TypeBuilder::Debugger::Location> location = TypeBuilder::Debugger::Location::create()
-        .setScriptId(scriptId)
-        .setLineNumber(lineNumber);
-    location->setColumnNumber(columnNumber);
-    RefPtr<TypeBuilder::DOM::EventListener> value = TypeBuilder::DOM::EventListener::create()
-        .setType(eventType)
-        .setUseCapture(registeredEventListener.useCapture)
-        .setIsAttribute(eventListener->isAttribute())
-        .setNodeId(pushNodePathToFrontend(node))
-        .setLocation(location);
-    if (objectGroupId)
-        value->setHandler(eventHandlerObject(&document, eventListener.get(), m_injectedScriptManager, objectGroupId));
-    return value.release();
 }
 
 PassRefPtr<TypeBuilder::Array<TypeBuilder::DOM::Node> > InspectorDOMAgent::buildArrayForPseudoElements(Element* element, NodeToIdMap* nodesMap)
@@ -2081,7 +2075,7 @@ static ShadowRoot* shadowRootForNode(Node* node, const String& type)
     if (!node->isElementNode())
         return nullptr;
     if (type == "a")
-        return toElement(node)->shadowRoot();
+        return toElement(node)->authorShadowRoot();
     if (type == "u")
         return toElement(node)->userAgentShadowRoot();
     return nullptr;
@@ -2155,12 +2149,17 @@ void InspectorDOMAgent::pushNodesByBackendIdsToFrontend(ErrorString* errorString
 class InspectableNode final : public InjectedScriptHost::InspectableObject {
 public:
     explicit InspectableNode(Node* node) : m_node(node) { }
-    virtual ScriptValue get(ScriptState* state) override
+    ScriptValue get(ScriptState* state) override
     {
-        return InjectedScriptHost::nodeAsScriptValue(state, m_node);
+        return nodeAsScriptValue(state, m_node);
+    }
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_node);
+        InspectableObject::trace(visitor);
     }
 private:
-    Node* m_node;
+    RawPtrWillBeMember<Node> m_node;
 };
 
 void InspectorDOMAgent::setInspectedNode(ErrorString* errorString, int nodeId)
@@ -2168,7 +2167,7 @@ void InspectorDOMAgent::setInspectedNode(ErrorString* errorString, int nodeId)
     Node* node = assertNode(errorString, nodeId);
     if (!node)
         return;
-    m_injectedScriptManager->injectedScriptHost()->addInspectedObject(adoptPtr(new InspectableNode(node)));
+    m_injectedScriptManager->injectedScriptHost()->addInspectedObject(adoptPtrWillBeNoop(new InspectableNode(node)));
 }
 
 void InspectorDOMAgent::getRelayoutBoundary(ErrorString* errorString, int nodeId, int* relayoutBoundaryNodeId)
@@ -2203,11 +2202,13 @@ PassRefPtr<TypeBuilder::Runtime::RemoteObject> InspectorDOMAgent::resolveNode(No
     if (!frame)
         return nullptr;
 
-    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptFor(ScriptState::forMainWorld(frame));
+    ScriptState* state = ScriptState::forMainWorld(frame);
+    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptFor(state);
     if (injectedScript.isEmpty())
         return nullptr;
 
-    return injectedScript.wrapNode(node, objectGroup);
+    ScriptValue scriptValue = nodeAsScriptValue(state, node);
+    return injectedScript.wrapObject(scriptValue, objectGroup);
 }
 
 bool InspectorDOMAgent::pushDocumentUponHandlelessOperation(ErrorString* errorString)
@@ -2238,7 +2239,6 @@ DEFINE_TRACE(InspectorDOMAgent)
     visitor->trace(m_hoveredNodeForInspectMode);
     visitor->trace(m_history);
     visitor->trace(m_domEditor);
-    visitor->trace(m_listener);
     InspectorBaseAgent::trace(visitor);
 }
 

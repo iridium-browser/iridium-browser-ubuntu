@@ -102,8 +102,10 @@ class ASH_EXPORT WindowSelector
   void OnWindowDestroying(aura::Window* window) override;
 
   // aura::client::ActivationChangeObserver:
-  void OnWindowActivated(aura::Window* gained_active,
-                         aura::Window* lost_active) override;
+  void OnWindowActivated(
+      aura::client::ActivationChangeObserver::ActivationReason reason,
+      aura::Window* gained_active,
+      aura::Window* lost_active) override;
   void OnAttemptToReactivateWindow(aura::Window* request_active,
                                    aura::Window* actual_active) override;
 
@@ -121,6 +123,10 @@ class ASH_EXPORT WindowSelector
 
   // Position all of the windows in the overview.
   void PositionWindows(bool animate);
+
+  // Repositions and resizes |text_filter_widget_| on
+  // DisplayMetricsChanged event.
+  void RepositionTextFilterOnDisplayMetricsChange();
 
   // |focus|, restores focus to the stored window.
   void ResetFocusRestoreWindow(bool focus);

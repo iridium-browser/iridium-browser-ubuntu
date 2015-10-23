@@ -6,6 +6,7 @@
 #define CHROMECAST_BROWSER_MEDIA_MEDIA_PIPELINE_HOST_H_
 
 #include <map>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -19,7 +20,6 @@
 
 namespace base {
 class SharedMemory;
-class SingleThreadTaskRunner;
 }
 
 namespace media {
@@ -28,20 +28,29 @@ class VideoDecoderConfig;
 }
 
 namespace chromecast {
+class TaskRunnerImpl;
+
 namespace media {
 struct AvPipelineClient;
 class BrowserCdmCast;
+class MediaPipelineBackend;
 struct MediaPipelineClient;
+struct MediaPipelineDeviceParams;
 class MediaPipelineImpl;
 struct VideoPipelineClient;
 
 class MediaPipelineHost {
  public:
+  // Factory method to create a MediaPipelineBackend
+  typedef base::Callback<scoped_ptr<media::MediaPipelineBackend>(
+      const MediaPipelineDeviceParams&)> CreateDeviceComponentsCB;
+
   MediaPipelineHost();
   ~MediaPipelineHost();
 
   void Initialize(LoadType load_type,
-                  const MediaPipelineClient& client);
+                  const MediaPipelineClient& client,
+                  const CreateDeviceComponentsCB& create_device_components_cb);
 
   void SetAvPipe(TrackId track_id,
                  scoped_ptr<base::SharedMemory> shared_mem,
@@ -53,7 +62,7 @@ class MediaPipelineHost {
                        const ::media::PipelineStatusCB& status_cb);
   void VideoInitialize(TrackId track_id,
                        const VideoPipelineClient& client,
-                       const ::media::VideoDecoderConfig& config,
+                       const std::vector<::media::VideoDecoderConfig>& configs,
                        const ::media::PipelineStatusCB& status_cb);
   void StartPlayingFrom(base::TimeDelta time);
   void Flush(const ::media::PipelineStatusCB& status_cb);
@@ -68,6 +77,7 @@ class MediaPipelineHost {
  private:
   base::ThreadChecker thread_checker_;
 
+  scoped_ptr<TaskRunnerImpl> task_runner_;
   scoped_ptr<MediaPipelineImpl> media_pipeline_;
 
   // The shared memory for a track id must be valid until Stop is invoked on
@@ -83,4 +93,3 @@ class MediaPipelineHost {
 }  // namespace chromecast
 
 #endif  // CHROMECAST_BROWSER_MEDIA_MEDIA_PIPELINE_HOST_H_
-

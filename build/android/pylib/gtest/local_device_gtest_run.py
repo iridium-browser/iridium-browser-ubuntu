@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-
+import itertools
 import logging
 import os
+import posixpath
 
 from pylib import constants
 from pylib import ports
@@ -15,7 +16,6 @@ from pylib.gtest import gtest_test_instance
 from pylib.local import local_test_server_spawner
 from pylib.local.device import local_device_environment
 from pylib.local.device import local_device_test_run
-from pylib.utils import apk_helper
 from pylib.utils import device_temp_file
 
 _COMMAND_LINE_FLAGS_SUPPORTED = True
@@ -24,6 +24,9 @@ _EXTRA_COMMAND_LINE_FILE = (
     'org.chromium.native_test.NativeTestActivity.CommandLineFile')
 _EXTRA_COMMAND_LINE_FLAGS = (
     'org.chromium.native_test.NativeTestActivity.CommandLineFlags')
+_EXTRA_TEST_LIST = (
+    'org.chromium.native_test.NativeTestInstrumentationTestRunner'
+        '.TestList')
 
 _MAX_SHARD_SIZE = 256
 
@@ -34,34 +37,57 @@ _SUITE_REQUIRES_TEST_SERVER_SPAWNER = [
   'net_unittests', 'unit_tests'
 ]
 
+# TODO(jbudorick): Move this inside _ApkDelegate once TestPackageApk is gone.
+def PullAppFilesImpl(device, package, files, directory):
+  device_dir = device.GetApplicationDataDirectory(package)
+  host_dir = os.path.join(directory, str(device))
+  for f in files:
+    device_file = posixpath.join(device_dir, f)
+    host_file = os.path.join(host_dir, *f.split(posixpath.sep))
+    host_file_base, ext = os.path.splitext(host_file)
+    for i in itertools.count():
+      host_file = '%s_%d%s' % (host_file_base, i, ext)
+      if not os.path.exists(host_file):
+        break
+    device.PullFile(device_file, host_file)
+
 class _ApkDelegate(object):
-  def __init__(self, apk):
-    self._apk = apk
-    self._package = apk_helper.GetPackageName(self._apk)
-    self._runner = apk_helper.GetInstrumentationName(self._apk)
+  def __init__(self, test_instance):
+    self._activity = test_instance.activity
+    self._apk = test_instance.apk
+    self._package = test_instance.package
+    self._runner = test_instance.runner
+
     self._component = '%s/%s' % (self._package, self._runner)
-    self._enable_test_server_spawner = False
+    self._extras = test_instance.extras
 
   def Install(self, device):
     device.Install(self._apk)
 
-  def RunWithFlags(self, device, flags, **kwargs):
+  def Run(self, test, device, flags=None, **kwargs):
+    extras = dict(self._extras)
+
     with device_temp_file.DeviceTempFile(device.adb) as command_line_file:
-      device.WriteFile(command_line_file.name, '_ %s' % flags)
+      device.WriteFile(command_line_file.name, '_ %s' % flags if flags else '_')
+      extras[_EXTRA_COMMAND_LINE_FILE] = command_line_file.name
 
-      extras = {
-        _EXTRA_COMMAND_LINE_FILE: command_line_file.name,
-      }
+      with device_temp_file.DeviceTempFile(device.adb) as test_list_file:
+        if test:
+          device.WriteFile(test_list_file.name, '\n'.join(test))
+          extras[_EXTRA_TEST_LIST] = test_list_file.name
 
-      return device.StartInstrumentation(
-          self._component, extras=extras, raw=False, **kwargs)
+        return device.StartInstrumentation(
+            self._component, extras=extras, raw=False, **kwargs)
+
+  def PullAppFiles(self, device, files, directory):
+    PullAppFilesImpl(device, self._package, files, directory)
 
   def Clear(self, device):
     device.ClearApplicationState(self._package)
 
 
 class _ExeDelegate(object):
-  def __init__(self, exe, tr):
+  def __init__(self, tr, exe):
     self._exe_host_path = exe
     self._exe_file_name = os.path.split(exe)[-1]
     self._exe_device_path = '%s/%s' % (
@@ -82,12 +108,15 @@ class _ExeDelegate(object):
       host_device_tuples.append((self._deps_host_path, self._deps_device_path))
     device.PushChangedFiles(host_device_tuples)
 
-  def RunWithFlags(self, device, flags, **kwargs):
+  def Run(self, test, device, flags=None, **kwargs):
     cmd = [
         self._test_run.GetTool(device).GetTestWrapper(),
         self._exe_device_path,
-        flags,
     ]
+    if test:
+      cmd.append('--gtest_filter=%s' % ':'.join(test))
+    if flags:
+      cmd.append(flags)
     cwd = constants.TEST_EXECUTABLE_DIR
 
     env = {
@@ -112,6 +141,9 @@ class _ExeDelegate(object):
                                       env=env, **kwargs)
     return output
 
+  def PullAppFiles(self, device, files, directory):
+    pass
+
   def Clear(self, device):
     device.KillAll(self._exe_file_name, blocking=True, timeout=30, quiet=True)
 
@@ -124,7 +156,7 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     super(LocalDeviceGtestRun, self).__init__(env, test_instance)
 
     if self._test_instance.apk:
-      self._delegate = _ApkDelegate(self._test_instance.apk)
+      self._delegate = _ApkDelegate(self._test_instance)
     elif self._test_instance.exe:
       self._delegate = _ExeDelegate(self, self._test_instance.exe)
 
@@ -132,7 +164,7 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
   #override
   def TestPackage(self):
-    return self._test_instance._suite
+    return self._test_instance.suite
 
   #override
   def SetUp(self):
@@ -172,12 +204,12 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
       unbounded_shard = tests[i::device_count]
       shards += [unbounded_shard[j:j+_MAX_SHARD_SIZE]
                  for j in xrange(0, len(unbounded_shard), _MAX_SHARD_SIZE)]
-    return [':'.join(s) for s in shards]
+    return shards
 
   #override
   def _GetTests(self):
-    tests = self._delegate.RunWithFlags(
-        self._env.devices[0], '--gtest_list_tests')
+    tests = self._delegate.Run(
+        None, self._env.devices[0], flags='--gtest_list_tests')
     tests = gtest_test_instance.ParseGTestListTests(tests)
     tests = self._test_instance.FilterTests(tests)
     return tests
@@ -185,10 +217,14 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
   #override
   def _RunTest(self, device, test):
     # Run the test.
-    output = self._delegate.RunWithFlags(device, '--gtest_filter=%s' % test,
-                                         timeout=900, retries=0)
+    timeout = 900 * self.GetTool(device).GetTimeoutScale()
+    output = self._delegate.Run(
+        test, device, timeout=timeout, retries=0)
     for s in self._servers[str(device)]:
       s.Reset()
+    if self._test_instance.app_files:
+      self._delegate.PullAppFiles(device, self._test_instance.app_files,
+                                  self._test_instance.app_file_dir)
     self._delegate.Clear(device)
 
     # Parse the output.

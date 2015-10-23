@@ -34,6 +34,9 @@ class ScopedCOMInitializer;
 
 class Browser;
 class Profile;
+#if defined(OS_MACOSX)
+class ScopedBundleSwizzlerMac;
+#endif  // defined(OS_MACOSX)
 
 namespace content {
 class ContentRendererClient;
@@ -108,6 +111,18 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // Returns the browser created by CreateBrowser.
   Browser* browser() const { return browser_; }
 
+  // Closes the given browser and waits for it to release all its resources.
+  void CloseBrowserSynchronously(Browser* browser);
+
+  // Closes the browser without waiting for it to release all its resources.
+  // WARNING: This may leave tasks posted, but not yet run, in the message
+  // loops. Prefer CloseBrowserSynchronously over this method.
+  void CloseBrowserAsynchronously(Browser* browser);
+
+  // Closes all browsers. No guarantees are made about the destruction of
+  // outstanding resources.
+  void CloseAllBrowsers();
+
   // Convenience methods for adding tabs to a Browser.
   void AddTabAtIndexToBrowser(Browser* browser,
                               int index,
@@ -127,6 +142,15 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
   // BrowserTestBase:
   void RunTestOnMainThreadLoop() override;
+
+  // Ensures that no devtools are open, and then opens the devtools.
+  void OpenDevToolsWindow(content::WebContents* web_contents);
+
+  // Opens |url| in an incognito browser window with the incognito profile of
+  // |profile|, blocking until the navigation finishes. This will create a new
+  // browser if a browser with the incognito profile does not exist. Returns the
+  // incognito window Browser.
+  Browser* OpenURLOffTheRecord(Profile* profile, const GURL& url);
 
   // Creates a browser with a single tab (about:blank), waits for the tab to
   // finish loading and shows the browser.
@@ -224,6 +248,7 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool* autorelease_pool_;
+  scoped_ptr<ScopedBundleSwizzlerMac> bundle_swizzler_;
 #endif  // OS_MACOSX
 
 #if defined(OS_WIN)

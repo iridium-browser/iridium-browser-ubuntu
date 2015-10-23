@@ -12,12 +12,12 @@
 #include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/extensions/extension_action_view_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
@@ -67,7 +67,7 @@ void BrowserActionsBarBrowserTest::SetUpCommandLine(
 void BrowserActionsBarBrowserTest::SetUpOnMainThread() {
   ExtensionBrowserTest::SetUpOnMainThread();
   browser_actions_bar_.reset(new BrowserActionTestUtil(browser()));
-  toolbar_model_ = extensions::ExtensionToolbarModel::Get(profile());
+  toolbar_model_ = ToolbarActionsModel::Get(profile());
 }
 
 void BrowserActionsBarBrowserTest::TearDownOnMainThread() {
@@ -147,19 +147,19 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, MoveBrowserActions) {
   EXPECT_EQ(extension_c()->id(), browser_actions_bar()->GetExtensionId(2));
 
   // Move C to first position. Order is C A B.
-  toolbar_model()->MoveExtensionIcon(extension_c()->id(), 0);
+  toolbar_model()->MoveActionIcon(extension_c()->id(), 0);
   EXPECT_EQ(extension_c()->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(1));
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(2));
 
   // Move B to third position. Order is still C A B.
-  toolbar_model()->MoveExtensionIcon(extension_b()->id(), 2);
+  toolbar_model()->MoveActionIcon(extension_b()->id(), 2);
   EXPECT_EQ(extension_c()->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(1));
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(2));
 
   // Move B to middle position. Order is C B A.
-  toolbar_model()->MoveExtensionIcon(extension_b()->id(), 1);
+  toolbar_model()->MoveActionIcon(extension_b()->id(), 1);
   EXPECT_EQ(extension_c()->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(1));
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(2));
@@ -333,9 +333,19 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarRedesignBrowserTest,
   EXPECT_TRUE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
   toolbar_model()->SetVisibleIconCount(4);
   EXPECT_FALSE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
+
+  // Adjusting the visible count down should mean an overflowed action wants
+  // to run again. Removing the action that wants to run should result in
+  // no overflowed action wanting to run.
+  toolbar_model()->SetVisibleIconCount(3);
+  EXPECT_TRUE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
+  extension_service()->DisableExtension(page_action_extension->id(),
+                                        extensions::Extension::DISABLE_NONE);
+  EXPECT_FALSE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, BrowserActionPopupTest) {
+IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
+                       BrowserActionPopupTest) {
   // Load up two extensions that have browser action popups.
   base::FilePath data_dir =
       test_data_dir_.AppendASCII("api_test").AppendASCII("browser_action");
@@ -405,14 +415,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, BrowserActionPopupTest) {
   }
 }
 
-// Waiting for popup termination is flaky on mac; disabling while investigating.
-#if defined(OS_MACOSX)
-#define MAYBE_OverflowedBrowserActionPopupTest DISABLED_OverflowedBrowserActionPopupTest
-#else
-#define MAYBE_OverflowedBrowserActionPopupTest OverflowedBrowserActionPopupTest
-#endif
 IN_PROC_BROWSER_TEST_F(BrowserActionsBarRedesignBrowserTest,
-                       MAYBE_OverflowedBrowserActionPopupTest) {
+                       OverflowedBrowserActionPopupTest) {
   scoped_ptr<BrowserActionTestUtil> overflow_bar =
       browser_actions_bar()->CreateOverflowBar();
 
@@ -511,4 +515,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarRedesignBrowserTest,
   browser_actions_bar()->Press(0);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(browser_actions_bar()->HasPopup());
+  // Cleanup the popup (to avoid having windows open at tear down).
+  browser_actions_bar()->HidePopup();
+  content::RunAllBlockingPoolTasksUntilIdle();
+  EXPECT_FALSE(browser_actions_bar()->HasPopup());
 }

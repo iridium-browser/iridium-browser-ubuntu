@@ -27,10 +27,6 @@
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/base/ime/dummy_text_input_client.h"
-#include "ui/base/ime/input_method.h"
-#include "ui/base/ime/text_input_focus_manager.h"
-#include "ui/base/ui_base_switches_util.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/screen.h"
@@ -647,6 +643,34 @@ TEST_F(WorkspaceLayoutManagerSoloTest, Fullscreen) {
   EXPECT_EQ(bounds.ToString(), window->bounds().ToString());
 }
 
+// Tests that fullscreen window causes always_on_top windows to stack below.
+TEST_F(WorkspaceLayoutManagerSoloTest, FullscreenSuspendsAlwaysOnTop) {
+  gfx::Rect bounds(100, 100, 200, 200);
+  scoped_ptr<aura::Window> fullscreen_window(CreateTestWindow(bounds));
+  scoped_ptr<aura::Window> always_on_top_window1(CreateTestWindow(bounds));
+  scoped_ptr<aura::Window> always_on_top_window2(CreateTestWindow(bounds));
+  always_on_top_window1->SetProperty(aura::client::kAlwaysOnTopKey, true);
+  always_on_top_window2->SetProperty(aura::client::kAlwaysOnTopKey, true);
+  // Making a window fullscreen temporarily suspends always on top state.
+  fullscreen_window->SetProperty(aura::client::kShowStateKey,
+                                 ui::SHOW_STATE_FULLSCREEN);
+  EXPECT_FALSE(
+      always_on_top_window1->GetProperty(aura::client::kAlwaysOnTopKey));
+  EXPECT_FALSE(
+      always_on_top_window2->GetProperty(aura::client::kAlwaysOnTopKey));
+  EXPECT_NE(nullptr, GetRootWindowController(fullscreen_window->GetRootWindow())
+                         ->GetWindowForFullscreenMode());
+  // Making fullscreen window normal restores always on top windows.
+  fullscreen_window->SetProperty(aura::client::kShowStateKey,
+                                 ui::SHOW_STATE_NORMAL);
+  EXPECT_TRUE(
+      always_on_top_window1->GetProperty(aura::client::kAlwaysOnTopKey));
+  EXPECT_TRUE(
+      always_on_top_window2->GetProperty(aura::client::kAlwaysOnTopKey));
+  EXPECT_EQ(nullptr, GetRootWindowController(fullscreen_window->GetRootWindow())
+                         ->GetWindowForFullscreenMode());
+}
+
 // Tests fullscreen window size during root window resize.
 TEST_F(WorkspaceLayoutManagerSoloTest, FullscreenRootWindowResize) {
   gfx::Rect bounds(100, 100, 200, 200);
@@ -789,7 +813,7 @@ namespace {
 
 class WorkspaceLayoutManagerBackdropTest : public test::AshTestBase {
  public:
-  WorkspaceLayoutManagerBackdropTest() {}
+  WorkspaceLayoutManagerBackdropTest() : default_container_(nullptr) {}
   ~WorkspaceLayoutManagerBackdropTest() override {}
 
   void SetUp() override {
@@ -977,7 +1001,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, ShelfVisibilityChangesBounds) {
 
 class WorkspaceLayoutManagerKeyboardTest : public test::AshTestBase {
  public:
-  WorkspaceLayoutManagerKeyboardTest() {}
+  WorkspaceLayoutManagerKeyboardTest() : layout_manager_(nullptr) {}
   ~WorkspaceLayoutManagerKeyboardTest() override {}
 
   void SetUp() override {
@@ -1013,51 +1037,12 @@ class WorkspaceLayoutManagerKeyboardTest : public test::AshTestBase {
     keyboard_bounds_ = bounds;
   }
 
-  void Focus(ui::TextInputClient* text_input_client) {
-    if (switches::IsTextInputFocusManagerEnabled()) {
-      ui::TextInputFocusManager::GetInstance()->FocusTextInputClient(
-          text_input_client);
-    } else {
-      aura::Window* root_window =
-          ash::Shell::GetInstance()->GetPrimaryRootWindow();
-      ui::InputMethod* input_method =
-          root_window->GetProperty(aura::client::kRootWindowInputMethodKey);
-      input_method->SetFocusedTextInputClient(text_input_client);
-    }
-  }
-
-  void Blur(ui::TextInputClient* text_input_client) {
-    if (switches::IsTextInputFocusManagerEnabled()) {
-      ui::TextInputFocusManager::GetInstance()->BlurTextInputClient(
-          text_input_client);
-    } else {
-      aura::Window* root_window =
-          ash::Shell::GetInstance()->GetPrimaryRootWindow();
-      ui::InputMethod* input_method =
-          root_window->GetProperty(aura::client::kRootWindowInputMethodKey);
-      input_method->SetFocusedTextInputClient(NULL);
-    }
-  }
-
  private:
   gfx::Insets restore_work_area_insets_;
   gfx::Rect keyboard_bounds_;
   WorkspaceLayoutManager* layout_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkspaceLayoutManagerKeyboardTest);
-};
-
-class FakeTextInputClient : public ui::DummyTextInputClient {
- public:
-  explicit FakeTextInputClient(gfx::NativeWindow window) : window_(window) {}
-  ~FakeTextInputClient() override {}
-
-  gfx::NativeWindow GetAttachedWindow() const override { return window_; }
-
- private:
-  gfx::NativeWindow window_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeTextInputClient);
 };
 
 // Tests that when a child window gains focus the top level window containing it
@@ -1080,8 +1065,7 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest, ChildWindowFocused) {
       &delegate2, -1, work_area));
   parent_window->AddChild(window.get());
 
-  FakeTextInputClient text_input_client(window.get());
-  Focus(&text_input_client);
+  wm::ActivateWindow(window.get());
 
   int available_height =
       Shell::GetScreen()->GetPrimaryDisplay().bounds().height() -
@@ -1097,8 +1081,6 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest, ChildWindowFocused) {
   HideKeyboard();
   EXPECT_EQ(initial_window_bounds.ToString(),
             parent_window->bounds().ToString());
-
-  Blur(&text_input_client);
 }
 
 TEST_F(WorkspaceLayoutManagerKeyboardTest, AdjustWindowForA11yKeyboard) {
@@ -1115,12 +1097,11 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest, AdjustWindowForA11yKeyboard) {
   scoped_ptr<aura::Window> window(CreateTestWindowInShellWithDelegate(
       &delegate, -1, work_area));
 
-  FakeTextInputClient text_input_client(window.get());
-  Focus(&text_input_client);
-
   int available_height =
       Shell::GetScreen()->GetPrimaryDisplay().bounds().height() -
       keyboard_bounds.height();
+
+  wm::ActivateWindow(window.get());
 
   EXPECT_EQ(gfx::Rect(work_area).ToString(), window->bounds().ToString());
   ShowKeyboard();
@@ -1153,8 +1134,6 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest, AdjustWindowForA11yKeyboard) {
             window->bounds().ToString());
   HideKeyboard();
   EXPECT_EQ(occluded_window_bounds.ToString(), window->bounds().ToString());
-
-  Blur(&text_input_client);
 }
 
 }  // namespace ash

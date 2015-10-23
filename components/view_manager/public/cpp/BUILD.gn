@@ -2,20 +2,24 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/module_args/mojo.gni")
 import("//third_party/mojo/src/mojo/public/mojo_sdk.gni")
 
 mojo_sdk_source_set("cpp") {
   restrict_external_deps = false
   sources = [
+    "args.h",
+    "lib/args.cc",
+    "lib/scoped_view_ptr.cc",
     "lib/view.cc",
     "lib/view_manager_client_factory.cc",
     "lib/view_manager_client_impl.cc",
     "lib/view_manager_client_impl.h",
+    "lib/view_manager_delegate.cc",
     "lib/view_manager_init.cc",
     "lib/view_observer.cc",
     "lib/view_private.cc",
     "lib/view_private.h",
+    "scoped_view_ptr.h",
     "view.h",
     "view_manager.h",
     "view_manager_client_factory.h",
@@ -29,11 +33,11 @@ mojo_sdk_source_set("cpp") {
 
   public_deps = [
     ":common",
+    "../interfaces",
+    "//mojo/services/network/public/interfaces",
   ]
 
   deps = [
-    "../interfaces",
-    "//components/surfaces/public/interfaces:surface_id",
     "//mojo/application/public/cpp",
     "//mojo/application/public/interfaces",
     "//ui/mojo/events:interfaces",

@@ -37,8 +37,9 @@ std::string MakePrefValue(const GURL& origin,
 bool GetOriginAndSWRFromPrefValue(
     const std::string& pref_value, GURL* origin,
     int64_t* service_worker_registration_id) {
-  std::vector<std::string> parts;
-  base::SplitString(pref_value, kSeparator, &parts);
+  std::vector<std::string> parts = base::SplitString(
+      pref_value, std::string(1, kSeparator),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (parts.size() != 2)
     return false;
 
@@ -75,8 +76,8 @@ PushMessagingAppIdentifier PushMessagingAppIdentifier::Generate(
 // static
 PushMessagingAppIdentifier PushMessagingAppIdentifier::FindByAppId(
     Profile* profile, const std::string& app_id) {
-  if (!StartsWithASCII(app_id, kPushMessagingAppIdentifierPrefix,
-                       false /* case_sensitive */)) {
+  if (!base::StartsWith(app_id, kPushMessagingAppIdentifierPrefix,
+                        base::CompareCase::INSENSITIVE_ASCII)) {
     return PushMessagingAppIdentifier();
   }
 
@@ -85,7 +86,7 @@ PushMessagingAppIdentifier PushMessagingAppIdentifier::FindByAppId(
   DCHECK_EQ(kPushMessagingAppIdentifierPrefix, app_id.substr(0, kPrefixLength));
   DCHECK_GE(app_id.size(), kPrefixLength + kGuidLength);
   DCHECK_EQ(app_id.substr(app_id.size() - kGuidLength),
-            StringToUpperASCII(app_id.substr(app_id.size() - kGuidLength)));
+            base::ToUpperASCII(app_id.substr(app_id.size() - kGuidLength)));
 
   const base::DictionaryValue* map =
       profile->GetPrefs()->GetDictionary(prefs::kPushMessagingAppIdentifierMap);

@@ -164,11 +164,6 @@ const char kEnterpriseEnrollmentInitialModulus[] =
 const char kEnterpriseEnrollmentModulusLimit[] =
     "enterprise-enrollment-modulus-limit";
 
-// Don't create robot account on enrollment. Used when testing device
-// enrollment against YAPS or the Python test server.
-const char kEnterpriseEnrollmentSkipRobotAuth[] =
-    "enterprise-enrollment-skip-robot-auth";
-
 // Enables the chromecast support for video player app.
 const char kEnableVideoPlayerChromecastSupport[] =
     "enable-video-player-chromecast-support";
@@ -189,10 +184,6 @@ const char kGuestSession[] = "bwsi";
 // files).
 const char kGuestWallpaperLarge[] = "guest-wallpaper-large";
 const char kGuestWallpaperSmall[] = "guest-wallpaper-small";
-
-// If true, the Chromebook has a Chrome OS keyboard. Don't use the flag for
-// Chromeboxes.
-const char kHasChromeOSKeyboard[] = "has-chromeos-keyboard";
 
 // If true, the Chromebook has a keyboard with a diamond key.
 const char kHasChromeOSDiamondKey[] = "has-chromeos-diamond-key";
@@ -280,6 +271,8 @@ const char kSmsTestMessages[] = "sms-test-messages";
 
 // Indicates that a stub implementation of CrosSettings that stores settings in
 // memory without signing should be used, treating current user as the owner.
+// This also modifies OwnerSettingsServiceChromeOS::HandlesSetting such that no
+// settings are handled by OwnerSettingsServiceChromeOS.
 // This option is for testing the chromeos build of chrome on the desktop only.
 const char kStubCrosSettings[] = "stub-cros-settings";
 
@@ -295,13 +288,6 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
-
-// Enables testing Metronome client with a periodic timer.
-const char kTestMetronomeTimer[] = "test-metronome-timer";
-
-// Disable memory pressure checks on ChromeOS.
-const char kDisableMemoryPressureSystemChromeOS[] =
-    "disable-memory-pressure-chromeos";
 
 // Enables waking the device based on the receipt of some network packets.
 const char kWakeOnPackets[] = "wake-on-packets";
@@ -321,15 +307,6 @@ const char kDisableCaptivePortalBypassProxy[] =
 const char kDisableTimeZoneTrackingOption[] =
     "disable-timezone-tracking-option";
 
-// Disable new GAIA sign-in flow.
-const char kDisableWebviewSigninFlow[] = "disable-webview-signin-flow";
-
-// Enables searching for an app that supports a plugged in USB printer. When a
-// user plugs in USB printer, they are shown a notification offering to search
-// Chroem Web Store for an app that has printerProvider permission and can
-// handle the plugged in printer.
-const char kEnablePrinterAppSearch[] = "enable-printer-app-search";
-
 // Switches and optional value for Data Saver prompt on cellular networks.
 const char kDisableDataSaverPrompt[] = "disable-datasaver-prompt";
 const char kEnableDataSaverPrompt[] = "enable-datasaver-prompt";
@@ -340,11 +317,10 @@ bool WakeOnWifiEnabled() {
 }
 
 bool MemoryPressureHandlingEnabled() {
-  if ((base::CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kDisableMemoryPressureSystemChromeOS)) ||
-      (base::FieldTrialList::FindFullName(kMemoryPressureExperimentName) ==
-       kMemoryPressureHandlingOff))
+  if (base::FieldTrialList::FindFullName(kMemoryPressureExperimentName) ==
+      kMemoryPressureHandlingOff) {
     return false;
+  }
   return true;
 }
 

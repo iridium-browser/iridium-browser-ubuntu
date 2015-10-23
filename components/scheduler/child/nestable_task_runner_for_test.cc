@@ -4,6 +4,9 @@
 
 #include "components/scheduler/child/nestable_task_runner_for_test.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+
 namespace scheduler {
 
 // static
@@ -39,11 +42,7 @@ bool NestableTaskRunnerForTest::RunsTasksOnCurrentThread() const {
 }
 
 bool NestableTaskRunnerForTest::IsNested() const {
-  return is_nested_;
-}
-
-void NestableTaskRunnerForTest::SetNested(bool is_nested) {
-  is_nested_ = is_nested;
+  return false;
 }
 
 }  // namespace scheduler

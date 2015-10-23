@@ -14,19 +14,15 @@ WebInspector.DevicesSettingsTab = function()
     this.registerRequiredCSS("emulation/devicesSettingsTab.css");
 
     var header = this.element.createChild("header");
-    header.createChild("h3").createTextChild(WebInspector.UIString("Devices"));
+    header.createChild("h3").createTextChild(WebInspector.UIString("Emulated Devices"));
     this.containerElement = this.element.createChild("div", "help-container-wrapper").createChild("div", "settings-tab help-content help-container");
-
-    this.containerElement.createChild("div", "devices-title").textContent = WebInspector.UIString("Emulated devices");
-    this._devicesList = this.containerElement.createChild("div", "devices-list");
-    this._customListSearator = createElementWithClass("div", "devices-custom-separator");
 
     var buttonsRow = this.containerElement.createChild("div", "devices-button-row");
     this._addCustomButton = createTextButton(WebInspector.UIString("Add custom device..."), this._addCustomDevice.bind(this));
     buttonsRow.appendChild(this._addCustomButton);
-    this._updateStandardButton = createTextButton("", this._updateStandardDevices.bind(this));
-    if (Runtime.experiments.isEnabled("externalDeviceList"))
-        buttonsRow.appendChild(this._updateStandardButton);
+
+    this._devicesList = this.containerElement.createChild("div", "devices-list");
+    this._customListSearator = createElementWithClass("div", "devices-custom-separator");
 
     this._editDevice = null;
     this._editDeviceListItem = null;
@@ -35,7 +31,6 @@ WebInspector.DevicesSettingsTab = function()
     this._muteUpdate = false;
     WebInspector.emulatedDevicesList.addEventListener(WebInspector.EmulatedDevicesList.Events.CustomDevicesUpdated, this._devicesUpdated, this);
     WebInspector.emulatedDevicesList.addEventListener(WebInspector.EmulatedDevicesList.Events.StandardDevicesUpdated, this._devicesUpdated, this);
-    WebInspector.emulatedDevicesList.addEventListener(WebInspector.EmulatedDevicesList.Events.IsUpdatingChanged, this._isUpdatingChanged, this);
 }
 
 WebInspector.DevicesSettingsTab.prototype = {
@@ -43,7 +38,6 @@ WebInspector.DevicesSettingsTab.prototype = {
     {
         WebInspector.VBox.prototype.wasShown.call(this);
         this._devicesUpdated();
-        this._isUpdatingChanged();
         this._stopEditing();
     },
 
@@ -66,17 +60,6 @@ WebInspector.DevicesSettingsTab.prototype = {
         devices.sort(WebInspector.EmulatedDevice.compareByTitle);
         for (var i = 0; i < devices.length; ++i)
             this._devicesList.appendChild(this._createDeviceListItem(devices[i], false));
-    },
-
-    _isUpdatingChanged: function()
-    {
-        if (WebInspector.emulatedDevicesList.isUpdating()) {
-            this._updateStandardButton.textContent = WebInspector.UIString("Updating...");
-            this._updateStandardButton.disabled = true;
-        } else {
-            this._updateStandardButton.textContent = WebInspector.UIString("Update devices");
-            this._updateStandardButton.disabled = false;
-        }
     },
 
     _updateSeparatorVisibility: function()
@@ -111,7 +94,6 @@ WebInspector.DevicesSettingsTab.prototype = {
         item.createChild("div", "devices-list-title").textContent = device.title;
         item.addEventListener("click", onItemClicked.bind(this), false);
         item.classList.toggle("device-list-item-show", device.show());
-
         if (custom) {
             var editButton = item.createChild("div", "devices-list-edit");
             editButton.title = WebInspector.UIString("Edit");
@@ -219,24 +201,28 @@ WebInspector.DevicesSettingsTab.prototype = {
         if (width)
             input.style.width = width;
         input.placeholder = title;
-        input.addEventListener("input", this._validateInputs.bind(this), false);
+        input.addEventListener("input", this._validateInputs.bind(this, false), false);
+        input.addEventListener("blur", this._validateInputs.bind(this, false), false);
         return input;
     },
 
-    _validateInputs: function()
+    /**
+     * @param {boolean} forceValid
+     */
+    _validateInputs: function(forceValid)
     {
         var trimmedTitle = this._editDeviceTitle.value.trim();
         var titleValid = trimmedTitle.length > 0 && trimmedTitle.length < 50;
-        this._editDeviceTitle.classList.toggle("error-input", !titleValid);
+        this._editDeviceTitle.classList.toggle("error-input", !titleValid && !forceValid);
 
         var widthValid = !WebInspector.OverridesSupport.deviceSizeValidator(this._editDeviceWidth.value);
-        this._editDeviceWidth.classList.toggle("error-input", !widthValid);
+        this._editDeviceWidth.classList.toggle("error-input", !widthValid && !forceValid);
 
         var heightValid = !WebInspector.OverridesSupport.deviceSizeValidator(this._editDeviceHeight.value);
-        this._editDeviceHeight.classList.toggle("error-input", !heightValid);
+        this._editDeviceHeight.classList.toggle("error-input", !heightValid && !forceValid);
 
         var scaleValid = !WebInspector.OverridesSupport.deviceScaleFactorValidator(this._editDeviceScale.value);
-        this._editDeviceScale.classList.toggle("error-input", !scaleValid);
+        this._editDeviceScale.classList.toggle("error-input", !scaleValid && !forceValid);
 
         var allValid = titleValid && widthValid && heightValid && scaleValid;
         this._editDeviceCommitButton.disabled = !allValid;
@@ -273,7 +259,7 @@ WebInspector.DevicesSettingsTab.prototype = {
         this._editDeviceHeight.value = listItem ? this._toNumericInputValue(device.vertical.height) : "";
         this._editDeviceScale.value = listItem ? this._toNumericInputValue(device.deviceScaleFactor) : "";
         this._editDeviceUserAgent.value = device.userAgent;
-        this._validateInputs();
+        this._validateInputs(true);
 
         if (listItem && listItem.nextElementSibling)
             this._devicesList.insertBefore(this._editDeviceElement, listItem.nextElementSibling);
@@ -296,6 +282,8 @@ WebInspector.DevicesSettingsTab.prototype = {
         this._editDevice.horizontal.height = this._editDevice.vertical.width;
         this._editDevice.deviceScaleFactor = this._editDeviceScale.value ? parseFloat(this._editDeviceScale.value) : 0;
         this._editDevice.userAgent = this._editDeviceUserAgent.value;
+        this._editDevice.modes.push({title: "", orientation: WebInspector.EmulatedDevice.Horizontal, insets: new Insets(0, 0, 0, 0), images: null});
+        this._editDevice.modes.push({title: "", orientation: WebInspector.EmulatedDevice.Vertical, insets: new Insets(0, 0, 0, 0), images: null});
 
         this._stopEditing();
         if (this._editDeviceListItem)
@@ -315,11 +303,6 @@ WebInspector.DevicesSettingsTab.prototype = {
             this._devicesList.removeChild(this._editDeviceElement);
         this._addCustomButton.disabled = false;
         this._addCustomButton.focus();
-    },
-
-    _updateStandardDevices: function()
-    {
-        WebInspector.emulatedDevicesList.update();
     },
 
     __proto__: WebInspector.VBox.prototype

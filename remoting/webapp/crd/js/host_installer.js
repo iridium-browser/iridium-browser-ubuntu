@@ -52,7 +52,7 @@ remoting.HostInstaller.isInstalled = function() {
       function(resolve) {
         // TODO(kelvinp): Use different native messaging ports for the Me2me
         // host vs It2MeHost.
-        /** @type {chrome.runtime.Port} */
+        /** @type {Port} */
         var port =
             chrome.runtime.connectNative('com.google.chrome.remote_assistance');
 
@@ -75,7 +75,7 @@ remoting.HostInstaller.isInstalled = function() {
       });
 };
 
-/** @type {Object<string,string>} */
+/** @type {Object<string>} */
 var HOST_DOWNLOAD_URLS = {
   'Win32': 'http://dl.google.com/dl/edgedl/chrome-remote-desktop/' +
                'chromeremotedesktophost.msi',

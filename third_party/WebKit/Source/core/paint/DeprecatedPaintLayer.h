@@ -157,7 +157,6 @@ public:
     void updateLayerPositionsAfterLayout();
     void updateLayerPositionsAfterOverflowScroll(const DoubleSize& scrollDelta);
 
-    bool isPaginated() const { return m_isPaginated; }
     DeprecatedPaintLayer* enclosingPaginationLayer() const { return m_enclosingPaginationLayer; }
 
     void updateTransformationMatrix();
@@ -165,7 +164,6 @@ public:
 
     const LayoutSize& offsetForInFlowPosition() const { return m_offsetForInFlowPosition; }
 
-    void blockSelectionGapsBoundsChanged();
     void addBlockSelectionGapsBounds(const LayoutRect&);
     void clearBlockSelectionGapsBounds();
     void invalidatePaintForBlockSelectionGaps();
@@ -196,9 +194,14 @@ public:
     bool hasVisibleNonLayerContent() const { return m_hasVisibleNonLayerContent; }
     bool hasNonCompositedChild() const { ASSERT(isAllowedToQueryCompositingState()); return m_hasNonCompositedChild; }
 
-    // Gets the nearest enclosing positioned ancestor layer (also includes
-    // the <html> layer and the root layer).
-    DeprecatedPaintLayer* enclosingPositionedAncestor() const;
+    // Gets the ancestor layer that serves as the containing block of this layer. It is assumed
+    // that this layer is established by an out-of-flow positioned layout object (i.e. either
+    // absolutely or fixed positioned).
+    // If |ancestor| is specified, |*skippedAncestor| will be set to true if |ancestor| is found in
+    // the ancestry chain between this layer and the containing block layer; if not found, it will
+    // be set to false. Either both |ancestor| and |skippedAncestor| should be nullptr, or none of
+    // them should.
+    DeprecatedPaintLayer* enclosingPositionedAncestor(const DeprecatedPaintLayer* ancestor = nullptr, bool* skippedAncestor = nullptr) const;
 
     bool isPaintInvalidationContainer() const;
 
@@ -217,7 +220,7 @@ public:
     bool canUseConvertToLayerCoords() const
     {
         // These LayoutObjects have an impact on their layers without the layoutObjects knowing about it.
-        return !layoutObject()->hasColumns() && !layoutObject()->hasTransformRelatedProperty() && !layoutObject()->isSVGRoot();
+        return !layoutObject()->hasTransformRelatedProperty() && !layoutObject()->isSVGRoot();
     }
 
     void convertToLayerCoords(const DeprecatedPaintLayer* ancestorLayer, LayoutPoint&) const;
@@ -232,7 +235,6 @@ public:
 
     // The hitTest() method looks for mouse events by walking layers that intersect the point from front to back.
     bool hitTest(HitTestResult&);
-    bool hitTest(const HitTestRequest&, const HitTestLocation&, HitTestResult&);
 
     // Pass offsetFromRoot if known.
     bool intersectsDamageRect(const LayoutRect& layerBounds, const LayoutRect& damageRect, const DeprecatedPaintLayer* rootLayer, const LayoutPoint* offsetFromRoot = 0) const;
@@ -272,8 +274,8 @@ public:
     // currentTransform computes a transform which takes accelerated animations into account. The
     // resulting transform has transform-origin baked in. If the layer does not have a transform,
     // returns the identity matrix.
-    TransformationMatrix currentTransform(ComputedStyle::ApplyTransformOrigin = ComputedStyle::IncludeTransformOrigin) const;
-    TransformationMatrix renderableTransform(PaintBehavior) const;
+    TransformationMatrix currentTransform() const;
+    TransformationMatrix renderableTransform(GlobalPaintFlags) const;
 
     // Get the perspective transform, which is applied to transformed sublayers.
     // Returns true if the layer has a -webkit-perspective.
@@ -312,7 +314,11 @@ public:
     void ensureCompositedDeprecatedPaintLayerMapping();
     void clearCompositedDeprecatedPaintLayerMapping(bool layerBeingDestroyed = false);
     CompositedDeprecatedPaintLayerMapping* groupedMapping() const { return m_groupedMapping; }
-    void setGroupedMapping(CompositedDeprecatedPaintLayerMapping* groupedMapping, bool layerBeingDestroyed = false);
+    enum SetGroupMappingOptions {
+        InvalidateLayerAndRemoveFromMapping,
+        DoNotInvalidateLayerAndRemoveFromMapping
+    };
+    void setGroupedMapping(CompositedDeprecatedPaintLayerMapping*, SetGroupMappingOptions);
 
     bool hasCompositedMask() const;
     bool hasCompositedClippingMask() const;
@@ -332,12 +338,12 @@ public:
     // Computes the bounding paint invalidation rect for |layoutObject|, in the coordinate space of |paintInvalidationContainer|'s GraphicsLayer backing.
     static LayoutRect computePaintInvalidationRect(const LayoutObject*, const DeprecatedPaintLayer* paintInvalidationContainer, const PaintInvalidationState* = 0);
 
-    bool paintsWithTransparency(PaintBehavior paintBehavior) const
+    bool paintsWithTransparency(GlobalPaintFlags globalPaintFlags) const
     {
-        return isTransparent() && ((paintBehavior & PaintBehaviorFlattenCompositingLayers) || compositingState() != PaintsIntoOwnBacking);
+        return isTransparent() && ((globalPaintFlags & GlobalPaintFlattenCompositingLayers) || compositingState() != PaintsIntoOwnBacking);
     }
 
-    bool paintsWithTransform(PaintBehavior) const;
+    bool paintsWithTransform(GlobalPaintFlags) const;
 
     // Returns true if background phase is painted opaque in the given rect.
     // The query rect is given in local coordinates.
@@ -408,6 +414,7 @@ public:
             , filterAncestor(0)
             , clippingContainer(0)
             , ancestorScrollingLayer(0)
+            , nearestFixedPositionLayer(0)
             , scrollParent(0)
             , clipParent(0)
             , hasAncestorWithClipPath(false)
@@ -419,6 +426,7 @@ public:
         const DeprecatedPaintLayer* filterAncestor;
         const LayoutObject* clippingContainer;
         const DeprecatedPaintLayer* ancestorScrollingLayer;
+        const DeprecatedPaintLayer* nearestFixedPositionLayer;
 
         // A scroll parent is a compositor concept. It's only needed in blink
         // because we need to use it as a promotion trigger. A layer has a
@@ -472,6 +480,7 @@ public:
     const DeprecatedPaintLayer* filterAncestor() const { return ancestorDependentCompositingInputs().filterAncestor; }
     const LayoutObject* clippingContainer() const { return ancestorDependentCompositingInputs().clippingContainer; }
     const DeprecatedPaintLayer* ancestorScrollingLayer() const { return ancestorDependentCompositingInputs().ancestorScrollingLayer; }
+    const DeprecatedPaintLayer* nearestFixedPositionLayer() const { return ancestorDependentCompositingInputs().nearestFixedPositionLayer; }
     DeprecatedPaintLayer* scrollParent() const { return const_cast<DeprecatedPaintLayer*>(ancestorDependentCompositingInputs().scrollParent); }
     DeprecatedPaintLayer* clipParent() const { return const_cast<DeprecatedPaintLayer*>(ancestorDependentCompositingInputs().clipParent); }
     bool hasAncestorWithClipPath() const { return ancestorDependentCompositingInputs().hasAncestorWithClipPath; }
@@ -491,7 +500,6 @@ public:
     void setShouldIsolateCompositedDescendants(bool);
 
     void updateDescendantDependentFlags();
-    void updateDescendantDependentFlagsForEntireSubtree();
 
     void updateOrRemoveFilterEffectBuilder();
 
@@ -502,8 +510,6 @@ public:
 
     void didUpdateNeedsCompositedScrolling();
 
-    void setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
-
     bool hasSelfPaintingLayerDescendant() const
     {
         if (m_hasSelfPaintingLayerDescendantDirty)
@@ -511,7 +517,7 @@ public:
         ASSERT(!m_hasSelfPaintingLayerDescendantDirty);
         return m_hasSelfPaintingLayerDescendant;
     }
-    LayoutRect paintingExtent(const DeprecatedPaintLayer* rootLayer, const LayoutRect& paintDirtyRect, const LayoutSize& subPixelAccumulation, PaintBehavior);
+    LayoutRect paintingExtent(const DeprecatedPaintLayer* rootLayer, const LayoutRect& paintDirtyRect, const LayoutSize& subPixelAccumulation, GlobalPaintFlags);
     void appendSingleFragmentIgnoringPagination(DeprecatedPaintLayerFragments&, const DeprecatedPaintLayer* rootLayer, const LayoutRect& dirtyRect, ClipRectsCacheSlot, OverlayScrollbarSizeRelevancy = IgnoreOverlayScrollbarSize, ShouldRespectOverflowClip = RespectOverflowClip, const LayoutPoint* offsetFromRoot = 0, const LayoutSize& subPixelAccumulation = LayoutSize());
     void collectFragments(DeprecatedPaintLayerFragments&, const DeprecatedPaintLayer* rootLayer, const LayoutRect& dirtyRect,
         ClipRectsCacheSlot, OverlayScrollbarSizeRelevancy inOverlayScrollbarSizeRelevancy = IgnoreOverlayScrollbarSize,
@@ -531,7 +537,7 @@ public:
     };
 
     static LayoutRect transparencyClipBox(const DeprecatedPaintLayer*, const DeprecatedPaintLayer* rootLayer, TransparencyClipBoxBehavior transparencyBehavior,
-        TransparencyClipBoxMode transparencyMode, const LayoutSize& subPixelAccumulation, PaintBehavior = 0);
+        TransparencyClipBoxMode transparencyMode, const LayoutSize& subPixelAccumulation, GlobalPaintFlags = GlobalPaintNormalPhase);
 
 private:
     // Bounding box in the coordinates of this layer.
@@ -563,13 +569,6 @@ private:
         const LayoutRect& hitTestRect, const HitTestLocation&,
         const HitTestingTransformState*, double* zOffsetForDescendants, double* zOffset,
         const HitTestingTransformState* unflattenedTransformState, bool depthSortDescendants);
-    DeprecatedPaintLayer* hitTestPaginatedChildLayer(DeprecatedPaintLayer* childLayer, DeprecatedPaintLayer* rootLayer, HitTestResult&,
-        const LayoutRect& hitTestRect, const HitTestLocation&,
-        const HitTestingTransformState*, double* zOffset);
-    DeprecatedPaintLayer* hitTestChildLayerColumns(DeprecatedPaintLayer* childLayer, DeprecatedPaintLayer* rootLayer, HitTestResult&,
-        const LayoutRect& hitTestRect, const HitTestLocation&,
-        const HitTestingTransformState*, double* zOffset,
-        const Vector<DeprecatedPaintLayer*>& columnLayers, size_t columnIndex);
 
     PassRefPtr<HitTestingTransformState> createLocalTransformState(DeprecatedPaintLayer* rootLayer, DeprecatedPaintLayer* containerLayer,
         const LayoutRect& hitTestRect, const HitTestLocation&,
@@ -579,7 +578,7 @@ private:
     bool hitTestContents(HitTestResult&, const LayoutRect& layerBounds, const HitTestLocation&, HitTestFilter) const;
     bool hitTestContentsForFragments(const DeprecatedPaintLayerFragments&, HitTestResult&, const HitTestLocation&, HitTestFilter, bool& insideClipRect) const;
     DeprecatedPaintLayer* hitTestTransformedLayerInFragments(DeprecatedPaintLayer* rootLayer, DeprecatedPaintLayer* containerLayer, HitTestResult&,
-        const LayoutRect& hitTestRect, const HitTestLocation&, const HitTestingTransformState* = 0, double* zOffset = 0);
+        const LayoutRect& hitTestRect, const HitTestLocation&, const HitTestingTransformState*, double* zOffset, ClipRectsCacheSlot);
 
     bool childBackgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const;
 
@@ -608,8 +607,9 @@ private:
     void updateOrRemoveFilterClients();
 
     void updatePaginationRecursive(bool needsPaginationUpdate = false);
-    void updatePagination();
     void clearPaginationRecursive();
+
+    void blockSelectionGapsBoundsChanged();
 
     DeprecatedPaintLayerType m_layerType;
 
@@ -631,8 +631,6 @@ private:
     unsigned m_hasVisibleDescendant : 1;
 
     unsigned m_hasVisibleNonLayerContent : 1;
-
-    unsigned m_isPaginated : 1; // If we think this layer is split by a multi-column ancestor, then this bit will be set.
 
 #if ENABLE(ASSERT)
     unsigned m_needsPositionUpdate : 1;
@@ -710,7 +708,7 @@ private:
     IntRect m_blockSelectionGapsBounds;
 
     OwnPtr<CompositedDeprecatedPaintLayerMapping> m_compositedDeprecatedPaintLayerMapping;
-    OwnPtr<DeprecatedPaintLayerScrollableArea> m_scrollableArea;
+    OwnPtrWillBePersistent<DeprecatedPaintLayerScrollableArea> m_scrollableArea;
 
     CompositedDeprecatedPaintLayerMapping* m_groupedMapping;
 

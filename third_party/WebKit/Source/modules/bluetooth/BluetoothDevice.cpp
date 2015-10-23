@@ -12,42 +12,31 @@
 #include "core/dom/ExceptionCode.h"
 #include "modules/bluetooth/BluetoothError.h"
 #include "modules/bluetooth/BluetoothGATTRemoteServer.h"
-#include "public/platform/Platform.h"
+#include "modules/bluetooth/BluetoothSupplement.h"
 #include "public/platform/modules/bluetooth/WebBluetooth.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
-BluetoothDevice::BluetoothDevice(const WebBluetoothDevice& webDevice)
+BluetoothDevice::BluetoothDevice(PassOwnPtr<WebBluetoothDevice> webDevice)
     : m_webDevice(webDevice)
 {
 }
 
-BluetoothDevice* BluetoothDevice::create(const WebBluetoothDevice& webDevice)
+BluetoothDevice* BluetoothDevice::take(ScriptPromiseResolver*, PassOwnPtr<WebBluetoothDevice> webDevice)
 {
+    ASSERT(webDevice);
     return new BluetoothDevice(webDevice);
-}
-
-BluetoothDevice* BluetoothDevice::take(ScriptPromiseResolver*, WebBluetoothDevice* webDeviceRawPointer)
-{
-    OwnPtr<WebBluetoothDevice> webDevice = adoptPtr(webDeviceRawPointer);
-    return BluetoothDevice::create(*webDevice);
-}
-
-void BluetoothDevice::dispose(WebBluetoothDevice* webDeviceRaw)
-{
-    delete webDeviceRaw;
 }
 
 unsigned BluetoothDevice::deviceClass(bool& isNull)
 {
     isNull = false;
-    return m_webDevice.deviceClass;
+    return m_webDevice->deviceClass;
 }
 
 String BluetoothDevice::vendorIDSource()
 {
-    switch (m_webDevice.vendorIDSource) {
+    switch (m_webDevice->vendorIDSource) {
     case WebBluetoothDevice::VendorIDSource::Unknown: return String();
     case WebBluetoothDevice::VendorIDSource::Bluetooth: return "bluetooth";
     case WebBluetoothDevice::VendorIDSource::USB: return "usb";
@@ -59,40 +48,40 @@ String BluetoothDevice::vendorIDSource()
 unsigned BluetoothDevice::vendorID(bool& isNull)
 {
     isNull = false;
-    return m_webDevice.vendorID;
+    return m_webDevice->vendorID;
 }
 
 unsigned BluetoothDevice::productID(bool& isNull)
 {
     isNull = false;
-    return m_webDevice.productID;
+    return m_webDevice->productID;
 }
 
 unsigned BluetoothDevice::productVersion(bool& isNull)
 {
     isNull = false;
-    return m_webDevice.productVersion;
+    return m_webDevice->productVersion;
 }
 
 bool BluetoothDevice::paired()
 {
-    return m_webDevice.paired;
+    return m_webDevice->paired;
 }
 
 Vector<String> BluetoothDevice::uuids()
 {
-    Vector<String> uuids(m_webDevice.uuids.size());
-    for (size_t i = 0; i < m_webDevice.uuids.size(); ++i)
-        uuids[i] = m_webDevice.uuids[i];
+    Vector<String> uuids(m_webDevice->uuids.size());
+    for (size_t i = 0; i < m_webDevice->uuids.size(); ++i)
+        uuids[i] = m_webDevice->uuids[i];
     return uuids;
 }
 
 ScriptPromise BluetoothDevice::connectGATT(ScriptState* scriptState)
 {
-    WebBluetooth* webbluetooth = Platform::current()->bluetooth();
+    WebBluetooth* webbluetooth = BluetoothSupplement::from(scriptState);
     if (!webbluetooth)
         return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(NotSupportedError));
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
     webbluetooth->connectGATT(instanceID(), new CallbackPromiseAdapter<BluetoothGATTRemoteServer, BluetoothError>(resolver));
     return promise;

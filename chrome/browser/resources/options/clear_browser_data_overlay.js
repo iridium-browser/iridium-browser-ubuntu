@@ -220,6 +220,19 @@ cr.define('options', function() {
       $('clear-browser-data-time-period').disabled = clearing;
       $('cbd-throbber').style.visibility = clearing ? 'visible' : 'hidden';
       $('clear-browser-data-dismiss').disabled = clearing;
+    },
+
+    /**
+     * Updates the given data volume counter with a given text.
+     * @param {string} pref_name Name of the deletion preference of the counter
+     *     to be updated.
+     * @param {string} text The new text of the counter.
+     * @private
+     */
+    updateCounter_: function(pref_name, text) {
+      var counter = document.querySelector(
+          'input[pref="' + pref_name + '"] ~ .clear-browser-data-counter');
+      counter.textContent = text;
     }
   };
 
@@ -230,6 +243,10 @@ cr.define('options', function() {
     ClearBrowserDataOverlay.getInstance().setAllowDeletingHistory_(allowed);
   };
 
+  ClearBrowserDataOverlay.updateCounter = function(pref_name, text) {
+    ClearBrowserDataOverlay.getInstance().updateCounter_(pref_name, text);
+  };
+
   ClearBrowserDataOverlay.setClearing = function(clearing) {
     ClearBrowserDataOverlay.getInstance().setClearing_(clearing);
   };
@@ -238,9 +255,8 @@ cr.define('options', function() {
     ClearBrowserDataOverlay.getInstance().markInitializationComplete_();
   };
 
-  ClearBrowserDataOverlay.setBannerVisibility = function(args) {
-    var visible = args[0];
-    $('clear-browser-data-info-banner').hidden = !visible;
+  ClearBrowserDataOverlay.setBannerText = function(text) {
+    $('clear-browser-data-info-banner').innerText = text;
   };
 
   ClearBrowserDataOverlay.doneClearing = function() {

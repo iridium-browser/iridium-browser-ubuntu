@@ -41,6 +41,10 @@
 #include "platform/fonts/Font.h"
 #include "platform/fonts/FontSelector.h"
 #include "platform/geometry/FloatRoundedRect.h"
+#include "platform/graphics/GraphicsContext.h"
+#include "platform/transforms/RotateTransformOperation.h"
+#include "platform/transforms/ScaleTransformOperation.h"
+#include "platform/transforms/TranslateTransformOperation.h"
 #include "wtf/MathExtras.h"
 
 #include <algorithm>
@@ -126,6 +130,7 @@ ALWAYS_INLINE ComputedStyle::ComputedStyle(InitialStyleTag)
     rareNonInheritedData.access()->m_filter.init();
     rareNonInheritedData.access()->m_grid.init();
     rareNonInheritedData.access()->m_gridItem.init();
+    rareNonInheritedData.access()->m_scrollSnap.init();
     rareInheritedData.init();
     inherited.init();
     m_svgStyle.init();
@@ -175,7 +180,6 @@ StyleRecalcChange ComputedStyle::stylePropagationDiff(const ComputedStyle* oldSt
 
     if (oldStyle->display() != newStyle->display()
         || oldStyle->hasPseudoStyle(FIRST_LETTER) != newStyle->hasPseudoStyle(FIRST_LETTER)
-        || oldStyle->columnSpan() != newStyle->columnSpan()
         || !oldStyle->contentDataEquivalent(newStyle)
         || oldStyle->hasTextCombine() != newStyle->hasTextCombine()
         || oldStyle->justifyItems() != newStyle->justifyItems()
@@ -249,6 +253,7 @@ void ComputedStyle::copyNonInheritedFromCached(const ComputedStyle& other)
     noninherited_flags.pageBreakBefore = other.noninherited_flags.pageBreakBefore;
     noninherited_flags.pageBreakAfter = other.noninherited_flags.pageBreakAfter;
     noninherited_flags.pageBreakInside = other.noninherited_flags.pageBreakInside;
+    noninherited_flags.hasRemUnits = other.noninherited_flags.hasRemUnits;
 
     // Correctly set during selector matching:
     // noninherited_flags.styleType
@@ -411,7 +416,7 @@ StyleDifference ComputedStyle::visualInvalidationDiff(const ComputedStyle& other
 
     if (!diff.needsFullLayout() && surround->margin != other.surround->margin) {
         // Relative-positioned elements collapse their margins so need a full layout.
-        if (position() == AbsolutePosition || position() == FixedPosition)
+        if (hasOutOfFlowPosition())
             diff.setNeedsPositionedMovementLayout();
         else
             diff.setNeedsFullLayout();
@@ -470,7 +475,6 @@ bool ComputedStyle::diffNeedsFullLayoutAndPaintInvalidation(const ComputedStyle&
             || rareNonInheritedData->m_order != other.rareNonInheritedData->m_order
             || rareNonInheritedData->m_grid.get() != other.rareNonInheritedData->m_grid.get()
             || rareNonInheritedData->m_gridItem.get() != other.rareNonInheritedData->m_gridItem.get()
-            || rareNonInheritedData->m_textCombine != other.rareNonInheritedData->m_textCombine
             || rareNonInheritedData->hasFilters() != other.rareNonInheritedData->hasFilters())
             return true;
 
@@ -525,6 +529,7 @@ bool ComputedStyle::diffNeedsFullLayoutAndPaintInvalidation(const ComputedStyle&
             || rareInheritedData->hyphenationLimitBefore != other.rareInheritedData->hyphenationLimitBefore
             || rareInheritedData->hyphenationLimitAfter != other.rareInheritedData->hyphenationLimitAfter
             || rareInheritedData->hyphenationString != other.rareInheritedData->hyphenationString
+            || rareInheritedData->m_respectImageOrientation != other.rareInheritedData->m_respectImageOrientation
             || rareInheritedData->locale != other.rareInheritedData->locale
             || rareInheritedData->m_rubyPosition != other.rareInheritedData->m_rubyPosition
             || rareInheritedData->textEmphasisMark != other.rareInheritedData->textEmphasisMark
@@ -532,6 +537,7 @@ bool ComputedStyle::diffNeedsFullLayoutAndPaintInvalidation(const ComputedStyle&
             || rareInheritedData->textEmphasisCustomMark != other.rareInheritedData->textEmphasisCustomMark
             || rareInheritedData->m_textJustify != other.rareInheritedData->m_textJustify
             || rareInheritedData->m_textOrientation != other.rareInheritedData->m_textOrientation
+            || rareInheritedData->m_textCombine != other.rareInheritedData->m_textCombine
             || rareInheritedData->m_tabSize != other.rareInheritedData->m_tabSize
             || rareInheritedData->m_lineBoxContain != other.rareInheritedData->m_lineBoxContain
             || rareInheritedData->listStyleImage != other.rareInheritedData->listStyleImage
@@ -735,12 +741,12 @@ void ComputedStyle::updatePropertySpecificDifferences(const ComputedStyle& other
             || inherited->visitedLinkColor != other.inherited->visitedLinkColor
             || inherited_flags.m_textUnderline != other.inherited_flags.m_textUnderline
             || visual->textDecoration != other.visual->textDecoration) {
-            diff.setTextOrColorChanged();
+            diff.setTextDecorationOrColorChanged();
         } else if (rareNonInheritedData.get() != other.rareNonInheritedData.get()
             && (rareNonInheritedData->m_textDecorationStyle != other.rareNonInheritedData->m_textDecorationStyle
                 || rareNonInheritedData->m_textDecorationColor != other.rareNonInheritedData->m_textDecorationColor
                 || rareNonInheritedData->m_visitedLinkTextDecorationColor != other.rareNonInheritedData->m_visitedLinkTextDecorationColor)) {
-                diff.setTextOrColorChanged();
+                diff.setTextDecorationOrColorChanged();
         } else if (rareInheritedData.get() != other.rareInheritedData.get()
             && (rareInheritedData->textFillColor() != other.rareInheritedData->textFillColor()
                 || rareInheritedData->textStrokeColor() != other.rareInheritedData->textStrokeColor()
@@ -750,19 +756,24 @@ void ComputedStyle::updatePropertySpecificDifferences(const ComputedStyle& other
                 || rareInheritedData->visitedLinkTextEmphasisColor() != other.rareInheritedData->visitedLinkTextEmphasisColor()
                 || rareInheritedData->textEmphasisFill != other.rareInheritedData->textEmphasisFill
                 || rareInheritedData->appliedTextDecorations != other.rareInheritedData->appliedTextDecorations)) {
-                diff.setTextOrColorChanged();
+                diff.setTextDecorationOrColorChanged();
         }
     }
 }
 
-void ComputedStyle::addCursor(PassRefPtr<StyleImage> image, bool hotSpotSpecified, const IntPoint& hotSpot)
+void ComputedStyle::addCursor(PassRefPtrWillBeRawPtr<StyleImage> image, bool hotSpotSpecified, const IntPoint& hotSpot)
 {
-    if (!rareInheritedData.access()->cursorData)
+    if (!rareInheritedData.access()->cursorData) {
+#if ENABLE(OILPAN)
+        rareInheritedData.access()->cursorData = new CursorList;
+#else
         rareInheritedData.access()->cursorData = CursorList::create();
+#endif
+    }
     rareInheritedData.access()->cursorData->append(CursorData(image, hotSpotSpecified, hotSpot));
 }
 
-void ComputedStyle::setCursorList(PassRefPtr<CursorList> other)
+void ComputedStyle::setCursorList(PassRefPtrWillBeRawPtr<CursorList> other)
 {
     rareInheritedData.access()->cursorData = other;
 }
@@ -790,9 +801,9 @@ void ComputedStyle::clearContent()
         rareNonInheritedData.access()->m_content = nullptr;
 }
 
-void ComputedStyle::appendContent(PassOwnPtr<ContentData> contentData)
+void ComputedStyle::appendContent(PassOwnPtrWillBeRawPtr<ContentData> contentData)
 {
-    OwnPtr<ContentData>& content = rareNonInheritedData.access()->m_content;
+    OwnPtrWillBePersistent<ContentData>& content = rareNonInheritedData.access()->m_content;
     ContentData* lastContent = content.get();
     while (lastContent && lastContent->next())
         lastContent = lastContent->next();
@@ -803,7 +814,7 @@ void ComputedStyle::appendContent(PassOwnPtr<ContentData> contentData)
         content = contentData;
 }
 
-void ComputedStyle::setContent(PassRefPtr<StyleImage> image, bool add)
+void ComputedStyle::setContent(PassRefPtrWillBeRawPtr<StyleImage> image, bool add)
 {
     if (!image)
         return;
@@ -818,7 +829,7 @@ void ComputedStyle::setContent(PassRefPtr<StyleImage> image, bool add)
 
 void ComputedStyle::setContent(const String& string, bool add)
 {
-    OwnPtr<ContentData>& content = rareNonInheritedData.access()->m_content;
+    OwnPtrWillBePersistent<ContentData>& content = rareNonInheritedData.access()->m_content;
     if (add) {
         ContentData* lastContent = content.get();
         while (lastContent && lastContent->next())
@@ -882,15 +893,17 @@ bool ComputedStyle::hasWillChangeCompositingHint() const
     return false;
 }
 
-inline bool requireTransformOrigin(const Vector<RefPtr<TransformOperation>>& transformOperations, ComputedStyle::ApplyTransformOrigin applyOrigin, ComputedStyle::ApplyMotionPath applyMotionPath)
+bool ComputedStyle::requireTransformOrigin(ApplyTransformOrigin applyOrigin, ApplyMotionPath applyMotionPath) const
 {
+    const Vector<RefPtr<TransformOperation>>& transformOperations = transform().operations();
+
     // transform-origin brackets the transform with translate operations.
     // Optimize for the case where the only transform is a translation, since the transform-origin is irrelevant
     // in that case.
-    if (applyOrigin != ComputedStyle::IncludeTransformOrigin)
+    if (applyOrigin != IncludeTransformOrigin)
         return false;
 
-    if (applyMotionPath == ComputedStyle::IncludeMotionPath)
+    if (applyMotionPath == IncludeMotionPath)
         return true;
 
     unsigned size = transformOperations.size();
@@ -904,45 +917,59 @@ inline bool requireTransformOrigin(const Vector<RefPtr<TransformOperation>>& tra
             return true;
     }
 
-    return false;
+    return scale() || rotate();
 }
 
-void ComputedStyle::applyTransform(TransformationMatrix& transform, const LayoutSize& borderBoxSize, ApplyTransformOrigin applyOrigin, ApplyMotionPath applyMotionPath) const
+void ComputedStyle::applyTransform(TransformationMatrix& result, const LayoutSize& borderBoxSize, ApplyTransformOrigin applyOrigin, ApplyMotionPath applyMotionPath, ApplyIndependentTransformProperties applyIndependentTransformProperties) const
 {
-    applyTransform(transform, FloatRect(FloatPoint(), FloatSize(borderBoxSize)), applyOrigin, applyMotionPath);
+    applyTransform(result, FloatRect(FloatPoint(), FloatSize(borderBoxSize)), applyOrigin, applyMotionPath, applyIndependentTransformProperties);
 }
 
-void ComputedStyle::applyTransform(TransformationMatrix& transform, const FloatRect& boundingBox, ApplyTransformOrigin applyOrigin, ApplyMotionPath applyMotionPath) const
+void ComputedStyle::applyTransform(TransformationMatrix& result, const FloatRect& boundingBox, ApplyTransformOrigin applyOrigin, ApplyMotionPath applyMotionPath, ApplyIndependentTransformProperties applyIndependentTransformProperties) const
 {
     if (!hasMotionPath())
         applyMotionPath = ExcludeMotionPath;
-    const Vector<RefPtr<TransformOperation>>& transformOperations = rareNonInheritedData->m_transform->m_operations.operations();
-    bool applyTransformOrigin = requireTransformOrigin(transformOperations, applyOrigin, applyMotionPath);
+    bool applyTransformOrigin = requireTransformOrigin(applyOrigin, applyMotionPath);
 
     float offsetX = transformOriginX().type() == Percent ? boundingBox.x() : 0;
     float offsetY = transformOriginY().type() == Percent ? boundingBox.y() : 0;
 
+    float originX = 0;
+    float originY = 0;
+    float originZ = 0;
+
     if (applyTransformOrigin) {
-        transform.translate3d(floatValueForLength(transformOriginX(), boundingBox.width()) + offsetX,
-            floatValueForLength(transformOriginY(), boundingBox.height()) + offsetY,
-            transformOriginZ());
+        originX = floatValueForLength(transformOriginX(), boundingBox.width()) + offsetX;
+        originY = floatValueForLength(transformOriginY(), boundingBox.height()) + offsetY;
+        originZ = transformOriginZ();
+        result.translate3d(originX, originY, originZ);
+    }
+
+    if (applyIndependentTransformProperties == IncludeIndependentTransformProperties) {
+        if (translate())
+            translate()->apply(result, boundingBox.size());
+
+        if (rotate())
+            rotate()->apply(result, boundingBox.size());
+
+        if (scale())
+            scale()->apply(result, boundingBox.size());
     }
 
     if (applyMotionPath == ComputedStyle::IncludeMotionPath)
-        applyMotionPathTransform(transform);
+        applyMotionPathTransform(originX, originY, result);
 
+    const Vector<RefPtr<TransformOperation>>& transformOperations = transform().operations();
     unsigned size = transformOperations.size();
     for (unsigned i = 0; i < size; ++i)
-        transformOperations[i]->apply(transform, boundingBox.size());
+        transformOperations[i]->apply(result, boundingBox.size());
 
     if (applyTransformOrigin) {
-        transform.translate3d(-floatValueForLength(transformOriginX(), boundingBox.width()) - offsetX,
-            -floatValueForLength(transformOriginY(), boundingBox.height()) - offsetY,
-            -transformOriginZ());
+        result.translate3d(-originX, -originY, -originZ);
     }
 }
 
-void ComputedStyle::applyMotionPathTransform(TransformationMatrix& transform) const
+void ComputedStyle::applyMotionPathTransform(float originX, float originY, TransformationMatrix& transform) const
 {
     const StyleMotionData& motionData = rareNonInheritedData->m_transform->m_motion;
     ASSERT(motionData.m_path && motionData.m_path->isPathStyleMotionPath());
@@ -965,7 +992,7 @@ void ComputedStyle::applyMotionPathTransform(TransformationMatrix& transform) co
     if (motionData.m_rotationType == MotionRotationFixed)
         angle = 0;
 
-    transform.translate(point.x(), point.y());
+    transform.translate(point.x() - originX, point.y() - originY);
     transform.rotate(angle + motionData.m_rotation);
 }
 
@@ -993,7 +1020,7 @@ static FloatRoundedRect::Radii calcRadiiFor(const BorderData& border, LayoutSize
 }
 
 StyleImage* ComputedStyle::listStyleImage() const { return rareInheritedData->listStyleImage.get(); }
-void ComputedStyle::setListStyleImage(PassRefPtr<StyleImage> v)
+void ComputedStyle::setListStyleImage(PassRefPtrWillBeRawPtr<StyleImage> v)
 {
     if (rareInheritedData->listStyleImage != v)
         rareInheritedData.access()->listStyleImage = v;
@@ -1128,7 +1155,9 @@ const AtomicString& ComputedStyle::hyphenString() const
     // FIXME: This should depend on locale.
     DEFINE_STATIC_LOCAL(AtomicString, hyphenMinusString, (&hyphenMinusCharacter, 1));
     DEFINE_STATIC_LOCAL(AtomicString, hyphenString, (&hyphenCharacter, 1));
-    return font().primaryFontHasGlyphForCharacter(hyphenCharacter) ? hyphenString : hyphenMinusString;
+    const SimpleFontData* primaryFont = font().primaryFont();
+    ASSERT(primaryFont);
+    return primaryFont->glyphForCharacter(hyphenCharacter) ? hyphenString : hyphenMinusString;
 }
 
 const AtomicString& ComputedStyle::textEmphasisMarkString() const
@@ -1233,6 +1262,11 @@ bool ComputedStyle::setFontDescription(const FontDescription& v)
         return true;
     }
     return false;
+}
+
+void ComputedStyle::setFont(const Font& font)
+{
+    inherited.access()->font = font;
 }
 
 const Length& ComputedStyle::specifiedLineHeight() const { return inherited->line_height; }
@@ -1522,7 +1556,7 @@ const BorderValue& ComputedStyle::borderEnd() const
     return isLeftToRightDirection() ? borderBottom() : borderTop();
 }
 
-unsigned short ComputedStyle::borderBeforeWidth() const
+int ComputedStyle::borderBeforeWidth() const
 {
     switch (writingMode()) {
     case TopToBottomWritingMode:
@@ -1538,7 +1572,7 @@ unsigned short ComputedStyle::borderBeforeWidth() const
     return borderTopWidth();
 }
 
-unsigned short ComputedStyle::borderAfterWidth() const
+int ComputedStyle::borderAfterWidth() const
 {
     switch (writingMode()) {
     case TopToBottomWritingMode:
@@ -1554,14 +1588,14 @@ unsigned short ComputedStyle::borderAfterWidth() const
     return borderBottomWidth();
 }
 
-unsigned short ComputedStyle::borderStartWidth() const
+int ComputedStyle::borderStartWidth() const
 {
     if (isHorizontalWritingMode())
         return isLeftToRightDirection() ? borderLeftWidth() : borderRightWidth();
     return isLeftToRightDirection() ? borderTopWidth() : borderBottomWidth();
 }
 
-unsigned short ComputedStyle::borderEndWidth() const
+int ComputedStyle::borderEndWidth() const
 {
     if (isHorizontalWritingMode())
         return isLeftToRightDirection() ? borderRightWidth() : borderLeftWidth();
@@ -1609,6 +1643,15 @@ void ComputedStyle::resetMotionPath()
     rareNonInheritedData.access()->m_transform.access()->m_motion.m_path = nullptr;
 }
 
+int ComputedStyle::outlineOutsetExtent() const
+{
+    if (!hasOutline())
+        return 0;
+    if (outlineStyleIsAuto())
+        return GraphicsContext::focusRingOutsetExtent(outlineOffset(), outlineWidth());
+    return std::max(0, outlineWidth() + outlineOffset());
+}
+
 bool ComputedStyle::columnRuleEquivalent(const ComputedStyle* otherStyle) const
 {
     return columnRuleStyle() == otherStyle->columnRuleStyle()
@@ -1650,7 +1693,7 @@ LayoutRectOutsets ComputedStyle::imageOutsets(const NinePieceImage& image) const
         NinePieceImage::computeOutset(image.outset().left(), borderLeftWidth()));
 }
 
-void ComputedStyle::setBorderImageSource(PassRefPtr<StyleImage> image)
+void ComputedStyle::setBorderImageSource(PassRefPtrWillBeRawPtr<StyleImage> image)
 {
     if (surround->border.m_image.image() == image.get())
         return;
@@ -1710,29 +1753,32 @@ void ComputedStyle::getBorderEdgeInfo(BorderEdge edges[], bool includeLogicalLef
 {
     bool horizontal = isHorizontalWritingMode();
 
-    edges[BSTop] = BorderEdge(borderTopWidth(),
+    edges[BSTop] = BorderEdge(LayoutUnit(borderTopWidth()),
         visitedDependentColor(CSSPropertyBorderTopColor),
         borderTopStyle(),
-        borderTopIsTransparent(),
         horizontal || includeLogicalLeftEdge);
 
-    edges[BSRight] = BorderEdge(borderRightWidth(),
+    edges[BSRight] = BorderEdge(LayoutUnit(borderRightWidth()),
         visitedDependentColor(CSSPropertyBorderRightColor),
         borderRightStyle(),
-        borderRightIsTransparent(),
         !horizontal || includeLogicalRightEdge);
 
-    edges[BSBottom] = BorderEdge(borderBottomWidth(),
+    edges[BSBottom] = BorderEdge(LayoutUnit(borderBottomWidth()),
         visitedDependentColor(CSSPropertyBorderBottomColor),
         borderBottomStyle(),
-        borderBottomIsTransparent(),
         horizontal || includeLogicalRightEdge);
 
-    edges[BSLeft] = BorderEdge(borderLeftWidth(),
+    edges[BSLeft] = BorderEdge(LayoutUnit(borderLeftWidth()),
         visitedDependentColor(CSSPropertyBorderLeftColor),
         borderLeftStyle(),
-        borderLeftIsTransparent(),
         !horizontal || includeLogicalLeftEdge);
+}
+
+void ComputedStyle::copyChildDependentFlagsFrom(const ComputedStyle& other)
+{
+    setEmptyState(other.emptyState());
+    if (other.hasExplicitlyInheritedProperties())
+        setHasExplicitlyInheritedProperties();
 }
 
 } // namespace blink

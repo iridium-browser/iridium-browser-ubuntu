@@ -21,10 +21,14 @@ PermissionType PermissionNameToPermissionType(PermissionName name) {
       return PermissionType::NOTIFICATIONS;
     case PERMISSION_NAME_PUSH_NOTIFICATIONS:
       return PermissionType::PUSH_MESSAGING;
+    case PERMISSION_NAME_MIDI:
+      return PermissionType::MIDI;
     case PERMISSION_NAME_MIDI_SYSEX:
       return PermissionType::MIDI_SYSEX;
     case PERMISSION_NAME_PROTECTED_MEDIA_IDENTIFIER:
       return PermissionType::PROTECTED_MEDIA_IDENTIFIER;
+    case PERMISSION_NAME_DURABLE_STORAGE:
+      return PermissionType::DURABLE_STORAGE;
   }
 
   NOTREACHED();
@@ -62,9 +66,15 @@ PermissionServiceImpl::PendingSubscription::~PendingSubscription() {
     callback.Run(PERMISSION_STATUS_ASK);
 }
 
-PermissionServiceImpl::PermissionServiceImpl(PermissionServiceContext* context)
+PermissionServiceImpl::PermissionServiceImpl(
+    PermissionServiceContext* context,
+    mojo::InterfaceRequest<PermissionService> request)
     : context_(context),
+      binding_(this, request.Pass()),
       weak_factory_(this) {
+  binding_.set_connection_error_handler(
+      base::Bind(&PermissionServiceImpl::OnConnectionError,
+                 base::Unretained(this)));
 }
 
 PermissionServiceImpl::~PermissionServiceImpl() {
@@ -88,7 +98,7 @@ void PermissionServiceImpl::RequestPermission(
   // can. Even if the call comes from a context where it is not possible to show
   // any UI, we want to still return something relevant so the current
   // permission status is returned.
-  if (!context_->web_contents()) {
+  if (!context_->render_frame_host()) {
     // There is no way to show a UI so the call will simply return the current
     // permission.
     HasPermission(permission, origin, callback);
@@ -108,7 +118,7 @@ void PermissionServiceImpl::RequestPermission(
 
   browser_context->GetPermissionManager()->RequestPermission(
       permission_type,
-      context_->web_contents(),
+      context_->render_frame_host(),
       request_id,
       GURL(origin),
       user_gesture, // TODO(mlamouri): should be removed (crbug.com/423770)
@@ -128,7 +138,7 @@ void PermissionServiceImpl::OnRequestPermissionResponse(
 }
 
 void PermissionServiceImpl::CancelPendingOperations() {
-  DCHECK(context_->web_contents());
+  DCHECK(context_->render_frame_host());
   DCHECK(context_->GetBrowserContext());
 
   PermissionManager* permission_manager =
@@ -141,7 +151,7 @@ void PermissionServiceImpl::CancelPendingOperations() {
        !it.IsAtEnd(); it.Advance()) {
     permission_manager->CancelPermissionRequest(
         it.GetCurrentValue()->permission,
-        context_->web_contents(),
+        context_->render_frame_host(),
         it.GetCurrentKey(),
         it.GetCurrentValue()->origin);
   }

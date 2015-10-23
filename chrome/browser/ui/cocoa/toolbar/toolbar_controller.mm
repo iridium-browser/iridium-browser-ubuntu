@@ -15,9 +15,9 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/command_observer.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -42,7 +42,6 @@
 #import "chrome/browser/ui/cocoa/toolbar/wrench_toolbar_button_cell.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_badge_controller.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
@@ -50,9 +49,11 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #import "ui/base/cocoa/menu_controller.h"
@@ -121,6 +122,7 @@ CGFloat BrowserActionsContainerDelegate::GetMaxAllowedWidth() {
 
 @interface ToolbarController()
 @property(assign, nonatomic) Browser* browser;
+- (void)cleanUp;
 - (void)addAccessibilityDescriptions;
 - (void)initCommandStatus:(CommandUpdater*)commands;
 - (void)prefChanged:(const std::string&)prefName;
@@ -138,6 +140,30 @@ CGFloat BrowserActionsContainerDelegate::GetMaxAllowedWidth() {
 @end
 
 namespace ToolbarControllerInternal {
+
+// A C++ bridge class that handles listening for updates to commands and
+// passing them back to ToolbarController. ToolbarController will create one of
+// these bridges, pass them to CommandUpdater::AddCommandObserver, and then wait
+// for update notifications, delivered via
+// -enabledStateChangedForCommand:enabled:.
+class CommandObserverBridge : public CommandObserver {
+ public:
+  explicit CommandObserverBridge(ToolbarController* observer)
+      : observer_(observer) {
+    DCHECK(observer_);
+  }
+
+ protected:
+  // Overridden from CommandObserver
+  void EnabledStateChangedForCommand(int command, bool enabled) override {
+    [observer_ enabledStateChangedForCommand:command enabled:enabled];
+  }
+
+ private:
+  ToolbarController* observer_;  // weak, owns me
+
+  DISALLOW_COPY_AND_ASSIGN(CommandObserverBridge);
+};
 
 // A class registered for C++ notifications. This is used to detect changes in
 // preferences and upgrade available notifications. Bridges the notification
@@ -164,6 +190,8 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
     [controller_ prefChanged:pref_name];
   }
 
+  WrenchMenuBadgeController* badge_controller() { return &badge_controller_; }
+
  private:
   ToolbarController* controller_;  // weak, owns us
 
@@ -181,7 +209,6 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 - (id)initWithCommands:(CommandUpdater*)commands
                profile:(Profile*)profile
                browser:(Browser*)browser
-        resizeDelegate:(id<ViewResizer>)resizeDelegate
           nibFileNamed:(NSString*)nibName {
   DCHECK(commands && profile && [nibName length]);
   if ((self = [super initWithNibName:nibName
@@ -189,56 +216,34 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
     commands_ = commands;
     profile_ = profile;
     browser_ = browser;
-    resizeDelegate_ = resizeDelegate;
     hasToolbar_ = YES;
     hasLocationBar_ = YES;
 
     // Register for notifications about state changes for the toolbar buttons
-    commandObserver_.reset(new CommandObserverBridge(self, commands));
-    commandObserver_->ObserveCommand(IDC_BACK);
-    commandObserver_->ObserveCommand(IDC_FORWARD);
-    commandObserver_->ObserveCommand(IDC_RELOAD);
-    commandObserver_->ObserveCommand(IDC_HOME);
-    commandObserver_->ObserveCommand(IDC_BOOKMARK_PAGE);
+    commandObserver_.reset(
+        new ToolbarControllerInternal::CommandObserverBridge(self));
+
+    commands->AddCommandObserver(IDC_BACK, commandObserver_.get());
+    commands->AddCommandObserver(IDC_FORWARD, commandObserver_.get());
+    commands->AddCommandObserver(IDC_RELOAD, commandObserver_.get());
+    commands->AddCommandObserver(IDC_HOME, commandObserver_.get());
+    commands->AddCommandObserver(IDC_BOOKMARK_PAGE, commandObserver_.get());
+    // NOTE: Don't remove the command observers. ToolbarController is
+    // autoreleased at about the same time as the CommandUpdater (owned by the
+    // Browser), so |commands_| may not be valid any more.
   }
   return self;
 }
 
 - (id)initWithCommands:(CommandUpdater*)commands
                profile:(Profile*)profile
-               browser:(Browser*)browser
-        resizeDelegate:(id<ViewResizer>)resizeDelegate {
+               browser:(Browser*)browser {
   if ((self = [self initWithCommands:commands
                              profile:profile
                              browser:browser
-                      resizeDelegate:resizeDelegate
                         nibFileNamed:@"Toolbar"])) {
   }
   return self;
-}
-
-
-- (void)dealloc {
-  browserActionsContainerDelegate_.reset();
-
-  // Unset ViewIDs of toolbar elements.
-  // ViewIDs of |toolbarView|, |reloadButton_|, |locationBar_| and
-  // |browserActionsContainerView_| are handled by themselves.
-  view_id_util::UnsetID(backButton_);
-  view_id_util::UnsetID(forwardButton_);
-  view_id_util::UnsetID(homeButton_);
-  view_id_util::UnsetID(wrenchButton_);
-
-  // Make sure any code in the base class which assumes [self view] is
-  // the "parent" view continues to work.
-  hasToolbar_ = YES;
-  hasLocationBar_ = YES;
-
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-
-  if (trackingArea_.get())
-    [[self view] removeTrackingArea:trackingArea_.get()];
-  [super dealloc];
 }
 
 // Called after the view is done loading and the outlets have been hooked up.
@@ -368,16 +373,69 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   [self addAccessibilityDescriptions];
 }
 
+- (void)dealloc {
+  [self cleanUp];
+  [super dealloc];
+}
+
+- (void)browserWillBeDestroyed {
+  // Pass this call onto other reference counted objects.
+  [backMenuController_ browserWillBeDestroyed];
+  [forwardMenuController_ browserWillBeDestroyed];
+  [browserActionsController_ browserWillBeDestroyed];
+  [wrenchMenuController_ browserWillBeDestroyed];
+
+  [self cleanUp];
+}
+
+- (void)cleanUp {
+  // Unset ViewIDs of toolbar elements.
+  // ViewIDs of |toolbarView|, |reloadButton_|, |locationBar_| and
+  // |browserActionsContainerView_| are handled by themselves.
+  view_id_util::UnsetID(backButton_);
+  view_id_util::UnsetID(forwardButton_);
+  view_id_util::UnsetID(homeButton_);
+  view_id_util::UnsetID(wrenchButton_);
+
+  // Make sure any code in the base class which assumes [self view] is
+  // the "parent" view continues to work.
+  hasToolbar_ = YES;
+  hasLocationBar_ = YES;
+
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+  if (trackingArea_.get()) {
+    [[self view] removeTrackingArea:trackingArea_.get()];
+    [trackingArea_.get() clearOwner];
+    trackingArea_.reset();
+  }
+
+  // Destroy owned objects that hold a weak Browser*.
+  locationBarView_.reset();
+  browserActionsContainerDelegate_.reset();
+  browser_ = nullptr;
+}
+
 - (void)addAccessibilityDescriptions {
   // Set accessibility descriptions. http://openradar.appspot.com/7496255
   NSString* description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_BACK);
   [[backButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
+  NSString* helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_TOOLTIP_BACK);
+  [[backButton_ cell]
+      accessibilitySetOverrideValue:helpTag
+                       forAttribute:NSAccessibilityHelpAttribute];
+
   description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_FORWARD);
   [[forwardButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
+  helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_TOOLTIP_FORWARD);
+  [[forwardButton_ cell]
+      accessibilitySetOverrideValue:helpTag
+                       forAttribute:NSAccessibilityHelpAttribute];
+
   description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_RELOAD);
   [[reloadButton_ cell]
       accessibilitySetOverrideValue:description
@@ -441,7 +499,7 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 
 // Called when the state for a command changes to |enabled|. Update the
 // corresponding UI element.
-- (void)enabledStateChangedForCommand:(NSInteger)command enabled:(BOOL)enabled {
+- (void)enabledStateChangedForCommand:(int)command enabled:(bool)enabled {
   NSButton* button = nil;
   switch (command) {
     case IDC_BACK:
@@ -493,9 +551,13 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 }
 
 - (void)setOverflowedToolbarActionWantsToRun:(BOOL)overflowedActionWantsToRun {
-  WrenchToolbarButtonCell* cell =
-      base::mac::ObjCCastStrict<WrenchToolbarButtonCell>([wrenchButton_ cell]);
-  [cell setOverflowedToolbarActionWantsToRun:overflowedActionWantsToRun];
+  notificationBridge_->badge_controller()->SetOverflowedToolbarActionWantsToRun(
+      overflowedActionWantsToRun);
+}
+
+- (BOOL)overflowedToolbarActionWantsToRun {
+  return notificationBridge_->badge_controller()->
+      overflowed_toolbar_action_wants_to_run();
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
@@ -843,8 +905,8 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
     NOTIMPLEMENTED();
 
   // Get the first URL and fix it up.
-  GURL url(url_fixer::FixupURL(base::SysNSStringToUTF8([urls objectAtIndex:0]),
-                               std::string()));
+  GURL url(url_formatter::FixupURL(
+      base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string()));
 
   if (url.SchemeIs(url::kJavaScriptScheme)) {
     browser_->window()->GetLocationBar()->GetOmniboxView()->SetUserText(

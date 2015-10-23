@@ -14,9 +14,11 @@
 #include <algorithm>
 
 #include "base/command_line.h"
+#include "base/environment.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/strings/string_util.h"
@@ -373,20 +375,43 @@ void InstallUtil::UpdateInstallerStage(bool system_install,
 }
 
 bool InstallUtil::IsPerUserInstall(const base::FilePath& exe_path) {
-  const int kProgramFilesKey =
-#if defined(_WIN64)
-      // TODO(wfh): Revise this when Chrome is/can be installed in the 64-bit
-      // program files directory.
-      base::DIR_PROGRAM_FILESX86;
-#else
-      base::DIR_PROGRAM_FILES;
-#endif
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+
+  static const char kEnvProgramFilesPath[] = "CHROME_PROBED_PROGRAM_FILES_PATH";
+  std::string env_program_files_path;
+  // Check environment variable to find program files path.
   base::FilePath program_files_path;
-  if (!PathService::Get(kProgramFilesKey, &program_files_path)) {
-    NOTREACHED();
-    return true;
+  if (env->GetVar(kEnvProgramFilesPath, &env_program_files_path) &&
+      !env_program_files_path.empty()) {
+    program_files_path =
+        base::FilePath(base::UTF8ToWide(env_program_files_path));
+  } else {
+    const int kProgramFilesKey =
+#if defined(_WIN64)
+        // TODO(wfh): Revise this when Chrome is/can be installed in the 64-bit
+        // program files directory.
+        base::DIR_PROGRAM_FILESX86;
+#else
+        base::DIR_PROGRAM_FILES;
+#endif
+    if (!PathService::Get(kProgramFilesKey, &program_files_path)) {
+      NOTREACHED();
+      return true;
+    }
+    env->SetVar(kEnvProgramFilesPath,
+                base::WideToUTF8(program_files_path.value()));
   }
-  return !StartsWith(exe_path.value(), program_files_path.value(), false);
+
+  // Return true if the program files path is not a case-insensitive prefix of
+  // the exe path.
+  if (exe_path.value().size() < program_files_path.value().size())
+    return true;
+  DWORD prefix_len =
+      base::saturated_cast<DWORD>(program_files_path.value().size());
+  return ::CompareString(LOCALE_USER_DEFAULT, NORM_IGNORECASE,
+                         exe_path.value().data(), prefix_len,
+                         program_files_path.value().data(), prefix_len) !=
+      CSTR_EQUAL;
 }
 
 bool InstallUtil::IsMultiInstall(BrowserDistribution* dist,

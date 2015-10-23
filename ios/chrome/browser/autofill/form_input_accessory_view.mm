@@ -12,6 +12,8 @@
 #import "ios/chrome/browser/autofill/form_input_accessory_view_delegate.h"
 #import "ios/chrome/browser/ui/image_util.h"
 #include "ios/chrome/browser/ui/ui_util.h"
+#include "ios/chrome/grit/ios_strings_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -114,6 +116,20 @@ CGFloat GetNavigationViewWidth() {
     [self initializeViewWithCustomView:_customView
                              leftFrame:leftFrame
                             rightFrame:rightFrame];
+  }
+  return self;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame customView:(UIView*)customView {
+  self = [super initWithFrame:frame];
+  if (self) {
+    _customView.reset([customView retain]);
+    customView.frame =
+        CGRectMake(0, 0, CGRectGetWidth(frame), CGRectGetHeight(frame));
+    [self addSubview:customView];
+
+    [[self class] addBackgroundImageInView:self
+                             withImageName:@"autofill_keyboard_background"];
   }
   return self;
 }
@@ -247,6 +263,9 @@ UIImage* ButtonImage(NSString* name) {
                                originX:currentX
                                originY:firstRow
                                 height:CGRectGetHeight(frame)];
+  [previousButton
+      setAccessibilityLabel:l10n_util::GetNSString(
+                                IDS_AUTOFILL_ACCNAME_PREVIOUS_FIELD)];
   [navView addSubview:previousButton];
   currentX += kNavigationButtonWidth;
 
@@ -268,6 +287,8 @@ UIImage* ButtonImage(NSString* name) {
                                originX:currentX
                                originY:firstRow
                                 height:CGRectGetHeight(frame)];
+  [nextButton setAccessibilityLabel:l10n_util::GetNSString(
+                                        IDS_AUTOFILL_ACCNAME_NEXT_FIELD)];
   [navView addSubview:nextButton];
   currentX += kNavigationButtonWidth;
 
@@ -286,7 +307,7 @@ UIImage* ButtonImage(NSString* name) {
                                      inView:navView];
     currentX += kNavigationButtonSeparatorWidth;
 
-    [navView addSubview:[self
+    UIButton* closeButton = [self
         keyboardNavButtonWithNormalImage:ButtonImage(@"autofill_close")
                             pressedImage:ButtonImage(@"autofill_close_pressed")
                            disabledImage:nil
@@ -295,7 +316,10 @@ UIImage* ButtonImage(NSString* name) {
                                  enabled:YES
                                  originX:currentX
                                  originY:firstRow
-                                  height:CGRectGetHeight(frame)]];
+                                  height:CGRectGetHeight(frame)];
+    [closeButton setAccessibilityLabel:l10n_util::GetNSString(
+                                           IDS_AUTOFILL_ACCNAME_HIDE_KEYBOARD)];
+    [navView addSubview:closeButton];
     currentX += kNavigationButtonWidth;
   }
 

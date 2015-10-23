@@ -9,6 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
@@ -85,7 +86,7 @@ class AndroidDeviceManager : public base::NonThreadSafe {
     AndroidWebSocket(
         scoped_refptr<Device> device,
         const std::string& socket_name,
-        const std::string& url,
+        const std::string& path,
         AndroidWebSocket::Delegate* delegate);
     void Connected(int result,
                    const std::string& extensions,
@@ -117,12 +118,12 @@ class AndroidDeviceManager : public base::NonThreadSafe {
                          const CommandCallback& callback);
 
     void HttpUpgrade(const std::string& socket_name,
-                     const std::string& url,
+                     const std::string& path,
                      const std::string& extensions,
                      const HttpUpgradeCallback& callback);
     AndroidWebSocket* CreateWebSocket(
         const std::string& socket_name,
-        const std::string& url,
+        const std::string& path,
         AndroidWebSocket::Delegate* delegate);
 
     std::string serial() { return serial_; }
@@ -132,13 +133,13 @@ class AndroidDeviceManager : public base::NonThreadSafe {
     friend class AndroidDeviceManager;
     friend class AndroidWebSocket;
 
-    Device(scoped_refptr<base::MessageLoopProxy> device_message_loop,
+    Device(scoped_refptr<base::SingleThreadTaskRunner> device_task_runner,
            scoped_refptr<DeviceProvider> provider,
            const std::string& serial);
 
     virtual ~Device();
 
-    scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
     scoped_refptr<DeviceProvider> provider_;
     std::string serial_;
     std::set<AndroidWebSocket*> sockets_;
@@ -173,7 +174,7 @@ class AndroidDeviceManager : public base::NonThreadSafe {
 
     virtual void HttpUpgrade(const std::string& serial,
                              const std::string& socket_name,
-                             const std::string& url,
+                             const std::string& path,
                              const std::string& extensions,
                              const HttpUpgradeCallback& callback);
 
@@ -217,7 +218,7 @@ class AndroidDeviceManager : public base::NonThreadSafe {
   class HandlerThread : public base::RefCountedThreadSafe<HandlerThread> {
    public:
     static scoped_refptr<HandlerThread> GetInstance();
-    scoped_refptr<base::MessageLoopProxy> message_loop();
+    scoped_refptr<base::SingleThreadTaskRunner> message_loop();
 
    private:
     friend class base::RefCountedThreadSafe<HandlerThread>;

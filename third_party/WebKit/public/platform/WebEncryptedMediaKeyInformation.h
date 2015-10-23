@@ -15,8 +15,8 @@ public:
     enum class KeyStatus {
         Usable,
         Expired,
+        OutputRestricted,
         OutputDownscaled,
-        OutputNotAllowed,
         StatusPending,
         InternalError
     };

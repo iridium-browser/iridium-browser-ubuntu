@@ -7,11 +7,13 @@ This is a port of the trace event importer from
 https://code.google.com/p/trace-viewer/
 """
 
+import collections
 import copy
 
 import telemetry.timeline.async_slice as tracing_async_slice
 import telemetry.timeline.flow_event as tracing_flow_event
 from telemetry.timeline import importer
+from telemetry.timeline import memory_dump_event
 from telemetry.timeline import trace_data as trace_data_module
 
 
@@ -25,6 +27,7 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
     self._all_async_events = []
     self._all_object_events = []
     self._all_flow_events = []
+    self._all_memory_dumps_by_dump_id = collections.defaultdict(list)
 
     self._events = trace_data.GetEventsFor(trace_data_module.CHROME_TRACE_PART)
 
@@ -145,6 +148,9 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
     elif event['name'] == 'process_name':
       process = self._GetOrCreateProcess(event['pid'])
       process.name = event['args']['name']
+    elif event['name'] == 'process_labels':
+      process = self._GetOrCreateProcess(event['pid'])
+      process.labels = event['args']['labels']
     elif event['name'] == 'trace_buffer_overflowed':
       process = self._GetOrCreateProcess(event['pid'])
       process.SetTraceBufferOverflowTimestamp(event['args']['overflowed_at_ts'])
@@ -178,6 +184,12 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
         'event': event,
         'thread': thread})
 
+  def _ProcessMemoryDumpEvent(self, event):
+    process = self._GetOrCreateProcess(event['pid'])
+    memory_dump = memory_dump_event.ProcessMemoryDumpEvent(process, event)
+    process.AddMemoryDumpEvent(memory_dump)
+    self._all_memory_dumps_by_dump_id[memory_dump.dump_id].append(memory_dump)
+
   def ImportEvents(self):
     """Walks through the events_ list and outputs the structures discovered to
     model_.
@@ -208,6 +220,8 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
         self._ProcessObjectEvent(event)
       elif phase == 's' or phase == 't' or phase == 'f':
         self._ProcessFlowEvent(event)
+      elif phase == 'v':
+        self._ProcessMemoryDumpEvent(event)
       else:
         self._model.import_errors.append('Unrecognized event phase: ' +
             phase + '(' + event['name'] + ')')
@@ -227,6 +241,7 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
     self._SetGpuProcess()
     self._CreateExplicitObjects()
     self._CreateImplicitObjects()
+    self._CreateMemoryDumps()
 
   def _CreateAsyncSlices(self):
     if len(self._all_async_events) == 0:
@@ -391,6 +406,11 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
         else:
           # Make this event the next start event in this flow.
           flow_id_to_event[event['id']] = flow_event
+
+  def _CreateMemoryDumps(self):
+    self._model.SetGlobalMemoryDumps(
+        memory_dump_event.GlobalMemoryDump(events)
+        for events in self._all_memory_dumps_by_dump_id.itervalues())
 
   def _SetBrowserProcess(self):
     for thread in self._model.GetAllThreads():

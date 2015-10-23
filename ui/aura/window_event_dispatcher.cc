@@ -158,10 +158,12 @@ DispatchDetails WindowEventDispatcher::DispatchMouseExitAtPoint(
   return DispatchMouseEnterOrExit(window, event, ui::ET_MOUSE_EXITED);
 }
 
-void WindowEventDispatcher::ProcessedTouchEvent(Window* window,
+void WindowEventDispatcher::ProcessedTouchEvent(uint32 unique_event_id,
+                                                Window* window,
                                                 ui::EventResult result) {
   scoped_ptr<ui::GestureRecognizer::Gestures> gestures(
-      ui::GestureRecognizer::Get()->AckAsyncTouchEvent(result, window));
+      ui::GestureRecognizer::Get()->AckTouchEvent(unique_event_id, result,
+                                                  window));
   DispatchDetails details = ProcessGestures(gestures.get());
   if (details.dispatcher_destroyed)
     return;
@@ -244,7 +246,7 @@ void WindowEventDispatcher::DispatchMouseExitToHidingWindow(Window* window) {
   if (window->Contains(mouse_moved_handler_) &&
       window->ContainsPointInRoot(last_mouse_location)) {
     DispatchDetails details =
-        DispatchMouseExitAtPoint(window, last_mouse_location);
+        DispatchMouseExitAtPoint(this->window(), last_mouse_location);
     if (details.dispatcher_destroyed)
       return;
   }
@@ -467,7 +469,7 @@ ui::EventDispatchDetails WindowEventDispatcher::PreDispatchEvent(
     PreDispatchTouchEvent(target_window, static_cast<ui::TouchEvent*>(event));
   }
   old_dispatch_target_ = event_dispatch_target_;
-  event_dispatch_target_ = static_cast<Window*>(target);
+  event_dispatch_target_ = target_window;
   return DispatchDetails();
 }
 
@@ -496,7 +498,7 @@ ui::EventDispatchDetails WindowEventDispatcher::PostDispatchEvent(
 
         // Once we've fully migrated to the eager gesture detector, we won't
         // need to pass an event here.
-        gestures.reset(ui::GestureRecognizer::Get()->AckSyncTouchEvent(
+        gestures.reset(ui::GestureRecognizer::Get()->AckTouchEvent(
             touchevent.unique_event_id(), event.result(),
             static_cast<Window*>(target)));
 

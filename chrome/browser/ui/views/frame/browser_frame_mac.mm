@@ -47,12 +47,13 @@ void BrowserFrameMac::InitNativeWidget(
 gfx::NativeWindow BrowserFrameMac::CreateNSWindow(
     const views::Widget::InitParams& params) {
   NSUInteger style_mask = NSTitledWindowMask | NSClosableWindowMask |
-                          NSMiniaturizableWindowMask | NSResizableWindowMask;
+                          NSMiniaturizableWindowMask | NSResizableWindowMask |
+                          NSTexturedBackgroundWindowMask;
   return [[[NativeWidgetMacFramelessNSWindow alloc]
       initWithContentRect:ui::kWindowSizeDeterminedLater
                 styleMask:style_mask
                   backing:NSBackingStoreBuffered
-                    defer:YES] autorelease];
+                    defer:NO] autorelease];
 }
 
 ////////////////////////////////////////////////////////////////////////////////

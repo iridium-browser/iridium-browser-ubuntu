@@ -11,12 +11,14 @@
 #include "SkCodec.h"
 #include "SkImageInfo.h"
 #include "SkJpegDecoderMgr.h"
-#include "SkJpegUtility.h"
+#include "SkJpegUtility_codec.h"
 #include "SkStream.h"
 
 extern "C" {
     #include "jpeglib.h"
 }
+
+class SkScanlineDecoder;
 
 /*
  *
@@ -39,6 +41,13 @@ public:
      */
     static SkCodec* NewFromStream(SkStream*);
 
+    /*
+     * Assumes IsJpeg was called and returned true
+     * Creates a jpeg scanline decoder
+     * Takes ownership of the stream
+     */
+    static SkScanlineDecoder* NewSDFromStream(SkStream*);
+
 protected:
 
     /*
@@ -56,8 +65,7 @@ protected:
         return kJPEG_SkEncodedFormat;
     }
 
-    SkScanlineDecoder* onGetScanlineDecoder(const SkImageInfo& dstInfo, const Options& options,
-            SkPMColor ctable[], int* ctableCount) override;
+    bool onRewind() override;
 
 private:
 
@@ -95,26 +103,20 @@ private:
     SkJpegCodec(const SkImageInfo& srcInfo, SkStream* stream, JpegDecoderMgr* decoderMgr);
 
     /*
-     * Handles rewinding the input stream if it is necessary
+     * Checks if the conversion between the input image and the requested output
+     * image has been implemented
+     * Sets the output color space
      */
-    bool handleRewind();
+    bool setOutputColorSpace(const SkImageInfo& dst);
 
     /*
-     * Checks if we can scale to the requested dimensions and scales the dimensions
-     * if possible
+     * Checks if we can natively scale to the requested dimensions and natively scales the 
+     * dimensions if possible
      */
-    bool scaleToDimensions(uint32_t width, uint32_t height);
-
-    /*
-     * Create the swizzler based on the encoded format
-     */
-    void initializeSwizzler(const SkImageInfo& dstInfo, void* dst, size_t dstRowBytes,
-            const Options& options);
+    bool nativelyScaleToDimensions(uint32_t width, uint32_t height); 
 
     SkAutoTDelete<JpegDecoderMgr> fDecoderMgr;
-    SkAutoTDelete<SkSwizzler>     fSwizzler;
-    size_t                        fSrcRowBytes;
-
+    
     friend class SkJpegScanlineDecoder;
 
     typedef SkCodec INHERITED;

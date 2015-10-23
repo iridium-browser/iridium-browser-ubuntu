@@ -8,6 +8,7 @@
 #include "SkChecksum.h"
 #include "SkMessageBus.h"
 #include "SkMipMap.h"
+#include "SkMutex.h"
 #include "SkPixelRef.h"
 #include "SkResourceCache.h"
 
@@ -35,9 +36,9 @@ void SkResourceCache::Key::init(void* nameSpace, uint64_t sharedID, size_t lengt
     static const int kHashedLocal32s = kSharedIDLocal32s + (sizeof(fNamespace) >> 2);
     static const int kLocal32s = kUnhashedLocal32s + kHashedLocal32s;
 
-    SK_COMPILE_ASSERT(sizeof(Key) == (kLocal32s << 2), unaccounted_key_locals);
-    SK_COMPILE_ASSERT(sizeof(Key) == offsetof(Key, fNamespace) + sizeof(fNamespace),
-                      namespace_field_must_be_last);
+    static_assert(sizeof(Key) == (kLocal32s << 2), "unaccounted_key_locals");
+    static_assert(sizeof(Key) == offsetof(Key, fNamespace) + sizeof(fNamespace),
+                 "namespace_field_must_be_last");
 
     fCount32 = SkToS32(kLocal32s + (length >> 2));
     fSharedID_lo = (uint32_t)sharedID;
@@ -74,7 +75,7 @@ void SkResourceCache::init() {
 
 class SkOneShotDiscardablePixelRef : public SkPixelRef {
 public:
-    SK_DECLARE_INST_COUNT(SkOneShotDiscardablePixelRef)
+
     // Ownership of the discardablememory is transfered to the pixelref
     SkOneShotDiscardablePixelRef(const SkImageInfo&, SkDiscardableMemory*, size_t rowBytes);
     ~SkOneShotDiscardablePixelRef();
@@ -236,7 +237,7 @@ static bool gDumpCacheTransactions;
 
 void SkResourceCache::add(Rec* rec) {
     this->checkMessages();
-    
+
     SkASSERT(rec);
     // See if we already have this key (racy inserts, etc.)
     Rec* existing = fHash->find(rec->getKey());
@@ -244,7 +245,7 @@ void SkResourceCache::add(Rec* rec) {
         SkDELETE(rec);
         return;
     }
-    
+
     this->addToHead(rec);
     fHash->add(rec);
 
@@ -346,6 +347,18 @@ void SkResourceCache::purgeSharedID(uint64_t sharedID) {
 #endif
 }
 
+void SkResourceCache::visitAll(Visitor visitor, void* context) {
+    // go backwards, just like purgeAsNeeded, just to make the code similar.
+    // could iterate either direction and still be correct.
+    Rec* rec = fTail;
+    while (rec) {
+        visitor(*rec, context);
+        rec = rec->fPrev;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 size_t SkResourceCache::setTotalByteLimit(size_t newLimit) {
     size_t prevLimit = fTotalByteLimit;
     fTotalByteLimit = newLimit;
@@ -357,7 +370,7 @@ size_t SkResourceCache::setTotalByteLimit(size_t newLimit) {
 
 SkCachedData* SkResourceCache::newCachedData(size_t bytes) {
     this->checkMessages();
-    
+
     if (fDiscardableFactory) {
         SkDiscardableMemory* dm = fDiscardableFactory(bytes);
         return dm ? SkNEW_ARGS(SkCachedData, (bytes, dm)) : NULL;
@@ -515,8 +528,6 @@ void SkResourceCache::checkMessages() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "SkThread.h"
-
 SK_DECLARE_STATIC_MUTEX(gMutex);
 static SkResourceCache* gResourceCache = NULL;
 static void cleanup_gResourceCache() {
@@ -609,6 +620,11 @@ void SkResourceCache::Add(Rec* rec) {
     get_cache()->add(rec);
 }
 
+void SkResourceCache::VisitAll(Visitor visitor, void* context) {
+    SkAutoMutexAcquire am(gMutex);
+    get_cache()->visitAll(visitor, context);
+}
+
 void SkResourceCache::PostPurgeSharedID(uint64_t sharedID) {
     if (sharedID) {
         SkMessageBus<PurgeSharedIDMessage>::Post(PurgeSharedIDMessage(sharedID));
@@ -618,6 +634,7 @@ void SkResourceCache::PostPurgeSharedID(uint64_t sharedID) {
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "SkGraphics.h"
+#include "SkImageFilter.h"
 
 size_t SkGraphics::GetResourceCacheTotalBytesUsed() {
     return SkResourceCache::GetTotalBytesUsed();
@@ -640,6 +657,17 @@ size_t SkGraphics::SetResourceCacheSingleAllocationByteLimit(size_t newLimit) {
 }
 
 void SkGraphics::PurgeResourceCache() {
+    SkImageFilter::PurgeCache();
     return SkResourceCache::PurgeAll();
 }
 
+/////////////
+
+static void dump_visitor(const SkResourceCache::Rec& rec, void*) {
+    SkDebugf("RC: %12s bytes %9lu  discardable %p\n",
+             rec.getCategory(), rec.bytesUsed(), rec.diagnostic_only_getDiscardable());
+}
+
+void SkResourceCache::TestDumpMemoryStatistics() {
+    VisitAll(dump_visitor, nullptr);
+}

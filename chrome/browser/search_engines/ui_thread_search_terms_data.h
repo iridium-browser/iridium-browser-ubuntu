@@ -27,13 +27,13 @@ class UIThreadSearchTermsData : public SearchTermsData {
   std::string GetSearchClient() const override;
   std::string GetSuggestClient() const override;
   std::string GetSuggestRequestIdentifier() const override;
-  bool EnableAnswersInSuggest() const override;
   bool IsShowingSearchTermsOnSearchResultsPages() const override;
   std::string InstantExtendedEnabledParam(bool for_search) const override;
   std::string ForceInstantResultsParam(bool for_prerender) const override;
   int OmniboxStartMargin() const override;
   std::string NTPIsThemedParam() const override;
   std::string GoogleImageSearchSource() const override;
+  std::string GetAcceptLanguages() const override;
 
   // Used by tests to override the value for the Google base URL.  Passing the
   // empty string cancels this override.

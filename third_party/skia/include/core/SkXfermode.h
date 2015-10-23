@@ -14,6 +14,7 @@
 #include "SkColor.h"
 
 class GrFragmentProcessor;
+class GrProcessorDataManager;
 class GrTexture;
 class GrXPFactory;
 class SkString;
@@ -31,8 +32,6 @@ class SkString;
  */
 class SK_API SkXfermode : public SkFlattenable {
 public:
-    SK_DECLARE_INST_COUNT(SkXfermode)
-
     virtual void xfer32(SkPMColor dst[], const SkPMColor src[], int count,
                         const SkAlpha aa[]) const;
     virtual void xfer16(uint16_t dst[], const SkPMColor src[], int count,
@@ -147,13 +146,6 @@ public:
      */
     static SkXfermodeProc GetProc(Mode mode);
 
-    /** Return a function pointer to a routine that applies the specified
-        porter-duff transfer mode and srcColor to a 16bit device color. Note,
-        if the mode+srcColor might return a non-opaque color, then there is not
-        16bit proc, and this will return NULL.
-      */
-    static SkXfermodeProc16 GetProc16(Mode mode, SkColor srcColor);
-
     /**
      *  If the specified mode can be represented by a pair of Coeff, then return
      *  true and set (if not NULL) the corresponding coeffs. If the mode is
@@ -169,7 +161,7 @@ public:
 
     /**
      * Returns whether or not the xfer mode can support treating coverage as alpha
-     */    
+     */
     virtual bool supportsCoverageAsAlpha() const;
 
     /**
@@ -209,7 +201,8 @@ public:
         required. Upon success the function returns true and the caller owns a ref to the fragment
         parameter. Upon failure false is returned and the processor param is not written to.
      */
-    virtual bool asFragmentProcessor(GrFragmentProcessor**, GrTexture* background) const;
+    virtual bool asFragmentProcessor(GrFragmentProcessor**, GrProcessorDataManager*,
+                                     GrTexture* background) const;
 
     /** A subclass may implement this factory function to work with the GPU backend. It is legal
         to call this with xpf NULL to simply test the return value. If xpf is non-NULL then the

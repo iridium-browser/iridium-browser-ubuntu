@@ -6,11 +6,15 @@
 #define CHROME_INSTALLER_MINI_INSTALLER_MINI_STRING_H_
 
 #ifndef COMPILE_ASSERT
-// COMPILE_ASSERT macro borrowed from basictypes.h
+// Some bots that build mini_installer don't know static_assert.
+#if __cplusplus >= 201103L
+#define COMPILE_ASSERT(expr, msg) static_assert(expr, #msg)
+#else
 template <bool>
 struct CompileAssert {};
 #define COMPILE_ASSERT(expr, msg) \
-    typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1]
+  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1]
+#endif
 #endif
 
 namespace mini_installer {
@@ -58,11 +62,13 @@ const wchar_t* SearchStringI(const wchar_t* source, const wchar_t* find);
 bool FindTagInStr(const wchar_t* str, const wchar_t* tag,
                   const wchar_t** position);
 
-// Takes the path to file and returns a pointer to the filename component. For
-// example for input of c:\full\path\to\file.ext it returns pointer to file.ext.
-// It returns NULL if extension or path separator is not found.
-// |size| is the number of characters in |path| not including the string
+// Takes the path to file and returns a pointer to the basename component.
+// Example input -> output:
+//     c:\full\path\to\file.ext -> file.ext
+//     file.ext -> file.ext
+// Note: |size| is the number of characters in |path| not including the string
 // terminator.
+const wchar_t* GetNameFromPathExt(const wchar_t* path, size_t size);
 wchar_t* GetNameFromPathExt(wchar_t* path, size_t size);
 
 // A string class that manages a fixed size buffer on the stack.

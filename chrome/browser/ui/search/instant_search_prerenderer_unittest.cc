@@ -26,7 +26,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/render_messages.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -224,17 +224,17 @@ TEST_F(InstantSearchPrerendererTest, GetSearchTermsFromPrerenderedPage) {
   GURL url(GetPrerenderURL());
   EXPECT_EQ(GURL("https://www.google.com/instant?ion=1&foo=foo#foo=foo&strk"),
             url);
-  EXPECT_EQ(base::UTF16ToASCII(prerenderer->get_last_query()),
-            base::UTF16ToASCII(
-                chrome::ExtractSearchTermsFromURL(profile(), url)));
+  EXPECT_EQ(
+      base::UTF16ToASCII(prerenderer->get_last_query()),
+      base::UTF16ToASCII(search::ExtractSearchTermsFromURL(profile(), url)));
 
   // Assume the prerendered page prefetched search results for the query
   // "flowers".
   SetLastQuery(ASCIIToUTF16("flowers"));
   EXPECT_EQ("flowers", base::UTF16ToASCII(prerenderer->get_last_query()));
-  EXPECT_EQ(base::UTF16ToASCII(prerenderer->get_last_query()),
-            base::UTF16ToASCII(
-                chrome::ExtractSearchTermsFromURL(profile(), url)));
+  EXPECT_EQ(
+      base::UTF16ToASCII(prerenderer->get_last_query()),
+      base::UTF16ToASCII(search::ExtractSearchTermsFromURL(profile(), url)));
 }
 
 TEST_F(InstantSearchPrerendererTest, PrefetchSearchResults) {
@@ -347,9 +347,10 @@ TEST_F(InstantSearchPrerendererTest, PrerenderingAllowed) {
   // used only when the underlying page doesn't support Instant.
   NavigateAndCommitActiveTab(GURL("https://www.google.com/alt#quux=foo&strk"));
   active_tab = GetActiveWebContents();
-  EXPECT_FALSE(chrome::ExtractSearchTermsFromURL(profile(),
-                                                 active_tab->GetURL()).empty());
-  EXPECT_FALSE(chrome::ShouldPrefetchSearchResultsOnSRP());
+  EXPECT_FALSE(
+      search::ExtractSearchTermsFromURL(profile(), active_tab->GetURL())
+          .empty());
+  EXPECT_FALSE(search::ShouldPrefetchSearchResultsOnSRP());
   EXPECT_FALSE(prerenderer->IsAllowed(search_type_match, active_tab));
 }
 
@@ -529,13 +530,13 @@ TEST_F(TestUsePrerenderPage, SetEmbeddedSearchRequestParams) {
   ASSERT_TRUE(message);
 
   // Verify the IPC message params.
-  Tuple<base::string16, EmbeddedSearchRequestParams> params;
+  base::Tuple<base::string16, EmbeddedSearchRequestParams> params;
   ChromeViewMsg_SearchBoxSubmit::Read(message, &params);
-  EXPECT_EQ("foo", base::UTF16ToASCII(get<0>(params)));
-  EXPECT_EQ("f", base::UTF16ToASCII(get<1>(params).original_query));
-  EXPECT_EQ("utf-8", base::UTF16ToASCII(get<1>(params).input_encoding));
-  EXPECT_EQ("", base::UTF16ToASCII(get<1>(params).rlz_parameter_value));
+  EXPECT_EQ("foo", base::UTF16ToASCII(base::get<0>(params)));
+  EXPECT_EQ("f", base::UTF16ToASCII(base::get<1>(params).original_query));
+  EXPECT_EQ("utf-8", base::UTF16ToASCII(base::get<1>(params).input_encoding));
+  EXPECT_EQ("", base::UTF16ToASCII(base::get<1>(params).rlz_parameter_value));
   EXPECT_EQ("chrome...0",
-            base::UTF16ToASCII(get<1>(params).assisted_query_stats));
+            base::UTF16ToASCII(base::get<1>(params).assisted_query_stats));
 }
 #endif

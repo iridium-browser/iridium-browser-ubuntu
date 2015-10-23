@@ -40,7 +40,7 @@
 #include "src/arm/assembler-arm.h"
 
 #include "src/assembler.h"
-#include "src/debug.h"
+#include "src/debug/debug.h"
 
 
 namespace v8 {
@@ -97,7 +97,7 @@ DwVfpRegister DwVfpRegister::FromAllocationIndex(int index) {
 }
 
 
-void RelocInfo::apply(intptr_t delta, ICacheFlushMode icache_flush_mode) {
+void RelocInfo::apply(intptr_t delta) {
   if (RelocInfo::IsInternalReference(rmode_)) {
     // absolute code pointer inside code object moves with the code object.
     int32_t* p = reinterpret_cast<int32_t*>(pc_);
@@ -118,10 +118,11 @@ Address RelocInfo::target_address_address() {
   DCHECK(IsCodeTarget(rmode_) || IsRuntimeEntry(rmode_)
                               || rmode_ == EMBEDDED_OBJECT
                               || rmode_ == EXTERNAL_REFERENCE);
-  if (FLAG_enable_ool_constant_pool ||
+  if (FLAG_enable_embedded_constant_pool ||
       Assembler::IsMovW(Memory::int32_at(pc_))) {
-    // We return the PC for ool constant pool since this function is used by the
-    // serializer and expects the address to reside within the code object.
+    // We return the PC for embedded constant pool since this function is used
+    // by the serializer and expects the address to reside within the code
+    // object.
     return reinterpret_cast<Address>(pc_);
   } else {
     DCHECK(Assembler::IsLdrPcImmediateOffset(Memory::int32_at(pc_)));
@@ -271,41 +272,23 @@ void RelocInfo::set_code_age_stub(Code* stub,
 }
 
 
-Address RelocInfo::call_address() {
+Address RelocInfo::debug_call_address() {
   // The 2 instructions offset assumes patched debug break slot or return
   // sequence.
-  DCHECK((IsJSReturn(rmode()) && IsPatchedReturnSequence()) ||
-         (IsDebugBreakSlot(rmode()) && IsPatchedDebugBreakSlotSequence()));
-  return Memory::Address_at(pc_ + 2 * Assembler::kInstrSize);
+  DCHECK(IsDebugBreakSlot(rmode()) && IsPatchedDebugBreakSlotSequence());
+  return Memory::Address_at(pc_ + Assembler::kPatchDebugBreakSlotAddressOffset);
 }
 
 
-void RelocInfo::set_call_address(Address target) {
-  DCHECK((IsJSReturn(rmode()) && IsPatchedReturnSequence()) ||
-         (IsDebugBreakSlot(rmode()) && IsPatchedDebugBreakSlotSequence()));
-  Memory::Address_at(pc_ + 2 * Assembler::kInstrSize) = target;
+void RelocInfo::set_debug_call_address(Address target) {
+  DCHECK(IsDebugBreakSlot(rmode()) && IsPatchedDebugBreakSlotSequence());
+  Memory::Address_at(pc_ + Assembler::kPatchDebugBreakSlotAddressOffset) =
+      target;
   if (host() != NULL) {
     Object* target_code = Code::GetCodeFromTargetAddress(target);
     host()->GetHeap()->incremental_marking()->RecordWriteIntoCode(
         host(), this, HeapObject::cast(target_code));
   }
-}
-
-
-Object* RelocInfo::call_object() {
-  return *call_object_address();
-}
-
-
-void RelocInfo::set_call_object(Object* target) {
-  *call_object_address() = target;
-}
-
-
-Object** RelocInfo::call_object_address() {
-  DCHECK((IsJSReturn(rmode()) && IsPatchedReturnSequence()) ||
-         (IsDebugBreakSlot(rmode()) && IsPatchedDebugBreakSlotSequence()));
-  return reinterpret_cast<Object**>(pc_ + 2 * Assembler::kInstrSize);
 }
 
 
@@ -352,11 +335,8 @@ void RelocInfo::Visit(Isolate* isolate, ObjectVisitor* visitor) {
     visitor->VisitInternalReference(this);
   } else if (RelocInfo::IsCodeAgeSequence(mode)) {
     visitor->VisitCodeAgeSequence(this);
-  } else if (((RelocInfo::IsJSReturn(mode) &&
-              IsPatchedReturnSequence()) ||
-             (RelocInfo::IsDebugBreakSlot(mode) &&
-              IsPatchedDebugBreakSlotSequence())) &&
-             isolate->debug()->has_break_points()) {
+  } else if (RelocInfo::IsDebugBreakSlot(mode) &&
+             IsPatchedDebugBreakSlotSequence()) {
     visitor->VisitDebugTarget(this);
   } else if (RelocInfo::IsRuntimeEntry(mode)) {
     visitor->VisitRuntimeEntry(this);
@@ -379,11 +359,8 @@ void RelocInfo::Visit(Heap* heap) {
     StaticVisitor::VisitInternalReference(this);
   } else if (RelocInfo::IsCodeAgeSequence(mode)) {
     StaticVisitor::VisitCodeAgeSequence(heap, this);
-  } else if (heap->isolate()->debug()->has_break_points() &&
-             ((RelocInfo::IsJSReturn(mode) &&
-              IsPatchedReturnSequence()) ||
-             (RelocInfo::IsDebugBreakSlot(mode) &&
-              IsPatchedDebugBreakSlotSequence()))) {
+  } else if (RelocInfo::IsDebugBreakSlot(mode) &&
+             IsPatchedDebugBreakSlotSequence()) {
     StaticVisitor::VisitDebugTarget(heap, this);
   } else if (RelocInfo::IsRuntimeEntry(mode)) {
     StaticVisitor::VisitRuntimeEntry(this);
@@ -503,11 +480,6 @@ Address Assembler::target_address_from_return_address(Address pc) {
 }
 
 
-Address Assembler::break_address_from_return_address(Address pc) {
-  return pc - Assembler::kPatchDebugBreakSlotReturnOffset;
-}
-
-
 Address Assembler::return_address_from_call_start(Address pc) {
   if (IsLdrPcImmediateOffset(Memory::int32_at(pc)) |
       IsLdrPpImmediateOffset(Memory::int32_at(pc))) {
@@ -543,7 +515,7 @@ Address Assembler::return_address_from_call_start(Address pc) {
 
 void Assembler::deserialization_set_special_target_at(
     Address constant_pool_entry, Code* code, Address target) {
-  if (FLAG_enable_ool_constant_pool) {
+  if (FLAG_enable_embedded_constant_pool) {
     set_target_address_at(constant_pool_entry, code, target);
   } else {
     Memory::Address_at(constant_pool_entry) = target;
@@ -560,21 +532,21 @@ void Assembler::deserialization_set_target_internal_reference_at(
 bool Assembler::is_constant_pool_load(Address pc) {
   if (CpuFeatures::IsSupported(ARMv7)) {
     return !Assembler::IsMovW(Memory::int32_at(pc)) ||
-           (FLAG_enable_ool_constant_pool &&
+           (FLAG_enable_embedded_constant_pool &&
             Assembler::IsLdrPpRegOffset(
                 Memory::int32_at(pc + 2 * Assembler::kInstrSize)));
   } else {
     return !Assembler::IsMovImmed(Memory::int32_at(pc)) ||
-           (FLAG_enable_ool_constant_pool &&
+           (FLAG_enable_embedded_constant_pool &&
             Assembler::IsLdrPpRegOffset(
                 Memory::int32_at(pc + 4 * Assembler::kInstrSize)));
   }
 }
 
 
-Address Assembler::constant_pool_entry_address(
-    Address pc, ConstantPoolArray* constant_pool) {
-  if (FLAG_enable_ool_constant_pool) {
+Address Assembler::constant_pool_entry_address(Address pc,
+                                               Address constant_pool) {
+  if (FLAG_enable_embedded_constant_pool) {
     DCHECK(constant_pool != NULL);
     int cp_offset;
     if (!CpuFeatures::IsSupported(ARMv7) && IsMovImmed(Memory::int32_at(pc))) {
@@ -602,7 +574,7 @@ Address Assembler::constant_pool_entry_address(
       DCHECK(Assembler::IsLdrPpImmediateOffset(Memory::int32_at(pc)));
       cp_offset = GetLdrRegisterImmediateOffset(Memory::int32_at(pc));
     }
-    return reinterpret_cast<Address>(constant_pool) + cp_offset;
+    return constant_pool + cp_offset;
   } else {
     DCHECK(Assembler::IsLdrPcImmediateOffset(Memory::int32_at(pc)));
     Instr instr = Memory::int32_at(pc);
@@ -611,8 +583,7 @@ Address Assembler::constant_pool_entry_address(
 }
 
 
-Address Assembler::target_address_at(Address pc,
-                                     ConstantPoolArray* constant_pool) {
+Address Assembler::target_address_at(Address pc, Address constant_pool) {
   if (is_constant_pool_load(pc)) {
     // This is a constant pool lookup. Return the value in the constant pool.
     return Memory::Address_at(constant_pool_entry_address(pc, constant_pool));
@@ -643,8 +614,7 @@ Address Assembler::target_address_at(Address pc,
 }
 
 
-void Assembler::set_target_address_at(Address pc,
-                                      ConstantPoolArray* constant_pool,
+void Assembler::set_target_address_at(Address pc, Address constant_pool,
                                       Address target,
                                       ICacheFlushMode icache_flush_mode) {
   if (is_constant_pool_load(pc)) {

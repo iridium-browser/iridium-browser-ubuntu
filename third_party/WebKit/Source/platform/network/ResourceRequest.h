@@ -116,8 +116,6 @@ public:
     void addHTTPHeaderFields(const HTTPHeaderMap& headerFields);
     void clearHTTPHeaderField(const AtomicString& name);
 
-    void clearHTTPAuthorization();
-
     const AtomicString& httpContentType() const { return httpHeaderField("Content-Type");  }
     void setHTTPContentType(const AtomicString& httpContentType) { setHTTPHeaderField("Content-Type", httpContentType); }
 
@@ -211,12 +209,12 @@ public:
     WebURLRequest::FetchCredentialsMode fetchCredentialsMode() const { return m_fetchCredentialsMode; }
     void setFetchCredentialsMode(WebURLRequest::FetchCredentialsMode mode) { m_fetchCredentialsMode = mode; }
 
+    WebURLRequest::FetchRedirectMode fetchRedirectMode() const { return m_fetchRedirectMode; }
+    void setFetchRedirectMode(WebURLRequest::FetchRedirectMode redirect) { m_fetchRedirectMode = redirect; }
+
     bool cacheControlContainsNoCache() const;
     bool cacheControlContainsNoStore() const;
     bool hasCacheValidatorFields() const;
-
-    static double defaultTimeoutInterval(); // May return 0 when using platform default.
-    static void setDefaultTimeoutInterval(double);
 
     static bool compare(const ResourceRequest&, const ResourceRequest&);
 
@@ -232,8 +230,8 @@ public:
     InputToLoadPerfMetricReportPolicy inputPerfMetricReportPolicy() const { return m_inputPerfMetricReportPolicy; }
     void setInputPerfMetricReportPolicy(InputToLoadPerfMetricReportPolicy inputPerfMetricReportPolicy) { m_inputPerfMetricReportPolicy = inputPerfMetricReportPolicy; }
 
-    void setFollowedRedirect(bool followed) { m_followedRedirect = followed; };
-    bool followedRedirect() const { return m_followedRedirect; };
+    void setFollowedRedirect(bool followed) { m_followedRedirect = followed; }
+    bool followedRedirect() const { return m_followedRedirect; }
 
 private:
     void initialize(const KURL&);
@@ -266,6 +264,7 @@ private:
     WebURLRequest::FrameType m_frameType;
     WebURLRequest::FetchRequestMode m_fetchRequestMode;
     WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
+    WebURLRequest::FetchRedirectMode m_fetchRedirectMode;
     ReferrerPolicy m_referrerPolicy;
     bool m_didSetHTTPReferrer;
     bool m_checkForBrowserSideNavigation;
@@ -315,6 +314,7 @@ public:
     WebURLRequest::FrameType m_frameType;
     WebURLRequest::FetchRequestMode m_fetchRequestMode;
     WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
+    WebURLRequest::FetchRedirectMode m_fetchRedirectMode;
     ReferrerPolicy m_referrerPolicy;
     bool m_didSetHTTPReferrer;
     bool m_checkForBrowserSideNavigation;
@@ -323,8 +323,6 @@ public:
     InputToLoadPerfMetricReportPolicy m_inputPerfMetricReportPolicy;
     bool m_followedRedirect;
 };
-
-unsigned initializeMaximumHTTPConnectionCountPerHost();
 
 } // namespace blink
 

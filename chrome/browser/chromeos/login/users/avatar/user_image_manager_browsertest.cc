@@ -15,12 +15,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/run_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -39,6 +39,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_downloader.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -216,6 +217,24 @@ class UserImageManagerTest : public LoginManagerTest,
     return user_data_dir_.Append(username).AddExtension(extension);
   }
 
+  // Seeds the AccountTrackerService with test data so the ProfileDownloader can
+  // retrieve the picture URL and fetch the image.
+  void SeedAccountTrackerService(const std::string& username,
+                                 Profile* profile) {
+    AccountTrackerService::AccountInfo info;
+    info.account_id = std::string();
+    info.gaia = username;
+    info.email = username;
+    info.full_name = username;
+    info.given_name = username;
+    info.hosted_domain = std::string();
+    info.locale = username;
+    info.picture_url = "http://localhost/avatar.jpg";
+    info.is_child_account = false;
+
+    AccountTrackerServiceFactory::GetForProfile(profile)->SeedAccountInfo(info);
+  }
+
   // Completes the download of all non-image profile data for the user
   // |username|.  This method must only be called after a profile data
   // download has been started.  |url_fetcher_factory| will capture
@@ -234,17 +253,6 @@ class UserImageManagerTest : public LoginManagerTest,
         OnGetTokenSuccess(NULL,
                           std::string(),
                           base::Time::Now() + base::TimeDelta::FromDays(1));
-
-    net::TestURLFetcher* fetcher = url_fetcher_factory->GetFetcherByID(
-        gaia::GaiaOAuthClient::kUrlFetcherId);
-    ASSERT_TRUE(fetcher);
-    fetcher->SetResponseString(
-        "{ \"picture\": \"http://localhost/avatar.jpg\" }");
-    fetcher->set_status(net::URLRequestStatus(net::URLRequestStatus::SUCCESS,
-                                              net::OK));
-    fetcher->set_response_code(200);
-    fetcher->delegate()->OnURLFetchComplete(fetcher);
-    base::RunLoop().RunUntilIdle();
   }
 
   // Completes the download of the currently logged-in user's profile image.
@@ -523,6 +531,8 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest, SaveUserImageFromProfileImage) {
 
   UserImageManagerImpl::IgnoreProfileDataDownloadDelayForTesting();
   LoginUser(kTestUser1);
+  Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
+  SeedAccountTrackerService(kTestUser1, profile);
 
   run_loop_.reset(new base::RunLoop);
   UserImageManager* user_image_manager =
@@ -574,6 +584,8 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest,
 
   UserImageManagerImpl::IgnoreProfileDataDownloadDelayForTesting();
   LoginUser(kTestUser1);
+  Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
+  SeedAccountTrackerService(kTestUser1, profile);
 
   run_loop_.reset(new base::RunLoop);
   UserImageManager* user_image_manager =
@@ -656,10 +668,12 @@ class UserImageManagerPolicyTest : public UserImageManagerTest,
       ADD_FAILURE();
     }
     std::string policy;
-    base::JSONWriter::Write(policy::test::ConstructExternalDataReference(
-        embedded_test_server()->GetURL(std::string("/") + relative_path).spec(),
-        image_data).get(),
-        &policy);
+    base::JSONWriter::Write(*policy::test::ConstructExternalDataReference(
+                                embedded_test_server()
+                                    ->GetURL(std::string("/") + relative_path)
+                                    .spec(),
+                                image_data),
+                            &policy);
     return policy;
   }
 

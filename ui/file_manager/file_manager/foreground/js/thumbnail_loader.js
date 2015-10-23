@@ -26,6 +26,12 @@ function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
     ThumbnailLoader.LoadTarget.FILE_ENTRY
   ];
 
+  /**
+   * @private {Entry}
+   * @const
+   */
+  this.entry_ = entry;
+
   this.mediaType_ = opt_mediaType || FileType.getMediaType(entry);
   this.loaderType_ = opt_loaderType || ThumbnailLoader.LoaderType.IMAGE;
   this.metadata_ = opt_metadata;
@@ -48,6 +54,7 @@ function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
   this.thumbnailUrl_ = null;
   if (opt_metadata.external && opt_metadata.external.customIconUrl)
     this.fallbackUrl_ = opt_metadata.external.customIconUrl;
+  var mimeType = opt_metadata && opt_metadata.contentMimeType;
 
   for (var i = 0; i < loadTargets.length; i++) {
     switch (loadTargets[i]) {
@@ -61,14 +68,16 @@ function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
         break;
       case ThumbnailLoader.LoadTarget.EXTERNAL_METADATA:
         if (opt_metadata.external && opt_metadata.external.thumbnailUrl &&
-            (!opt_metadata.external.present || !FileType.isImage(entry))) {
+            (!opt_metadata.external.present ||
+             !FileType.isImage(entry, mimeType))) {
           this.thumbnailUrl_ = opt_metadata.external.thumbnailUrl;
           this.croppedThumbnailUrl_ = opt_metadata.external.croppedThumbnailUrl;
           this.loadTarget_ = ThumbnailLoader.LoadTarget.EXTERNAL_METADATA;
         }
         break;
       case ThumbnailLoader.LoadTarget.FILE_ENTRY:
-        if (FileType.isImage(entry) || FileType.isRaw(entry)) {
+        if (FileType.isImage(entry, mimeType) ||
+            FileType.isRaw(entry, mimeType)) {
           this.thumbnailUrl_ = entry.toURL();
           this.transform_ =
               opt_metadata.media && opt_metadata.media.imageTransform;
@@ -92,10 +101,10 @@ function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
 /**
  * In percents (0.0 - 1.0), how much area can be cropped to fill an image
  * in a container, when loading a thumbnail in FillMode.AUTO mode.
- * The specified 30% value allows to fill 16:9, 3:2 pictures in 4:3 element.
- * @type {number}
+ * The default 30% value allows to fill 16:9, 3:2 pictures in 4:3 element.
+ * @const {number}
  */
-ThumbnailLoader.AUTO_FILL_THRESHOLD = 0.3;
+ThumbnailLoader.AUTO_FILL_THRESHOLD_DEFAULT_VALUE = 0.3;
 
 /**
  * Type of displaying a thumbnail within a box.
@@ -172,9 +181,15 @@ ThumbnailLoader.prototype.getLoadTarget = function() {
  *     accepts the image and the transform.
  * @param {function()=} opt_onError Error callback.
  * @param {function()=} opt_onGeneric Callback for generic image used.
+ * @param {number=} opt_autoFillThreshold Auto fill threshold.
+ * @param {number=} opt_boxWidth Container box's width. If not specified, the
+ *     given |box|'s clientWidth will be used.
+ * @param {number=} opt_boxHeight Container box's height. If not specified, the
+ *     given |box|'s clientHeight will be used.
  */
 ThumbnailLoader.prototype.load = function(box, fillMode, opt_optimizationMode,
-    opt_onSuccess, opt_onError, opt_onGeneric) {
+    opt_onSuccess, opt_onError, opt_onGeneric, opt_autoFillThreshold,
+    opt_boxWidth, opt_boxHeight) {
   opt_optimizationMode = opt_optimizationMode ||
       ThumbnailLoader.OptimizationMode.NEVER_DISCARD;
 
@@ -188,8 +203,10 @@ ThumbnailLoader.prototype.load = function(box, fillMode, opt_optimizationMode,
   this.cancel();
   this.canvasUpToDate_ = false;
   this.image_ = new Image();
+  this.image_.setAttribute('alt', this.entry_.name);
   this.image_.onload = function() {
-    this.attachImage(assert(box), fillMode);
+    this.attachImage(assert(box), fillMode, opt_autoFillThreshold,
+                     opt_boxWidth, opt_boxHeight);
     if (opt_onSuccess)
       opt_onSuccess(this.image_, this.transform_);
   }.bind(this);
@@ -464,26 +481,35 @@ ThumbnailLoader.prototype.renderMedia_ = function() {
 
 /**
  * Attach the image to a given element.
- * @param {!Element} container Parent element.
+ * @param {!Element} box Container element.
  * @param {ThumbnailLoader.FillMode} fillMode Fill mode.
+ * @param {number=} opt_autoFillThreshold Threshold value which is used for fill
+ *     mode auto.
+ * @param {number=} opt_boxWidth Container box's width. If not specified, the
+ *     given |box|'s clientWidth will be used.
+ * @param {number=} opt_boxHeight Container box's height. If not specified, the
+ *     given |box|'s clientHeight will be used.
  */
-ThumbnailLoader.prototype.attachImage = function(container, fillMode) {
+ThumbnailLoader.prototype.attachImage = function(
+    box, fillMode, opt_autoFillThreshold, opt_boxWidth, opt_boxHeight) {
   if (!this.hasValidImage()) {
-    container.setAttribute('generic-thumbnail', this.mediaType_);
+    box.setAttribute('generic-thumbnail', this.mediaType_);
     return;
   }
 
   this.renderMedia_();
-  util.applyTransform(container, this.transform_);
+  util.applyTransform(box, this.transform_);
   var attachableMedia = this.loaderType_ === ThumbnailLoader.LoaderType.CANVAS ?
       this.canvas_ : this.image_;
 
-  ThumbnailLoader.centerImage_(
-      container, attachableMedia, fillMode, this.isRotated_());
+  var autoFillThreshold = opt_autoFillThreshold ||
+      ThumbnailLoader.AUTO_FILL_THRESHOLD_DEFAULT_VALUE;
+  ThumbnailLoader.centerImage_(box, attachableMedia, fillMode,
+      this.isRotated_(), autoFillThreshold, opt_boxWidth, opt_boxHeight);
 
-  if (attachableMedia.parentNode !== container) {
-    container.textContent = '';
-    container.appendChild(attachableMedia);
+  if (attachableMedia.parentNode !== box) {
+    box.textContent = '';
+    box.appendChild(attachableMedia);
   }
 
   if (!this.taskId_)
@@ -513,17 +539,25 @@ ThumbnailLoader.prototype.getImage = function() {
  * @param {Image|HTMLCanvasElement} img Element containing an image.
  * @param {ThumbnailLoader.FillMode} fillMode Fill mode.
  * @param {boolean} rotate True if the image should be rotated 90 degrees.
+ * @param {number} autoFillThreshold Threshold value which is used for fill mode
+ *     auto.
+ * @param {number=} opt_boxWidth Container box's width. If not specified, the
+ *     given |box|'s clientWidth will be used.
+ * @param {number=} opt_boxHeight Container box's height. If not specified, the
+ *     given |box|'s clientHeight will be used.
  * @private
  */
-ThumbnailLoader.centerImage_ = function(box, img, fillMode, rotate) {
+ThumbnailLoader.centerImage_ = function(
+    box, img, fillMode, rotate, autoFillThreshold, opt_boxWidth,
+    opt_boxHeight) {
   var imageWidth = img.width;
   var imageHeight = img.height;
 
   var fractionX;
   var fractionY;
 
-  var boxWidth = box.clientWidth;
-  var boxHeight = box.clientHeight;
+  var boxWidth = opt_boxWidth || box.clientWidth;
+  var boxHeight = opt_boxHeight || box.clientHeight;
 
   var fill;
   switch (fillMode) {
@@ -541,8 +575,8 @@ ThumbnailLoader.centerImage_ = function(box, img, fillMode, rotate) {
         boxRatio = boxWidth / boxHeight;
       // Cropped area in percents.
       var ratioFactor = boxRatio / imageRatio;
-      fill = (ratioFactor >= 1.0 - ThumbnailLoader.AUTO_FILL_THRESHOLD) &&
-             (ratioFactor <= 1.0 + ThumbnailLoader.AUTO_FILL_THRESHOLD);
+      fill = (ratioFactor >= 1.0 - autoFillThreshold) &&
+             (ratioFactor <= 1.0 + autoFillThreshold);
       break;
   }
 

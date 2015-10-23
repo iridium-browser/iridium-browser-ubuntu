@@ -5,14 +5,21 @@
 #include "ui/views/controls/menu/menu_controller.h"
 
 #include "base/run_loop.h"
-#include "ui/aura/scoped_window_targeter.h"
-#include "ui/aura/window.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/null_event_targeter.h"
 #include "ui/events/platform/platform_event_source.h"
+#include "ui/events/test/platform_event_source_test_api.h"
 #include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/test/views_test_base.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/env.h"
+#include "ui/aura/scoped_window_targeter.h"
+#include "ui/aura/window.h"
 #include "ui/wm/public/dispatcher_client.h"
+#endif
 
 #if defined(OS_WIN)
 #include "base/message_loop/message_pump_dispatcher.h"
@@ -20,45 +27,41 @@
 #include <X11/Xlib.h>
 #undef Bool
 #undef None
-#include "ui/events/devices/x11/device_data_manager_x11.h"
 #include "ui/events/test/events_test_utils_x11.h"
 #elif defined(USE_OZONE)
 #include "ui/events/event.h"
+#elif defined(OS_MACOSX)
+#include "ui/events/test/event_generator.h"
 #endif
 
 namespace views {
+namespace test {
 
 namespace {
 
 class TestMenuItemView : public MenuItemView {
  public:
-  TestMenuItemView() : MenuItemView(NULL) {}
+  TestMenuItemView() : MenuItemView(nullptr) {}
   ~TestMenuItemView() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestMenuItemView);
 };
 
-class TestPlatformEventSource : public ui::PlatformEventSource {
+class SubmenuViewShown : public SubmenuView {
  public:
-  TestPlatformEventSource() {
-#if defined(USE_X11)
-    ui::DeviceDataManagerX11::CreateInstance();
-#endif
-  }
-  ~TestPlatformEventSource() override {}
-
-  uint32_t Dispatch(const ui::PlatformEvent& event) {
-    return DispatchEvent(event);
-  }
+  SubmenuViewShown(MenuItemView* parent) : SubmenuView(parent) {}
+  ~SubmenuViewShown() override {}
+  bool IsShowing() override { return true; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(TestPlatformEventSource);
+  DISALLOW_COPY_AND_ASSIGN(SubmenuViewShown);
 };
 
+#if defined(USE_AURA)
 class TestDispatcherClient : public aura::client::DispatcherClient {
  public:
-  TestDispatcherClient() : dispatcher_(NULL) {}
+  TestDispatcherClient() : dispatcher_(nullptr) {}
   ~TestDispatcherClient() override {}
 
   base::MessagePumpDispatcher* dispatcher() {
@@ -91,12 +94,26 @@ class TestDispatcherClient : public aura::client::DispatcherClient {
 
   DISALLOW_COPY_AND_ASSIGN(TestDispatcherClient);
 };
+#endif  // USE_AURA
 
 }  // namespace
 
+class TestMenuItemViewShown : public MenuItemView {
+ public:
+  TestMenuItemViewShown() : MenuItemView(nullptr) {
+    submenu_ = new SubmenuViewShown(this);
+  }
+  ~TestMenuItemViewShown() override {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestMenuItemViewShown);
+};
+
 class MenuControllerTest : public ViewsTestBase {
  public:
-  MenuControllerTest() : controller_(NULL) {}
+  MenuControllerTest()
+      : controller_(nullptr),
+        event_source_(ui::PlatformEventSource::GetInstance()) {}
   ~MenuControllerTest() override { ResetMenuController(); }
 
   // Dispatches |count| number of items, each in a separate iteration of the
@@ -148,19 +165,70 @@ class MenuControllerTest : public ViewsTestBase {
     widget->Init(params);
     widget->Show();
 
+#if defined(USE_AURA)
     aura::client::SetDispatcherClient(
         widget->GetNativeWindow()->GetRootWindow(), &dispatcher_client_);
+#endif
     return widget.Pass();
+  }
+
+  const MenuItemView* pending_state_item() const {
+    return controller_->pending_state_.item;
+  }
+
+  void SetPendingStateItem(MenuItemView* item) {
+    controller_->pending_state_.item = item;
+    controller_->pending_state_.submenu_open = true;
+  }
+
+  void ResetSelection() {
+    controller_->SetSelection(nullptr,
+                              MenuController::SELECTION_EXIT |
+                              MenuController::SELECTION_UPDATE_IMMEDIATELY);
+  }
+
+  void IncrementSelection() {
+    controller_->IncrementSelection(MenuController::INCREMENT_SELECTION_DOWN);
+  }
+
+  void DecrementSelection() {
+    controller_->IncrementSelection(MenuController::INCREMENT_SELECTION_UP);
+  }
+
+  MenuItemView* FindInitialSelectableMenuItemDown(MenuItemView* parent) {
+    return controller_->FindInitialSelectableMenuItem(
+        parent, MenuController::INCREMENT_SELECTION_DOWN);
+  }
+
+  MenuItemView* FindInitialSelectableMenuItemUp(MenuItemView* parent) {
+    return controller_->FindInitialSelectableMenuItem(
+        parent, MenuController::INCREMENT_SELECTION_UP);
+  }
+
+  MenuItemView* FindNextSelectableMenuItem(MenuItemView* parent,
+                                           int index) {
+    return controller_->FindNextSelectableMenuItem(
+        parent, index, MenuController::INCREMENT_SELECTION_DOWN);
+  }
+
+  MenuItemView* FindPreviousSelectableMenuItem(MenuItemView* parent,
+                                               int index) {
+    return controller_->FindNextSelectableMenuItem(
+        parent, index, MenuController::INCREMENT_SELECTION_UP);
+  }
+
+  void SetupMenu(views::Widget* owner, views::MenuItemView* item) {
+    ResetMenuController();
+    controller_ = new MenuController(nullptr, true, nullptr);
+    controller_->owner_ = owner;
+    controller_->showing_ = true;
+    controller_->SetSelection(item,
+                              MenuController::SELECTION_UPDATE_IMMEDIATELY);
   }
 
   void RunMenu(views::Widget* owner) {
     scoped_ptr<TestMenuItemView> menu_item(new TestMenuItemView);
-    ResetMenuController();
-    controller_ = new MenuController(NULL, true, NULL);
-    controller_->owner_ = owner;
-    controller_->showing_ = true;
-    controller_->SetSelection(menu_item.get(),
-                              MenuController::SELECTION_UPDATE_IMMEDIATELY);
+    SetupMenu(owner, menu_item.get());
     controller_->RunMessageLoop(false);
   }
 
@@ -195,6 +263,16 @@ class MenuControllerTest : public ViewsTestBase {
 #elif defined(USE_OZONE)
     ui::KeyEvent event(' ', ui::VKEY_SPACE, ui::EF_NONE);
     event_source_.Dispatch(&event);
+#elif defined(OS_MACOSX) && !defined(USE_AURA)
+    // Since this is not an interactive test, on Mac there will be no key
+    // window. Any system event will just get ignored, so use the EventGenerator
+    // to generate a dummy event. Without Aura, these will be native events.
+    gfx::NativeWindow window = controller_->owner()->GetNativeWindow();
+    ui::test::EventGenerator generator(window, window);
+    // Send "up", since this will not activate a menu item. But note that the
+    // test has already set exit_type_ = EXIT_ALL just before the first call
+    // to this function.
+    generator.PressKey(ui::VKEY_UP, 0);
 #else
 #error Unsupported platform
 #endif
@@ -205,18 +283,20 @@ class MenuControllerTest : public ViewsTestBase {
     if (controller_) {
       // These properties are faked by RunMenu for the purposes of testing and
       // need to be undone before we call the destructor.
-      controller_->owner_ = NULL;
+      controller_->owner_ = nullptr;
       controller_->showing_ = false;
       delete controller_;
-      controller_ = NULL;
+      controller_ = nullptr;
     }
   }
 
   // A weak pointer to the MenuController owned by this class.
   MenuController* controller_;
   scoped_ptr<base::RunLoop> run_loop_;
-  TestPlatformEventSource event_source_;
+  ui::test::PlatformEventSourceTestAPI event_source_;
+#if defined(USE_AURA)
   TestDispatcherClient dispatcher_client_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(MenuControllerTest);
 };
@@ -287,9 +367,8 @@ class TestEventHandler : public ui::EventHandler {
   int outstanding_touches_;
 };
 
-// Tests that touch event ids are released correctly. See
-// crbug.com/439051 for details. When the ids aren't managed
-// correctly, we get stuck down touches.
+// Tests that touch event ids are released correctly. See crbug.com/439051 for
+// details. When the ids aren't managed correctly, we get stuck down touches.
 TEST_F(MenuControllerTest, TouchIdsReleasedCorrectly) {
   scoped_ptr<Widget> owner(CreateOwnerWidget());
   TestEventHandler test_event_handler;
@@ -321,4 +400,161 @@ TEST_F(MenuControllerTest, TouchIdsReleasedCorrectly) {
 }
 #endif // defined(USE_X11)
 
+// Tests that initial selected menu items are correct when items are enabled or
+// disabled.
+TEST_F(MenuControllerTest, InitialSelectedItem) {
+  scoped_ptr<Widget> owner(CreateOwnerWidget());
+  scoped_ptr<TestMenuItemView> menu_item(new TestMenuItemView);
+  menu_item->AppendMenuItemWithLabel(1, base::ASCIIToUTF16("One"));
+  menu_item->AppendMenuItemWithLabel(2, base::ASCIIToUTF16("Two"));
+  menu_item->AppendMenuItemWithLabel(3, base::ASCIIToUTF16("Three"));
+  SetupMenu(owner.get(), menu_item.get());
+
+  // Leave items "Two" and "Three" enabled.
+  menu_item->GetSubmenu()->GetMenuItemAt(0)->SetEnabled(false);
+  // The first selectable item should be item "Two".
+  MenuItemView* first_selectable =
+      FindInitialSelectableMenuItemDown(menu_item.get());
+  ASSERT_NE(nullptr, first_selectable);
+  EXPECT_EQ(2, first_selectable->GetCommand());
+  // The last selectable item should be item "Three".
+  MenuItemView* last_selectable =
+      FindInitialSelectableMenuItemUp(menu_item.get());
+  ASSERT_NE(nullptr, last_selectable);
+  EXPECT_EQ(3, last_selectable->GetCommand());
+
+  // Leave items "One" and "Two" enabled.
+  menu_item->GetSubmenu()->GetMenuItemAt(0)->SetEnabled(true);
+  menu_item->GetSubmenu()->GetMenuItemAt(1)->SetEnabled(true);
+  menu_item->GetSubmenu()->GetMenuItemAt(2)->SetEnabled(false);
+  // The first selectable item should be item "One".
+  first_selectable = FindInitialSelectableMenuItemDown(menu_item.get());
+  ASSERT_NE(nullptr, first_selectable);
+  EXPECT_EQ(1, first_selectable->GetCommand());
+  // The last selectable item should be item "Two".
+  last_selectable = FindInitialSelectableMenuItemUp(menu_item.get());
+  ASSERT_NE(nullptr, last_selectable);
+  EXPECT_EQ(2, last_selectable->GetCommand());
+
+  // Leave only a single item "One" enabled.
+  menu_item->GetSubmenu()->GetMenuItemAt(0)->SetEnabled(true);
+  menu_item->GetSubmenu()->GetMenuItemAt(1)->SetEnabled(false);
+  menu_item->GetSubmenu()->GetMenuItemAt(2)->SetEnabled(false);
+  // The first selectable item should be item "One".
+  first_selectable = FindInitialSelectableMenuItemDown(menu_item.get());
+  ASSERT_NE(nullptr, first_selectable);
+  EXPECT_EQ(1, first_selectable->GetCommand());
+  // The last selectable item should be item "One".
+  last_selectable = FindInitialSelectableMenuItemUp(menu_item.get());
+  ASSERT_NE(nullptr, last_selectable);
+  EXPECT_EQ(1, last_selectable->GetCommand());
+
+  // Leave only a single item "Three" enabled.
+  menu_item->GetSubmenu()->GetMenuItemAt(0)->SetEnabled(false);
+  menu_item->GetSubmenu()->GetMenuItemAt(1)->SetEnabled(false);
+  menu_item->GetSubmenu()->GetMenuItemAt(2)->SetEnabled(true);
+  // The first selectable item should be item "Three".
+  first_selectable = FindInitialSelectableMenuItemDown(menu_item.get());
+  ASSERT_NE(nullptr, first_selectable);
+  EXPECT_EQ(3, first_selectable->GetCommand());
+  // The last selectable item should be item "Three".
+  last_selectable = FindInitialSelectableMenuItemUp(menu_item.get());
+  ASSERT_NE(nullptr, last_selectable);
+  EXPECT_EQ(3, last_selectable->GetCommand());
+
+  // Leave only a single item ("Two") selected. It should be the first and the
+  // last selectable item.
+  menu_item->GetSubmenu()->GetMenuItemAt(0)->SetEnabled(false);
+  menu_item->GetSubmenu()->GetMenuItemAt(1)->SetEnabled(true);
+  menu_item->GetSubmenu()->GetMenuItemAt(2)->SetEnabled(false);
+  first_selectable = FindInitialSelectableMenuItemDown(menu_item.get());
+  ASSERT_NE(nullptr, first_selectable);
+  EXPECT_EQ(2, first_selectable->GetCommand());
+  last_selectable = FindInitialSelectableMenuItemUp(menu_item.get());
+  ASSERT_NE(nullptr, last_selectable);
+  EXPECT_EQ(2, last_selectable->GetCommand());
+
+  // There should be no next or previous selectable item since there is only a
+  // single enabled item in the menu.
+  EXPECT_EQ(nullptr, FindNextSelectableMenuItem(menu_item.get(), 1));
+  EXPECT_EQ(nullptr, FindPreviousSelectableMenuItem(menu_item.get(), 1));
+
+  // Clear references in menu controller to the menu item that is going away.
+  ResetSelection();
+}
+
+// Tests that opening menu and pressing 'Down' and 'Up' iterates over enabled
+// items.
+TEST_F(MenuControllerTest, NextSelectedItem) {
+  scoped_ptr<Widget> owner(CreateOwnerWidget());
+  scoped_ptr<TestMenuItemView> menu_item(new TestMenuItemView);
+  menu_item->AppendMenuItemWithLabel(1, base::ASCIIToUTF16("One"));
+  menu_item->AppendMenuItemWithLabel(2, base::ASCIIToUTF16("Two"));
+  menu_item->AppendMenuItemWithLabel(3, base::ASCIIToUTF16("Three"));
+  menu_item->AppendMenuItemWithLabel(4, base::ASCIIToUTF16("Four"));
+  // Disabling the item "Three" gets it skipped when using keyboard to navigate.
+  menu_item->GetSubmenu()->GetMenuItemAt(2)->SetEnabled(false);
+
+  SetupMenu(owner.get(), menu_item.get());
+
+  // Fake initial hot selection.
+  SetPendingStateItem(menu_item->GetSubmenu()->GetMenuItemAt(0));
+  EXPECT_EQ(1, pending_state_item()->GetCommand());
+
+  // Move down in the menu.
+  // Select next item.
+  IncrementSelection();
+  EXPECT_EQ(2, pending_state_item()->GetCommand());
+
+  // Skip disabled item.
+  IncrementSelection();
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+
+  // Wrap around.
+  IncrementSelection();
+  EXPECT_EQ(1, pending_state_item()->GetCommand());
+
+  // Move up in the menu.
+  // Wrap around.
+  DecrementSelection();
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+
+  // Skip disabled item.
+  DecrementSelection();
+  EXPECT_EQ(2, pending_state_item()->GetCommand());
+
+  // Select previous item.
+  DecrementSelection();
+  EXPECT_EQ(1, pending_state_item()->GetCommand());
+
+  // Clear references in menu controller to the menu item that is going away.
+  ResetSelection();
+}
+
+// Tests that opening menu and pressing 'Up' selects the last enabled menu item.
+TEST_F(MenuControllerTest, PreviousSelectedItem) {
+  scoped_ptr<Widget> owner(CreateOwnerWidget());
+  scoped_ptr<TestMenuItemViewShown> menu_item(new TestMenuItemViewShown);
+  menu_item->AppendMenuItemWithLabel(1, base::ASCIIToUTF16("One"));
+  menu_item->AppendMenuItemWithLabel(2, base::ASCIIToUTF16("Two"));
+  menu_item->AppendMenuItemWithLabel(3, base::ASCIIToUTF16("Three"));
+  menu_item->AppendMenuItemWithLabel(4, base::ASCIIToUTF16("Four"));
+  // Disabling the item "Four" gets it skipped when using keyboard to navigate.
+  menu_item->GetSubmenu()->GetMenuItemAt(3)->SetEnabled(false);
+
+  SetupMenu(owner.get(), menu_item.get());
+
+  // Fake initial root item selection and submenu showing.
+  SetPendingStateItem(menu_item.get());
+  EXPECT_EQ(0, pending_state_item()->GetCommand());
+
+  // Move up and select a previous (in our case the last enabled) item.
+  DecrementSelection();
+  EXPECT_EQ(3, pending_state_item()->GetCommand());
+
+  // Clear references in menu controller to the menu item that is going away.
+  ResetSelection();
+}
+
+}  // namespace test
 }  // namespace views

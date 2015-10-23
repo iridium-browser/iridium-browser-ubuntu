@@ -43,15 +43,15 @@ class Event;
 // that can handle the event.
 class V8EventListener : public V8AbstractEventListener {
 public:
-    static PassRefPtr<V8EventListener> create(v8::Local<v8::Object> listener, bool isAttribute, ScriptState* scriptState)
+    static PassRefPtrWillBeRawPtr<V8EventListener> create(v8::Local<v8::Object> listener, bool isAttribute, ScriptState* scriptState)
     {
-        return adoptRef(new V8EventListener(listener, isAttribute, scriptState));
+        return adoptRefWillBeNoop(new V8EventListener(listener, isAttribute, scriptState));
     }
 
 protected:
     V8EventListener(v8::Local<v8::Object> listener, bool isAttribute, ScriptState*);
     v8::Local<v8::Function> getListenerFunction(ScriptState*);
-    virtual v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*) override;
+    v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*) override;
 };
 
 } // namespace blink

@@ -4,9 +4,9 @@
 
 package org.chromium.net.urlconnection;
 
-import android.util.Log;
 import android.util.Pair;
 
+import org.chromium.base.Log;
 import org.chromium.net.ExtendedResponseInfo;
 import org.chromium.net.ResponseInfo;
 import org.chromium.net.UploadDataProvider;
@@ -31,13 +31,11 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * An implementation of HttpURLConnection that uses Cronet to send requests and
- * receive response. This class inherits a {@code connected} field from the
- * superclass. That field indicates whether a connection has ever been
- * attempted.
+ * An implementation of {@link HttpURLConnection} that uses Cronet to send
+ * requests and receive responses.
  */
-public class CronetHttpURLConnection extends HttpURLConnection {
-    private static final String TAG = "CronetHttpURLConnection";
+class CronetHttpURLConnection extends HttpURLConnection {
+    private static final String TAG = "cr.CronetHttpURLConn";
     private static final String CONTENT_LENGTH = "Content-Length";
     private final UrlRequestContext mUrlRequestContext;
     private final MessageLoop mMessageLoop;
@@ -65,7 +63,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     /**
      * Opens a connection to the resource. If the connect method is called when
      * the connection has already been opened (indicated by the connected field
-     * having the value true), the call is ignored.
+     * having the value {@code true}), the call is ignored.
      */
     @Override
     public void connect() throws IOException {
@@ -142,8 +140,8 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     }
 
     /**
-     * Returns the name of the header field at the given position pos, or null
-     * if there are fewer than pos fields.
+     * Returns the name of the header field at the given position {@code pos}, or {@code null}
+     * if there are fewer than {@code pos} fields.
      */
     @Override
     public final String getHeaderFieldKey(int pos) {
@@ -155,8 +153,8 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     }
 
     /**
-     * Returns the header value at the field position pos or null if the header
-     * has fewer than pos fields.
+     * Returns the header value at the field position {@code pos} or {@code null} if the header
+     * has fewer than {@code pos} fields.
      */
     @Override
     public final String getHeaderField(int pos) {
@@ -169,7 +167,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
 
     /**
      * Returns an InputStream for reading data from the resource pointed by this
-     * URLConnection.
+     * {@link java.net.URLConnection}.
      * @throws FileNotFoundException if http response code is equal or greater
      *             than {@link HTTP_BAD_REQUEST}.
      * @throws IOException If the request gets a network error or HTTP error
@@ -190,6 +188,10 @@ public class CronetHttpURLConnection extends HttpURLConnection {
         return mInputStream;
     }
 
+    /**
+     * Returns an {@link OutputStream} for writing data to this {@link URLConnection}.
+     * @throws IOException if no {@code OutputStream} could be created.
+     */
     @Override
     public OutputStream getOutputStream() throws IOException {
         if (mOutputStream == null) {
@@ -197,23 +199,29 @@ public class CronetHttpURLConnection extends HttpURLConnection {
                 throw new ProtocolException(
                         "Cannot write to OutputStream after receiving response.");
             }
-            long fixedStreamingModeContentLength = getStreamingModeContentLength();
-            if (fixedStreamingModeContentLength != -1) {
-                mOutputStream = new CronetFixedModeOutputStream(this,
-                        fixedStreamingModeContentLength, mMessageLoop);
+            if (isChunkedUpload()) {
+                mOutputStream = new CronetChunkedOutputStream(this, chunkLength, mMessageLoop);
                 // Start the request now since all headers can be sent.
                 startRequest();
             } else {
-                // For the buffered case, start the request only when
-                // content-length bytes are received, or when a
-                // connect action is initiated by the consumer.
-                Log.d(TAG, "Outputstream is being buffered in memory.");
-                String length = getRequestProperty(CONTENT_LENGTH);
-                if (length == null) {
-                    mOutputStream = new CronetBufferedOutputStream(this);
+                long fixedStreamingModeContentLength = getStreamingModeContentLength();
+                if (fixedStreamingModeContentLength != -1) {
+                    mOutputStream = new CronetFixedModeOutputStream(
+                            this, fixedStreamingModeContentLength, mMessageLoop);
+                    // Start the request now since all headers can be sent.
+                    startRequest();
                 } else {
-                    long lengthParsed = Long.parseLong(length);
-                    mOutputStream = new CronetBufferedOutputStream(this, lengthParsed);
+                    // For the buffered case, start the request only when
+                    // content-length bytes are received, or when a
+                    // connect action is initiated by the consumer.
+                    Log.d(TAG, "Outputstream is being buffered in memory.");
+                    String length = getRequestProperty(CONTENT_LENGTH);
+                    if (length == null) {
+                        mOutputStream = new CronetBufferedOutputStream(this);
+                    } else {
+                        long lengthParsed = Long.parseLong(length);
+                        mOutputStream = new CronetBufferedOutputStream(this, lengthParsed);
+                    }
                 }
             }
         }
@@ -252,7 +260,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
             if (mOutputStream != null) {
                 mRequest.setUploadDataProvider(
                         (UploadDataProvider) mOutputStream, mMessageLoop);
-                if (getRequestProperty(CONTENT_LENGTH) == null) {
+                if (getRequestProperty(CONTENT_LENGTH) == null && !isChunkedUpload()) {
                     addRequestProperty(CONTENT_LENGTH,
                             Long.toString(((UploadDataProvider) mOutputStream).getLength()));
                 }
@@ -328,7 +336,8 @@ public class CronetHttpURLConnection extends HttpURLConnection {
                 // Cronet does not support adding multiple headers
                 // of the same key, see crbug.com/432719 for more details.
                 throw new UnsupportedOperationException(
-                        "Cannot add multiple headers of the same key. crbug.com/432719.");
+                        "Cannot add multiple headers of the same key, " + key
+                        + ". crbug.com/432719.");
             }
         }
         // Adds the new header at the end of mRequestHeaders.
@@ -362,8 +371,8 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     }
 
     /**
-     * Returns the value of the request header property specified by {code
-     * key} or null if there is no key with this name.
+     * Returns the value of the request header property specified by {@code
+     * key} or {@code null} if there is no key with this name.
      */
     @Override
     public String getRequestProperty(String key) {
@@ -381,15 +390,6 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     public boolean usingProxy() {
         // TODO(xunjieli): implement this.
         return false;
-    }
-
-    /**
-     * Sets chunked streaming mode.
-     */
-    @Override
-    public void setChunkedStreamingMode(int chunklen) {
-        // TODO(xunjieli): implement this.
-        throw new UnsupportedOperationException("Chunked mode not supported yet");
     }
 
     /**
@@ -491,6 +491,10 @@ public class CronetHttpURLConnection extends HttpURLConnection {
         // Check to see if enough data has been received.
         if (mOutputStream != null) {
             mOutputStream.checkReceivedEnoughContent();
+            if (isChunkedUpload()) {
+                // Write last chunk.
+                mOutputStream.close();
+            }
         }
         if (!mHasResponse) {
             startRequest();
@@ -531,5 +535,13 @@ public class CronetHttpURLConnection extends HttpURLConnection {
             return null;
         }
         return headers.get(pos);
+    }
+
+    /**
+     * Returns whether the client has used {@link #setChunkedStreamingMode} to
+     * set chunked encoding for upload.
+     */
+    private boolean isChunkedUpload() {
+        return chunkLength > 0;
     }
 }

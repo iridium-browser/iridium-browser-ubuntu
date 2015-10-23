@@ -12,7 +12,7 @@
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
-#include "ui/base/ime/chromeos/composition_text.h"
+#include "ui/base/ime/chromeos/composition_text_chromeos.h"
 #include "ui/base/ime/chromeos/ime_bridge.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -194,8 +194,9 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
   ExtensionTestMessageListener surrounding_text_listener(
       "onSurroundingTextChanged", false);
   engine_handler->SetSurroundingText("text",  // Surrounding text.
-                                     0,  // focused position.
-                                     1);  // anchor position.
+                                     0,       // focused position.
+                                     1,       // anchor position.
+                                     0);      // offset position.
   ASSERT_TRUE(surrounding_text_listener.WaitUntilSatisfied());
   ASSERT_TRUE(surrounding_text_listener.was_satisfied());
 

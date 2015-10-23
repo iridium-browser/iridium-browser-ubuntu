@@ -35,7 +35,7 @@ function WallpaperManager(dialogDom) {
    * URL of the learn more page for wallpaper picker.
    */
   /** @const */ var LearnMoreURL =
-      'https://support.google.com/chromeos/?p=wallpaper_fileerror&hl=' +
+      'https://support.google.com/chromebook/?p=wallpaper_fileerror&hl=' +
           navigator.language;
 
   /**
@@ -59,6 +59,15 @@ function WallpaperManager(dialogDom) {
    */
   function str(id) {
     return loadTimeData.getString(id);
+  }
+
+  /**
+   * Returns the base name for |file_path|.
+   * @param {string} file_path The path of the file.
+   * @return {string} The base name of the file.
+   */
+  function getBaseName(file_path) {
+    return file_path.substring(file_path.lastIndexOf('/') + 1);
   }
 
   /**
@@ -202,6 +211,7 @@ function WallpaperManager(dialogDom) {
     var onSuccess = function() {
       if (chrome.runtime.lastError == null) {
         if (shouldEnable) {
+          self.document_.body.removeAttribute('surprise-me-disabled');
           checkbox.classList.add('checked');
           // Hides the wallpaper set by message if there is any.
           $('wallpaper-set-by-message').textContent = '';
@@ -214,6 +224,7 @@ function WallpaperManager(dialogDom) {
                                      self.currentWallpaper_);
           }
           checkbox.classList.remove('checked');
+          self.document_.body.setAttribute('surprise-me-disabled', '');
         }
         $('categories-list').disabled = shouldEnable;
         $('wallpaper-grid').disabled = shouldEnable;
@@ -281,6 +292,7 @@ function WallpaperManager(dialogDom) {
 
     if (this.enableOnlineWallpaper_) {
       var self = this;
+      self.document_.body.setAttribute('surprise-me-disabled', '');
       $('surprise-me').hidden = false;
       $('surprise-me').addEventListener('click',
                                         this.toggleSurpriseMe_.bind(this));
@@ -288,6 +300,7 @@ function WallpaperManager(dialogDom) {
         $('surprise-me').querySelector('#checkbox').classList.add('checked');
         $('categories-list').disabled = true;
         $('wallpaper-grid').disabled = true;
+        self.document_.body.removeAttribute('surprise-me-disabled');
       };
 
       WallpaperUtil.enabledSyncThemesCallback(function(syncEnabled) {
@@ -341,8 +354,7 @@ function WallpaperManager(dialogDom) {
           for (var i = 0; i < thumbnails.length; i++) {
             var thumbnail = thumbnails[i];
             var url = self.wallpaperGrid_.dataModel.item(i).baseURL;
-            var fileName = url.substring(url.lastIndexOf('/') + 1) +
-                Constants.HighResolutionSuffix;
+            var fileName = getBaseName(url) + Constants.HighResolutionSuffix;
             if (self.downloadedListMap_ &&
                 self.downloadedListMap_.hasOwnProperty(encodeURI(fileName))) {
               thumbnail.offline = true;
@@ -1034,8 +1046,12 @@ function WallpaperManager(dialogDom) {
           wallpapersDataModel.push(oemDefaultWallpaperElement);
         }
         for (var i = 0; i < wallpapersDataModel.length; i++) {
-          if (self.currentWallpaper_ == wallpapersDataModel.item(i).baseURL)
+          // For custom wallpapers, the file name of |currentWallpaper_|
+          // includes the first directory level (corresponding to user id hash).
+          if (getBaseName(self.currentWallpaper_) ==
+              wallpapersDataModel.item(i).baseURL) {
             selectedItem = wallpapersDataModel.item(i);
+          }
         }
         var lastElement = {
             baseURL: '',
@@ -1089,8 +1105,7 @@ function WallpaperManager(dialogDom) {
             authorWebsite: this.manifest_.wallpaper_list[i].author_website,
             dynamicURL: this.manifest_.wallpaper_list[i].dynamic_url
           };
-          var startIndex = wallpaperInfo.baseURL.lastIndexOf('/') + 1;
-          var fileName = wallpaperInfo.baseURL.substring(startIndex) +
+          var fileName = getBaseName(wallpaperInfo.baseURL) +
               Constants.HighResolutionSuffix;
           if (this.downloadedListMap_ &&
               this.downloadedListMap_.hasOwnProperty(encodeURI(fileName))) {

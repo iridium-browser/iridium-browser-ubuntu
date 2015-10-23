@@ -33,8 +33,11 @@ TcpBweReceiver::~TcpBweReceiver() {
 
 void TcpBweReceiver::ReceivePacket(int64_t arrival_time_ms,
                                    const MediaPacket& media_packet) {
-  latest_owd_ms_ = arrival_time_ms - media_packet.sender_timestamp_us() / 1000;
+  latest_owd_ms_ = arrival_time_ms - media_packet.sender_timestamp_ms() / 1000;
   acks_.push_back(media_packet.header().sequenceNumber);
+
+  // Log received packet information.
+  BweReceiver::ReceivePacket(arrival_time_ms, media_packet);
 }
 
 FeedbackPacket* TcpBweReceiver::GetFeedback(int64_t now_ms) {

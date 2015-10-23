@@ -29,9 +29,9 @@ public:
     {
     }
 
-    WillBeHeapVector<RefPtrWillBeMember<TextTrack>> tracks;
-    RefPtrWillBeMember<TextTrack> visibleTrack;
-    RefPtrWillBeMember<TextTrack> defaultTrack;
+    HeapVector<Member<TextTrack>> tracks;
+    Member<TextTrack> visibleTrack;
+    Member<TextTrack> defaultTrack;
     GroupKind kind;
     bool hasSrcLang;
 };
@@ -62,41 +62,51 @@ AutomaticTrackSelection::AutomaticTrackSelection(const Configuration& configurat
 {
 }
 
+const AtomicString& AutomaticTrackSelection::preferredTrackKind() const
+{
+    if (m_configuration.textTrackKindUserPreference == TextTrackKindUserPreference::Subtitles)
+        return TextTrack::subtitlesKeyword();
+    if (m_configuration.textTrackKindUserPreference == TextTrackKindUserPreference::Captions)
+        return TextTrack::captionsKeyword();
+    return nullAtom;
+}
+
 void AutomaticTrackSelection::performAutomaticTextTrackSelection(const TrackGroup& group)
 {
     ASSERT(group.tracks.size());
 
     // First, find the track in the group that should be enabled (if any).
-    WillBeHeapVector<RefPtrWillBeMember<TextTrack>> currentlyEnabledTracks;
-    RefPtrWillBeRawPtr<TextTrack> trackToEnable = nullptr;
-    RefPtrWillBeRawPtr<TextTrack> defaultTrack = nullptr;
-    RefPtrWillBeRawPtr<TextTrack> fallbackTrack = nullptr;
+    HeapVector<Member<TextTrack>> currentlyEnabledTracks;
+    TextTrack* trackToEnable = nullptr;
+    TextTrack* defaultTrack = nullptr;
+    TextTrack* preferredTrack = nullptr;
+    TextTrack* fallbackTrack = nullptr;
     int highestTrackScore = 0;
+
     for (size_t i = 0; i < group.tracks.size(); ++i) {
-        RefPtrWillBeRawPtr<TextTrack> textTrack = group.tracks[i];
+        TextTrack* textTrack = group.tracks[i];
 
         if (m_configuration.disableCurrentlyEnabledTracks && textTrack->mode() == TextTrack::showingKeyword())
             currentlyEnabledTracks.append(textTrack);
 
         int trackScore = textTrackSelectionScore(*textTrack);
+
+        if (textTrack->kind() == preferredTrackKind())
+            trackScore += 1;
         if (trackScore) {
-            // * If the text track kind is { [subtitles or captions] [descriptions] } and the user has indicated an interest in having a
+            // * If the text track kind is subtitles or captions and the user has indicated an interest in having a
             // track with this text track kind, text track language, and text track label enabled, and there is no
             // other text track in the media element's list of text tracks with a text track kind of either subtitles
             // or captions whose text track mode is showing
-            // ...
-            // * If the text track kind is chapters and the text track language is one that the user agent has reason
-            // to believe is appropriate for the user, and there is no other text track in the media element's list of
-            // text tracks with a text track kind of chapters whose text track mode is showing
             //    Let the text track mode be showing.
             if (trackScore > highestTrackScore) {
+                preferredTrack = textTrack;
                 highestTrackScore = trackScore;
-                trackToEnable = textTrack;
             }
-
             if (!defaultTrack && textTrack->isDefault())
                 defaultTrack = textTrack;
-            if (!defaultTrack && !fallbackTrack)
+
+            if (!fallbackTrack)
                 fallbackTrack = textTrack;
         } else if (!group.visibleTrack && !defaultTrack && textTrack->isDefault()) {
             // * If the track element has a default attribute specified, and there is no other text track in the media
@@ -106,20 +116,22 @@ void AutomaticTrackSelection::performAutomaticTextTrackSelection(const TrackGrou
         }
     }
 
+    if (m_configuration.textTrackKindUserPreference != TextTrackKindUserPreference::Default)
+        trackToEnable = preferredTrack;
+
     if (!trackToEnable && defaultTrack)
         trackToEnable = defaultTrack;
 
-    // If no track matches the user's preferred language and non was marked 'default', enable the first track
-    // because the user has explicitly stated a preference for this kind of track.
-    if (!fallbackTrack && m_configuration.forceEnableSubtitleOrCaptionTrack && group.kind == TrackGroup::CaptionsAndSubtitles)
-        fallbackTrack = group.tracks[0];
-
-    if (!trackToEnable && fallbackTrack)
-        trackToEnable = fallbackTrack;
+    if (!trackToEnable && m_configuration.forceEnableSubtitleOrCaptionTrack && group.kind == TrackGroup::CaptionsAndSubtitles) {
+        if (fallbackTrack)
+            trackToEnable = fallbackTrack;
+        else
+            trackToEnable = group.tracks[0];
+    }
 
     if (currentlyEnabledTracks.size()) {
         for (size_t i = 0; i < currentlyEnabledTracks.size(); ++i) {
-            RefPtrWillBeRawPtr<TextTrack> textTrack = currentlyEnabledTracks[i];
+            TextTrack* textTrack = currentlyEnabledTracks[i];
             if (textTrack != trackToEnable)
                 textTrack->setMode(TextTrack::disabledKeyword());
         }
@@ -156,7 +168,7 @@ void AutomaticTrackSelection::perform(TextTrackList& textTracks)
     TrackGroup metadataTracks(TrackGroup::Metadata);
 
     for (size_t i = 0; i < textTracks.length(); ++i) {
-        RefPtrWillBeRawPtr<TextTrack> textTrack = textTracks.item(i);
+        TextTrack* textTrack = textTracks.item(i);
         if (!textTrack)
             continue;
 

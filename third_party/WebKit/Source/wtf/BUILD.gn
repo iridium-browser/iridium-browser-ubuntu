@@ -18,7 +18,6 @@ config("wtf_config") {
       "__STD_C",
       "_CRT_SECURE_NO_DEPRECATE",
       "_SCL_SECURE_NO_DEPRECATE",
-      "CRASH=__debugbreak",
     ]
     include_dirs = [
       "os-win32",
@@ -32,7 +31,7 @@ config("wtf_config") {
       "/wd4706",
     ]
 
-    if (component_mode == "shared_library") {
+    if (is_component_build) {
       # Chromium windows multi-dll build enables C++ exceptions and this causes
       # wtf to generate 4291 warning due to operator new/delete
       # implementations. Disable the warning for chromium windows multi-dll

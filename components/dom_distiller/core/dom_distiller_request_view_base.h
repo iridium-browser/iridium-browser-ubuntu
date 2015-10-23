@@ -9,36 +9,20 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/core/task_tracker.h"
-#include "components/dom_distiller/core/viewer.h"
-#include "content/public/browser/url_data_source.h"
-#include "net/base/url_util.h"
 
 namespace dom_distiller {
-
-// This interface is used to abstract the data callback from the distiller. The
-// callbacks for different platforms have different numbers of parameters
-// (namely iOS and Android) which makes this necessary.
-class DistillerDataCallback {
- public:
-  virtual ~DistillerDataCallback(){};
-  virtual void RunCallback(std::string& data) = 0;
-};
 
 // Handles receiving data asynchronously for a specific entry, and passing
 // it along to the data callback for the data source. Lifetime matches that of
 // the current main frame's page in the Viewer instance.
-class DomDistillerRequestViewBase
-    : public ViewRequestDelegate,
-      public DistilledPagePrefs::Observer {
+class DomDistillerRequestViewBase : public ViewRequestDelegate,
+                                    public DistilledPagePrefs::Observer {
  public:
   explicit DomDistillerRequestViewBase(
-      scoped_ptr<DistillerDataCallback> callback,
       DistilledPagePrefs* distilled_page_prefs);
   ~DomDistillerRequestViewBase() override;
 
@@ -67,9 +51,6 @@ class DomDistillerRequestViewBase
   // The handle to the view request towards the DomDistillerService. It
   // needs to be kept around to ensure the distillation request finishes.
   scoped_ptr<ViewerHandle> viewer_handle_;
-
-  // Holds the callback to where the data retrieved is sent back.
-  scoped_ptr<DistillerDataCallback> callback_;
 
   // Number of pages of the distilled article content that have been rendered by
   // the viewer.

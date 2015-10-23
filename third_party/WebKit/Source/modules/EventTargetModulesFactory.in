@@ -18,10 +18,13 @@ modules/mediastream/MediaStreamTrack
 modules/mediastream/RTCDTMFSender
 modules/mediastream/RTCDataChannel
 modules/mediastream/RTCPeerConnection
+modules/navigatorconnect/ServicePortCollection
 modules/netinfo/NetworkInformation
 modules/notifications/Notification
 modules/permissions/PermissionStatus
 modules/presentation/Presentation
+modules/presentation/PresentationAvailability
+modules/presentation/PresentationRequest
 modules/presentation/PresentationSession
 modules/screen_orientation/ScreenOrientation
 modules/serviceworkers/ServiceWorker
@@ -37,3 +40,4 @@ modules/webmidi/MIDIAccess
 modules/webmidi/MIDIInput
 modules/webmidi/MIDIPort
 modules/websockets/WebSocket ImplementedAs=DOMWebSocket
+modules/webusb/USB

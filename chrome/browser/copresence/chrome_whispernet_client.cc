@@ -133,9 +133,9 @@ void ChromeWhispernetClient::EncodeToken(
   ConvertTokenParams(token_params[type], &params.token_params);
 
   SendEventIfLoaded(make_scoped_ptr(new Event(
+      extensions::events::COPRESENCE_PRIVATE_ON_ENCODE_TOKEN_REQUEST,
       OnEncodeTokenRequest::kEventName,
-      OnEncodeTokenRequest::Create(client_id_, params),
-      browser_context_)));
+      OnEncodeTokenRequest::Create(client_id_, params), browser_context_)));
 }
 
 void ChromeWhispernetClient::DecodeSamples(
@@ -150,9 +150,9 @@ void ChromeWhispernetClient::DecodeSamples(
   ConvertTokenParams(token_params[INAUDIBLE], &params.inaudible_token_params);
 
   SendEventIfLoaded(make_scoped_ptr(new Event(
+      extensions::events::COPRESENCE_PRIVATE_ON_DECODE_SAMPLES_REQUEST,
       OnDecodeSamplesRequest::kEventName,
-      OnDecodeSamplesRequest::Create(client_id_, params),
-      browser_context_)));
+      OnDecodeSamplesRequest::Create(client_id_, params), browser_context_)));
 }
 
 void ChromeWhispernetClient::RegisterTokensCallback(
@@ -192,9 +192,9 @@ void ChromeWhispernetClient::AudioConfiguration(const AudioParamData& params) {
 
   DVLOG(3) << "Configuring audio for client " << client_id_;
   SendEventIfLoaded(make_scoped_ptr(new Event(
+      extensions::events::COPRESENCE_PRIVATE_ON_CONFIG_AUDIO,
       OnConfigAudio::kEventName,
-      OnConfigAudio::Create(client_id_, audio_params),
-      browser_context_)));
+      OnConfigAudio::Create(client_id_, audio_params), browser_context_)));
 }
 
 void ChromeWhispernetClient::SendEventIfLoaded(

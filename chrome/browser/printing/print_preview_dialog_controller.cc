@@ -15,6 +15,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/printing/print_view_manager.h"
+#include "chrome/browser/task_management/web_contents_tags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -100,20 +101,18 @@ void PrintPreviewDialogDelegate::GetDialogSize(gfx::Size* size) const {
   const int kBorder = 25;
   *size = kMinDialogSize;
 
-  web_modal::WebContentsModalDialogHost* host = NULL;
+  web_modal::WebContentsModalDialogHost* host = nullptr;
   content::WebContents* outermost_web_contents =
       guest_view::GuestViewBase::GetTopLevelWebContents(initiator_);
   Browser* browser = chrome::FindBrowserWithWebContents(outermost_web_contents);
   if (browser)
     host = browser->window()->GetWebContentsModalDialogHost();
 
-  if (host) {
+  if (host)
     size->SetToMax(host->GetMaximumDialogSize());
-    size->Enlarge(-2 * kBorder, -kBorder);
-  } else {
+  else
     size->SetToMax(outermost_web_contents->GetContainerBounds().size());
-    size->Enlarge(-2 * kBorder, -2 * kBorder);
-  }
+  size->Enlarge(-2 * kBorder, -kBorder);
 
 #if defined(OS_MACOSX)
   // Limit the maximum size on MacOS X.
@@ -152,7 +151,7 @@ PrintPreviewDialogController::PrintPreviewDialogController()
 // static
 PrintPreviewDialogController* PrintPreviewDialogController::GetInstance() {
   if (!g_browser_process)
-    return NULL;
+    return nullptr;
   return g_browser_process->print_preview_dialog_controller();
 }
 
@@ -184,6 +183,14 @@ WebContents* PrintPreviewDialogController::GetOrCreatePreviewDialog(
 
 WebContents* PrintPreviewDialogController::GetPrintPreviewForContents(
     WebContents* contents) const {
+  // If this WebContents relies on another for its preview dialog, we
+  // need to act as if we are looking for the proxied content's dialog.
+  PrintPreviewDialogMap::const_iterator proxied =
+      proxied_dialog_map_.find(contents);
+  if (proxied != proxied_dialog_map_.end()) {
+    contents = proxied->second;
+  }
+
   // |preview_dialog_map_| is keyed by the preview dialog, so if find()
   // succeeds, then |contents| is the preview dialog.
   PrintPreviewDialogMap::const_iterator it = preview_dialog_map_.find(contents);
@@ -199,13 +206,13 @@ WebContents* PrintPreviewDialogController::GetPrintPreviewForContents(
       return it->first;
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 WebContents* PrintPreviewDialogController::GetInitiator(
     WebContents* preview_dialog) {
   PrintPreviewDialogMap::iterator it = preview_dialog_map_.find(preview_dialog);
-  return (it != preview_dialog_map_.end()) ? it->second : NULL;
+  return (it != preview_dialog_map_.end()) ? it->second : nullptr;
 }
 
 void PrintPreviewDialogController::Observe(
@@ -254,7 +261,7 @@ void PrintPreviewDialogController::EraseInitiatorInfo(
     return;
 
   RemoveObservers(it->second);
-  preview_dialog_map_[preview_dialog] = NULL;
+  preview_dialog_map_[preview_dialog] = nullptr;
 }
 
 PrintPreviewDialogController::~PrintPreviewDialogController() {}
@@ -370,10 +377,24 @@ WebContents* PrintPreviewDialogController::CreatePrintPreviewDialog(
   preview_dialog_map_[preview_dialog] = initiator;
   waiting_for_new_preview_page_ = true;
 
+  // Make the print preview WebContents show up in the task manager.
+  task_management::WebContentsTags::CreateForPrintingContents(preview_dialog);
+
   AddObservers(initiator);
   AddObservers(preview_dialog);
 
   return preview_dialog;
+}
+
+void PrintPreviewDialogController::AddProxyDialogForWebContents(
+    WebContents* source,
+    WebContents* target) {
+  proxied_dialog_map_[source] = target;
+}
+
+void PrintPreviewDialogController::RemoveProxyDialogForWebContents(
+    WebContents* source) {
+  proxied_dialog_map_.erase(source);
 }
 
 void PrintPreviewDialogController::SaveInitiatorTitle(
@@ -428,7 +449,7 @@ void PrintPreviewDialogController::RemoveInitiator(
   // Update the map entry first, so when the print preview dialog gets destroyed
   // and reaches RemovePreviewDialog(), it does not attempt to also remove the
   // initiator's observers.
-  preview_dialog_map_[preview_dialog] = NULL;
+  preview_dialog_map_[preview_dialog] = nullptr;
   RemoveObservers(initiator);
 
   PrintViewManager::FromWebContents(initiator)->PrintPreviewDone();

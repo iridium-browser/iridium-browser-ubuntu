@@ -14,12 +14,8 @@
 #include "content/renderer/webpublicsuffixlist_impl.h"
 #include "device/vibration/vibration_manager.mojom.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
-#include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
 #include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBFactory.h"
-
-namespace base {
-class MessageLoopProxy;
-}
+#include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationType.h"
 
 namespace cc {
 class ContextProvider;
@@ -112,6 +108,7 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   virtual blink::WebFileSystem* fileSystem();
   virtual bool canAccelerate2dCanvas();
   virtual bool isThreadedCompositingEnabled();
+  virtual bool isThreadedAnimationEnabled();
   virtual double audioHardwareSampleRate();
   virtual size_t audioHardwareBufferSize();
   virtual unsigned audioHardwareOutputChannels();

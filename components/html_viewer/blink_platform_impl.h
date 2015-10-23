@@ -9,13 +9,13 @@
 #include "base/threading/thread_local_storage.h"
 #include "base/timer/timer.h"
 #include "cc/blink/web_compositor_support_impl.h"
-#include "components/html_viewer/blink_resource_map.h"
 #include "components/html_viewer/mock_web_blob_registry_impl.h"
 #include "components/html_viewer/web_mime_registry_impl.h"
 #include "components/html_viewer/web_notification_manager_impl.h"
 #include "components/html_viewer/web_theme_engine_impl.h"
 #include "components/webcrypto/webcrypto_impl.h"
-#include "mojo/services/network/public/interfaces/network_service.mojom.h"
+#include "mojo/services/network/public/interfaces/url_loader_factory.mojom.h"
+#include "mojo/services/network/public/interfaces/web_socket_factory.mojom.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebScrollbarBehavior.h"
 
@@ -51,11 +51,9 @@ class BlinkPlatformImpl : public blink::Platform {
   virtual double monotonicallyIncreasingTime();
   virtual void cryptographicallyRandomValues(unsigned char* buffer,
                                              size_t length);
-  virtual void setSharedTimerFiredFunction(void (*func)());
-  virtual void setSharedTimerFireInterval(double interval_seconds);
-  virtual void stopSharedTimer();
   virtual bool isThreadedCompositingEnabled();
   virtual blink::WebCompositorSupport* compositorSupport();
+  uint32_t getUniqueIdForProcess() override;
   void createMessageChannel(blink::WebMessagePortChannel** channel1,
                             blink::WebMessagePortChannel** channel2) override;
   virtual blink::WebURLLoader* createURLLoader();
@@ -69,7 +67,9 @@ class BlinkPlatformImpl : public blink::Platform {
   virtual blink::WebThread* createThread(const char* name);
   virtual blink::WebThread* currentThread();
   virtual void yieldCurrentThread();
-  virtual blink::WebWaitableEvent* createWaitableEvent();
+  virtual blink::WebWaitableEvent* createWaitableEvent(
+      blink::WebWaitableEvent::ResetPolicy policy,
+      blink::WebWaitableEvent::InitialState state);
   virtual blink::WebWaitableEvent* waitMultipleEvents(
       const blink::WebVector<blink::WebWaitableEvent*>& events);
   virtual blink::WebScrollbarBehavior* scrollbarBehavior();
@@ -84,24 +84,12 @@ class BlinkPlatformImpl : public blink::Platform {
   virtual blink::WebNotificationManager* notificationManager();
 
  private:
-  void SuspendSharedTimer();
-  void ResumeSharedTimer();
   void UpdateWebThreadTLS(blink::WebThread* thread);
-
-  void DoTimeout() {
-    if (shared_timer_func_ && !shared_timer_suspended_)
-      shared_timer_func_();
-  }
 
   static void DestroyCurrentThread(void*);
 
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   scoped_ptr<scheduler::WebThreadImplForRendererScheduler> main_thread_;
-  base::OneShotTimer<BlinkPlatformImpl> shared_timer_;
-  void (*shared_timer_func_)();
-  double shared_timer_fire_time_;
-  bool shared_timer_fire_time_was_set_while_suspended_;
-  int shared_timer_suspended_;  // counter
   base::ThreadLocalStorage::Slot current_thread_slot_;
   cc_blink::WebCompositorSupportImpl compositor_support_;
   WebThemeEngineImpl theme_engine_;
@@ -109,8 +97,8 @@ class BlinkPlatformImpl : public blink::Platform {
   webcrypto::WebCryptoImpl web_crypto_;
   WebNotificationManagerImpl web_notification_manager_;
   blink::WebScrollbarBehavior scrollbar_behavior_;
-  BlinkResourceMap blink_resource_map_;
-  mojo::NetworkServicePtr network_service_;
+  mojo::WebSocketFactoryPtr web_socket_factory_;
+  mojo::URLLoaderFactoryPtr url_loader_factory_;
   MockWebBlobRegistryImpl blob_registry_;
   scoped_ptr<WebCookieJarImpl> cookie_jar_;
   scoped_ptr<WebClipboardImpl> clipboard_;

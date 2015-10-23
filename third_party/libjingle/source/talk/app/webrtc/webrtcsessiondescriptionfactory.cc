@@ -33,6 +33,7 @@
 #include "talk/app/webrtc/mediaconstraintsinterface.h"
 #include "talk/app/webrtc/mediastreamsignaling.h"
 #include "talk/app/webrtc/webrtcsession.h"
+#include "webrtc/base/sslidentity.h"
 
 using cricket::MediaSessionOptions;
 
@@ -40,6 +41,8 @@ namespace webrtc {
 namespace {
 static const char kFailedDueToIdentityFailed[] =
     " failed because DTLS identity request failed";
+static const char kFailedDueToSessionShutdown[] =
+    " failed because the session was shut down";
 
 static const uint64 kInitSessionVersion = 2;
 
@@ -65,8 +68,7 @@ static bool ValidStreams(const MediaSessionOptions::Streams& streams) {
 
 enum {
   MSG_CREATE_SESSIONDESCRIPTION_SUCCESS,
-  MSG_CREATE_SESSIONDESCRIPTION_FAILED,
-  MSG_GENERATE_IDENTITY,
+  MSG_CREATE_SESSIONDESCRIPTION_FAILED
 };
 
 struct CreateSessionDescriptionMsg : public rtc::MessageData {
@@ -100,7 +102,7 @@ void WebRtcIdentityRequestObserver::OnSuccess(
   SignalIdentityReady(identity);
 }
 
-void WebRtcIdentityRequestObserver::OnSuccessWithIdentityObj(
+void WebRtcIdentityRequestObserver::OnSuccess(
     rtc::scoped_ptr<rtc::SSLIdentity> identity) {
   SignalIdentityReady(identity.release());
 }
@@ -128,7 +130,7 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
     rtc::Thread* signaling_thread,
     cricket::ChannelManager* channel_manager,
     MediaStreamSignaling* mediastream_signaling,
-    DTLSIdentityServiceInterface* dtls_identity_service,
+    rtc::scoped_ptr<DtlsIdentityStoreInterface> dtls_identity_store,
     WebRtcSession* session,
     const std::string& session_id,
     cricket::DataChannelType dct,
@@ -141,7 +143,7 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
       // to just use a random number as session id and start version from
       // |kInitSessionVersion|.
       session_version_(kInitSessionVersion),
-      identity_service_(dtls_identity_service),
+      dtls_identity_store_(dtls_identity_store.Pass()),
       session_(session),
       session_id_(session_id),
       data_channel_type_(dct),
@@ -151,11 +153,10 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
   // SRTP-SDES is disabled if DTLS is on.
   SetSdesPolicy(dtls_enabled ? cricket::SEC_DISABLED : cricket::SEC_REQUIRED);
 
-  if (!dtls_enabled) {
-    return;
-  }
+  // If |dtls_enabled| we must have a |dtls_identity_store_|.
+  DCHECK(!dtls_enabled || dtls_identity_store_);
 
-  if (identity_service_.get()) {
+  if (dtls_enabled && dtls_identity_store_) {
     identity_request_observer_ =
       new rtc::RefCountedObject<WebRtcIdentityRequestObserver>();
 
@@ -164,25 +165,26 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
     identity_request_observer_->SignalIdentityReady.connect(
         this, &WebRtcSessionDescriptionFactory::SetIdentity);
 
-    if (identity_service_->RequestIdentity(
-            DtlsIdentityStore::kIdentityName,
-            DtlsIdentityStore::kIdentityName,
-            identity_request_observer_)) {
-      LOG(LS_VERBOSE) << "DTLS-SRTP enabled; sent DTLS identity request.";
-      identity_request_state_ = IDENTITY_WAITING;
-    } else {
-      LOG(LS_ERROR) << "Failed to send DTLS identity request.";
-      identity_request_state_ = IDENTITY_FAILED;
-    }
-  } else {
+    LOG(LS_VERBOSE) << "DTLS-SRTP enabled; sending DTLS identity request.";
     identity_request_state_ = IDENTITY_WAITING;
-    // Do not generate the identity in the constructor since the caller has
-    // not got a chance to connect to SignalIdentityReady.
-    signaling_thread_->Post(this, MSG_GENERATE_IDENTITY, NULL);
+    dtls_identity_store_->RequestIdentity(rtc::KT_DEFAULT,
+                                          identity_request_observer_);
   }
 }
 
 WebRtcSessionDescriptionFactory::~WebRtcSessionDescriptionFactory() {
+  ASSERT(signaling_thread_->IsCurrent());
+
+  // Fail any requests that were asked for before identity generation completed.
+  FailPendingRequests(kFailedDueToSessionShutdown);
+
+  // Process all pending notifications in the message queue.  If we don't do
+  // this, requests will linger and not know they succeeded or failed.
+  rtc::MessageList list;
+  signaling_thread_->Clear(this, rtc::MQID_ANY, &list);
+  for (auto& msg : list)
+    OnMessage(&msg);
+
   transport_desc_factory_.set_identity(NULL);
 }
 
@@ -310,11 +312,6 @@ void WebRtcSessionDescriptionFactory::OnMessage(rtc::Message* msg) {
       delete param;
       break;
     }
-    case MSG_GENERATE_IDENTITY: {
-      LOG(LS_INFO) << "Generating identity.";
-      SetIdentity(rtc::SSLIdentity::Generate(DtlsIdentityStore::kIdentityName));
-      break;
-    }
     default:
       ASSERT(false);
       break;
@@ -400,6 +397,19 @@ void WebRtcSessionDescriptionFactory::InternalCreateAnswer(
   PostCreateSessionDescriptionSucceeded(request.observer, answer);
 }
 
+void WebRtcSessionDescriptionFactory::FailPendingRequests(
+    const std::string& reason) {
+  ASSERT(signaling_thread_->IsCurrent());
+  while (!create_session_description_requests_.empty()) {
+    const CreateSessionDescriptionRequest& request =
+        create_session_description_requests_.front();
+    PostCreateSessionDescriptionFailed(request.observer,
+        ((request.type == CreateSessionDescriptionRequest::kOffer) ?
+            "CreateOffer" : "CreateAnswer") + reason);
+    create_session_description_requests_.pop();
+  }
+}
+
 void WebRtcSessionDescriptionFactory::PostCreateSessionDescriptionFailed(
     CreateSessionDescriptionObserver* observer, const std::string& error) {
   CreateSessionDescriptionMsg* msg = new CreateSessionDescriptionMsg(observer);
@@ -422,16 +432,7 @@ void WebRtcSessionDescriptionFactory::OnIdentityRequestFailed(int error) {
   LOG(LS_ERROR) << "Async identity request failed: error = " << error;
   identity_request_state_ = IDENTITY_FAILED;
 
-  std::string msg = kFailedDueToIdentityFailed;
-  while (!create_session_description_requests_.empty()) {
-    const CreateSessionDescriptionRequest& request =
-        create_session_description_requests_.front();
-    PostCreateSessionDescriptionFailed(
-        request.observer,
-        ((request.type == CreateSessionDescriptionRequest::kOffer) ?
-            "CreateOffer" : "CreateAnswer") + msg);
-    create_session_description_requests_.pop();
-  }
+  FailPendingRequests(kFailedDueToIdentityFailed);
 }
 
 void WebRtcSessionDescriptionFactory::SetIdentity(

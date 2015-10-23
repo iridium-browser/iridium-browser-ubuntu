@@ -5,7 +5,9 @@
 #include "chrome/test/base/view_event_test_base.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/test/base/chrome_unit_test_suite.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -21,17 +23,10 @@ namespace {
 // View subclass that allows you to specify the preferred size.
 class TestView : public views::View {
  public:
-  TestView() {}
-
-  void SetPreferredSize(const gfx::Size& size) {
-    preferred_size_ = size;
-    PreferredSizeChanged();
-  }
+  explicit TestView(ViewEventTestBase* harness) : harness_(harness) {}
 
   gfx::Size GetPreferredSize() const override {
-    if (!preferred_size_.IsEmpty())
-      return preferred_size_;
-    return View::GetPreferredSize();
+    return harness_->GetPreferredSize();
   }
 
   void Layout() override {
@@ -40,7 +35,7 @@ class TestView : public views::View {
   }
 
  private:
-  gfx::Size preferred_size_;
+  ViewEventTestBase* harness_;
 
   DISALLOW_COPY_AND_ASSIGN(TestView);
 };
@@ -68,7 +63,6 @@ void ViewEventTestBase::SetUpTestCase() {
 }
 
 void ViewEventTestBase::SetUp() {
-  views::ViewsDelegate::views_delegate = &views_delegate_;
   ui::InitializeInputMethodForTesting();
 
   // The ContextFactory must exist before any Compositors are created.
@@ -97,7 +91,10 @@ void ViewEventTestBase::TearDown() {
   ui::TerminateContextFactoryForTests();
 
   ui::ShutdownInputMethodForTesting();
-  views::ViewsDelegate::views_delegate = NULL;
+}
+
+gfx::Size ViewEventTestBase::GetPreferredSize() const {
+  return gfx::Size();
 }
 
 bool ViewEventTestBase::CanResize() const {
@@ -108,8 +105,7 @@ views::View* ViewEventTestBase::GetContentsView() {
   if (!content_view_) {
     // Wrap the real view (as returned by CreateContentsView) in a View so
     // that we can customize the preferred size.
-    TestView* test_view = new TestView();
-    test_view->SetPreferredSize(GetPreferredSize());
+    TestView* test_view = new TestView(this);
     test_view->AddChildView(CreateContentsView());
     content_view_ = test_view;
   }
@@ -137,14 +133,10 @@ void ViewEventTestBase::StartMessageLoopAndRunTest() {
 
   // Schedule a task that starts the test. Need to do this as we're going to
   // run the message loop.
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&ViewEventTestBase::DoTestOnMessageLoop, this));
 
   content::RunThisRunLoop(&run_loop_);
-}
-
-gfx::Size ViewEventTestBase::GetPreferredSize() const {
-  return gfx::Size();
 }
 
 void ViewEventTestBase::ScheduleMouseMoveInBackground(int x, int y) {
@@ -152,7 +144,7 @@ void ViewEventTestBase::ScheduleMouseMoveInBackground(int x, int y) {
     dnd_thread_.reset(new base::Thread("mouse-move-thread"));
     dnd_thread_->Start();
   }
-  dnd_thread_->message_loop()->PostDelayedTask(
+  dnd_thread_->task_runner()->PostDelayedTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&ui_controls::SendMouseMove), x, y),
       base::TimeDelta::FromMilliseconds(kMouseMoveDelayMS));

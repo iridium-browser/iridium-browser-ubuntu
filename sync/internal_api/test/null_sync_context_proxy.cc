@@ -4,7 +4,7 @@
 
 #include "sync/internal_api/public/test/null_sync_context_proxy.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 NullSyncContextProxy::NullSyncContextProxy() {
 }

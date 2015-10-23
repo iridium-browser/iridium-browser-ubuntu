@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
-#include "gpu/command_buffer/service/query_manager.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "gpu/command_buffer/service/vertex_attrib_manager.h"
@@ -26,6 +25,7 @@ class ErrorState;
 class ErrorStateClient;
 class FeatureInfo;
 class Framebuffer;
+class Logger;
 class Program;
 class Renderbuffer;
 
@@ -231,6 +231,9 @@ struct GPU_EXPORT ContextState {
 
   ErrorState* GetErrorState();
 
+  void SetBoundBuffer(GLenum target, Buffer* buffer);
+  void RemoveBoundBuffer(Buffer* buffer);
+
   #include "gpu/command_buffer/service/context_state_autogen.h"
 
   EnableFlags enable_flags;
@@ -243,6 +246,13 @@ struct GPU_EXPORT ContextState {
   // The currently bound array buffer. If this is 0 it is illegal to call
   // glVertexAttribPointer.
   scoped_refptr<Buffer> bound_array_buffer;
+
+  scoped_refptr<Buffer> bound_copy_read_buffer;
+  scoped_refptr<Buffer> bound_copy_write_buffer;
+  scoped_refptr<Buffer> bound_pixel_pack_buffer;
+  scoped_refptr<Buffer> bound_pixel_unpack_buffer;
+  scoped_refptr<Buffer> bound_transform_feedback_buffer;
+  scoped_refptr<Buffer> bound_uniform_buffer;
 
   // Which textures are bound to texture units through glActiveTexture.
   std::vector<TextureUnit> texture_units;
@@ -263,10 +273,6 @@ struct GPU_EXPORT ContextState {
 
   // The currently bound valuebuffer
   scoped_refptr<Valuebuffer> bound_valuebuffer;
-
-  // A map of of target -> Query for current queries
-  typedef std::map<GLuint, scoped_refptr<QueryManager::Query> > QueryMap;
-  QueryMap current_queries;
 
   bool pack_reverse_row_order;
   bool ignore_cached_state;

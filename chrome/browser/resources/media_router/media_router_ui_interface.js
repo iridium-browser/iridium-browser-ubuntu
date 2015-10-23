@@ -11,12 +11,15 @@ cr.define('media_router.ui', function() {
   var container = null;
 
   /**
-   * Adds a new route.
+   * Handles response of previous create route attempt.
    *
-   * @param {!media_router.Route} route
+   * @param {string} sinkId The ID of the sink to which the Media Route was
+   *     creating a route.
+   * @param {?media_router.Route} route The newly create route to the sink
+   *     if route creation succeeded; null otherwise
    */
-  function addRoute(route) {
-    container.addRoute(route);
+  function onCreateRouteResponseReceived(sinkId, route) {
+    container.onCreateRouteResponseReceived(sinkId, route);
   }
 
   /**
@@ -38,9 +41,33 @@ cr.define('media_router.ui', function() {
   }
 
   /**
-   * Sets the current issue.
+   * Populates the WebUI with data obtained from Media Router.
    *
-   * @param {!media_router.Issue} issue
+   * @param {headerText: string,
+   *         headerTextTooltip: string,
+   *         sinks: !Array<!media_router.Sink>,
+   *         routes: !Array<!media_router.Route>,
+   *         castModes: !Array<!media_router.CastMode>} data
+   * Parameters in data:
+   *   headerText - text to be displayed in the header of the WebUI.
+   *   headerTextTooltip - tooltip to be displayed for the header of the WebUI.
+   *   sinks - list of sinks to be displayed.
+   *   routes - list of routes that are associated with the sinks.
+   *   castModes - list of available cast modes.
+   */
+  function setInitialData(data) {
+    container.headerText = data['headerText'];
+    container.headerTextTooltip = data['headerTextTooltip'];
+    container.sinkList = data['sinks'];
+    container.routeList = data['routes'];
+    container.castModeList = data['castModes'];
+  }
+
+  /**
+   * Sets current issue to |issue|, or clears the current issue if |issue| is
+   * null.
+   *
+   * @param {?media_router.Issue} issue
    */
   function setIssue(issue) {
     container.issue = issue;
@@ -65,9 +92,10 @@ cr.define('media_router.ui', function() {
   }
 
   return {
-    addRoute: addRoute,
+    onCreateRouteResponseReceived: onCreateRouteResponseReceived,
     setCastModeList: setCastModeList,
     setContainer: setContainer,
+    setInitialData: setInitialData,
     setIssue: setIssue,
     setRouteList: setRouteList,
     setSinkList: setSinkList,
@@ -83,10 +111,18 @@ cr.define('media_router.browserApi', function() {
    *
    * @param {string} issueId
    * @param {number} actionType Type of action that the user clicked.
-   * @param {?string} helpURL URL to open if the action is to learn more.
+   * @param {?number} helpPageId The numeric help center ID.
    */
-  function actOnIssue(issueId, actionType, helpURL) {
-    // TODO(imcheng): Implement.
+  function actOnIssue(issueId, actionType, helpPageId) {
+    chrome.send('actOnIssue', [{issueId: issueId, actionType: actionType,
+                                helpPageId: helpPageId}]);
+  }
+
+  /**
+   * Closes the dialog.
+   */
+  function closeDialog() {
+    chrome.send('closeDialog');
   }
 
   /**
@@ -95,7 +131,15 @@ cr.define('media_router.browserApi', function() {
    * @param {!media_router.Route} route
    */
   function closeRoute(route) {
-    // TODO(imcheng): Implement.
+    chrome.send('closeRoute', [{routeId: route.id}]);
+  }
+
+  /**
+   * Requests data to initialize the WebUI with.
+   * The data will be returned via media_router.ui.setInitialData.
+   */
+  function requestInitialData() {
+    chrome.send('requestInitialData');
   }
 
   /**
@@ -106,20 +150,15 @@ cr.define('media_router.browserApi', function() {
    *   selected, or -1 if the user has not explicitly selected a mode.
    */
   function requestRoute(sinkId, selectedCastMode) {
-    // TODO(imcheng): Implement.
-  }
-
-  /**
-   * Closes the dialog.
-   */
-  function closeDialog() {
-    chrome.send('closeDialog');
+    chrome.send('requestRoute',
+                [{sinkId: sinkId, selectedCastMode: selectedCastMode}]);
   }
 
   return {
     actOnIssue: actOnIssue,
-    closeRoute: closeRoute,
-    requestRoute: requestRoute,
     closeDialog: closeDialog,
+    closeRoute: closeRoute,
+    requestInitialData: requestInitialData,
+    requestRoute: requestRoute,
   };
 });

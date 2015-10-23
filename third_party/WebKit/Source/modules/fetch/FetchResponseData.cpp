@@ -8,74 +8,14 @@
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/fetch/CrossOriginAccessControl.h"
 #include "modules/fetch/BodyStreamBuffer.h"
+#include "modules/fetch/DataConsumerHandleUtil.h"
+#include "modules/fetch/DataConsumerTee.h"
 #include "modules/fetch/FetchHeaderList.h"
 #include "public/platform/WebServiceWorkerResponse.h"
 
 namespace blink {
 
 namespace {
-
-class BranchCanceller : public BodyStreamBuffer::Canceller {
-public:
-    static void create(BodyStreamBuffer* buffer, BranchCanceller** canceller1, BranchCanceller** canceller2)
-    {
-        auto context = new Context(buffer);
-        *canceller1 = new BranchCanceller(context, First);
-        *canceller2 = new BranchCanceller(context, Second);
-    }
-
-    void setBuffer(BodyStreamBuffer* buffer) { m_buffer = buffer; }
-
-    void cancel() override
-    {
-        if (m_tag == First) {
-            m_context->isFirstCancelled = true;
-        } else {
-            ASSERT(m_tag == Second);
-            m_context->isSecondCancelled = true;
-        }
-        ASSERT(m_buffer);
-        ASSERT(!m_buffer->isClosed());
-        ASSERT(!m_buffer->hasError());
-        m_buffer->close();
-        if (m_context->isFirstCancelled && m_context->isSecondCancelled)
-            m_context->buffer->cancel();
-    }
-
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        visitor->trace(m_context);
-        visitor->trace(m_buffer);
-        BodyStreamBuffer::Canceller::trace(visitor);
-    }
-
-private:
-    enum Tag {
-        First,
-        Second,
-    };
-    class Context : public GarbageCollected<Context> {
-    public:
-        explicit Context(BodyStreamBuffer* buffer)
-            : buffer(buffer)
-            , isFirstCancelled(false)
-            , isSecondCancelled(false) { }
-
-        DEFINE_INLINE_VIRTUAL_TRACE()
-        {
-            visitor->trace(buffer);
-        }
-
-        Member<BodyStreamBuffer> buffer;
-        bool isFirstCancelled;
-        bool isSecondCancelled;
-    };
-
-    BranchCanceller(Context* context, Tag tag) : m_context(context), m_tag(tag) { }
-    Member<Context> m_context;
-    Member<BodyStreamBuffer> m_buffer;
-    Tag m_tag;
-};
 
 WebServiceWorkerResponseType fetchTypeToWebType(FetchResponseData::Type fetchType)
 {
@@ -95,6 +35,9 @@ WebServiceWorkerResponseType fetchTypeToWebType(FetchResponseData::Type fetchTyp
         break;
     case FetchResponseData::OpaqueType:
         webType = WebServiceWorkerResponseTypeOpaque;
+        break;
+    case FetchResponseData::OpaqueRedirectType:
+        webType = WebServiceWorkerResponseTypeOpaqueRedirect;
         break;
     }
     return webType;
@@ -137,7 +80,6 @@ FetchResponseData* FetchResponseData::createBasicFilteredResponse()
             continue;
         response->m_headerList->append(header->first, header->second);
     }
-    response->m_blobDataHandle = m_blobDataHandle;
     response->m_buffer = m_buffer;
     response->m_mimeType = m_mimeType;
     response->m_internalResponse = this;
@@ -165,7 +107,6 @@ FetchResponseData* FetchResponseData::createCORSFilteredResponse()
             continue;
         response->m_headerList->append(header->first, header->second);
     }
-    response->m_blobDataHandle = m_blobDataHandle;
     response->m_buffer = m_buffer;
     response->m_mimeType = m_mimeType;
     response->m_internalResponse = this;
@@ -182,17 +123,20 @@ FetchResponseData* FetchResponseData::createOpaqueFilteredResponse()
     return response;
 }
 
+FetchResponseData* FetchResponseData::createOpaqueRedirectFilteredResponse()
+{
+    // "An opaque-redirect filtered response is a filtered response whose type
+    // is |opaqueredirect|, status is 0, status message is the empty byte
+    // sequence, header list is the empty list, body is null, and cache state is
+    // |none|.
+    FetchResponseData* response = new FetchResponseData(OpaqueRedirectType, 0, "");
+    response->m_internalResponse = this;
+    return response;
+}
+
 String FetchResponseData::mimeType() const
 {
     return m_mimeType;
-}
-
-PassRefPtr<BlobDataHandle> FetchResponseData::internalBlobDataHandle() const
-{
-    if (m_internalResponse) {
-        return m_internalResponse->m_blobDataHandle;
-    }
-    return m_blobDataHandle;
 }
 
 BodyStreamBuffer* FetchResponseData::internalBuffer() const
@@ -211,7 +155,7 @@ String FetchResponseData::internalMIMEType() const
     return m_mimeType;
 }
 
-FetchResponseData* FetchResponseData::clone()
+FetchResponseData* FetchResponseData::clone(ExecutionContext* executionContext)
 {
     FetchResponseData* newResponse = create();
     newResponse->m_type = m_type;
@@ -223,46 +167,41 @@ FetchResponseData* FetchResponseData::clone()
     newResponse->m_status = m_status;
     newResponse->m_statusMessage = m_statusMessage;
     newResponse->m_headerList = m_headerList->clone();
-    newResponse->m_blobDataHandle = m_blobDataHandle;
     newResponse->m_mimeType = m_mimeType;
 
     switch (m_type) {
     case BasicType:
     case CORSType:
         ASSERT(m_internalResponse);
-        ASSERT(m_blobDataHandle == m_internalResponse->m_blobDataHandle);
         ASSERT(m_buffer == m_internalResponse->m_buffer);
         ASSERT(m_internalResponse->m_type == DefaultType);
-        newResponse->m_internalResponse = m_internalResponse->clone();
+        newResponse->m_internalResponse = m_internalResponse->clone(executionContext);
         m_buffer = m_internalResponse->m_buffer;
         newResponse->m_buffer = newResponse->m_internalResponse->m_buffer;
         break;
     case DefaultType: {
         ASSERT(!m_internalResponse);
-        if (!m_buffer)
-            return newResponse;
-        BodyStreamBuffer* original = m_buffer;
-        BranchCanceller* canceller1 = nullptr;
-        BranchCanceller* canceller2 = nullptr;
-        BranchCanceller::create(original, &canceller1, &canceller2);
-        m_buffer = new BodyStreamBuffer(canceller1);
-        newResponse->m_buffer = new BodyStreamBuffer(canceller2);
-        canceller1->setBuffer(m_buffer);
-        canceller2->setBuffer(newResponse->m_buffer);
-        original->startTee(m_buffer, newResponse->m_buffer);
+        if (m_buffer->hasBody()) {
+            OwnPtr<WebDataConsumerHandle> handle1, handle2;
+            // TODO(yhirano): unlock the buffer appropriately.
+            DataConsumerTee::create(executionContext, m_buffer->lock(executionContext), &handle1, &handle2);
+            m_buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle1.release()));
+            newResponse->m_buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle2.release()));
+        } else {
+            m_buffer = new BodyStreamBuffer;
+        }
         break;
     }
     case ErrorType:
         ASSERT(!m_internalResponse);
-        ASSERT(!m_blobDataHandle);
-        ASSERT(!m_buffer);
+        ASSERT(!m_buffer->hasBody());
         break;
     case OpaqueType:
+    case OpaqueRedirectType:
         ASSERT(m_internalResponse);
-        ASSERT(!m_blobDataHandle);
-        ASSERT(!m_buffer);
+        ASSERT(!m_buffer->hasBody());
         ASSERT(m_internalResponse->m_type == DefaultType);
-        newResponse->m_internalResponse = m_internalResponse->clone();
+        newResponse->m_internalResponse = m_internalResponse->clone(executionContext);
         break;
     }
     return newResponse;
@@ -284,7 +223,6 @@ void FetchResponseData::populateWebServiceWorkerResponse(WebServiceWorkerRespons
         const FetchHeaderList::Header* header = headerList()->list()[i].get();
         response.appendHeader(header->first, header->second);
     }
-    response.setBlobDataHandle(m_blobDataHandle);
 }
 
 FetchResponseData::FetchResponseData(Type type, unsigned short status, AtomicString statusMessage)
@@ -292,26 +230,18 @@ FetchResponseData::FetchResponseData(Type type, unsigned short status, AtomicStr
     , m_status(status)
     , m_statusMessage(statusMessage)
     , m_headerList(FetchHeaderList::create())
+    , m_buffer(new BodyStreamBuffer)
 {
-}
-
-void FetchResponseData::setBlobDataHandle(PassRefPtr<BlobDataHandle> blobDataHandle)
-{
-    ASSERT(!m_buffer);
-    m_blobDataHandle = blobDataHandle;
 }
 
 void FetchResponseData::replaceBodyStreamBuffer(BodyStreamBuffer* buffer)
 {
     if (m_type == BasicType || m_type == CORSType) {
         ASSERT(m_internalResponse);
-        m_internalResponse->m_blobDataHandle = nullptr;
         m_internalResponse->m_buffer = buffer;
-        m_blobDataHandle = nullptr;
         m_buffer = buffer;
     } else if (m_type == DefaultType) {
         ASSERT(!m_internalResponse);
-        m_blobDataHandle = nullptr;
         m_buffer = buffer;
     }
 }

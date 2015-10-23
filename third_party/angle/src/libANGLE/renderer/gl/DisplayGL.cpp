@@ -10,6 +10,7 @@
 
 #include "libANGLE/AttributeMap.h"
 #include "libANGLE/Context.h"
+#include "libANGLE/Display.h"
 #include "libANGLE/Surface.h"
 #include "libANGLE/renderer/gl/RendererGL.h"
 #include "libANGLE/renderer/gl/SurfaceGL.h"
@@ -30,13 +31,28 @@ DisplayGL::~DisplayGL()
 
 egl::Error DisplayGL::initialize(egl::Display *display)
 {
-    mRenderer = new RendererGL(getFunctionsGL());
+    mRenderer = new RendererGL(getFunctionsGL(), display->getAttributeMap());
+
+    const gl::Version &maxVersion = mRenderer->getMaxSupportedESVersion();
+    if (maxVersion < gl::Version(2, 0))
+    {
+        return egl::Error(EGL_NOT_INITIALIZED, "OpenGL ES 2.0 is not supportable.");
+    }
+
     return egl::Error(EGL_SUCCESS);
 }
 
 void DisplayGL::terminate()
 {
     SafeDelete(mRenderer);
+}
+
+ImageImpl *DisplayGL::createImage(EGLenum target,
+                                  egl::ImageSibling *buffer,
+                                  const egl::AttributeMap &attribs)
+{
+    UNIMPLEMENTED();
+    return nullptr;
 }
 
 egl::Error DisplayGL::createContext(const egl::Config *config, const gl::Context *shareContext, const egl::AttributeMap &attribs, gl::Context **outContext)
@@ -60,6 +76,12 @@ egl::Error DisplayGL::makeCurrent(egl::Surface *drawSurface, egl::Surface *readS
 
     SurfaceGL *glDrawSurface = GetImplAs<SurfaceGL>(drawSurface);
     return glDrawSurface->makeCurrent();
+}
+
+const gl::Version &DisplayGL::getMaxSupportedESVersion() const
+{
+    ASSERT(mRenderer != nullptr);
+    return mRenderer->getMaxSupportedESVersion();
 }
 
 }

@@ -54,13 +54,13 @@ class Connection {
   // Disconnects from the remote device.
   virtual void Disconnect() = 0;
 
+  Status status() const { return status_; }
+
  protected:
   // Sets the connection's status to |status|. If this is different from the
   // previous status, notifies observers of the change in status.
   // Virtual for testing.
   virtual void SetStatus(Status status);
-
-  Status status() const { return status_; }
 
   // Called after attempting to send bytes over the connection, whether the
   // message was successfully sent or not.
@@ -73,7 +73,8 @@ class Connection {
   virtual void OnBytesReceived(const std::string& bytes);
 
   // Sends bytes over the connection. The implementing class should call
-  // OnSendCompleted() once the send succeeds or fails. At most one send will be
+  // OnDidSendMessage() once the send succeeds or fails. At most one send will
+  // be
   // in progress.
   virtual void SendMessageImpl(scoped_ptr<WireMessage> message) = 0;
 
@@ -93,7 +94,7 @@ class Connection {
   Status status_;
 
   // The registered observers of the connection.
-  ObserverList<ConnectionObserver> observers_;
+  base::ObserverList<ConnectionObserver> observers_;
 
   // A temporary buffer storing bytes received before a received message can be
   // fully constructed.

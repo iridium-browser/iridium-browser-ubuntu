@@ -63,19 +63,11 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
   void OnTempFileForPrintingWritten(int render_view_id, int sequence_number);
 #endif
 
-#if defined(OS_CHROMEOS)
-  void CreatePrintDialogForFile(int render_view_id, const base::FilePath& path);
-#endif
-
 #if defined(OS_ANDROID)
   // Updates the file descriptor for the PrintViewManagerBasic of a given
   // render_view_id.
   void UpdateFileDescriptor(int render_view_id, int fd);
 #endif
-
-  // Given a render_view_id get the corresponding WebContents.
-  // Must be called on the UI thread.
-  content::WebContents* GetWebContentsForRenderView(int render_view_id);
 
   // GetPrintSettingsForRenderView must be called via PostTask and
   // base::Bind.  Collapse the settings-specific params into a

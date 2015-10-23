@@ -29,6 +29,7 @@ namespace content {
 namespace {
 
 using webrtc::AudioProcessing;
+using webrtc::NoiseSuppression;
 
 const int kAudioProcessingNumberOfChannels = 1;
 
@@ -92,12 +93,29 @@ bool IsBeamformingEnabled(const MediaAudioConstraints& audio_constraints) {
          audio_constraints.GetProperty(MediaAudioConstraints::kGoogBeamforming);
 }
 
-bool IsAudioProcessing48kHzSupportEnabled(
-    const MediaAudioConstraints& audio_constraints) {
-  return base::FieldTrialList::FindFullName("AudioProcessing48kHzSupport") ==
-             "Enabled" ||
-         audio_constraints.GetProperty(
-             MediaAudioConstraints::kGoogAudioProcessing48kHzSupport);
+void ConfigureBeamforming(webrtc::Config* config,
+                          const std::string& geometry_str) {
+  std::vector<webrtc::Point> geometry = ParseArrayGeometry(geometry_str);
+#if defined(OS_CHROMEOS)
+  if (geometry.empty()) {
+    const std::string& board = base::SysInfo::GetLsbReleaseBoard();
+    if (board.find("nyan_kitty") != std::string::npos) {
+      geometry.push_back(webrtc::Point(-0.03f, 0.f, 0.f));
+      geometry.push_back(webrtc::Point(0.03f, 0.f, 0.f));
+    } else if (board.find("peach_pi") != std::string::npos) {
+      geometry.push_back(webrtc::Point(-0.025f, 0.f, 0.f));
+      geometry.push_back(webrtc::Point(0.025f, 0.f, 0.f));
+    } else if (board.find("samus") != std::string::npos) {
+      geometry.push_back(webrtc::Point(-0.032f, 0.f, 0.f));
+      geometry.push_back(webrtc::Point(0.032f, 0.f, 0.f));
+    } else if (board.find("swanky") != std::string::npos) {
+      geometry.push_back(webrtc::Point(-0.026f, 0.f, 0.f));
+      geometry.push_back(webrtc::Point(0.026f, 0.f, 0.f));
+    }
+  }
+#endif
+  config->Set<webrtc::Beamforming>(
+      new webrtc::Beamforming(geometry.size() > 1, geometry));
 }
 
 }  // namespace
@@ -193,10 +211,12 @@ class MediaStreamAudioFifo {
     }
 
     if (fifo_) {
+      CHECK_LT(fifo_->frames(), destination_->bus()->frames());
       next_audio_delay_ = audio_delay +
           fifo_->frames() * base::TimeDelta::FromSeconds(1) / sample_rate_;
       fifo_->Push(source_to_push);
     } else {
+      CHECK(!data_available_);
       source_to_push->CopyTo(destination_->bus());
       next_audio_delay_ = audio_delay;
       data_available_ = true;
@@ -257,8 +277,7 @@ MediaStreamAudioProcessor::MediaStreamAudioProcessor(
       playout_data_source_(playout_data_source),
       audio_mirroring_(false),
       typing_detected_(false),
-      stopped_(false),
-      audio_proc_48kHz_support_(false) {
+      stopped_(false) {
   capture_thread_checker_.DetachFromThread();
   render_thread_checker_.DetachFromThread();
   InitializeAudioProcessingModule(constraints, effects);
@@ -351,6 +370,7 @@ void MediaStreamAudioProcessor::Stop() {
   if (!audio_processing_.get())
     return;
 
+  audio_processing_.get()->UpdateHistogramsOnCallEnd();
   StopEchoCancellationDump(audio_processing_.get());
 
   if (playout_data_source_) {
@@ -474,8 +494,6 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
   const bool goog_beamforming = IsBeamformingEnabled(audio_constraints);
   const bool goog_high_pass_filter = audio_constraints.GetProperty(
       MediaAudioConstraints::kGoogHighpassFilter);
-  audio_proc_48kHz_support_ =
-      IsAudioProcessing48kHzSupportEnabled(audio_constraints);
   // Return immediately if no goog constraint is enabled.
   if (!echo_cancellation && !goog_experimental_aec && !goog_ns &&
       !goog_high_pass_filter && !goog_typing_detection &&
@@ -487,16 +505,16 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
   // Experimental options provided at creation.
   webrtc::Config config;
   if (goog_experimental_aec)
-    config.Set<webrtc::DelayCorrection>(new webrtc::DelayCorrection(true));
+    config.Set<webrtc::ExtendedFilter>(new webrtc::ExtendedFilter(true));
   if (goog_experimental_ns)
     config.Set<webrtc::ExperimentalNs>(new webrtc::ExperimentalNs(true));
   if (IsDelayAgnosticAecEnabled())
-    config.Set<webrtc::ReportedDelay>(new webrtc::ReportedDelay(false));
+    config.Set<webrtc::DelayAgnostic>(new webrtc::DelayAgnostic(true));
   if (goog_beamforming) {
-    ConfigureBeamforming(&config);
+    ConfigureBeamforming(&config,
+                         audio_constraints.GetPropertyAsString(
+                             MediaAudioConstraints::kGoogArrayGeometry));
   }
-  config.Set<webrtc::AudioProcessing48kHzSupport>(
-      new webrtc::AudioProcessing48kHzSupport(audio_proc_48kHz_support_));
 
   // Create and configure the webrtc::AudioProcessing.
   audio_processing_.reset(webrtc::AudioProcessing::Create(config));
@@ -513,8 +531,15 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
     echo_information_.reset(new EchoInformation());
   }
 
-  if (goog_ns)
-    EnableNoiseSuppression(audio_processing_.get());
+  if (goog_ns) {
+    // The beamforming postfilter is effective at suppressing stationary noise,
+    // so reduce the single-channel NS aggressiveness when enabled.
+    const NoiseSuppression::Level ns_level =
+        config.Get<webrtc::Beamforming>().enabled ? NoiseSuppression::kLow
+                                                  : NoiseSuppression::kHigh;
+
+    EnableNoiseSuppression(audio_processing_.get(), ns_level);
+  }
 
   if (goog_high_pass_filter)
     EnableHighPassFilter(audio_processing_.get());
@@ -532,22 +557,6 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
   RecordProcessingState(AUDIO_PROCESSING_ENABLED);
 }
 
-void MediaStreamAudioProcessor::ConfigureBeamforming(webrtc::Config* config) {
-  bool enabled = false;
-  std::vector<webrtc::Point> geometry(1, webrtc::Point(0.f, 0.f, 0.f));
-#if defined(OS_CHROMEOS)
-  const std::string board = base::SysInfo::GetLsbReleaseBoard();
-  if (board.find("peach_pi") != std::string::npos) {
-    enabled = true;
-    geometry.push_back(webrtc::Point(0.050f, 0.f, 0.f));
-  } else if (board.find("swanky") != std::string::npos) {
-    enabled = true;
-    geometry.push_back(webrtc::Point(0.052f, 0.f, 0.f));
-  }
-#endif
-  config->Set<webrtc::Beamforming>(new webrtc::Beamforming(enabled, geometry));
-}
-
 void MediaStreamAudioProcessor::InitializeCaptureFifo(
     const media::AudioParameters& input_format) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
@@ -562,9 +571,7 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
 #if defined(OS_ANDROID)
   int audio_processing_sample_rate = AudioProcessing::kSampleRate16kHz;
 #else
-  int audio_processing_sample_rate = audio_proc_48kHz_support_ ?
-                                     AudioProcessing::kSampleRate48kHz :
-                                     AudioProcessing::kSampleRate32kHz;
+  int audio_processing_sample_rate = AudioProcessing::kSampleRate48kHz;
 #endif
   const int output_sample_rate = audio_processing_ ?
                                  audio_processing_sample_rate :

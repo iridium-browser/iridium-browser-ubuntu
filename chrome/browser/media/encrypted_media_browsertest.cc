@@ -39,8 +39,6 @@ const char kClearKeyCdmPluginMimeType[] = "application/x-ppapi-clearkey-cdm";
 const char kClearKeyKeySystem[] = "org.w3.clearkey";
 const char kPrefixedClearKeyKeySystem[] = "webkit-org.w3.clearkey";
 const char kExternalClearKeyKeySystem[] = "org.chromium.externalclearkey";
-const char kExternalClearKeyDecryptOnlyKeySystem[] =
-    "org.chromium.externalclearkey.decryptonly";
 const char kExternalClearKeyFileIOTestKeySystem[] =
     "org.chromium.externalclearkey.fileiotest";
 const char kExternalClearKeyInitializeFailKeySystem[] =
@@ -64,9 +62,17 @@ const char kLoadableSession[] = "LoadableSession";
 const char kUnknownSession[] = "UnknownSession";
 
 // EME-specific test results and errors.
-const char kEmeKeyError[] = "KEY_ERROR";
-const char kEmeNotSupportedError[] = "NOTSUPPORTEDERROR";
 const char kFileIOTestSuccess[] = "FILE_IO_TEST_SUCCESS";
+const char kEmeNotSupportedError[] = "NOTSUPPORTEDERROR";
+const char kEmeGenerateRequestFailed[] = "EME_GENERATEREQUEST_FAILED";
+const char kEmeSessionNotFound[] = "EME_SESSION_NOT_FOUND";
+const char kEmeLoadFailed[] = "EME_LOAD_FAILED";
+const char kEmeUpdateFailed[] = "EME_UPDATE_FAILED";
+const char kEmeErrorEvent[] = "EME_ERROR_EVENT";
+const char kEmeMessageUnexpectedType[] = "EME_MESSAGE_UNEXPECTED_TYPE";
+const char kPrefixedEmeRenewalMissingHeader[] =
+    "PREFIXED_EME_RENEWAL_MISSING_HEADER";
+const char kPrefixedEmeErrorEvent[] = "PREFIXED_EME_ERROR_EVENT";
 
 const char kDefaultEmePlayer[] = "eme_player.html";
 
@@ -84,6 +90,14 @@ enum EmeVersion {
 
 // Whether the video should be played once or twice.
 enum class PlayTwice { NO, YES };
+
+// Format of a container when testing different streams.
+enum class EncryptedContainer {
+  CLEAR_WEBM,
+  CLEAR_MP4,
+  ENCRYPTED_WEBM,
+  ENCRYPTED_MP4
+};
 
 // MSE is available on all desktop platforms and on Android 4.1 and later.
 static bool IsMSESupported() {
@@ -174,8 +188,11 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
                                    SrcType src_type,
                                    EmeVersion eme_version) {
     std::string expected_title = kEnded;
-    if (!IsPlayBackPossible(key_system))
-      expected_title = kEmeKeyError;
+    if (!IsPlayBackPossible(key_system)) {
+      expected_title = (eme_version == EmeVersion::UNPREFIXED)
+                           ? kEmeUpdateFailed
+                           : kPrefixedEmeErrorEvent;
+    }
 
     RunEncryptedMediaTest(kDefaultEmePlayer, media_file, media_type, key_system,
                           src_type, eme_version, kNoSessionToLoad, false,
@@ -231,7 +248,17 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
   void AddWaitForTitles(content::TitleWatcher* title_watcher) override {
     MediaBrowserTest::AddWaitForTitles(title_watcher);
     title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeNotSupportedError));
-    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeKeyError));
+    title_watcher->AlsoWaitForTitle(
+        base::ASCIIToUTF16(kEmeGenerateRequestFailed));
+    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeSessionNotFound));
+    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeLoadFailed));
+    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeUpdateFailed));
+    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeErrorEvent));
+    title_watcher->AlsoWaitForTitle(
+        base::ASCIIToUTF16(kEmeMessageUnexpectedType));
+    title_watcher->AlsoWaitForTitle(
+        base::ASCIIToUTF16(kPrefixedEmeRenewalMissingHeader));
+    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kPrefixedEmeErrorEvent));
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -421,10 +448,14 @@ class EncryptedMediaTest
   }
 
   void RunInvalidResponseTest() {
-    RunEncryptedMediaTest(kDefaultEmePlayer, "bear-320x240-av_enc-av.webm",
-                          kWebMAudioVideo, CurrentKeySystem(),
-                          CurrentSourceType(), CurrentEmeVersion(),
-                          kNoSessionToLoad, true, PlayTwice::NO, kEmeKeyError);
+    std::string expected_response =
+        (CurrentEmeVersion() == EmeVersion::UNPREFIXED)
+            ? kEmeUpdateFailed
+            : kPrefixedEmeErrorEvent;
+    RunEncryptedMediaTest(
+        kDefaultEmePlayer, "bear-320x240-av_enc-av.webm", kWebMAudioVideo,
+        CurrentKeySystem(), CurrentSourceType(), CurrentEmeVersion(),
+        kNoSessionToLoad, true, PlayTwice::NO, expected_response);
   }
 
   void TestFrameSizeChange() {
@@ -445,6 +476,36 @@ class EncryptedMediaTest
                               CurrentKeySystem(),
                               query_params,
                               kEnded);
+  }
+
+  std::string ConvertContainerFormat(EncryptedContainer format) {
+    switch (format) {
+      case EncryptedContainer::CLEAR_MP4:
+        return "CLEAR_MP4";
+      case EncryptedContainer::CLEAR_WEBM:
+        return "CLEAR_WEBM";
+      case EncryptedContainer::ENCRYPTED_MP4:
+        return "ENCRYPTED_MP4";
+      case EncryptedContainer::ENCRYPTED_WEBM:
+        return "ENCRYPTED_WEBM";
+    }
+    NOTREACHED();
+    return "UNKNOWN";
+  }
+
+  void TestDifferentContainers(EncryptedContainer video_format,
+                               EncryptedContainer audio_format) {
+    DCHECK(IsMSESupported());
+    DCHECK_NE(CurrentEmeVersion(), PREFIXED);
+    base::StringPairs query_params;
+    query_params.push_back(std::make_pair("keySystem", CurrentKeySystem()));
+    query_params.push_back(std::make_pair("runEncrypted", "1"));
+    query_params.push_back(
+        std::make_pair("videoFormat", ConvertContainerFormat(video_format)));
+    query_params.push_back(
+        std::make_pair("audioFormat", ConvertContainerFormat(audio_format)));
+    RunEncryptedMediaTestPage("mse_different_containers.html",
+                              CurrentKeySystem(), query_params, kEnded);
   }
 
  protected:
@@ -494,6 +555,10 @@ INSTANTIATE_TEST_CASE_P(SRC_ExternalClearKey,
                         Combine(Values(kExternalClearKeyKeySystem),
                                 Values(SRC),
                                 Values(UNPREFIXED)));
+
+const char kExternalClearKeyDecryptOnlyKeySystem[] =
+    "org.chromium.externalclearkey.decryptonly";
+
 INSTANTIATE_TEST_CASE_P(MSE_ExternalClearKey_Prefixed,
                         EncryptedMediaTest,
                         Combine(Values(kExternalClearKeyKeySystem),
@@ -632,6 +697,63 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_MP4) {
   }
   TestSimplePlayback("bear-640x360-a_frag-cenc.mp4", kMP4AudioOnly);
 }
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       Playback_EncryptedVideo_MP4_ClearAudio_WEBM) {
+  // MP4 without MSE is not support yet, http://crbug.com/170793.
+  if (CurrentSourceType() != MSE) {
+    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
+    return;
+  }
+  if (CurrentEmeVersion() != UNPREFIXED) {
+    DVLOG(0) << "Skipping test; Only supported by unprefixed EME";
+    return;
+  }
+  if (!IsPlayBackPossible(CurrentKeySystem())) {
+    DVLOG(0) << "Skipping test - Test requires video playback.";
+    return;
+  }
+  TestDifferentContainers(EncryptedContainer::ENCRYPTED_MP4,
+                          EncryptedContainer::CLEAR_WEBM);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       Playback_ClearVideo_WEBM_EncryptedAudio_MP4) {
+  // MP4 without MSE is not support yet, http://crbug.com/170793.
+  if (CurrentSourceType() != MSE) {
+    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
+    return;
+  }
+  if (CurrentEmeVersion() != UNPREFIXED) {
+    DVLOG(0) << "Skipping test; Only supported by unprefixed EME";
+    return;
+  }
+  if (!IsPlayBackPossible(CurrentKeySystem())) {
+    DVLOG(0) << "Skipping test - Test requires video playback.";
+    return;
+  }
+  TestDifferentContainers(EncryptedContainer::CLEAR_WEBM,
+                          EncryptedContainer::ENCRYPTED_MP4);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       Playback_EncryptedVideo_WEBM_EncryptedAudio_MP4) {
+  // MP4 without MSE is not support yet, http://crbug.com/170793.
+  if (CurrentSourceType() != MSE) {
+    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
+    return;
+  }
+  if (CurrentEmeVersion() != UNPREFIXED) {
+    DVLOG(0) << "Skipping test; Only supported by unprefixed EME";
+    return;
+  }
+  if (!IsPlayBackPossible(CurrentKeySystem())) {
+    DVLOG(0) << "Skipping test - Test requires video playback.";
+    return;
+  }
+  TestDifferentContainers(EncryptedContainer::ENCRYPTED_WEBM,
+                          EncryptedContainer::ENCRYPTED_MP4);
+}
 #endif  // defined(USE_PROPRIETARY_CODECS)
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
@@ -657,20 +779,20 @@ IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, InitializeCDMFail) {
                        kEmeNotSupportedError);
 }
 
-// When CDM crashes, we should still get a decode error.
-// crbug.com/386657
-IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, DISABLED_CDMCrashDuringDecode) {
+// When CDM crashes, we should still get a decode error. |kError| is reported
+// when the HTMLVideoElement error event fires, indicating an error happened
+// during playback.
+IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, CDMCrashDuringDecode) {
   IgnorePluginCrash();
   TestNonPlaybackCases(kExternalClearKeyCrashKeySystem, kError);
 }
 
 // Testing that the media browser test does fail on plugin crash.
-// crbug.com/386657
-IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, DISABLED_CDMExpectedCrash) {
+IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, CDMExpectedCrash) {
   // Plugin crash is not ignored by default, the test is expected to fail.
   EXPECT_NONFATAL_FAILURE(
       TestNonPlaybackCases(kExternalClearKeyCrashKeySystem, kError),
-      "plugin crash");
+      "Failing test due to plugin crash.");
 }
 
 IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, FileIOTest) {
@@ -683,12 +805,12 @@ IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, LoadLoadableSession) {
 }
 
 IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, LoadUnknownSession) {
-  // TODO(xhwang): Add a specific error for this failure, e.g. kSessionNotFound.
-  TestPlaybackCase(kUnknownSession, kEmeKeyError);
+  TestPlaybackCase(kUnknownSession, kEmeSessionNotFound);
 }
 
 IN_PROC_BROWSER_TEST_F(ECKPrefixedEncryptedMediaTest, InitializeCDMFail) {
-  TestNonPlaybackCases(kExternalClearKeyInitializeFailKeySystem, kEmeKeyError);
+  TestNonPlaybackCases(kExternalClearKeyInitializeFailKeySystem,
+                       kPrefixedEmeErrorEvent);
 }
 
 // When CDM crashes, we should still get a decode error.
@@ -719,7 +841,6 @@ IN_PROC_BROWSER_TEST_F(ECKPrefixedEncryptedMediaTest, LoadLoadableSession) {
 }
 
 IN_PROC_BROWSER_TEST_F(ECKPrefixedEncryptedMediaTest, LoadUnknownSession) {
-  // TODO(xhwang): Add a specific error for this failure, e.g. kSessionNotFound.
-  TestPlaybackCase(kUnknownSession, kEmeKeyError);
+  TestPlaybackCase(kUnknownSession, kPrefixedEmeErrorEvent);
 }
 #endif  // defined(ENABLE_PEPPER_CDMS)

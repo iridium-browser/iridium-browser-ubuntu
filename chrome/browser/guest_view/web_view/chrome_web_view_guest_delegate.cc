@@ -6,27 +6,17 @@
 #include "chrome/browser/guest_view/web_view/chrome_web_view_guest_delegate.h"
 
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
-#include "chrome/browser/favicon/favicon_helper.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/ui/pdf/chrome_pdf_web_contents_helper_client.h"
-#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/url_constants.h"
 #include "components/browsing_data/storage_partition_http_cache_data_remover.h"
 #include "components/guest_view/browser/guest_view_event.h"
-#include "components/pdf/browser/pdf_web_contents_helper.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
-
-#if defined(ENABLE_PRINTING)
-#if defined(ENABLE_PRINT_PREVIEW)
-#include "chrome/browser/printing/print_preview_message_handler.h"
-#include "chrome/browser/printing/print_view_manager.h"
-#else
-#include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_PRINT_PREVIEW)
-#endif  // defined(ENABLE_PRINTING)
 
 using guest_view::GuestViewEvent;
 
@@ -68,26 +58,6 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
   return true;
 }
 
-// TODO(hanxi) Investigate which of these observers should move to the
-// extension module in the future.
-void ChromeWebViewGuestDelegate::OnAttachWebViewHelpers(
-    content::WebContents* contents) {
-  favicon::CreateContentFaviconDriverForWebContents(contents);
-  ChromeExtensionWebContentsObserver::CreateForWebContents(contents);
-#if defined(ENABLE_PRINTING)
-#if defined(ENABLE_PRINT_PREVIEW)
-  printing::PrintViewManager::CreateForWebContents(contents);
-  printing::PrintPreviewMessageHandler::CreateForWebContents(contents);
-#else
-  printing::PrintViewManagerBasic::CreateForWebContents(contents);
-#endif  // defined(ENABLE_PRINT_PREVIEW)
-#endif  // defined(ENABLE_PRINTING)
-  pdf::PDFWebContentsHelper::CreateForWebContentsWithClient(
-      contents,
-      scoped_ptr<pdf::PDFWebContentsHelperClient>(
-          new ChromePDFWebContentsHelperClient()));
-}
-
 void ChromeWebViewGuestDelegate::OnDidInitialize() {
 #if defined(OS_CHROMEOS)
   chromeos::AccessibilityManager* accessibility_manager =
@@ -97,15 +67,6 @@ void ChromeWebViewGuestDelegate::OnDidInitialize() {
       base::Bind(&ChromeWebViewGuestDelegate::OnAccessibilityStatusChanged,
                  weak_ptr_factory_.GetWeakPtr()));
 #endif
-}
-
-void ChromeWebViewGuestDelegate::OnGuestDestroyed() {
-  // Clean up custom context menu items for this guest.
-  MenuManager* menu_manager = MenuManager::Get(
-      Profile::FromBrowserContext(web_view_guest()->browser_context()));
-  menu_manager->RemoveAllContextItems(MenuItem::ExtensionKey(
-      web_view_guest()->owner_host(),
-      web_view_guest()->view_instance_id()));
 }
 
 // static
@@ -140,6 +101,13 @@ void ChromeWebViewGuestDelegate::OnShowContextMenu(
   ContextMenuDelegate* menu_delegate =
       ContextMenuDelegate::FromWebContents(guest_web_contents());
   menu_delegate->ShowMenu(pending_menu_.Pass());
+}
+
+bool ChromeWebViewGuestDelegate::ShouldHandleFindRequestsForEmbedder() const {
+  // Find requests will be handled by the guest for the Chrome signin page.
+  return web_view_guest_->owner_web_contents()->GetWebUI() != nullptr &&
+         web_view_guest_->GetOwnerSiteURL().GetOrigin().spec() ==
+             chrome::kChromeUIChromeSigninURL;
 }
 
 void ChromeWebViewGuestDelegate::InjectChromeVoxIfNeeded(

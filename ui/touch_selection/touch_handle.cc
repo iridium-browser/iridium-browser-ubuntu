@@ -160,37 +160,35 @@ bool TouchHandle::WillHandleTouchEvent(const MotionEvent& event) {
       const float touch_radius = std::max(
           kMinTouchMajorForHitTesting,
           std::min(kMaxTouchMajorForHitTesting, event.GetTouchMajor())) * 0.5f;
-      if (!RectIntersectsCircle(drawable_->GetVisibleBounds(),
-                                touch_point,
-                                touch_radius)) {
+      const gfx::RectF drawable_bounds = drawable_->GetVisibleBounds();
+      // Only use the touch radius for targetting if the touch is at or below
+      // the drawable area. This makes it easier to interact with the line of
+      // text above the drawable.
+      if (touch_point.y() < drawable_bounds.y() ||
+          !RectIntersectsCircle(drawable_bounds, touch_point, touch_radius)) {
         EndDrag();
         return false;
       }
       touch_down_position_ = touch_point;
-      touch_to_focus_offset_ = position_ - touch_down_position_;
+      touch_drag_offset_ = position_ - touch_down_position_;
       touch_down_time_ = event.GetEventTime();
       BeginDrag();
     } break;
 
     case MotionEvent::ACTION_MOVE: {
       gfx::PointF touch_move_position(event.GetX(), event.GetY());
-      if (is_drag_within_tap_region_) {
-        const float tap_slop = client_->GetTapSlop();
-        is_drag_within_tap_region_ =
-            (touch_move_position - touch_down_position_).LengthSquared() <
-            tap_slop * tap_slop;
-      }
+      is_drag_within_tap_region_ &=
+          client_->IsWithinTapSlop(touch_down_position_ - touch_move_position);
 
       // Note that we signal drag update even if we're inside the tap region,
       // as there are cases where characters are narrower than the slop length.
-      client_->OnHandleDragUpdate(*this,
-                                  touch_move_position + touch_to_focus_offset_);
+      client_->OnDragUpdate(*this, touch_move_position + touch_drag_offset_);
     } break;
 
     case MotionEvent::ACTION_UP: {
       if (is_drag_within_tap_region_ &&
           (event.GetEventTime() - touch_down_time_) <
-              client_->GetTapTimeout()) {
+              client_->GetMaxTapDuration()) {
         client_->OnHandleTapped(*this);
       }
 
@@ -205,6 +203,10 @@ bool TouchHandle::WillHandleTouchEvent(const MotionEvent& event) {
       break;
   };
   return true;
+}
+
+bool TouchHandle::IsActive() const {
+  return is_dragging_;
 }
 
 bool TouchHandle::Animate(base::TimeTicks frame_time) {
@@ -242,7 +244,7 @@ void TouchHandle::BeginDrag() {
   EndFade();
   is_dragging_ = true;
   is_drag_within_tap_region_ = true;
-  client_->OnHandleDragBegin(*this);
+  client_->OnDragBegin(*this, position());
 }
 
 void TouchHandle::EndDrag() {
@@ -252,7 +254,7 @@ void TouchHandle::EndDrag() {
 
   is_dragging_ = false;
   is_drag_within_tap_region_ = false;
-  client_->OnHandleDragEnd(*this);
+  client_->OnDragEnd(*this);
 
   if (deferred_orientation_ != TouchHandleOrientation::UNDEFINED) {
     TouchHandleOrientation deferred_orientation = deferred_orientation_;

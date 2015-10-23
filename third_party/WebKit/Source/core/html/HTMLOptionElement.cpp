@@ -212,8 +212,9 @@ void HTMLOptionElement::parseAttribute(const QualifiedName& name, const AtomicSt
             setSelected(willBeSelected);
     } else if (name == labelAttr) {
         updateLabel();
-    } else
+    } else {
         HTMLElement::parseAttribute(name, value);
+    }
 }
 
 String HTMLOptionElement::value() const
@@ -331,18 +332,6 @@ PassRefPtr<ComputedStyle> HTMLOptionElement::customStyleForLayoutObject()
     return m_style;
 }
 
-void HTMLOptionElement::didRecalcStyle(StyleRecalcChange change)
-{
-    if (change == NoChange)
-        return;
-
-    // FIXME: We ask our owner select to repaint regardless of which property changed.
-    if (HTMLSelectElement* select = ownerSelectElement()) {
-        if (LayoutObject* layoutObject = select->layoutObject())
-            layoutObject->setShouldDoFullPaintInvalidation();
-    }
-}
-
 String HTMLOptionElement::textIndentedToRespectGroupLabel() const
 {
     ContainerNode* parent = parentNode();
@@ -433,6 +422,9 @@ bool HTMLOptionElement::isDisplayNone() const
         return false;
 
     if (m_style->display() != NONE) {
+        // We need to check the parent's display property.  Parent's
+        // display:none doesn't override children's display properties in
+        // ComputedStyle.
         Element* parent = parentElement();
         ASSERT(parent);
         if (isHTMLOptGroupElement(*parent)) {

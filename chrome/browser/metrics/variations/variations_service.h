@@ -13,11 +13,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/observer_list.h"
+#include "base/threading/thread_checker.h"
 #include "base/time/time.h"
-#include "chrome/browser/metrics/variations/variations_request_scheduler.h"
 #include "chrome/browser/metrics/variations/variations_seed_store.h"
-#include "chrome/common/chrome_version_info.h"
+#include "components/variations/variations_request_scheduler.h"
 #include "components/variations/variations_seed_simulator.h"
+#include "components/variations/variations_service_client.h"
 #include "components/web_resource/resource_request_allowed_notifier.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
@@ -130,6 +131,7 @@ class VariationsService
   // |state_manager|. Caller should ensure that |state_manager| is valid for the
   // lifetime of this class.
   static scoped_ptr<VariationsService> Create(
+      scoped_ptr<VariationsServiceClient> client,
       PrefService* local_state,
       metrics::MetricsStateManager* state_manager);
 
@@ -152,16 +154,19 @@ class VariationsService
 
   // Stores the seed to prefs. Set as virtual and protected so that it can be
   // overridden by tests.
-  virtual void StoreSeed(const std::string& seed_data,
+  virtual bool StoreSeed(const std::string& seed_data,
                          const std::string& seed_signature,
-                         const base::Time& date_fetched);
+                         const std::string& country_code,
+                         const base::Time& date_fetched,
+                         bool is_delta_compressed);
 
   // Creates the VariationsService with the given |local_state| prefs service
   // and |state_manager|. This instance will take ownership of |notifier|.
   // Does not take ownership of |state_manager|. Caller should ensure that
   // |state_manager| is valid for the lifetime of this class. Use the |Create|
   // factory method to create a VariationsService.
-  VariationsService(web_resource::ResourceRequestAllowedNotifier* notifier,
+  VariationsService(scoped_ptr<VariationsServiceClient> client,
+                    web_resource::ResourceRequestAllowedNotifier* notifier,
                     PrefService* local_state,
                     metrics::MetricsStateManager* state_manager);
 
@@ -172,6 +177,7 @@ class VariationsService
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedDateUpdatedOn304Status);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest,
                            LoadPermanentConsistencyCountry);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, CountryHeader);
 
   // Set of different possible values to report for the
   // Variations.LoadPermanentConsistencyCountryResult histogram. This enum must
@@ -219,7 +225,9 @@ class VariationsService
   // to experiment churn while traveling.
   std::string LoadPermanentConsistencyCountry(
       const base::Version& version,
-      const variations::VariationsSeed& seed);
+      const std::string& latest_country);
+
+  scoped_ptr<VariationsServiceClient> client_;
 
   // The pref service used to store persist the variations seed.
   PrefService* local_state_;
@@ -258,6 +266,11 @@ class VariationsService
   // Tracks whether the initial request to the variations server had completed.
   bool initial_request_completed_;
 
+  // Indicates that the next request to the variations service shouldn't specify
+  // that it supports delta compression. Set to true when a delta compressed
+  // response encountered an error.
+  bool disable_deltas_for_next_request_;
+
   // Helper class used to tell this service if it's allowed to make network
   // resource requests.
   scoped_ptr<web_resource::ResourceRequestAllowedNotifier>
@@ -271,12 +284,14 @@ class VariationsService
   int request_count_;
 
   // List of observers of the VariationsService.
-  ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer> observer_list_;
 
 #if defined(OS_WIN)
   // Helper that handles synchronizing Variations with the Registry.
   VariationsRegistrySyncer registry_syncer_;
 #endif
+
+  base::ThreadChecker thread_checker_;
 
   base::WeakPtrFactory<VariationsService> weak_ptr_factory_;
 

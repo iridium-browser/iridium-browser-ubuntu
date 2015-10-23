@@ -41,17 +41,17 @@ bool InfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {
 }
 
 bool InfoBarDelegate::ShouldExpire(const NavigationDetails& details) const {
-  if (!details.is_navigation_to_different_page)
-    return false;
-
-  return ShouldExpireInternal(details);
+  return details.is_navigation_to_different_page &&
+      !details.did_replace_entry &&
+      // This next condition ensures a navigation that passes the above
+      // conditions doesn't dismiss infobars added while that navigation was
+      // already in process.  We carve out an exception for reloads since we
+      // want reloads to dismiss infobars, but they will have unchanged entry
+      // IDs.
+      ((nav_entry_id_ != details.entry_id) || details.is_reload);
 }
 
 void InfoBarDelegate::InfoBarDismissed() {
-}
-
-AutoLoginInfoBarDelegate* InfoBarDelegate::AsAutoLoginInfoBarDelegate() {
-  return nullptr;
 }
 
 ConfirmInfoBarDelegate* InfoBarDelegate::AsConfirmInfoBarDelegate() {
@@ -103,18 +103,7 @@ InfoBarDelegate::AsTranslateInfoBarDelegate() {
   return nullptr;
 }
 
-void InfoBarDelegate::StoreActiveEntryUniqueID() {
-  contents_unique_id_ = infobar()->owner()->GetActiveEntryID();
-}
-
-InfoBarDelegate::InfoBarDelegate() : contents_unique_id_(0) {
-}
-
-bool InfoBarDelegate::ShouldExpireInternal(
-    const NavigationDetails& details) const {
-  // NOTE: If you change this, be sure to check and adjust the behavior of
-  // anyone who overrides this as necessary!
-  return (contents_unique_id_ != details.entry_id) || details.is_reload;
+InfoBarDelegate::InfoBarDelegate() : nav_entry_id_(0) {
 }
 
 }  // namespace infobars

@@ -26,12 +26,13 @@ struct SamplerBindingGL
 class ProgramGL : public ProgramImpl
 {
   public:
-    ProgramGL(const FunctionsGL *functions, StateManagerGL *stateManager);
+    ProgramGL(const gl::Program::Data &data,
+              const FunctionsGL *functions,
+              StateManagerGL *stateManager);
     ~ProgramGL() override;
 
     bool usesPointSize() const override;
     int getShaderVersion() const override;
-    GLenum getTransformFeedbackBufferMode() const override;
 
     GLenum getBinaryFormat() override;
     LinkResult load(gl::InfoLog &infoLog, gl::BinaryInputStream *stream) override;
@@ -39,8 +40,6 @@ class ProgramGL : public ProgramImpl
 
     LinkResult link(const gl::Data &data, gl::InfoLog &infoLog,
                     gl::Shader *fragmentShader, gl::Shader *vertexShader,
-                    const std::vector<std::string> &transformFeedbackVaryings,
-                    GLenum transformFeedbackBufferMode,
                     int *registers, std::vector<gl::LinkedVarying> *linkedVaryings,
                     std::map<int, gl::VariableLocation> *outputVariables) override;
 
@@ -78,8 +77,7 @@ class ProgramGL : public ProgramImpl
     void updateSamplerMapping() override;
     bool validateSamplers(gl::InfoLog *infoLog, const gl::Caps &caps) override;
 
-    LinkResult compileProgramExecutables(gl::InfoLog &infoLog, gl::Shader *fragmentShader, gl::Shader *vertexShader,
-                                         int registers) override;
+    LinkResult compileProgramExecutables(gl::InfoLog &infoLog, int registers) override;
 
     bool linkUniforms(gl::InfoLog &infoLog, const gl::Shader &vertexShader, const gl::Shader &fragmentShader,
                       const gl::Caps &caps) override;
@@ -95,6 +93,7 @@ class ProgramGL : public ProgramImpl
 
     GLuint getProgramID() const;
     const std::vector<SamplerBindingGL> &getAppliedSamplerUniforms() const;
+    const gl::AttributesMask &getActiveAttributesMask() const;
 
   private:
     const FunctionsGL *mFunctions;
@@ -110,6 +109,9 @@ class ProgramGL : public ProgramImpl
 
     // An array of the samplers that are used by the program
     std::vector<SamplerBindingGL> mSamplerBindings;
+
+    // Array of attribute locations used by this program
+    gl::AttributesMask mActiveAttributesMask;
 
     GLuint mProgramID;
 };

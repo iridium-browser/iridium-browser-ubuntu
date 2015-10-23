@@ -22,12 +22,12 @@
 #include "url/url_constants.h"
 
 #if defined(ENABLE_EXTENSIONS)
-#include "chrome/common/extensions/chrome_extension_messages.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/renderer/dispatcher.h"
+#include "extensions/renderer/renderer_extension_registry.h"
 #endif
 
 using blink::WebContentSettingCallbacks;
@@ -107,7 +107,7 @@ static const char kDotHTML[] = ".html";
 static const char kGoogleDotCom[] = "google.com";
 
 static bool IsHostInDomain(const std::string& host, const std::string& domain) {
-  return (EndsWith(host, domain, false) &&
+  return (base::EndsWith(host, domain, base::CompareCase::INSENSITIVE_ASCII) &&
           (host.length() == domain.length() ||
            (host.length() > domain.length() &&
             host[host.length() - domain.length() - 1] == '.')));
@@ -170,11 +170,15 @@ ContentSettingsObserver::ContentSettingsObserver(
   ClearBlockedContentSettings();
   render_frame->GetWebFrame()->setContentSettingsClient(this);
 
-  if (render_frame->GetRenderView()->GetMainRenderFrame() != render_frame) {
+  content::RenderFrame* main_frame =
+      render_frame->GetRenderView()->GetMainRenderFrame();
+  // TODO(nasko): The main frame is not guaranteed to be in the same process
+  // with this frame with --site-per-process. This code needs to be updated
+  // to handle this case. See https://crbug.com/496670.
+  if (main_frame && main_frame != render_frame) {
     // Copy all the settings from the main render frame to avoid race conditions
-    // when initializing this data. See http://crbug.com/333308.
-    ContentSettingsObserver* parent = ContentSettingsObserver::Get(
-        render_frame->GetRenderView()->GetMainRenderFrame());
+    // when initializing this data. See https://crbug.com/333308.
+    ContentSettingsObserver* parent = ContentSettingsObserver::Get(main_frame);
     allow_displaying_insecure_content_ =
         parent->allow_displaying_insecure_content_;
     allow_running_insecure_content_ = parent->allow_running_insecure_content_;
@@ -470,18 +474,19 @@ bool ContentSettingsObserver::allowDisplayingInsecureContent(
   GURL frame_gurl(frame->document().url());
   if (IsHostInDomain(origin_host, kGoogleDotCom)) {
     SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HOST_GOOGLE);
-    if (StartsWithASCII(frame_gurl.path(), kGoogleSupportPathPrefix, false)) {
+    if (base::StartsWith(frame_gurl.path(), kGoogleSupportPathPrefix,
+                         base::CompareCase::INSENSITIVE_ASCII)) {
       SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_SUPPORT);
-    } else if (StartsWithASCII(frame_gurl.path(),
-                               kGoogleIntlPathPrefix,
-                               false)) {
+    } else if (base::StartsWith(frame_gurl.path(), kGoogleIntlPathPrefix,
+                                base::CompareCase::INSENSITIVE_ASCII)) {
       SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_INTL);
     }
   }
 
   if (origin_host == kWWWDotGoogleDotCom) {
     SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HOST_WWW_GOOGLE);
-    if (StartsWithASCII(frame_gurl.path(), kGoogleReaderPathPrefix, false))
+    if (base::StartsWith(frame_gurl.path(), kGoogleReaderPathPrefix,
+                         base::CompareCase::INSENSITIVE_ASCII))
       SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_READER);
   } else if (origin_host == kMailDotGoogleDotCom) {
     SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HOST_MAIL_GOOGLE);
@@ -504,7 +509,8 @@ bool ContentSettingsObserver::allowDisplayingInsecureContent(
   }
 
   GURL resource_gurl(resource_url);
-  if (EndsWith(resource_gurl.path(), kDotHTML, false))
+  if (base::EndsWith(resource_gurl.path(), kDotHTML,
+                     base::CompareCase::INSENSITIVE_ASCII))
     SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HTML);
 
   if (allowed_per_settings || allow_displaying_insecure_content_)
@@ -527,18 +533,19 @@ bool ContentSettingsObserver::allowRunningInsecureContent(
   bool is_google = IsHostInDomain(origin_host, kGoogleDotCom);
   if (is_google) {
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_GOOGLE);
-    if (StartsWithASCII(frame_gurl.path(), kGoogleSupportPathPrefix, false)) {
+    if (base::StartsWith(frame_gurl.path(), kGoogleSupportPathPrefix,
+                         base::CompareCase::INSENSITIVE_ASCII)) {
       SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_GOOGLE_SUPPORT);
-    } else if (StartsWithASCII(frame_gurl.path(),
-                               kGoogleIntlPathPrefix,
-                               false)) {
+    } else if (base::StartsWith(frame_gurl.path(), kGoogleIntlPathPrefix,
+                                base::CompareCase::INSENSITIVE_ASCII)) {
       SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_GOOGLE_INTL);
     }
   }
 
   if (origin_host == kWWWDotGoogleDotCom) {
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_WWW_GOOGLE);
-    if (StartsWithASCII(frame_gurl.path(), kGoogleReaderPathPrefix, false))
+    if (base::StartsWith(frame_gurl.path(), kGoogleReaderPathPrefix,
+                         base::CompareCase::INSENSITIVE_ASCII))
       SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_GOOGLE_READER);
   } else if (origin_host == kMailDotGoogleDotCom) {
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_MAIL_GOOGLE);
@@ -558,7 +565,8 @@ bool ContentSettingsObserver::allowRunningInsecureContent(
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_MAPS_GOOGLE);
   } else if (origin_host == kWWWDotYoutubeDotCom) {
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_YOUTUBE);
-  } else if (EndsWith(origin_host, kDotGoogleUserContentDotCom, false)) {
+  } else if (base::EndsWith(origin_host, kDotGoogleUserContentDotCom,
+                            base::CompareCase::INSENSITIVE_ASCII)) {
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_HOST_GOOGLEUSERCONTENT);
   }
 
@@ -566,11 +574,14 @@ bool ContentSettingsObserver::allowRunningInsecureContent(
   if (resource_gurl.host() == kWWWDotYoutubeDotCom)
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_TARGET_YOUTUBE);
 
-  if (EndsWith(resource_gurl.path(), kDotJS, false))
+  if (base::EndsWith(resource_gurl.path(), kDotJS,
+                     base::CompareCase::INSENSITIVE_ASCII))
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_JS);
-  else if (EndsWith(resource_gurl.path(), kDotCSS, false))
+  else if (base::EndsWith(resource_gurl.path(), kDotCSS,
+                          base::CompareCase::INSENSITIVE_ASCII))
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_CSS);
-  else if (EndsWith(resource_gurl.path(), kDotSWF, false))
+  else if (base::EndsWith(resource_gurl.path(), kDotSWF,
+                          base::CompareCase::INSENSITIVE_ASCII))
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_SWF);
 
   if (!allow_running_insecure_content_ && !allowed_per_settings) {
@@ -659,14 +670,15 @@ bool ContentSettingsObserver::IsPlatformApp() {
 #if defined(ENABLE_EXTENSIONS)
 const extensions::Extension* ContentSettingsObserver::GetExtension(
     const WebSecurityOrigin& origin) const {
-  if (!EqualsASCII(origin.protocol(), extensions::kExtensionScheme))
+  if (!base::EqualsASCII(base::StringPiece16(origin.protocol()),
+                         extensions::kExtensionScheme))
     return NULL;
 
   const std::string extension_id = origin.host().utf8().data();
   if (!extension_dispatcher_->IsExtensionActive(extension_id))
     return NULL;
 
-  return extension_dispatcher_->extensions()->GetByID(extension_id);
+  return extensions::RendererExtensionRegistry::Get()->GetByID(extension_id);
 }
 #endif
 
@@ -693,14 +705,15 @@ bool ContentSettingsObserver::IsWhitelistedForContentSettings(
   if (origin.isUnique())
     return false;  // Uninitialized document?
 
-  if (EqualsASCII(origin.protocol(), content::kChromeUIScheme))
+  base::string16 protocol = origin.protocol();
+  if (base::EqualsASCII(protocol, content::kChromeUIScheme))
     return true;  // Browser UI elements should still work.
 
-  if (EqualsASCII(origin.protocol(), content::kChromeDevToolsScheme))
+  if (base::EqualsASCII(protocol, content::kChromeDevToolsScheme))
     return true;  // DevTools UI elements should still work.
 
 #if defined(ENABLE_EXTENSIONS)
-  if (EqualsASCII(origin.protocol(), extensions::kExtensionScheme))
+  if (base::EqualsASCII(protocol, extensions::kExtensionScheme))
     return true;
 #endif
 
@@ -711,7 +724,7 @@ bool ContentSettingsObserver::IsWhitelistedForContentSettings(
 
   // If the scheme is file:, an empty file name indicates a directory listing,
   // which requires JavaScript to function properly.
-  if (EqualsASCII(origin.protocol(), url::kFileScheme)) {
+  if (base::EqualsASCII(protocol, url::kFileScheme)) {
     return document_url.SchemeIs(url::kFileScheme) &&
            document_url.ExtractFileName().empty();
   }

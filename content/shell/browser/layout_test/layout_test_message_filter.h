@@ -54,7 +54,8 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
   void OnGrantWebNotificationPermission(const GURL& origin,
                                         bool permission_granted);
   void OnClearWebNotificationPermissions();
-  void OnSimulateWebNotificationClick(const std::string& title);
+  void OnSimulateWebNotificationClick(const std::string& title,
+                                      int action_index);
   void OnSetPushMessagingPermission(const GURL& origin, bool allowed);
   void OnClearPushMessagingPermissions();
   void OnAcceptAllCookies(bool accept);
@@ -64,6 +65,7 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
                        const GURL& origin,
                        const GURL& embedding_origin);
   void OnResetPermissions();
+  void OnSetBluetoothAdapter(const std::string& name);
 
   int render_process_id_;
 

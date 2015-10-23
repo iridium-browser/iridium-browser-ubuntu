@@ -19,8 +19,6 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
-import java.util.concurrent.Callable;
-
 /**
  * Integration tests for text selection-related behavior.
  */
@@ -199,6 +197,21 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
         DOMUtils.longPressNode(this, mContentViewCore, "disabled_text");
         assertWaitForPastePopupStatus(false);
         assertFalse(mContentViewCore.hasInsertion());
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testPastePopupDismissedOnDestroy() throws Throwable {
+        copyStringToClipboard("SampleTextToCopy");
+        DOMUtils.longPressNode(this, mContentViewCore, "empty_input_text");
+        assertWaitForPastePopupStatus(true);
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mContentViewCore.destroy();
+            }
+        });
+        assertWaitForPastePopupStatus(false);
     }
 
     @SmallTest
@@ -446,17 +459,28 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
     @SmallTest
     @Feature({"TextInput"})
     public void testSelectActionBarPasswordPaste() throws Exception {
-        copyStringToClipboard("SampleTextToCopy");
+        copyStringToClipboard("SamplePassword2");
+
+        // Select the password field.
         DOMUtils.longPressNode(this, mContentViewCore, "input_password");
         assertWaitForSelectActionBarVisible(true);
         assertTrue(mContentViewCore.hasSelection());
+        assertEquals(mContentViewCore.getSelectedText().length(), "SamplePassword".length());
+
+        // Paste "SamplePassword2" into the password field, replacing
+        // "SamplePassword".
         assertNotNull(mContentViewCore.getSelectActionHandler());
         selectActionBarPaste();
-        DOMUtils.clickNode(this, mContentViewCore, "plain_text_1");
+        assertWaitForSelectActionBarVisible(false);
+        assertFalse(mContentViewCore.hasSelection());
+
+        // Ensure the new text matches the pasted text. Note that we can't
+        // actually compare strings as password field selections only provide
+        // a placeholder with the correct length.
         DOMUtils.longPressNode(this, mContentViewCore, "input_password");
         assertWaitForSelectActionBarVisible(true);
         assertTrue(mContentViewCore.hasSelection());
-        assertNotSame(mContentViewCore.getSelectedText(), "SampleTextToCopy");
+        assertEquals(mContentViewCore.getSelectedText().length(), "SamplePassword2".length());
     }
 
     @SmallTest
@@ -548,27 +572,21 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
 
     private void assertClipboardContents(final Context context, final String expectedContents)
             throws InterruptedException {
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Boolean>() {
-                    @Override
-                    public Boolean call() throws Exception {
-                        ClipboardManager clipboardManager =
-                                (ClipboardManager) context.getSystemService(
-                                        Context.CLIPBOARD_SERVICE);
-                        ClipData clip = clipboardManager.getPrimaryClip();
-                        return clip != null && clip.getItemCount() == 1
-                                && TextUtils.equals(clip.getItemAt(0).getText(), expectedContents);
-                    }
-                });
+                ClipboardManager clipboardManager =
+                        (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+                ClipData clip = clipboardManager.getPrimaryClip();
+                return clip != null && clip.getItemCount() == 1
+                        && TextUtils.equals(clip.getItemAt(0).getText(), expectedContents);
             }
         }));
     }
 
     private void assertWaitForSelectActionBarVisible(
             final boolean visible) throws InterruptedException {
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return visible == mContentViewCore.isSelectActionBarShowing();
@@ -623,10 +641,10 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
     }
 
     private void assertWaitForPastePopupStatus(final boolean show) throws InterruptedException {
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return show == mContentViewCore.getPastePopupForTest().isShowing();
+                return show == mContentViewCore.isPastePopupShowing();
             }
         }));
     }

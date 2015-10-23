@@ -13,6 +13,10 @@
 namespace chromecast {
 namespace media {
 
+class MediaPipelineBackend;
+struct MediaPipelineDeviceParams;
+class VideoPlane;
+
 // Provides access to platform-specific media systems and hardware resources.
 // In cast_shell, all usage is from the browser process.  An implementation is
 // assumed to be in an uninitialized state initially.  When uninitialized, no
@@ -32,6 +36,17 @@ class CHROMECAST_EXPORT CastMediaShlib {
   // state.  The implementation must release all media-related hardware
   // resources.
   static void Finalize();
+
+  // Gets the VideoPlane instance for managing the hardware video plane.
+  // While an implementation is in an initialized state, this function may be
+  // called at any time.  The VideoPlane object must be destroyed in Finalize.
+  static VideoPlane* GetVideoPlane();
+
+  // Creates a factory object for a media pipeline backend.  Called in the
+  // browser process, any number of times (once per media pipeline).  Each call
+  // must instantiate a new factory object
+  static MediaPipelineBackend* CreateMediaPipelineBackend(
+      const MediaPipelineDeviceParams& params);
 };
 
 }  // namespace media

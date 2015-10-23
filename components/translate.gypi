@@ -113,7 +113,7 @@
             '<(DEPTH)/third_party/cld/cld.gyp:cld',
           ],
         }],
-        ['cld_version==0 or cld_version==2', {
+        ['cld_version==2', {
           'dependencies': [
             '<(DEPTH)/third_party/cld_2/cld_2.gyp:cld_2',
           ],
@@ -195,8 +195,6 @@
           ],
           'sources': [
             # Note: sources list duplicated in GN build.
-            'translate/content/renderer/data_file_renderer_cld_data_provider.cc',
-            'translate/content/renderer/data_file_renderer_cld_data_provider.h',
             'translate/content/renderer/renderer_cld_data_provider.cc',
             'translate/content/renderer/renderer_cld_data_provider.h',
             'translate/content/renderer/renderer_cld_data_provider_factory.cc',
@@ -207,9 +205,13 @@
             'translate/content/renderer/translate_helper.h',
            ],
           'conditions': [
-            ['cld_version==0 or cld_version==2', {
+            ['cld_version==2', {
               'dependencies': [
                 '<(DEPTH)/third_party/cld_2/cld_2.gyp:cld_2',
+              ],
+              'sources': [
+                'translate/content/renderer/data_file_renderer_cld_data_provider.cc',
+                'translate/content/renderer/data_file_renderer_cld_data_provider.h',
               ],
             }],
           ],
@@ -260,7 +262,7 @@
             ],
           },
           'includes': [
-            '../ios/web/js_compile.gypi',
+            '../ios/web/js_compile_checked.gypi',
           ],
         },
       ],

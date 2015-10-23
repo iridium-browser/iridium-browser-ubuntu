@@ -5,8 +5,10 @@
 #include "content/browser/notifications/notification_message_filter.h"
 
 #include "base/callback.h"
+#include "content/browser/bad_message.h"
 #include "content/browser/notifications/page_notification_delegate.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
+#include "content/common/notification_constants.h"
 #include "content/common/platform_notification_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -33,6 +35,10 @@ PlatformNotificationData SanitizeNotificationData(
     pattern = std::min(kMaximumVibrationDurationMs,
         std::max(kMinimumVibrationDurationMs, pattern));
   }
+
+  // Ensure there aren't more actions than supported.
+  if (sanitized_data.actions.size() > kPlatformNotificationMaxActions)
+    sanitized_data.actions.resize(kPlatformNotificationMaxActions);
 
   return sanitized_data;
 }
@@ -138,7 +144,7 @@ void NotificationMessageFilter::OnShowPersistentNotification(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (GetPermissionForOriginOnIO(origin) !=
           blink::WebNotificationPermissionAllowed) {
-    BadMessageReceived();
+    bad_message::ReceivedBadMessage(this, bad_message::NMF_NO_PERMISSION_SHOW);
     return;
   }
 
@@ -257,7 +263,7 @@ void NotificationMessageFilter::OnClosePersistentNotification(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (GetPermissionForOriginOnIO(origin) !=
           blink::WebNotificationPermissionAllowed) {
-    BadMessageReceived();
+    bad_message::ReceivedBadMessage(this, bad_message::NMF_NO_PERMISSION_CLOSE);
     return;
   }
 
@@ -318,7 +324,7 @@ bool NotificationMessageFilter::VerifyNotificationPermissionGranted(
   if (permission == blink::WebNotificationPermissionAllowed)
     return true;
 
-  BadMessageReceived();
+  bad_message::ReceivedBadMessage(this, bad_message::NMF_NO_PERMISSION_VERIFY);
   return false;
 }
 

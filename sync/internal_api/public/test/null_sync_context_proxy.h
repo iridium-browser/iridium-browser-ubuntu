@@ -9,8 +9,7 @@
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 #include "sync/internal_api/public/sync_context_proxy.h"
 
-namespace syncer {
-
+namespace syncer_v2 {
 class ModelTypeSyncProxyImpl;
 
 // A non-functional implementation of SyncContextProxy.

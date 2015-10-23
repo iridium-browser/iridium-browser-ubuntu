@@ -243,7 +243,6 @@ class RemoteDeviceTest(cros_test_lib.MockTestCase):
 
   def _SetupRemoteTempDir(self):
     """Mock out the calls needed for a remote tempdir."""
-    self.rsh_mock.AddCmdResult(partial_mock.In('mkdir'))
     self.rsh_mock.AddCmdResult(partial_mock.In('mktemp'))
     self.rsh_mock.AddCmdResult(partial_mock.In('rm'))
 
@@ -296,13 +295,14 @@ class RemoteDeviceTest(cros_test_lib.MockTestCase):
       self.assertEqual(self.rsh_mock.call_count, 0)
 
       # The work dir will get automatically created when we use it.
-      self.rsh_mock.AddCmdResult(partial_mock.In('mkdir'))
       self.rsh_mock.AddCmdResult(partial_mock.In('mktemp'))
       _ = device.work_dir
-      self.assertEqual(self.rsh_mock.call_count, 2)
+      self.assertEqual(self.rsh_mock.call_count, 1)
 
       # Add a mock for the clean up logic.
       self.rsh_mock.AddCmdResult(partial_mock.In('rm'))
+
+    self.assertEqual(self.rsh_mock.call_count, 2)
 
 
 class USBDeviceTestCase(mdns_unittest.mDnsTestCase):
@@ -336,8 +336,8 @@ class TestGetUSBConnectedDevices(USBDeviceTestCase):
       self.assertEqual(devices[index].alias, services[index].text['alias'])
 
 
-class TestGetDefaultDevice(USBDeviceTestCase):
-  """Tests _GetDefaultDevice() function."""
+class TestGetDefaultService(USBDeviceTestCase):
+  """Tests _GetDefaultService() function."""
 
   SERVICE_1 = mdns.Service('d1.local', '1.1.1.1', 0, 'd1.a.local',
                            {'alias': 'd1'})
@@ -353,11 +353,12 @@ class TestGetDefaultDevice(USBDeviceTestCase):
   def testOneDevice(self):
     """Tests when one device is found."""
     self._MockNetworkResponse([self.SERVICE_1])
-    service = remote_access._GetDefaultService()
+    service, connection_type = remote_access._GetDefaultService()
     self.assertEqual(self.SERVICE_1.ip, service.ip)
     self.assertEqual(
         self.SERVICE_1.text[remote_access.BRILLO_DEVICE_PROPERTY_ALIAS],
         service.text[remote_access.BRILLO_DEVICE_PROPERTY_ALIAS])
+    self.assertEqual(remote_access.CONNECTION_TYPE_USB, connection_type)
 
   def testMultipleDevices(self):
     """Tests when multiple devices are found."""
@@ -373,6 +374,7 @@ class TestGetDefaultDevice(USBDeviceTestCase):
     self.assertEqual(
         self.SERVICE_1.text[remote_access.BRILLO_DEVICE_PROPERTY_ALIAS],
         device.alias)
+    self.assertEqual(remote_access.CONNECTION_TYPE_USB, device.connection_type)
 
 
 class TestUSBDeviceIP(USBDeviceTestCase):
@@ -439,6 +441,7 @@ class TestChromiumOSDeviceHostnameResolution(USBDeviceTestCase):
     device = remote_access.ChromiumOSDevice(hostname, connect=False)
     self.assertEqual(device.hostname, ip)
     self.assertEqual(device._alias, hostname)
+    self.assertEqual(remote_access.CONNECTION_TYPE_USB, device.connection_type)
 
   def testInvalidHostname(self):
     """Test resolving a bad network name and bad alias."""

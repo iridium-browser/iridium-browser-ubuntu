@@ -29,7 +29,6 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/Settings.h"
 #include "core/layout/LayoutBlockFlow.h"
-#include "core/page/Chrome.h"
 #include "core/page/Page.h"
 
 #include "public/platform/WebScreenInfo.h"
@@ -39,25 +38,25 @@ using namespace blink;
 class LayoutFullScreenPlaceholder final : public LayoutBlockFlow {
 public:
     LayoutFullScreenPlaceholder(LayoutFullScreen* owner)
-        : LayoutBlockFlow(0)
+        : LayoutBlockFlow(nullptr)
         , m_owner(owner)
     {
         setDocumentForAnonymous(&owner->document());
     }
 private:
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutFullScreenPlaceholder || LayoutBlockFlow::isOfType(type); }
-    virtual void willBeDestroyed() override;
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutFullScreenPlaceholder || LayoutBlockFlow::isOfType(type); }
+    void willBeDestroyed() override;
     LayoutFullScreen* m_owner;
 };
 
 void LayoutFullScreenPlaceholder::willBeDestroyed()
 {
-    m_owner->setPlaceholder(0);
+    m_owner->setPlaceholder(nullptr);
     LayoutBlockFlow::willBeDestroyed();
 }
 
 LayoutFullScreen::LayoutFullScreen()
-    : LayoutFlexibleBox(0)
+    : LayoutFlexibleBox(nullptr)
     , m_placeholder(nullptr)
 {
     setReplaced(false);
@@ -106,7 +105,7 @@ void LayoutFullScreen::updateStyle()
     fullscreenStyle->setPosition(FixedPosition);
     fullscreenStyle->setLeft(Length(0, blink::Fixed));
     fullscreenStyle->setTop(Length(0, blink::Fixed));
-    IntSize viewportSize = document().page()->frameHost().pinchViewport().size();
+    IntSize viewportSize = document().page()->frameHost().visualViewport().size();
     fullscreenStyle->setWidth(Length(viewportSize.width(), blink::Fixed));
     fullscreenStyle->setHeight(Length(viewportSize.height(), blink::Fixed));
 
@@ -125,7 +124,7 @@ LayoutObject* LayoutFullScreen::wrapLayoutObject(LayoutObject* object, LayoutObj
     fullscreenLayoutObject->updateStyle();
     if (parent && !parent->isChildAllowed(fullscreenLayoutObject, fullscreenLayoutObject->styleRef())) {
         fullscreenLayoutObject->destroy();
-        return 0;
+        return nullptr;
     }
     if (object) {
         // |object->parent()| can be null if the object is not yet attached

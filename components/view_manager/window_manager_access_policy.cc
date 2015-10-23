@@ -52,14 +52,14 @@ bool WindowManagerAccessPolicy::CanDescendIntoViewForViewTree(
 }
 
 bool WindowManagerAccessPolicy::CanEmbed(const ServerView* view) const {
-  return view->id().connection_id == connection_id_;
+  return true;
 }
 
 bool WindowManagerAccessPolicy::CanChangeViewVisibility(
     const ServerView* view) const {
   // The WindowManager can change the visibility of the root too.
   return view->id().connection_id == connection_id_ ||
-         view->id() == RootViewId();
+      (view->GetRoot() == view);
 }
 
 bool WindowManagerAccessPolicy::CanSetViewSurfaceId(
@@ -75,6 +75,11 @@ bool WindowManagerAccessPolicy::CanSetViewBounds(const ServerView* view) const {
 }
 
 bool WindowManagerAccessPolicy::CanSetViewProperties(
+    const ServerView* view) const {
+  return view->id().connection_id == connection_id_;
+}
+
+bool WindowManagerAccessPolicy::CanSetViewTextInputState(
     const ServerView* view) const {
   return view->id().connection_id == connection_id_;
 }

@@ -15,20 +15,11 @@ public:
     typedef GrCommandBuilder::Cmd Cmd;
     typedef GrCommandBuilder::State State;
 
-    GrInOrderCommandBuilder(GrGpu* gpu) : INHERITED(gpu) { }
+    GrInOrderCommandBuilder() : INHERITED() { }
 
-    Cmd* recordDrawBatch(State*, GrBatch*) override;
-    Cmd* recordStencilPath(const GrPipelineBuilder&,
-                           const GrPathProcessor*,
-                           const GrPath*,
-                           const GrScissorState&,
-                           const GrStencilSettings&) override;
-    Cmd* recordDrawPath(State*,
-                        const GrPathProcessor*,
-                        const GrPath*,
-                        const GrStencilSettings&) override;
+    Cmd* recordDrawBatch(GrBatch*, const GrCaps&) override;
     Cmd* recordDrawPaths(State*,
-                         GrInOrderDrawBuffer*,
+                         GrBufferedDrawTarget*,
                          const GrPathProcessor*,
                          const GrPathRange*,
                          const void*,
@@ -37,7 +28,7 @@ public:
                          GrDrawTarget::PathTransformType ,
                          int,
                          const GrStencilSettings&,
-                         const GrDrawTarget::PipelineInfo&) override;
+                         const GrPipelineOptimizations&) override;
 
 private:
     typedef GrCommandBuilder INHERITED;

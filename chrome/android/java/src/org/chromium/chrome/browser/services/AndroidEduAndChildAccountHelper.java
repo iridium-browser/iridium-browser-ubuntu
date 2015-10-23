@@ -6,8 +6,8 @@ package org.chromium.chrome.browser.services;
 
 import android.app.Activity;
 
-import org.chromium.chrome.browser.ChromiumApplication;
-import org.chromium.chrome.browser.child_accounts.ChildAccountService;
+import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.childaccounts.ChildAccountService;
 
 /**
  * A helper for Android EDU and child account checks.
@@ -40,7 +40,7 @@ public abstract class AndroidEduAndChildAccountHelper
     public void start(Activity activity) {
         android.util.Log.i("AndroidEduAndChildAccountHelper", "before checking child and EDU");
         ChildAccountService.getInstance(activity).checkHasChildAccount(this);
-        ((ChromiumApplication) activity.getApplication()).checkIsAndroidEduDevice(this);
+        ((ChromeApplication) activity.getApplication()).checkIsAndroidEduDevice(this);
         // TODO(aruslan): Should we start a watchdog to kill if Child/Edu stuff takes too long?
         android.util.Log.i("AndroidEduAndChildAccountHelper", "returning from start");
     }

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
@@ -56,6 +57,8 @@ if (enable_nacl) {
 
   source_set("nacl_browser") {
     sources = [
+      "browser/bad_message.cc",
+      "browser/bad_message.h",
       "browser/nacl_broker_host_win.cc",
       "browser/nacl_broker_host_win.h",
       "browser/nacl_broker_service_win.cc",
@@ -146,7 +149,15 @@ if (enable_nacl) {
       "//ppapi/proxy:ipc",
       "//ppapi/shared_impl",
       "//third_party/WebKit/public:blink",
-      "//third_party/jsoncpp",
+    ]
+  }
+
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("nacl_loader_unittests_run") {
+    testonly = true
+    deps = [
+      ":nacl_loader_unittests",
     ]
   }
 
@@ -180,12 +191,15 @@ if (enable_nacl) {
         "//content/public/common",
         "//crypto",
         "//ipc",
-        "//sandbox/linux:libc_urandom_override",
       ]
 
       cflags = [ "-fPIE" ]
 
       ldflags = [ "-pie" ]
+
+      if (!use_openssl) {
+        deps += [ "//sandbox/linux:libc_urandom_override" ]
+      }
     }
 
     source_set("nacl_linux") {
@@ -242,7 +256,6 @@ if (enable_nacl) {
         "//ppapi/proxy",
         "//ppapi/shared_impl",
         "//sandbox",
-        "//sandbox/linux:libc_urandom_override",
         "//sandbox/linux:sandbox_services_headers",
       ]
 
@@ -282,7 +295,7 @@ source_set("nacl_common") {
     "common/nacl_process_type.h",
     "common/nacl_renderer_messages.cc",
     "common/nacl_renderer_messages.h",
-    "common/nacl_sandbox_type_mac.h",
+    "common/nacl_sandbox_type.h",
     "common/nacl_types.cc",
     "common/nacl_types.h",
     "common/nacl_types_param_traits.cc",

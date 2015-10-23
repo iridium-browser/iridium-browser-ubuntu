@@ -9,6 +9,7 @@
 #include "libANGLE/renderer/d3d/RendererD3D.h"
 
 #include "common/MemoryBuffer.h"
+#include "common/debug.h"
 #include "common/utilities.h"
 #include "libANGLE/Display.h"
 #include "libANGLE/Framebuffer.h"
@@ -20,6 +21,7 @@
 #include "libANGLE/renderer/d3d/BufferD3D.h"
 #include "libANGLE/renderer/d3d/DisplayD3D.h"
 #include "libANGLE/renderer/d3d/IndexDataManager.h"
+#include "libANGLE/renderer/d3d/ProgramD3D.h"
 
 namespace rx
 {
@@ -30,6 +32,7 @@ namespace
 // release and recreate the scratch buffer. This ensures we don't have a
 // degenerate case where we are stuck hogging memory.
 const int ScratchMemoryBufferLifetime = 1000;
+
 }
 
 const uintptr_t RendererD3D::DirtyPointer = std::numeric_limits<uintptr_t>::max();
@@ -37,7 +40,9 @@ const uintptr_t RendererD3D::DirtyPointer = std::numeric_limits<uintptr_t>::max(
 RendererD3D::RendererD3D(egl::Display *display)
     : mDisplay(display),
       mDeviceLost(false),
-      mScratchMemoryBufferResetCounter(0)
+      mAnnotator(nullptr),
+      mScratchMemoryBufferResetCounter(0),
+      mWorkaroundsInitialized(false)
 {
 }
 
@@ -54,6 +59,12 @@ void RendererD3D::cleanup()
         incompleteTexture.second.set(NULL);
     }
     mIncompleteTextures.clear();
+
+    if (mAnnotator != nullptr)
+    {
+        gl::UninitializeDebugAnnotations();
+        SafeDelete(mAnnotator);
+    }
 }
 
 gl::Error RendererD3D::drawElements(const gl::Data &data,
@@ -98,7 +109,10 @@ gl::Error RendererD3D::drawElements(const gl::Data &data,
     gl::VertexArray *vao = data.state->getVertexArray();
     TranslatedIndexData indexInfo;
     indexInfo.indexRange = indexRange;
-    error = applyIndexBuffer(indices, vao->getElementArrayBuffer(), count, mode, type, &indexInfo);
+
+    SourceIndexData sourceIndexInfo;
+
+    error = applyIndexBuffer(indices, vao->getElementArrayBuffer().get(), count, mode, type, &indexInfo, &sourceIndexInfo);
     if (error.isError())
     {
         return error;
@@ -110,7 +124,7 @@ gl::Error RendererD3D::drawElements(const gl::Data &data,
     ASSERT(!data.state->isTransformFeedbackActiveUnpaused());
 
     GLsizei vertexCount = indexInfo.indexRange.length() + 1;
-    error = applyVertexBuffer(*data.state, mode, indexInfo.indexRange.start, vertexCount, instances);
+    error = applyVertexBuffer(*data.state, mode, indexInfo.indexRange.start, vertexCount, instances, &sourceIndexInfo);
     if (error.isError())
     {
         return error;
@@ -136,7 +150,7 @@ gl::Error RendererD3D::drawElements(const gl::Data &data,
 
     if (!skipDraw(data, mode))
     {
-        error = drawElements(mode, count, type, indices, vao->getElementArrayBuffer(), indexInfo, instances);
+        error = drawElements(mode, count, type, indices, vao->getElementArrayBuffer().get(), indexInfo, instances, program->usesPointSize());
         if (error.isError())
         {
             return error;
@@ -180,7 +194,7 @@ gl::Error RendererD3D::drawArrays(const gl::Data &data,
 
     applyTransformFeedbackBuffers(*data.state);
 
-    error = applyVertexBuffer(*data.state, mode, first, count, instances);
+    error = applyVertexBuffer(*data.state, mode, first, count, instances, nullptr);
     if (error.isError())
     {
         return error;
@@ -225,9 +239,9 @@ gl::Error RendererD3D::generateSwizzles(const gl::Data &data, gl::SamplerType ty
 {
     gl::Program *program = data.state->getProgram();
 
-    size_t samplerRange = program->getUsedSamplerRange(type);
+    unsigned int samplerRange = static_cast<unsigned int>(program->getUsedSamplerRange(type));
 
-    for (size_t i = 0; i < samplerRange; i++)
+    for (unsigned int i = 0; i < samplerRange; i++)
     {
         GLenum textureType = program->getSamplerTextureType(type, i);
         GLint textureUnit = program->getSamplerMapping(type, i, *data.caps);
@@ -355,13 +369,11 @@ gl::Error RendererD3D::applyState(const gl::Data &data, GLenum drawMode)
 gl::Error RendererD3D::applyShaders(const gl::Data &data)
 {
     gl::Program *program = data.state->getProgram();
-
-    gl::VertexFormat inputLayout[gl::MAX_VERTEX_ATTRIBS];
-    gl::VertexFormat::GetInputLayout(inputLayout, program, *data.state);
+    GetImplAs<ProgramD3D>(program)->updateCachedInputLayout(program, *data.state);
 
     const gl::Framebuffer *fbo = data.state->getDrawFramebuffer();
 
-    gl::Error error = applyShaders(program, inputLayout, fbo, data.state->getRasterizerState().rasterizerDiscard, data.state->isTransformFeedbackActiveUnpaused());
+    gl::Error error = applyShaders(program, fbo, data.state->getRasterizerState().rasterizerDiscard, data.state->isTransformFeedbackActiveUnpaused());
     if (error.isError())
     {
         return error;
@@ -378,8 +390,8 @@ gl::Error RendererD3D::applyTextures(const gl::Data &data, gl::SamplerType shade
 {
     gl::Program *program = data.state->getProgram();
 
-    size_t samplerRange = program->getUsedSamplerRange(shaderType);
-    for (size_t samplerIndex = 0; samplerIndex < samplerRange; samplerIndex++)
+    unsigned int samplerRange = program->getUsedSamplerRange(shaderType);
+    for (unsigned int samplerIndex = 0; samplerIndex < samplerRange; samplerIndex++)
     {
         GLenum textureType = program->getSamplerTextureType(shaderType, samplerIndex);
         GLint textureUnit = program->getSamplerMapping(shaderType, samplerIndex, *data.caps);
@@ -436,14 +448,7 @@ gl::Error RendererD3D::applyTextures(const gl::Data &data, gl::SamplerType shade
     // Set all the remaining textures to NULL
     size_t samplerCount = (shaderType == gl::SAMPLER_PIXEL) ? data.caps->maxTextureImageUnits
                                                             : data.caps->maxVertexTextureImageUnits;
-    for (size_t samplerIndex = samplerRange; samplerIndex < samplerCount; samplerIndex++)
-    {
-        gl::Error error = setTexture(shaderType, samplerIndex, NULL);
-        if (error.isError())
-        {
-            return error;
-        }
-    }
+    clearTextures(shaderType, samplerRange, samplerCount);
 
     return gl::Error(GL_NO_ERROR);
 }
@@ -540,20 +545,26 @@ gl::Texture *RendererD3D::getIncompleteTexture(GLenum type)
     {
         const GLubyte color[] = { 0, 0, 0, 255 };
         const gl::Extents colorSize(1, 1, 1);
-        const gl::PixelUnpackState incompleteUnpackState(1, 0);
+        const gl::PixelUnpackState unpack(1, 0);
+        const gl::Box area(0, 0, 0, 1, 1, 1);
 
-        gl::Texture* t = new gl::Texture(createTexture(type), std::numeric_limits<GLuint>::max(), type);
+        // Skip the API layer to avoid needing to pass the Context and mess with dirty bits.
+        gl::Texture *t =
+            new gl::Texture(createTexture(type), std::numeric_limits<GLuint>::max(), type);
+        t->setStorage(type, 1, GL_RGBA8, colorSize);
 
         if (type == GL_TEXTURE_CUBE_MAP)
         {
             for (GLenum face = GL_TEXTURE_CUBE_MAP_POSITIVE_X; face <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z; face++)
             {
-                t->setImage(face, 0, GL_RGBA, colorSize, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+                t->getImplementation()->setSubImage(face, 0, area, GL_RGBA8, GL_UNSIGNED_BYTE,
+                                                    unpack, color);
             }
         }
         else
         {
-            t->setImage(type, 0, GL_RGBA, colorSize, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+            t->getImplementation()->setSubImage(type, 0, area, GL_RGBA8, GL_UNSIGNED_BYTE, unpack,
+                                                color);
         }
 
         mIncompleteTextures[type].set(t);
@@ -615,6 +626,46 @@ gl::Error RendererD3D::getScratchMemoryBuffer(size_t requestedSize, MemoryBuffer
 
     *bufferOut = &mScratchMemoryBuffer;
     return gl::Error(GL_NO_ERROR);
+}
+
+void RendererD3D::insertEventMarker(GLsizei length, const char *marker)
+{
+    std::vector<wchar_t> wcstring (length + 1);
+    size_t convertedChars = 0;
+    errno_t err = mbstowcs_s(&convertedChars, wcstring.data(), length + 1, marker, _TRUNCATE);
+    if (err == 0)
+    {
+        getAnnotator()->setMarker(wcstring.data());
+    }
+}
+
+void RendererD3D::pushGroupMarker(GLsizei length, const char *marker)
+{
+    std::vector<wchar_t> wcstring(length + 1);
+    size_t convertedChars = 0;
+    errno_t err = mbstowcs_s(&convertedChars, wcstring.data(), length + 1, marker, _TRUNCATE);
+    if (err == 0)
+    {
+        getAnnotator()->beginEvent(wcstring.data());
+    }
+}
+
+void RendererD3D::popGroupMarker()
+{
+    getAnnotator()->endEvent();
+}
+
+void RendererD3D::initializeDebugAnnotator()
+{
+    createAnnotator();
+    ASSERT(mAnnotator);
+    gl::InitializeDebugAnnotations(mAnnotator);
+}
+
+gl::DebugAnnotator *RendererD3D::getAnnotator()
+{
+    ASSERT(mAnnotator);
+    return mAnnotator;
 }
 
 }

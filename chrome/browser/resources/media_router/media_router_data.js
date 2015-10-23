@@ -8,6 +8,16 @@ cr.define('media_router', function() {
   'use strict';
 
   /**
+   * This corresponds to the C++ MediaCastMode.
+   * @enum {number}
+   */
+  var CastModeType = {
+    DEFAULT: 0,
+    TAB_MIRROR: 1,
+    DESKTOP_MIRROR: 2,
+  };
+
+  /**
    * @enum {string}
    */
   var SinkStatus = {
@@ -18,14 +28,14 @@ cr.define('media_router', function() {
 
 
   /**
-   * @param {number} type The type of cast mode. This corresponds to the
-   *   C++ MediaCastMode.
+   * @param {media_router.CastModeType} type The type of cast mode.
    * @param {string} title The title of the cast mode.
    * @param {string} description The description of the cast mode.
+   * @param {string} host The hostname of the site to cast.
    * @constructor
    * @struct
    */
-  var CastMode = function(type, title, description) {
+  var CastMode = function(type, title, description, host) {
     /** @type {number} */
     this.type = type;
 
@@ -34,6 +44,9 @@ cr.define('media_router', function() {
 
     /** @type {string} */
     this.description = description;
+
+    /** @type {string} */
+    this.host = host || null;
   };
 
 
@@ -41,21 +54,18 @@ cr.define('media_router', function() {
    * @param {string} id The ID of this issue.
    * @param {string} title The issue title.
    * @param {string} message The issue message.
-   * @param {string} defaultActionText The button text of default action.
    * @param {number} defaultActionType The type of default action.
-   * @param {?string} secondaryActionText The button text of optional action.
    * @param {?number} secondaryActionType The type of optional action.
    * @param {?string} mediaRouteId The route ID to which this issue
    *                  pertains. If not set, this is a global issue.
    * @param {boolean} isBlocking True if this issue blocks other UI.
-   * @param {?string} helpURL The URL to be opened if learn more is clicked.
+   * @param {?number} helpPageId The numeric help center ID.
    * @constructor
    * @struct
    */
-  var Issue = function(id, title, message, defaultActionText,
-                       defaultActionType, secondaryActionText,
+  var Issue = function(id, title, message, defaultActionType,
                        secondaryActionType, mediaRouteId, isBlocking,
-                       helpURL) {
+                       helpPageId) {
     /** @type {string} */
     this.id = id;
 
@@ -65,14 +75,8 @@ cr.define('media_router', function() {
     /** @type {string} */
     this.message = message;
 
-    /** @type {string} */
-    this.defaultActionText = defaultActionText;
-
     /** @type {number} */
     this.defaultActionType = defaultActionType;
-
-    /** @type {?string} */
-    this.secondaryActionText = secondaryActionText;
 
     /** @type {?number} */
     this.secondaryActionType = secondaryActionType;
@@ -83,8 +87,8 @@ cr.define('media_router', function() {
     /** @type {boolean} */
     this.isBlocking = isBlocking;
 
-    /** @type {?string} */
-    this.helpURL = helpURL;
+    /** @type {?number} */
+    this.helpPageId = helpPageId;
   };
 
 
@@ -95,10 +99,13 @@ cr.define('media_router', function() {
    * @param {?number} tabId The ID of the tab in which web app is running and
    *                  accessing the route.
    * @param {boolean} isLocal True if this is a locally created route.
+   * @param {?string} customControllerPath non-empty if this route has custom
+   *                  controller.
    * @constructor
    * @struct
    */
-  var Route = function(id, sinkId, title, tabId, isLocal) {
+  var Route = function(id, sinkId, title, tabId, isLocal,
+      customControllerPath) {
     /** @type {string} */
     this.id = id;
 
@@ -113,6 +120,9 @@ cr.define('media_router', function() {
 
     /** @type {boolean} */
     this.isLocal = isLocal;
+
+    /** @type {?string} */
+    this.customControllerPath = customControllerPath;
   };
 
 
@@ -121,10 +131,12 @@ cr.define('media_router', function() {
    * @param {string} name The name of the sink.
    * @param {media_router.SinkStatus} status The readiness state of the sink.
    * @param {!Array<number>} castModes Cast modes compatible with the sink.
+   * @param {boolean} isLaunching True if the Media Router is creating a route
+   *                              to this sink.
    * @constructor
    * @struct
    */
-  var Sink = function(id, name, status) {
+  var Sink = function(id, name, status, castModes, isLaunching) {
     /** @type {string} */
     this.id = id;
 
@@ -136,6 +148,9 @@ cr.define('media_router', function() {
 
     /** @type {!Array<number>} */
     this.castModes = castModes;
+
+    /** @type {boolean} */
+    this.isLaunching = isLaunching;
   };
 
 
@@ -154,6 +169,7 @@ cr.define('media_router', function() {
   };
 
   return {
+    CastModeType: CastModeType,
     SinkStatus: SinkStatus,
     CastMode: CastMode,
     Issue: Issue,

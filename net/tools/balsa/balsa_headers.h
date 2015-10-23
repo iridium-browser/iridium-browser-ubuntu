@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/port.h"
 #include "base/strings/string_piece.h"
 #include "net/tools/balsa/balsa_enums.h"
 #include "net/tools/balsa/string_piece_utils.h"
@@ -539,7 +538,7 @@ class BalsaHeaders {
       do {
         iterator_base::increment();
       } while (!AtEnd() &&
-               !StringPieceUtils::EqualIgnoreCase(key_, (**this).first));
+               !base::EqualsCaseInsensitiveASCII(key_, (**this).first));
       return *this;
     }
 

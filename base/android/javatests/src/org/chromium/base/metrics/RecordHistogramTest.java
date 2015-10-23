@@ -20,7 +20,8 @@ public class RecordHistogramTest extends InstrumentationTestCase {
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized();
+        LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER)
+                .ensureInitialized(getInstrumentation().getTargetContext());
         RecordHistogram.initialize();
     }
 
@@ -154,6 +155,39 @@ public class RecordHistogramTest extends InstrumentationTestCase {
         RecordHistogram.recordCustomTimesHistogram(histogram, 200, 1, 100, milli, 3);
         assertEquals(2, zeroCount.getDelta());
         assertEquals(1, oneCount.getDelta());
+        assertEquals(1, twoCount.getDelta());
+    }
+
+    /**
+     * Tests recording of linear count histograms.
+     */
+    @SmallTest
+    public void testRecordLinearCountHistogram() {
+        String histogram = "HelloWorld.LinearCountMetric";
+        HistogramDelta zeroCount = new HistogramDelta(histogram, 0);
+        HistogramDelta oneCount = new HistogramDelta(histogram, 1);
+        HistogramDelta twoCount = new HistogramDelta(histogram, 2);
+        final int min = 1;
+        final int max = 3;
+        final int numBuckets = 4;
+
+        assertEquals(0, zeroCount.getDelta());
+        assertEquals(0, oneCount.getDelta());
+        assertEquals(0, twoCount.getDelta());
+
+        RecordHistogram.recordLinearCountHistogram(histogram, 0, min, max, numBuckets);
+        assertEquals(1, zeroCount.getDelta());
+        assertEquals(0, oneCount.getDelta());
+        assertEquals(0, twoCount.getDelta());
+
+        RecordHistogram.recordLinearCountHistogram(histogram, 0, min, max, numBuckets);
+        assertEquals(2, zeroCount.getDelta());
+        assertEquals(0, oneCount.getDelta());
+        assertEquals(0, twoCount.getDelta());
+
+        RecordHistogram.recordLinearCountHistogram(histogram, 2, min, max, numBuckets);
+        assertEquals(2, zeroCount.getDelta());
+        assertEquals(0, oneCount.getDelta());
         assertEquals(1, twoCount.getDelta());
     }
 }

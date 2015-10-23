@@ -42,6 +42,7 @@
 #include "public/platform/WebUnitTestSupport.h"
 #include "public/web/WebRemoteFrame.h"
 #include "public/web/WebSettings.h"
+#include "public/web/WebTreeScopeType.h"
 #include "public/web/WebViewClient.h"
 #include "web/WebLocalFrameImpl.h"
 #include "wtf/StdLibExtras.h"
@@ -78,7 +79,7 @@ public:
     {
     }
 
-    virtual void run() override
+    void run() override
     {
         Platform::current()->unitTestSupport()->serveAsynchronousMockedRequests();
         if (m_client->isLoading())
@@ -105,7 +106,7 @@ public:
     {
     }
 
-    virtual void run() override
+    void run() override
     {
         m_frame->loadRequest(m_request);
     }
@@ -124,7 +125,7 @@ public:
     {
     }
 
-    virtual void run() override
+    void run() override
     {
         m_frame->loadHTMLString(WebData(m_html.data(), m_html.size()), m_baseURL);
     }
@@ -145,7 +146,7 @@ public:
     {
     }
 
-    virtual void run() override
+    void run() override
     {
         m_frame->loadHistoryItem(m_item, m_loadType, m_cachePolicy);
     }
@@ -165,7 +166,7 @@ public:
     {
     }
 
-    virtual void run() override
+    void run() override
     {
         m_frame->reload(m_ignoreCache);
     }
@@ -228,8 +229,9 @@ void pumpPendingRequestsDoNotUse(WebFrame* frame)
     pumpPendingRequests(frame);
 }
 
-WebViewHelper::WebViewHelper()
+WebViewHelper::WebViewHelper(SettingOverrider* settingOverrider)
     : m_webView(0)
+    , m_settingOverrider(settingOverrider)
 {
 }
 
@@ -248,13 +250,16 @@ WebViewImpl* WebViewHelper::initialize(bool enableJavascript, TestWebFrameClient
         webViewClient = defaultWebViewClient();
     m_webView = WebViewImpl::create(webViewClient);
     m_webView->settings()->setJavaScriptEnabled(enableJavascript);
+    m_webView->settings()->setPluginsEnabled(true);
     if (updateSettingsFunc)
         updateSettingsFunc(m_webView->settings());
     else
         m_webView->settings()->setDeviceSupportsMouse(false);
+    if (m_settingOverrider)
+        m_settingOverrider->overrideSettings(m_webView->settings());
 
     m_webView->setDefaultPageScaleLimits(1, 4);
-    m_webView->setMainFrame(WebLocalFrameImpl::create(webFrameClient));
+    m_webView->setMainFrame(WebLocalFrameImpl::create(WebTreeScopeType::Document, webFrameClient));
 
     return m_webView;
 }
@@ -281,16 +286,16 @@ TestWebFrameClient::TestWebFrameClient() : m_loadsInProgress(0)
 {
 }
 
-WebFrame* TestWebFrameClient::createChildFrame(WebLocalFrame* parent, const WebString& frameName, WebSandboxFlags sandboxFlags)
+WebFrame* TestWebFrameClient::createChildFrame(WebLocalFrame* parent, WebTreeScopeType scope, const WebString& frameName, WebSandboxFlags sandboxFlags)
 {
-    WebFrame* frame = WebLocalFrame::create(this);
+    WebFrame* frame = WebLocalFrame::create(scope, this);
     parent->appendChild(frame);
     return frame;
 }
 
-void TestWebFrameClient::frameDetached(WebFrame* frame)
+void TestWebFrameClient::frameDetached(WebFrame* frame, DetachType type)
 {
-    if (frame->parent())
+    if (type == DetachType::Remove && frame->parent())
         frame->parent()->removeChild(frame);
     frame->close();
 }
@@ -322,13 +327,13 @@ void TestWebFrameClient::waitForLoadToComplete()
 }
 
 TestWebRemoteFrameClient::TestWebRemoteFrameClient()
-    : m_frame(WebRemoteFrame::create(this))
+    : m_frame(WebRemoteFrame::create(WebTreeScopeType::Document, this))
 {
 }
 
-void TestWebRemoteFrameClient::frameDetached()
+void TestWebRemoteFrameClient::frameDetached(DetachType type)
 {
-    if (m_frame->parent())
+    if (type == DetachType::Remove && m_frame->parent())
         m_frame->parent()->removeChild(m_frame);
     m_frame->close();
 }

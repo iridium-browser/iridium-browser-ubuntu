@@ -50,27 +50,41 @@ from sys import stdout, stderr, argv
 # List of targets (short target name, closure namespace)
 targets = {
     'textureformat': 'functional.gles3.es3fTextureFormatTests',
-    # 'fboCompletenessTests': 'functional.gles3.es3fFboCompletenessTests',
-    # 'fbomultisampletests': 'functional.gles3.es3fFboMultisampleTests',
-    # 'fbostencilbuffertests': 'functional.gles3.es3fFboStencilbufferTests',
-    # 'fragmentoutput': 'functional.gles3.es3fFragmentOutputTests',
-    # 'framebufferblittests': 'functional.gles3.es3fFramebufferBlitTests',
-    # 'instancedrenderingtests': 'functional.gles3.es3fInstancedRenderingTests',
-    # 'pixelBufferObjectTest': 'functional.gles3.es3fPixelBufferObjectTest',
-    # 'primitiverestarttests': 'functional.gles3.es3fPrimitiveRestartTests',
-    # 'samplerobjecttests': 'functional.gles3.es3fSamplerObjectTests',
-    'testfloats': 'framework.common.tcuFloat',
+    'fboCompletenessTests': 'functional.gles3.es3fFboCompletenessTests',
+    'fbomultisampletests': 'functional.gles3.es3fFboMultisampleTests',
+    'fbostencilbuffertests': 'functional.gles3.es3fFboStencilbufferTests',
+    'fragmentoutput': 'functional.gles3.es3fFragmentOutputTests',
+    'framebufferblittests': 'functional.gles3.es3fFramebufferBlitTests',
+    'instancedrenderingtests': 'functional.gles3.es3fInstancedRenderingTests',
+    'pixelBufferObjectTest': 'functional.gles3.es3fPixelBufferObjectTest',
+    'primitiverestarttests': 'functional.gles3.es3fPrimitiveRestartTests',
+    'samplerobjecttests': 'functional.gles3.es3fSamplerObjectTests',
     'transformFeedbackTests': 'functional.gles3.es3fTransformFeedbackTests',
-    # 'uniformapi': 'functional.gles3.es3fUniformApiTests',
+    'uniformapi': 'functional.gles3.es3fUniformApiTests',
     'uniformbuffers': 'functional.gles3.es3fUniformBlockTests',
-    'glsvaotests': 'modules.shared.glsVertexArrayTests',
-    # 'vertexarrays': 'functional.gles3.es3fVertexArrayTests',
+    'vertexarrays': 'functional.gles3.es3fVertexArrayTests',
     'shaderlibrary': 'modules.shared.glsShaderLibrary',
-    'matrix': 'framework.common.tcuMatrix',
-    'fragOps': 'framework.referencerenderer.rrFragmentOperations',
-    'renderer': 'framework.referencerenderer.rrRenderer',
-	'matrixUtil': 'framework.common.tcuMatrixUtil'
+    'negativebuffer': 'functional.gles3.es3fNegativeBufferApiTests',
+    'sglrReferenceContextTest': 'framework.opengl.simplereference.sglrReferenceContextTest',
+    'lifetime': 'functional.gles3.es3fLifetimeTests',
+    'draw': 'functional.gles3.es3fDrawTests',
+    'attriblocation': 'functional.gles3.es3fAttribLocationTests',
+    'textureShadowTests': 'functional.gles3.es3fTextureShadowTests',
+    'texturewrap': 'functional.gles3.es3fTextureWrapTests',
+    'negativetextureapi': 'functional.gles3.es3fNegativeTextureApiTests',
+    'multisample': 'functional.gles3.es3fMultisampleTests',
+    'negativefragmentapi': 'functional.gles3.es3fNegativeFragmentApiTests',
+    'negativevertexarrayapi': 'functional.gles3.es3fNegativeVertexArrayApiTests',
+    'negativestateapi' : 'functional.gles3.es3fNegativeStateApiTests',
+    'negativeshaderapi' : 'functional.gles3.es3fNegativeShaderApiTests',
+    'buffercopy' : 'functional.gles3.es3fBufferCopyTests'
 }
+
+total_errors = 0
+total_warnings = 0
+
+results = dict()
+
 def dep_filename(target):
     return target + '.dep'
 
@@ -83,13 +97,11 @@ def write_to_file(outfile, cmdLine, redirect_stderr):
         stderr = subprocess.STDOUT
 
     with open(outfile, "w") as out_file:
-            
             proc = subprocess.Popen(cmdLine, shell=True, stdout=subprocess.PIPE, stderr=stderr)
-            
             while proc.poll() is None:
                 line = proc.stdout.readline()
                 out_file.write(line)
-            
+
             out_file.flush()
             proc.wait()
 
@@ -99,11 +111,8 @@ def read_file(file_path):
         sys.exit(2)
 
     fo = open(file_path)
-
     lines = fo.read()
-
     fo.close()
-
     return lines
 
 def file_exists(file_path):
@@ -131,11 +140,6 @@ def buildDepsFile():
     proc = subprocess.Popen(cmdBuildDeps, shell=True, stdout=subprocess.PIPE, stderr=None)
     proc.wait()
 
-total_errors = 0
-total_warnings = 0
-
-results = dict()
-
 def build_target(target, namespace):
     global total_errors
     global total_warnings
@@ -161,15 +165,13 @@ def build_target(target, namespace):
         total_warnings += warnings
     results[target] = [errors, warnings]
 
-
-
 def build_all_targets():
     for target in targets.keys():
         build_target(target, targets[target])
 
 def format_target(target):
     deps = read_file(dep_filename(target))
-    fixjsstyle = 'fixjsstyle-script.py'
+    fixjsstyle = 'fixjsstyle.py'
     reformat = 'reformatting_tool.py'
     for dep in deps.split('\n'):
         dep = dep.strip()
@@ -187,14 +189,19 @@ def pass_or_fail():
     if total_errors + total_warnings == 0:
         print "Passed"
     elif len(results) > 1: #display the summary only when building more than one target
-        for target in results:
-            errors = results[target][0]
-            warnings = results[target][1]
-            if errors + warnings == 0:
-                print target + ':\tPassed'
-            else:
-                print target + ':\terrors: ' + str(errors) + '\twarnings: ' + str(warnings)
-        print "Compilation failed: " + str(total_errors) + ' error(s), ' + str(total_warnings) + ' warning(s)'  
+        passed = [k for k, v in results.iteritems() if v[0] + v[1] == 0]
+        failed = dict((k, v) for k, v in results.iteritems() if v[0] + v[1] != 0)
+        print "\nBuild Summary:"
+        # Print first the tests that passed
+        for target in passed:
+            print "{0:>30}\tPassed".format(target+":")
+
+        # Print tests that failed. Fixed-width to improve readability
+        for target in failed:
+            errors = failed[target][0]
+            warnings = failed[target][1]
+            print "{0:>30}\tErrors: {1:4}\tWarnings: {2:4}".format(target+":", errors, warnings)
+        print "Compilation failed: {} error(s), {} warning(s).".format(total_errors, total_warnings)
 
 def main(argv):
     if len(argv) == 0:
@@ -223,12 +230,16 @@ def main(argv):
         pass_or_fail()
     elif (argv[0] == 'depfile'):
         buildDepsFile()
+    elif (argv[0] == 'list'):
+        print "List of available targets:"
+        for target in targets.keys():
+            print "\t{}".format(target)
     else:
         target = argv[0]
         build_deps(target, targets[target])
         build_target(target, targets[target])
         pass_or_fail()
 
-if __name__ == '__main__': 
+if __name__ == '__main__':
     main(sys.argv[1:])
 

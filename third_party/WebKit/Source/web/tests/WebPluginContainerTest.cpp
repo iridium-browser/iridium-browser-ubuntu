@@ -46,8 +46,10 @@
 #include "public/web/WebFrame.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebPluginParams.h"
+#include "public/web/WebPrintParams.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebView.h"
+#include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebPluginContainerImpl.h"
 #include "web/WebViewImpl.h"
@@ -56,9 +58,8 @@
 #include <gtest/gtest.h>
 
 using blink::testing::runPendingTasks;
-using namespace blink;
 
-namespace {
+namespace blink {
 
 class WebPluginContainerTest : public ::testing::Test {
 public:
@@ -67,7 +68,7 @@ public:
     {
     }
 
-    virtual void TearDown()
+    void TearDown() override
     {
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
@@ -76,27 +77,50 @@ protected:
     std::string m_baseURL;
 };
 
+class TestPluginWebFrameClient;
+
 // Subclass of FakeWebPlugin that has a selection of 'x' as plain text and 'y' as markup text.
 class TestPlugin : public FakeWebPlugin {
 public:
-    TestPlugin(WebFrame* frame, const WebPluginParams& params)
+    TestPlugin(WebFrame* frame, const WebPluginParams& params, TestPluginWebFrameClient* testClient)
         : FakeWebPlugin(frame, params)
     {
+        m_testClient = testClient;
     }
 
-    virtual bool hasSelection() const { return true; }
-    virtual WebString selectionAsText() const { return WebString("x"); }
-    virtual WebString selectionAsMarkup() const { return WebString("y"); }
+    bool hasSelection() const override { return true; }
+    WebString selectionAsText() const override { return WebString("x"); }
+    WebString selectionAsMarkup() const override { return WebString("y"); }
+    bool supportsPaginatedPrint() override { return true; }
+    int printBegin(const WebPrintParams& printParams) override { return 1; }
+    void printPage(int pageNumber, WebCanvas*) override;
+private:
+    TestPluginWebFrameClient* m_testClient;
 };
 
 class TestPluginWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
-    virtual WebPlugin* createPlugin(WebLocalFrame* frame, const WebPluginParams& params) override
+    WebPlugin* createPlugin(WebLocalFrame* frame, const WebPluginParams& params) override
     {
         if (params.mimeType == WebString::fromUTF8("application/x-webkit-test-webplugin"))
-            return new TestPlugin(frame, params);
+            return new TestPlugin(frame, params, this);
+        if (params.mimeType == WebString::fromUTF8("application/pdf"))
+            return new TestPlugin(frame, params, this);
         return WebFrameClient::createPlugin(frame, params);
     }
+
+public:
+    void onPrintPage() { m_printedPage = true; }
+    bool printedAtLeastOnePage() { return m_printedPage; }
+
+private:
+    bool m_printedPage = false;
 };
+
+void TestPlugin::printPage(int pageNumber, WebCanvas* canvas)
+{
+    ASSERT(m_testClient);
+    m_testClient->onPrintPage();
+}
 
 WebPluginContainer* getWebPluginContainer(WebView* webView, const WebString& id)
 {
@@ -132,6 +156,52 @@ TEST_F(WebPluginContainerTest, WindowToLocalPointTest)
     WebPoint point4 = pluginContainerTwo->rootFrameToLocalPoint(WebPoint(-10, 10));
     ASSERT_EQ(10, point4.x);
     ASSERT_EQ(10, point4.y);
+}
+
+TEST_F(WebPluginContainerTest, PrintOnePage)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("test.pdf"), WebString::fromUTF8("application/pdf"));
+
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    TestPluginWebFrameClient* testClient = new TestPluginWebFrameClient();
+    WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "test.pdf", true, testClient);
+    ASSERT(webView);
+    webView->layout();
+    runPendingTasks();
+    WebFrame* frame = webView->mainFrame();
+
+    WebPrintParams printParams;
+    printParams.printContentArea.width = 500;
+    printParams.printContentArea.height = 500;
+
+    frame->printBegin(printParams);
+    SkPictureRecorder recorder;
+    frame->printPage(0, recorder.beginRecording(IntRect()));
+    frame->printEnd();
+    ASSERT(testClient->printedAtLeastOnePage());
+}
+
+TEST_F(WebPluginContainerTest, PrintAllPages)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("test.pdf"), WebString::fromUTF8("application/pdf"));
+
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    TestPluginWebFrameClient* testClient = new TestPluginWebFrameClient();
+    WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "test.pdf", true, testClient);
+    ASSERT(webView);
+    webView->layout();
+    runPendingTasks();
+    WebFrame* frame = webView->mainFrame();
+
+    WebPrintParams printParams;
+    printParams.printContentArea.width = 500;
+    printParams.printContentArea.height = 500;
+
+    frame->printBegin(printParams);
+    SkPictureRecorder recorder;
+    frame->printPagesWithBoundaries(recorder.beginRecording(IntRect()), WebSize());
+    frame->printEnd();
+    ASSERT(testClient->printedAtLeastOnePage());
 }
 
 TEST_F(WebPluginContainerTest, LocalToWindowPointTest)
@@ -225,7 +295,7 @@ public:
     {
     }
 
-    virtual bool handleInputEvent(const WebInputEvent& event, WebCursorInfo&) override
+    bool handleInputEvent(const WebInputEvent& event, WebCursorInfo&) override
     {
         m_lastEventType = event.type;
         return true;
@@ -237,7 +307,7 @@ private:
 };
 
 class EventTestPluginWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
-    virtual WebPlugin* createPlugin(WebLocalFrame* frame, const WebPluginParams& params) override
+    WebPlugin* createPlugin(WebLocalFrame* frame, const WebPluginParams& params) override
     {
         if (params.mimeType == WebString::fromUTF8("application/x-webkit-test-webplugin"))
             return new EventTestPlugin(frame, params);
@@ -310,4 +380,59 @@ TEST_F(WebPluginContainerTest, IsRectTopmostTest)
 
     EXPECT_FALSE(pluginContainerImpl->isRectTopmost(rect));
 }
+
+TEST_F(WebPluginContainerTest, TopmostAfterDetachTest)
+{
+    static WebRect topmostRect(10, 10, 40, 40);
+
+    // Plugin that checks isRectTopmost in destroy().
+    class TopmostPlugin : public FakeWebPlugin {
+    public:
+        TopmostPlugin(WebFrame* frame, const WebPluginParams& params)
+            : FakeWebPlugin(frame, params) {}
+
+        bool isRectTopmost()
+        {
+            return container()->isRectTopmost(topmostRect);
+        }
+
+        void destroy() override
+        {
+            // In destroy, isRectTopmost is no longer valid.
+            EXPECT_FALSE(container()->isRectTopmost(topmostRect));
+            FakeWebPlugin::destroy();
+        }
+    };
+
+    class TopmostPluginWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
+        WebPlugin* createPlugin(WebLocalFrame* frame, const WebPluginParams& params) override
+        {
+            return new TopmostPlugin(frame, params);
+        }
+    };
+
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("plugin_container.html"));
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "plugin_container.html", true, new TopmostPluginWebFrameClient());
+    ASSERT(webView);
+    webView->settings()->setPluginsEnabled(true);
+    webView->resize(WebSize(300, 300));
+    webView->layout();
+    runPendingTasks();
+
+    RefPtrWillBeRawPtr<WebPluginContainerImpl> pluginContainerImpl =
+        toWebPluginContainerImpl(getWebPluginContainer(webView, WebString::fromUTF8("translated-plugin")));
+    pluginContainerImpl->setFrameRect(IntRect(0, 0, 300, 300));
+
+    EXPECT_TRUE(pluginContainerImpl->isRectTopmost(topmostRect));
+
+    TopmostPlugin* testPlugin = static_cast<TopmostPlugin*>(pluginContainerImpl->plugin());
+    EXPECT_TRUE(testPlugin->isRectTopmost());
+
+    // Cause the plugin's frame to be detached.
+    webViewHelper.reset();
+
+    EXPECT_FALSE(pluginContainerImpl->isRectTopmost(topmostRect));
 }
+
+} // namespace blink

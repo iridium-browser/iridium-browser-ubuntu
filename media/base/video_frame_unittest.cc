@@ -23,9 +23,9 @@ using base::MD5DigestToBase16;
 // lines based on the |white_to_black| parameter.  If 0, then the entire
 // frame will be black, if 1 then the entire frame will be white.
 void InitializeYV12Frame(VideoFrame* frame, double white_to_black) {
-  EXPECT_EQ(VideoFrame::YV12, frame->format());
-  int first_black_row = static_cast<int>(frame->coded_size().height() *
-                                         white_to_black);
+  EXPECT_EQ(PIXEL_FORMAT_YV12, frame->format());
+  const int first_black_row =
+      static_cast<int>(frame->coded_size().height() * white_to_black);
   uint8* y_plane = frame->data(VideoFrame::kYPlane);
   for (int row = 0; row < frame->coded_size().height(); ++row) {
     int color = (row < first_black_row) ? 0xFF : 0x00;
@@ -45,7 +45,7 @@ void InitializeYV12Frame(VideoFrame* frame, double white_to_black) {
 // Given a |yv12_frame| this method converts the YV12 frame to RGBA and
 // makes sure that all the pixels of the RBG frame equal |expect_rgb_color|.
 void ExpectFrameColor(media::VideoFrame* yv12_frame, uint32 expect_rgb_color) {
-  ASSERT_EQ(VideoFrame::YV12, yv12_frame->format());
+  ASSERT_EQ(PIXEL_FORMAT_YV12, yv12_frame->format());
   ASSERT_EQ(yv12_frame->stride(VideoFrame::kUPlane),
             yv12_frame->stride(VideoFrame::kVPlane));
   ASSERT_EQ(
@@ -76,8 +76,7 @@ void ExpectFrameColor(media::VideoFrame* yv12_frame, uint32 expect_rgb_color) {
     uint32* rgb_row_data = reinterpret_cast<uint32*>(
         rgb_data + (bytes_per_row * row));
     for (int col = 0; col < yv12_frame->coded_size().width(); ++col) {
-      SCOPED_TRACE(
-          base::StringPrintf("Checking (%d, %d)", row, col));
+      SCOPED_TRACE(base::StringPrintf("Checking (%d, %d)", row, col));
       EXPECT_EQ(expect_rgb_color, rgb_row_data[col]);
     }
   }
@@ -88,7 +87,7 @@ void ExpectFrameColor(media::VideoFrame* yv12_frame, uint32 expect_rgb_color) {
 // Fill each plane to its reported extents and verify accessors report non
 // zero values.  Additionally, for the first plane verify the rows and
 // row_bytes values are correct.
-void ExpectFrameExtents(VideoFrame::Format format, const char* expected_hash) {
+void ExpectFrameExtents(VideoPixelFormat format, const char* expected_hash) {
   const unsigned char kFillByte = 0x80;
   const int kWidth = 61;
   const int kHeight = 31;
@@ -113,7 +112,7 @@ void ExpectFrameExtents(VideoFrame::Format format, const char* expected_hash) {
 
   base::MD5Context context;
   base::MD5Init(&context);
-  frame->HashFrameForTesting(&context);
+  VideoFrame::HashFrameForTesting(&context, frame);
   base::MD5Digest digest;
   base::MD5Final(&digest, &context);
   EXPECT_EQ(MD5DigestToBase16(digest), expected_hash);
@@ -126,13 +125,12 @@ TEST(VideoFrame, CreateFrame) {
 
   // Create a YV12 Video Frame.
   gfx::Size size(kWidth, kHeight);
-  scoped_refptr<media::VideoFrame> frame =
-      VideoFrame::CreateFrame(media::VideoFrame::YV12, size, gfx::Rect(size),
-                              size, kTimestamp);
+  scoped_refptr<media::VideoFrame> frame = VideoFrame::CreateFrame(
+      media::PIXEL_FORMAT_YV12, size, gfx::Rect(size), size, kTimestamp);
   ASSERT_TRUE(frame.get());
 
   // Test VideoFrame implementation.
-  EXPECT_EQ(media::VideoFrame::YV12, frame->format());
+  EXPECT_EQ(media::PIXEL_FORMAT_YV12, frame->format());
   {
     SCOPED_TRACE("");
     InitializeYV12Frame(frame.get(), 0.0f);
@@ -141,7 +139,7 @@ TEST(VideoFrame, CreateFrame) {
   base::MD5Digest digest;
   base::MD5Context context;
   base::MD5Init(&context);
-  frame->HashFrameForTesting(&context);
+  VideoFrame::HashFrameForTesting(&context, frame);
   base::MD5Final(&digest, &context);
   EXPECT_EQ(MD5DigestToBase16(digest), "9065c841d9fca49186ef8b4ef547e79b");
   {
@@ -150,13 +148,14 @@ TEST(VideoFrame, CreateFrame) {
     ExpectFrameColor(frame.get(), 0xFFFFFFFF);
   }
   base::MD5Init(&context);
-  frame->HashFrameForTesting(&context);
+  VideoFrame::HashFrameForTesting(&context, frame);
   base::MD5Final(&digest, &context);
   EXPECT_EQ(MD5DigestToBase16(digest), "911991d51438ad2e1a40ed5f6fc7c796");
 
   // Test an empty frame.
   frame = VideoFrame::CreateEOSFrame();
-  EXPECT_TRUE(frame->end_of_stream());
+  EXPECT_TRUE(
+      frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM));
 }
 
 TEST(VideoFrame, CreateBlackFrame) {
@@ -168,13 +167,15 @@ TEST(VideoFrame, CreateBlackFrame) {
   scoped_refptr<media::VideoFrame> frame =
       VideoFrame::CreateBlackFrame(gfx::Size(kWidth, kHeight));
   ASSERT_TRUE(frame.get());
+  EXPECT_TRUE(frame->IsMappable());
 
   // Test basic properties.
   EXPECT_EQ(0, frame->timestamp().InMicroseconds());
-  EXPECT_FALSE(frame->end_of_stream());
+  EXPECT_FALSE(
+      frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM));
 
   // Test |frame| properties.
-  EXPECT_EQ(VideoFrame::YV12, frame->format());
+  EXPECT_EQ(PIXEL_FORMAT_YV12, frame->format());
   EXPECT_EQ(kWidth, frame->coded_size().width());
   EXPECT_EQ(kHeight, frame->coded_size().height());
 
@@ -205,7 +206,7 @@ TEST(VideoFrame, WrapVideoFrame) {
   const int kWidth = 4;
   const int kHeight = 4;
   scoped_refptr<media::VideoFrame> frame;
-  bool no_longer_needed_triggered = false;
+  bool done_callback_was_run = false;
   {
     scoped_refptr<media::VideoFrame> wrapped_frame =
         VideoFrame::CreateBlackFrame(gfx::Size(kWidth, kHeight));
@@ -214,9 +215,10 @@ TEST(VideoFrame, WrapVideoFrame) {
     gfx::Rect visible_rect(1, 1, 1, 1);
     gfx::Size natural_size = visible_rect.size();
     frame = media::VideoFrame::WrapVideoFrame(
-        wrapped_frame, visible_rect, natural_size,
+        wrapped_frame, visible_rect, natural_size);
+    frame->AddDestructionObserver(
         base::Bind(&FrameNoLongerNeededCallback, wrapped_frame,
-                   &no_longer_needed_triggered));
+                   &done_callback_was_run));
     EXPECT_EQ(wrapped_frame->coded_size(), frame->coded_size());
     EXPECT_EQ(wrapped_frame->data(media::VideoFrame::kYPlane),
               frame->data(media::VideoFrame::kYPlane));
@@ -226,18 +228,18 @@ TEST(VideoFrame, WrapVideoFrame) {
     EXPECT_EQ(natural_size, frame->natural_size());
   }
 
-  EXPECT_FALSE(no_longer_needed_triggered);
+  EXPECT_FALSE(done_callback_was_run);
   frame = NULL;
-  EXPECT_TRUE(no_longer_needed_triggered);
+  EXPECT_TRUE(done_callback_was_run);
 }
 
 // Ensure each frame is properly sized and allocated.  Will trigger OOB reads
 // and writes as well as incorrect frame hashes otherwise.
 TEST(VideoFrame, CheckFrameExtents) {
-  // Each call consists of a VideoFrame::Format and the expected hash of all
+  // Each call consists of a Format and the expected hash of all
   // planes if filled with kFillByte (defined in ExpectFrameExtents).
-  ExpectFrameExtents(VideoFrame::YV12, "8e5d54cb23cd0edca111dd35ffb6ff05");
-  ExpectFrameExtents(VideoFrame::YV16, "cce408a044b212db42a10dfec304b3ef");
+  ExpectFrameExtents(PIXEL_FORMAT_YV12, "8e5d54cb23cd0edca111dd35ffb6ff05");
+  ExpectFrameExtents(PIXEL_FORMAT_YV16, "cce408a044b212db42a10dfec304b3ef");
 }
 
 static void TextureCallback(uint32* called_sync_point,
@@ -252,15 +254,16 @@ TEST(VideoFrame, TextureNoLongerNeededCallbackIsCalled) {
 
   {
     scoped_refptr<VideoFrame> frame = VideoFrame::WrapNativeTexture(
-        gpu::MailboxHolder(gpu::Mailbox(), 5, 0 /* sync_point */),
+        PIXEL_FORMAT_ARGB,
+        gpu::MailboxHolder(gpu::Mailbox::Generate(), 5, 0 /* sync_point */),
         base::Bind(&TextureCallback, &called_sync_point),
-        gfx::Size(10, 10),  // coded_size
-        gfx::Rect(10, 10),  // visible_rect
-        gfx::Size(10, 10),  // natural_size
-        base::TimeDelta(),  // timestamp
-        false,              // allow_overlay
-        true);              // has_alpha
-    EXPECT_EQ(VideoFrame::TEXTURE_RGBA, frame->texture_format());
+        gfx::Size(10, 10),   // coded_size
+        gfx::Rect(10, 10),   // visible_rect
+        gfx::Size(10, 10),   // natural_size
+        base::TimeDelta());  // timestamp
+    EXPECT_EQ(PIXEL_FORMAT_ARGB, frame->format());
+    EXPECT_EQ(VideoFrame::STORAGE_OPAQUE, frame->storage_type());
+    EXPECT_TRUE(frame->HasTextures());
   }
   // Nobody set a sync point to |frame|, so |frame| set |called_sync_point| to 0
   // as default value.
@@ -306,13 +309,13 @@ TEST(VideoFrame,
         gfx::Size(10, 10),  // coded_size
         gfx::Rect(10, 10),  // visible_rect
         gfx::Size(10, 10),  // natural_size
-        base::TimeDelta(),  // timestamp
-        false);             // allow_overlay
+        base::TimeDelta()); // timestamp
 
-    EXPECT_EQ(VideoFrame::TEXTURE_YUV_420, frame->texture_format());
-    EXPECT_EQ(3u, VideoFrame::NumTextures(frame->texture_format()));
-    for (size_t i = 0; i < VideoFrame::NumTextures(frame->texture_format());
-         ++i) {
+    EXPECT_EQ(VideoFrame::STORAGE_OPAQUE, frame->storage_type());
+    EXPECT_EQ(PIXEL_FORMAT_I420, frame->format());
+    EXPECT_EQ(3u, VideoFrame::NumPlanes(frame->format()));
+    EXPECT_TRUE(frame->HasTextures());
+    for (size_t i = 0; i < VideoFrame::NumPlanes(frame->format()); ++i) {
       const gpu::MailboxHolder& mailbox_holder = frame->mailbox_holder(i);
       EXPECT_EQ(mailbox[i].name[0], mailbox_holder.mailbox.name[0]);
       EXPECT_EQ(target, mailbox_holder.texture_target);
@@ -327,17 +330,48 @@ TEST(VideoFrame,
   EXPECT_EQ(release_sync_point, called_sync_point);
 }
 
-TEST(VideoFrame, ZeroInitialized) {
-  const int kWidth = 64;
-  const int kHeight = 48;
-  const base::TimeDelta kTimestamp = base::TimeDelta::FromMicroseconds(1337);
+TEST(VideoFrame, IsValidConfig_OddCodedSize) {
+  // Odd sizes are valid for all formats. Odd formats may be internally rounded
+  // in VideoFrame::CreateFrame because VideoFrame owns the allocation and can
+  // pad the requested coded_size to ensure the UV sample boundaries line up
+  // with the Y plane after subsample scaling. See CreateFrame_OddWidth.
+  gfx::Size odd_size(677, 288);
 
-  gfx::Size size(kWidth, kHeight);
-  scoped_refptr<media::VideoFrame> frame = VideoFrame::CreateFrame(
-      media::VideoFrame::YV12, size, gfx::Rect(size), size, kTimestamp);
+  // First choosing a format with sub-sampling for UV.
+  EXPECT_TRUE(VideoFrame::IsValidConfig(
+      PIXEL_FORMAT_I420, VideoFrame::STORAGE_OWNED_MEMORY, odd_size,
+      gfx::Rect(odd_size), odd_size));
 
-  for (size_t i = 0; i < VideoFrame::NumPlanes(frame->format()); ++i)
-    EXPECT_EQ(0, frame->data(i)[0]);
+  // Next try a format with no sub-sampling for UV.
+  EXPECT_TRUE(VideoFrame::IsValidConfig(
+      PIXEL_FORMAT_YV24, VideoFrame::STORAGE_OWNED_MEMORY, odd_size,
+      gfx::Rect(odd_size), odd_size));
+}
+
+TEST(VideoFrame, CreateFrame_OddWidth) {
+  // Odd sizes are non-standard for YUV formats that subsample the UV, but they
+  // do exist in the wild and should be gracefully handled by VideoFrame in
+  // situations where VideoFrame allocates the YUV memory. See discussion in
+  // crrev.com/1240833003
+  const gfx::Size odd_size(677, 288);
+  const base::TimeDelta kTimestamp = base::TimeDelta();
+
+  // First create a frame that sub-samples UV.
+  scoped_refptr<VideoFrame> frame = VideoFrame::CreateFrame(
+      PIXEL_FORMAT_I420, odd_size, gfx::Rect(odd_size), odd_size, kTimestamp);
+  ASSERT_TRUE(frame.get());
+  // I420 aligns UV to every 2 Y pixels. Hence, 677 should be rounded to 678
+  // which is the nearest value such that width % 2 == 0
+  EXPECT_EQ(678, frame->coded_size().width());
+
+  // Next create a frame that does not sub-sample UV.
+  frame = VideoFrame::CreateFrame(PIXEL_FORMAT_YV24, odd_size,
+                                  gfx::Rect(odd_size), odd_size, kTimestamp);
+  ASSERT_TRUE(frame.get());
+  // No sub-sampling for YV24 will mean odd width can remain odd since any pixel
+  // in the Y plane has a a corresponding pixel in the UV planes at the same
+  // index.
+  EXPECT_EQ(677, frame->coded_size().width());
 }
 
 TEST(VideoFrameMetadata, SetAndThenGetAllKeysForAllTypes) {
@@ -376,6 +410,14 @@ TEST(VideoFrameMetadata, SetAndThenGetAllKeysForAllTypes) {
     std::string string_value;
     EXPECT_TRUE(metadata.GetString(key, &string_value));
     EXPECT_EQ(base::StringPrintf("\xfe%d\xff", i), string_value);
+    metadata.Clear();
+
+    EXPECT_FALSE(metadata.HasKey(key));
+    metadata.SetTimeDelta(key, base::TimeDelta::FromInternalValue(42 + i));
+    EXPECT_TRUE(metadata.HasKey(key));
+    base::TimeDelta delta_value;
+    EXPECT_TRUE(metadata.GetTimeDelta(key, &delta_value));
+    EXPECT_EQ(base::TimeDelta::FromInternalValue(42 + i), delta_value);
     metadata.Clear();
 
     EXPECT_FALSE(metadata.HasKey(key));

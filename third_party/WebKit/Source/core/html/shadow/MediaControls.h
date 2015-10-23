@@ -67,6 +67,11 @@ public:
     void stoppedCasting();
     void refreshCastButtonVisibility();
     void showOverlayCastButton();
+    // Update cast button visibility, but don't try to update our panel
+    // button visibility for space.
+    void refreshCastButtonVisibilityWithoutUpdate();
+
+    void setAllowHiddenVolumeControls(bool);
 
     void mediaElementFocused();
 
@@ -74,9 +79,14 @@ public:
     // used for overlap checking during text track layout. May be null.
     LayoutObject* layoutObjectForTextTrackLayout();
 
+    // Notify us that our controls enclosure has changed width.
+    void notifyPanelWidthChanged(const LayoutUnit& newWidth);
+
     DECLARE_VIRTUAL_TRACE();
 
 private:
+    class BatchedControlUpdate;
+
     explicit MediaControls(HTMLMediaElement&);
 
     void initializeControls();
@@ -103,36 +113,45 @@ private:
     // element in the page, it will be hidden.
     void tryShowOverlayCastButton();
 
+    void panelWidthChangedTimerFired(Timer<MediaControls>*);
+
+    // Hide elements that don't fit, and show those things that we want which
+    // do fit.  This requires that m_panelWidth is current.
+    void computeWhichControlsFit();
+
     // Node
-    virtual bool isMediaControls() const override { return true; }
-    virtual bool willRespondToMouseMoveEvents() override { return true; }
-    virtual void defaultEventHandler(Event*) override;
+    bool isMediaControls() const override { return true; }
+    bool willRespondToMouseMoveEvents() override { return true; }
+    void defaultEventHandler(Event*) override;
     bool containsRelatedTarget(Event*);
 
     RawPtrWillBeMember<HTMLMediaElement> m_mediaElement;
 
-    // Container for the media control elements.
-    RawPtrWillBeMember<MediaControlPanelElement> m_panel;
-
     // Media control elements.
-    RawPtrWillBeMember<MediaControlOverlayPlayButtonElement> m_overlayPlayButton;
     RawPtrWillBeMember<MediaControlOverlayEnclosureElement> m_overlayEnclosure;
+    RawPtrWillBeMember<MediaControlOverlayPlayButtonElement> m_overlayPlayButton;
+    RawPtrWillBeMember<MediaControlCastButtonElement> m_overlayCastButton;
+    RawPtrWillBeMember<MediaControlPanelEnclosureElement> m_enclosure;
+    RawPtrWillBeMember<MediaControlPanelElement> m_panel;
     RawPtrWillBeMember<MediaControlPlayButtonElement> m_playButton;
-    RawPtrWillBeMember<MediaControlCurrentTimeDisplayElement> m_currentTimeDisplay;
     RawPtrWillBeMember<MediaControlTimelineElement> m_timeline;
+    RawPtrWillBeMember<MediaControlCurrentTimeDisplayElement> m_currentTimeDisplay;
+    RawPtrWillBeMember<MediaControlTimeRemainingDisplayElement> m_durationDisplay;
     RawPtrWillBeMember<MediaControlMuteButtonElement> m_muteButton;
     RawPtrWillBeMember<MediaControlVolumeSliderElement> m_volumeSlider;
     RawPtrWillBeMember<MediaControlToggleClosedCaptionsButtonElement> m_toggleClosedCaptionsButton;
-    RawPtrWillBeMember<MediaControlFullscreenButtonElement> m_fullScreenButton;
     RawPtrWillBeMember<MediaControlCastButtonElement> m_castButton;
-    RawPtrWillBeMember<MediaControlCastButtonElement> m_overlayCastButton;
-    RawPtrWillBeMember<MediaControlTimeRemainingDisplayElement> m_durationDisplay;
-    RawPtrWillBeMember<MediaControlPanelEnclosureElement> m_enclosure;
+    RawPtrWillBeMember<MediaControlFullscreenButtonElement> m_fullScreenButton;
 
     Timer<MediaControls> m_hideMediaControlsTimer;
     unsigned m_hideTimerBehaviorFlags;
     bool m_isMouseOverControls : 1;
     bool m_isPausedForScrubbing : 1;
+
+    Timer<MediaControls> m_panelWidthChangedTimer;
+    int m_panelWidth;
+
+    bool m_allowHiddenVolumeControls : 1;
 };
 
 DEFINE_ELEMENT_TYPE_CASTS(MediaControls, isMediaControls());

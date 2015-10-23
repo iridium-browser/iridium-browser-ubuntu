@@ -24,9 +24,12 @@ from pylib.base import environment_factory
 from pylib.base import test_dispatcher
 from pylib.base import test_instance_factory
 from pylib.base import test_run_factory
+from pylib.device import device_blacklist
 from pylib.device import device_errors
 from pylib.device import device_utils
 from pylib.gtest import gtest_config
+# TODO(jbudorick): Remove this once we stop selectively enabling platform mode.
+from pylib.gtest import gtest_test_instance
 from pylib.gtest import setup as gtest_setup
 from pylib.gtest import test_options as gtest_test_options
 from pylib.linker import setup as linker_setup
@@ -186,6 +189,7 @@ def AddDeviceOptions(parser):
   group.add_argument('-d', '--device', dest='test_device',
                      help=('Target device for the test suite '
                            'to run on.'))
+  group.add_argument('--blacklist-file', help='Device blacklist file.')
 
 
 def AddGTestOptions(parser):
@@ -215,6 +219,15 @@ def AddGTestOptions(parser):
                      dest='isolate_file_path',
                      help='.isolate file path to override the default '
                           'path')
+  group.add_argument('--app-data-file', action='append', dest='app_data_files',
+                     help='A file path relative to the app data directory '
+                          'that should be saved to the host.')
+  group.add_argument('--app-data-file-dir',
+                     help='Host directory to which app data files will be'
+                          ' saved. Used with --app-data-file.')
+  group.add_argument('--delete-stale-data', dest='delete_stale_data',
+                     action='store_true',
+                     help='Delete stale test data on the device.')
 
   filter_group = group.add_mutually_exclusive_group()
   filter_group.add_argument('-f', '--gtest_filter', '--gtest-filter',
@@ -335,6 +348,9 @@ def AddInstrumentationTestOptions(parser):
                      dest='isolate_file_path',
                      help='.isolate file path to override the default '
                           'path')
+  group.add_argument('--delete-stale-data', dest='delete_stale_data',
+                     action='store_true',
+                     help='Delete stale test data on the device.')
 
   AddCommonOptions(parser)
   AddDeviceOptions(parser)
@@ -388,7 +404,8 @@ def ProcessInstrumentationOptions(args):
       args.test_support_apk_path,
       args.device_flags,
       args.isolate_file_path,
-      args.set_asserts
+      args.set_asserts,
+      args.delete_stale_data
       )
 
 
@@ -591,8 +608,16 @@ def AddPerfTestOptions(parser):
   group.add_argument(
       '--dry-run', action='store_true',
       help='Just print the steps without executing.')
+  # Uses 0.1 degrees C because that's what Android does.
+  group.add_argument(
+      '--max-battery-temp', type=int,
+      help='Only start tests when the battery is at or below the given '
+           'temperature (0.1 C)')
   group.add_argument('single_step_command', nargs='*', action=SingleStepAction,
                      help='If --single-step is specified, the command to run.')
+  group.add_argument('--min-battery-level', type=int,
+                     help='Only starts tests when the battery is charged above '
+                          'given level.')
   AddCommonOptions(parser)
   AddDeviceOptions(parser)
 
@@ -615,7 +640,7 @@ def ProcessPerfTestOptions(args):
       args.steps, args.flaky_steps, args.output_json_list,
       args.print_step, args.no_timeout, args.test_filter,
       args.dry_run, args.single_step, args.collect_chartjson_data,
-      args.output_chartjson_data)
+      args.output_chartjson_data, args.max_battery_temp, args.min_battery_level)
 
 
 def AddPythonTestOptions(parser):
@@ -640,7 +665,10 @@ def _RunGTests(args, devices):
         args.test_arguments,
         args.timeout,
         args.isolate_file_path,
-        suite_name)
+        suite_name,
+        args.app_data_files,
+        args.app_data_file_dir,
+        args.delete_stale_data)
     runner_factory, tests = gtest_setup.Setup(gtest_options, devices)
 
     results, test_exit_code = test_dispatcher.RunTests(
@@ -741,7 +769,7 @@ def _RunUIAutomatorTests(args, devices):
   """Subcommand of RunTestsCommands which runs uiautomator tests."""
   uiautomator_options = ProcessUIAutomatorOptions(args)
 
-  runner_factory, tests = uiautomator_setup.Setup(uiautomator_options)
+  runner_factory, tests = uiautomator_setup.Setup(uiautomator_options, devices)
 
   results, exit_code = test_dispatcher.RunTests(
       tests, runner_factory, devices, shard=True, test_timeout=None,
@@ -797,7 +825,7 @@ def _RunMonkeyTests(args, devices):
   return exit_code
 
 
-def _RunPerfTests(args):
+def _RunPerfTests(args, active_devices):
   """Subcommand of RunTestsCommands which runs perf tests."""
   perf_options = ProcessPerfTestOptions(args)
 
@@ -811,7 +839,8 @@ def _RunPerfTests(args):
     return perf_test_runner.PrintTestOutput(
         perf_options.print_step, perf_options.output_chartjson_data)
 
-  runner_factory, tests, devices = perf_setup.Setup(perf_options)
+  runner_factory, tests, devices = perf_setup.Setup(
+      perf_options, active_devices)
 
   # shard=False means that each device will get the full list of tests
   # and then each one will decide their own affinity.
@@ -856,7 +885,7 @@ def _RunPythonTests(args):
     sys.path = sys.path[1:]
 
 
-def _GetAttachedDevices(test_device=None):
+def _GetAttachedDevices(blacklist_file, test_device):
   """Get all attached devices.
 
   Args:
@@ -865,7 +894,14 @@ def _GetAttachedDevices(test_device=None):
   Returns:
     A list of attached devices.
   """
-  attached_devices = device_utils.DeviceUtils.HealthyDevices()
+  if not blacklist_file:
+    # TODO(jbudorick): Remove this once bots pass the blacklist file.
+    blacklist_file = device_blacklist.BLACKLIST_JSON
+    logging.warning('Using default device blacklist %s',
+                    device_blacklist.BLACKLIST_JSON)
+
+  blacklist = device_blacklist.Blacklist(blacklist_file)
+  attached_devices = device_utils.DeviceUtils.HealthyDevices(blacklist)
   if test_device:
     test_device = [d for d in attached_devices if d == test_device]
     if not test_device:
@@ -904,13 +940,15 @@ def RunTestsCommand(args, parser):
   if command in constants.LOCAL_MACHINE_TESTS:
     devices = []
   else:
-    devices = _GetAttachedDevices(args.test_device)
+    devices = _GetAttachedDevices(args.blacklist_file, args.test_device)
 
   forwarder.Forwarder.RemoveHostLog()
   if not ports.ResetTestServerPortAllocation():
     raise Exception('Failed to reset test server port.')
 
   if command == 'gtest':
+    if args.suite_name[0] in gtest_test_instance.BROWSER_TEST_SUITES:
+      return RunTestsInPlatformMode(args, parser)
     return _RunGTests(args, devices)
   elif command == 'linker':
     return _RunLinkerTests(args, devices)
@@ -923,7 +961,7 @@ def RunTestsCommand(args, parser):
   elif command == 'monkey':
     return _RunMonkeyTests(args, devices)
   elif command == 'perf':
-    return _RunPerfTests(args)
+    return _RunPerfTests(args, devices)
   elif command == 'python':
     return _RunPythonTests(args)
   else:
@@ -1026,8 +1064,7 @@ def main():
     logging.exception('Error occurred.')
     if e.is_infra_error:
       return constants.INFRA_EXIT_CODE
-    else:
-      return constants.ERROR_EXIT_CODE
+    return constants.ERROR_EXIT_CODE
   except: # pylint: disable=W0702
     logging.exception('Unrecognized error occurred.')
     return constants.ERROR_EXIT_CODE

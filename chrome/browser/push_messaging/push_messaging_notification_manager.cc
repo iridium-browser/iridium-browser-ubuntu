@@ -21,6 +21,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -256,10 +257,12 @@ void PushMessagingNotificationManager::DidGetNotificationsShownAndNeeded(
   // TODO(johnme): The generic notification should probably automatically
   // close itself when the next push message arrives?
   content::PlatformNotificationData notification_data;
-  // TODO(johnme): Switch to FormatOriginForDisplay from crbug.com/402698
-  notification_data.title = base::UTF8ToUTF16(requesting_origin.host());
+  notification_data.title =
+      base::UTF8ToUTF16(net::registry_controlled_domains::GetDomainAndRegistry(
+          requesting_origin.host(),
+          net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES));
   notification_data.direction =
-      content::PlatformNotificationData::NotificationDirectionLeftToRight;
+      content::PlatformNotificationData::DIRECTION_LEFT_TO_RIGHT;
   notification_data.body =
       l10n_util::GetStringUTF16(IDS_PUSH_MESSAGING_GENERIC_NOTIFICATION_BODY);
   notification_data.tag = kPushMessagingForcedNotificationTag;

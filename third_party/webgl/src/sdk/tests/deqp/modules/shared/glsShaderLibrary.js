@@ -41,7 +41,6 @@ var gluShaderUtil = framework.opengl.gluShaderUtil;
             state.setRoot(rootTest);
         }
         catch (err) {
-            console.log(err);
             bufferedLogToConsole(err);
             return false;
         }
@@ -101,7 +100,8 @@ var gluShaderUtil = framework.opengl.gluShaderUtil;
             for (var i = 0; i < arr.length; ++i) {
             /** @type {number} */ var removed = 0;
             /** @type {number} */ var j;
-                for (j = 0; removed < numIndentChars && j < arr[i].length; ++j) {
+                // Some tests are indented inconsistently, so we have to check for non-whitespace characters here.
+                for (j = 0; removed < numIndentChars && j < arr[i].length && glsShaderLibrary.isWhitespace(arr[i].charAt(j)); ++j) {
                     removed += (arr[i].charAt(j) === '\t' ? 4 : 1);
                 }
 
@@ -122,10 +122,12 @@ var gluShaderUtil = framework.opengl.gluShaderUtil;
     /**
      * @param {string} str
      * @param {string} endstr end of string character
+     * @param {boolean=} trimFront trim leading whitespace
      * @return {string} str
      * @private
      */
-    glsShaderLibrary.parseStringLiteralHelper = function(str, endstr) {
+    glsShaderLibrary.parseStringLiteralHelper = function(str, endstr, trimFront) {
+        trimFront = trimFront || false;
 
     /** @type {number} */ var index_end = 0;
         // isolate the string
@@ -138,8 +140,10 @@ var gluShaderUtil = framework.opengl.gluShaderUtil;
         }
 
         // strip quotes, replace \n and \t with nl and tabs respectively
+        str = str.substr(endstr.length, index_end - endstr.length);
+        if (trimFront)
+            str = str.replace(/^\s*\n/, '');
         return str
-            .substr(endstr.length, index_end - endstr.length)
             .replace('\\n', '\n')
             .replace('\\t', '\t')
             .replace(/\\/g, '');
@@ -314,7 +318,7 @@ var gluShaderUtil = framework.opengl.gluShaderUtil;
         var parseShaderSource = function(str) {
             // similar to parse literal, delimitors are two double quotes ("")
             return glsShaderLibrary.removeExtraIndentation(
-                glsShaderLibrary.parseStringLiteralHelper(str, '""')
+                glsShaderLibrary.parseStringLiteralHelper(str, '""', true)
             );
         };
 

@@ -8,7 +8,6 @@ import android.content.Context;
 import android.os.Handler;
 
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
-import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 
 /**
  * Controls the Contextual Search Panel.
@@ -23,7 +22,6 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
         UNDEFINED,
         CLOSED,
         PEEKED,
-        PROMO,
         EXPANDED,
         MAXIMIZED;
     }
@@ -38,6 +36,7 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
         TEXT_SELECT_TAP,
         TEXT_SELECT_LONG_PRESS,
         INVALID_SELECTION,
+        CLEARED_SELECTION,
         BASE_PAGE_TAP,
         BASE_PAGE_SCROLL,
         SEARCH_BAR_TAP,
@@ -47,7 +46,8 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
         SWIPE,
         FLING,
         OPTIN,
-        OPTOUT;
+        OPTOUT,
+        CLOSE_BUTTON;
     }
 
     /**
@@ -80,11 +80,6 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
      */
     private ContextualSearchPanelHost mSearchPanelHost;
 
-    /**
-     * The object for handling global Contextual Search management duties
-     */
-    private ContextualSearchManagementDelegate mManagementDelegate;
-
     // ============================================================================================
     // Constructor
     // ============================================================================================
@@ -114,51 +109,37 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     // ============================================================================================
 
     /**
-     * Sets the {@code ContextualSearchManagementDelegate} associated with this Layout.
-     * @param delegate The {@code ContextualSearchManagementDelegate}.
-     */
-    public void setManagementDelegate(ContextualSearchManagementDelegate delegate) {
-        mManagementDelegate = delegate;
-    }
-
-    /**
-     * @return The {@code ContextualSearchManagementDelegate} associated with this Layout.
-     */
-    public ContextualSearchManagementDelegate getManagementDelegate() {
-        return mManagementDelegate;
-    }
-
-    /**
      * Sets the visibility of the Search Content View.
      * @param isVisible True to make it visible.
      */
     public void setSearchContentViewVisibility(boolean isVisible) {
-        if (mManagementDelegate != null) {
-            mManagementDelegate.setSearchContentViewVisibility(isVisible);
+        if (getManagementDelegate() != null) {
+            getManagementDelegate().setSearchContentViewVisibility(isVisible);
         }
     }
 
     @Override
     public void setPreferenceState(boolean enabled) {
-        if (mManagementDelegate != null) {
-            mManagementDelegate.setPreferenceState(enabled);
+        if (getManagementDelegate() != null) {
+            getManagementDelegate().setPreferenceState(enabled);
         }
     }
 
     @Override
-    protected boolean isPanelPromoAvailable() {
-        return mManagementDelegate != null && mManagementDelegate.isOptOutPromoAvailable();
+    protected boolean isPromoAvailable() {
+        return getManagementDelegate() != null && getManagementDelegate().isPromoAvailable();
     }
 
     @Override
     public void onPromoButtonClick(boolean accepted) {
         super.onPromoButtonClick(accepted);
-        mManagementDelegate.logPromoOutcome();
+        getManagementDelegate().logPromoOutcome();
+        setIsPromoActive(false);
     }
 
     @Override
-    protected void onClose() {
-        mManagementDelegate.onCloseContextualSearch();
+    protected void onClose(StateChangeReason reason) {
+        getManagementDelegate().onCloseContextualSearch(reason);
     }
 
     // ============================================================================================
@@ -186,7 +167,7 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
         if (ty > 0 && getPanelState() == PanelState.MAXIMIZED) {
             // Resets the Search Content View scroll position when swiping the Panel down
             // after being maximized.
-            mManagementDelegate.resetSearchContentViewScroll();
+            getManagementDelegate().resetSearchContentViewScroll();
         }
 
         // Negative ty value means an upward movement so subtracting ty means expanding the panel.
@@ -228,32 +209,29 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
      */
     public void handleClick(long time, float x, float y) {
         mHasDetectedTouchGesture = true;
-        if (isYCoordinateInsideBasePage(y)) {
+        if (isCoordinateInsideBasePage(x, y)) {
             closePanel(StateChangeReason.BASE_PAGE_TAP, true);
-        } else if (isYCoordinateInsideSearchBar(y)) {
-            // TODO(pedrosimonetti): handle click in the close button here.
+        } else if (isCoordinateInsideSearchBar(x, y)) {
             if (isPeeking()) {
-                if (mManagementDelegate.isRunningInCompatibilityMode()) {
-                    mManagementDelegate.openResolvedSearchUrlInNewTab();
+                if (getManagementDelegate().isRunningInCompatibilityMode()) {
+                    getManagementDelegate().openResolvedSearchUrlInNewTab();
                 } else {
-                    // NOTE(pedrosimonetti): If the promo is active and getPromoContentHeight()
-                    // returns -1 that means that the promo page hasn't finished loading, and
-                    // therefore it wasn't possible to calculate the height of the promo contents.
-                    // This will only happen if the user taps on a word that will trigger the
-                    // promo, and then quickly taps on the peeking bar, before the promo page
-                    // (which is local) finishes loading.
-                    //
-                    // TODO(pedrosimonetti): For now, we're simply ignoring the tap action in
-                    // that case. Consider implementing a better approach, where the Panel
-                    // would auto-expand once the height is calculated.
-                    if (!getIsPromoActive() || getPromoContentHeight() != -1) {
+                    if (isFullscreenSizePanel()) {
                         expandPanel(StateChangeReason.SEARCH_BAR_TAP);
+                    } else {
+                        maximizePanel(StateChangeReason.SEARCH_BAR_TAP);
                     }
                 }
             } else if (isExpanded()) {
                 peekPanel(StateChangeReason.SEARCH_BAR_TAP);
             } else if (isMaximized()) {
-                mManagementDelegate.promoteToTab(true);
+                if (mSearchPanelFeatures.isSearchTermRefiningAvailable()) {
+                    getManagementDelegate().promoteToTab();
+                }
+                if (mSearchPanelFeatures.isCloseButtonAvailable()
+                        && isCoordinateInsideCloseButton(x, y)) {
+                    closePanel(StateChangeReason.CLOSE_BUTTON, true);
+                }
             }
         }
     }
@@ -263,20 +241,49 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     // ============================================================================================
 
     /**
+     * @param x The x coordinate in dp.
      * @param y The y coordinate in dp.
-     * @return Whether the given |y| coordinate is inside the Search Bar area.
+     * @return Whether the given coordinate is inside the Search Panel area.
      */
-    public boolean isYCoordinateInsideSearchBar(float y) {
-        return y >= getOffsetY() && y <= (getOffsetY() + getSearchBarHeight());
+    private boolean isCoordinateInsideSearchPanel(float x, float y) {
+        return y >= getOffsetY() && y <= (getOffsetY() + getHeight())
+                &&  x >= getOffsetX() && x <= (getOffsetX() + getWidth());
     }
 
     /**
+     * @param x The x coordinate in dp.
      * @param y The y coordinate in dp.
-     * @return Whether the given |y| coordinate is inside the Search Content
-     *         View area.
+     * @return Whether the given coordinate is inside the Base Page area.
      */
-    public boolean isYCoordinateInsideSearchContentView(float y) {
-        return y > getSearchContentViewOffsetY();
+    private boolean isCoordinateInsideBasePage(float x, float y) {
+        return !isCoordinateInsideSearchPanel(x, y);
+    }
+
+    /**
+     * @param x The x coordinate in dp.
+     * @param y The y coordinate in dp.
+     * @return Whether the given coordinate is inside the Search Bar area.
+     */
+    public boolean isCoordinateInsideSearchBar(float x, float y) {
+        return isCoordinateInsideSearchPanel(x, y)
+                && y >= getOffsetY() && y <= (getOffsetY() + getSearchBarHeight());
+    }
+
+    /**
+     * @param x The x coordinate in dp.
+     * @param y The y coordinate in dp.
+     * @return Whether the given coordinate is inside the Search Content View area.
+     */
+    public boolean isCoordinateInsideSearchContentView(float x, float y) {
+        return isCoordinateInsideSearchPanel(x, y)
+                && y > getSearchContentViewOffsetY();
+    }
+
+    /**
+     * @return The horizontal offset of the Search Content View in dp.
+     */
+    public float getSearchContentViewOffsetX() {
+        return getOffsetX();
     }
 
     /**
@@ -287,11 +294,14 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     }
 
     /**
+     * @param x The x coordinate in dp.
      * @param y The y coordinate in dp.
-     * @return Whether the given |y| coordinate is inside the Base Page area.
+     * @return Whether the given |x| |y| coordinate is inside the close button.
      */
-    private boolean isYCoordinateInsideBasePage(float y) {
-        return y < getOffsetY();
+    private boolean isCoordinateInsideCloseButton(float x, float y) {
+        boolean isInY = y >= getCloseIconY() && y <= (getCloseIconY() + getCloseIconDimension());
+        boolean isInX = x >= getCloseIconX() && x <= (getCloseIconX() + getCloseIconDimension());
+        return isInY && isInX;
     }
 
     /**
@@ -325,7 +335,7 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
 
         if (mShouldPromoteToTabAfterMaximizing && getPanelState() == PanelState.MAXIMIZED) {
             mShouldPromoteToTabAfterMaximizing = false;
-            mManagementDelegate.promoteToTab(false);
+            getManagementDelegate().promoteToTab();
         }
     }
 
@@ -346,6 +356,12 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     // ============================================================================================
 
     @Override
+    public boolean isFullscreenSizePanel() {
+        // NOTE(pedrosimonetti): exposing superclass method to the interface.
+        return super.isFullscreenSizePanel();
+    }
+
+    @Override
     public boolean isShowing() {
         // NOTE(pedrosimonetti): exposing superclass method to the interface.
         return super.isShowing();
@@ -354,6 +370,30 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     @Override
     public boolean isPeeking() {
         return doesPanelHeightMatchState(PanelState.PEEKED);
+    }
+
+    @Override
+    public int getMaximumWidthPx() {
+        // NOTE(pedrosimonetti): exposing superclass method to the interface.
+        return super.getMaximumWidthPx();
+    }
+
+    @Override
+    public int getMaximumHeightPx() {
+        // NOTE(pedrosimonetti): exposing superclass method to the interface.
+        return super.getMaximumHeightPx();
+    }
+
+    @Override
+    public int getSearchContentViewWidthPx() {
+        // NOTE(pedrosimonetti): exposing superclass method to the interface.
+        return super.getSearchContentViewWidthPx();
+    }
+
+    @Override
+    public int getSearchContentViewHeightPx() {
+        // NOTE(pedrosimonetti): exposing superclass method to the interface.
+        return super.getSearchContentViewHeightPx();
     }
 
     @Override
@@ -395,24 +435,6 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     public void updateBasePageSelectionYPx(float y) {
         // NOTE(pedrosimonetti): exposing superclass method to the interface.
         super.updateBasePageSelectionYPx(y);
-    }
-
-    @Override
-    public void setPromoContentHeight(float height) {
-        // NOTE(pedrosimonetti): exposing superclass method to the interface.
-        super.setPromoContentHeight(height);
-    }
-
-    @Override
-    public void setShouldHidePromoHeader(boolean shouldHidePromoHeader) {
-        // NOTE(pedrosimonetti): exposing superclass method to the interface.
-        super.setShouldHidePromoHeader(shouldHidePromoHeader);
-    }
-
-    @Override
-    public void animateAfterFirstRunSuccess() {
-        // NOTE(pedrosimonetti): exposing superclass method to the interface.
-        super.animateAfterFirstRunSuccess();
     }
 
     @Override
@@ -480,5 +502,10 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     public ContextualSearchControl getContextualSearchControl() {
         // NOTE(pedrosimonetti): exposing superclass method to the interface.
         return super.getContextualSearchControl();
+    }
+
+    @Override
+    public boolean shouldAnimatePanelCloseOnPromoteToTab() {
+        return mSearchPanelFeatures.shouldAnimatePanelCloseOnPromoteToTab();
     }
 }

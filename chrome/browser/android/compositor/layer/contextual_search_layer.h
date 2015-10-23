@@ -32,11 +32,12 @@ class ContextualSearchLayer : public Layer {
   static scoped_refptr<ContextualSearchLayer> Create(
       ui::ResourceManager* resource_manager);
 
-  void SetProperties(int search_bar_background_resource_id,
+  void SetProperties(int panel_shaddow_resource_id,
                      int search_bar_text_resource_id,
                      int search_bar_shadow_resource_id,
                      int search_provider_icon_resource_id,
-                     int search_icon_resource_id,
+                     int arrow_up_resource_id,
+                     int close_icon_resource_id,
                      int progress_bar_background_resource_id,
                      int progress_bar_resource_id,
                      int search_promo_resource_id,
@@ -44,9 +45,11 @@ class ContextualSearchLayer : public Layer {
                      bool search_promo_visible,
                      float search_promo_height,
                      float search_promo_opacity,
+                     float search_panel_x,
                      float search_panel_y,
                      float search_panel_width,
-                     float search_bar_margin_top,
+                     float search_panel_height,
+                     float search_bar_margin_side,
                      float search_bar_height,
                      float search_bar_text_opacity,
                      bool search_bar_border_visible,
@@ -54,9 +57,10 @@ class ContextualSearchLayer : public Layer {
                      float search_bar_border_height,
                      bool search_bar_shadow_visible,
                      float search_bar_shadow_opacity,
-                     float search_provider_icon_opacity,
-                     float search_icon_padding_left,
-                     float search_icon_opacity,
+                     float arrow_icon_opacity,
+                     float arrow_icon_rotation,
+                     bool close_icon_visible,
+                     float close_icon_opacity,
                      bool progress_bar_visible,
                      float progress_bar_y,
                      float progress_bar_height,
@@ -73,11 +77,13 @@ class ContextualSearchLayer : public Layer {
   ui::ResourceManager* resource_manager_;
 
   scoped_refptr<cc::Layer> layer_;
-  scoped_refptr<cc::NinePatchLayer> search_bar_background_;
+  scoped_refptr<cc::NinePatchLayer> panel_shadow_;
+  scoped_refptr<cc::SolidColorLayer> search_bar_background_;
   scoped_refptr<cc::UIResourceLayer> search_bar_text_;
   scoped_refptr<cc::UIResourceLayer> search_bar_shadow_;
   scoped_refptr<cc::UIResourceLayer> search_provider_icon_;
-  scoped_refptr<cc::UIResourceLayer> search_icon_;
+  scoped_refptr<cc::UIResourceLayer> arrow_icon_;
+  scoped_refptr<cc::UIResourceLayer> close_icon_;
   scoped_refptr<cc::Layer> content_view_container_;
   scoped_refptr<cc::SolidColorLayer> search_bar_border_;
   scoped_refptr<cc::NinePatchLayer> progress_bar_;

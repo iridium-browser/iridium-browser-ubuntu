@@ -43,8 +43,8 @@ class CookieProfileExtender(
     # since there's a high probability that the cookie is already present.
     self._page_set = page_sets.ProfileSafeUrlsPageSet()
     urls = []
-    for user_story in self._page_set.user_stories:
-      urls.append(user_story.url)
+    for story in self._page_set.stories:
+      urls.append(story.url)
     self._navigation_urls = urls
 
   def GetUrlIterator(self):
@@ -56,8 +56,8 @@ class CookieProfileExtender(
     return self._IsCookieDBFull()
 
   def WebPageReplayArchivePath(self):
-    return self._page_set.WprFilePathForUserStory(
-        self._page_set.user_stories[0])
+    return self._page_set.WprFilePathForStory(
+        self._page_set.stories[0])
 
   def FetchWebPageReplayArchives(self):
     """Superclass override."""

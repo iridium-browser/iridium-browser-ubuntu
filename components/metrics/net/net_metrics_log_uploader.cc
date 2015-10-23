@@ -4,7 +4,7 @@
 
 #include "components/metrics/net/net_metrics_log_uploader.h"
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_fetcher.h"
@@ -37,7 +37,7 @@ NetMetricsLogUploader::NetMetricsLogUploader(
 NetMetricsLogUploader::~NetMetricsLogUploader() {
 }
 
-bool NetMetricsLogUploader::UploadLog(const std::string& compressed_log_data,
+void NetMetricsLogUploader::UploadLog(const std::string& compressed_log_data,
                                       const std::string& log_hash) {
   current_fetch_ =
       net::URLFetcher::Create(GURL(server_url_), net::URLFetcher::POST, this);
@@ -55,7 +55,6 @@ bool NetMetricsLogUploader::UploadLog(const std::string& compressed_log_data,
   current_fetch_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
                                net::LOAD_DO_NOT_SEND_COOKIES);
   current_fetch_->Start();
-  return true;
 }
 
 void NetMetricsLogUploader::OnURLFetchComplete(const net::URLFetcher* source) {

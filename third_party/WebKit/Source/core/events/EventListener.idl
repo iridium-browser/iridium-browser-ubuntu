@@ -18,7 +18,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-callback interface EventListener {
+// https://dom.spec.whatwg.org/#callbackdef-eventlistener
+
+[
+    WillBeGarbageCollected
+] callback interface EventListener {
     void handleEvent(Event event);
 };
-

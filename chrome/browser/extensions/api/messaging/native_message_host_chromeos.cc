@@ -13,7 +13,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -52,7 +52,7 @@ class EchoHost : public NativeMessageHost {
 
   void OnMessage(const std::string& request_string) override {
     scoped_ptr<base::Value> request_value(
-        base::JSONReader::Read(request_string));
+        base::JSONReader::DeprecatedRead(request_string));
     scoped_ptr<base::DictionaryValue> request(
       static_cast<base::DictionaryValue*>(request_value.release()));
     if (request_string.find("stopHostTest") != std::string::npos) {
@@ -70,12 +70,12 @@ class EchoHost : public NativeMessageHost {
 
  private:
   void ProcessEcho(const base::DictionaryValue& request) {
-    scoped_ptr<base::DictionaryValue> response(new base::DictionaryValue());
-    response->SetInteger("id", ++message_number_);
-    response->Set("echo", request.DeepCopy());
-    response->SetString("caller_url", kEchoHostOrigins[0]);
+    base::DictionaryValue response;
+    response.SetInteger("id", ++message_number_);
+    response.Set("echo", request.CreateDeepCopy());
+    response.SetString("caller_url", kEchoHostOrigins[0]);
     std::string response_string;
-    base::JSONWriter::Write(response.get(), &response_string);
+    base::JSONWriter::Write(response, &response_string);
     client_->PostMessageFromNativeHost(response_string);
   }
 

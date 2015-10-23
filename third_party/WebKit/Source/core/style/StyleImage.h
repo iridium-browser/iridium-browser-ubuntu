@@ -24,6 +24,7 @@
 #ifndef StyleImage_h
 #define StyleImage_h
 
+#include "core/CoreExport.h"
 #include "core/css/CSSValue.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/geometry/LayoutSize.h"
@@ -40,7 +41,7 @@ class LayoutObject;
 
 typedef void* WrappedImagePtr;
 
-class StyleImage : public RefCounted<StyleImage> {
+class CORE_EXPORT StyleImage : public RefCountedWillBeGarbageCollectedFinalized<StyleImage> {
 public:
     virtual ~StyleImage() { }
 
@@ -73,6 +74,8 @@ public:
     ALWAYS_INLINE bool isGeneratedImage() const { return m_isGeneratedImage; }
     ALWAYS_INLINE bool isImageResourceSet() const { return m_isImageResourceSet; }
 
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
+
 protected:
     StyleImage()
         : m_isImageResource(false)
@@ -89,7 +92,7 @@ protected:
 
 #define DEFINE_STYLE_IMAGE_TYPE_CASTS(thisType, function) \
     DEFINE_TYPE_CASTS(thisType, StyleImage, styleImage, styleImage->function, styleImage.function); \
-    inline thisType* to##thisType(const RefPtr<StyleImage>& styleImage) { return to##thisType(styleImage.get()); } \
+    inline thisType* to##thisType(const RefPtrWillBeMember<StyleImage>& styleImage) { return to##thisType(styleImage.get()); } \
     typedef int NeedsSemiColonAfterDefineStyleImageTypeCasts
 
 }

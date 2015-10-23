@@ -11,10 +11,10 @@ import json
 import os
 import tempfile
 
-from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import parallel
 
 
 # A unique identifier for looking up CompatIds by board/useflags.
@@ -35,7 +35,7 @@ def GetBoardKey(config, board=None):
   """Get the BoardKey associated with a given config.
 
   Args:
-    config: A cbuildbot_config.BuildConfig object.
+    config: A config_lib.BuildConfig object.
     board: Board to use. Defaults to the first board in the config.
       Optional if len(config.boards) == 1.
   """
@@ -47,25 +47,32 @@ def GetBoardKey(config, board=None):
   return BoardKey(board, config.useflags)
 
 
-def GetAllImportantBoardKeys():
-  """Get a list of all board keys used in a top-level config."""
+def GetAllImportantBoardKeys(site_config):
+  """Get a list of all board keys used in a top-level config.
+
+  Args:
+    site_config: A config_lib.SiteConfig instance.
+  """
   boards = set()
-  for config in cbuildbot_config.GetConfig().values():
+  for config in site_config.values():
     if config.important:
       for board in config.boards:
         boards.add(GetBoardKey(config, board))
   return boards
 
 
-def GetChromePrebuiltConfigs():
+def GetChromePrebuiltConfigs(site_config):
   """Get a mapping of the boards used in the Chrome PFQ.
+
+  Args:
+    site_config: A config_lib.SiteConfig instance.
 
   Returns:
     A dict mapping BoardKey objects to configs.
   """
   boards = {}
-  master_chromium_pfq = cbuildbot_config.GetConfig()['master-chromium-pfq']
-  for config in cbuildbot_config.GetSlavesForMaster(master_chromium_pfq):
+  master_chromium_pfq = site_config['master-chromium-pfq']
+  for config in site_config.GetSlavesForMaster(master_chromium_pfq):
     if config.prebuilts:
       for board in config.boards:
         boards[GetBoardKey(config, board)] = config
@@ -264,7 +271,15 @@ def CalculateCompatId(board, extra_useflags):
   arch_cflags = cros_build_lib.RunCommand(
       cmd, print_cmd=False, capture_output=True).output.rstrip()
   arch, cflags = arch_cflags.split('\n', 1)
-  return CompatId(arch, useflags, cflags.split())
+  cflags_split = cflags.split()
+
+  # We will add -clang-syntax to falco and nyan board. So we need to
+  # filter out -clang-syntax to make the flags from PFQ are the same as
+  # the release-board. See crbug.com/499115
+  # TODO(yunlian): Remove this when all the boards are build with -clang-syntax
+  if '-clang-syntax' in cflags_split:
+    cflags_split.remove('-clang-syntax')
+  return CompatId(arch, useflags, cflags_split)
 
 
 class CompatIdFetcher(object):
@@ -300,9 +315,7 @@ class CompatIdFetcher(object):
     """
     # pylint: disable=method-hidden
     logging.info('Fetching CompatId objects...')
-    # Portage cache updates aren't parallel-safe, so limit to 1 job for now.
-    # See http://crbug.com/470998
-    self.compat_ids = {}
-    for key in board_keys:
-      self._FetchCompatId(*key)
-    return dict(self.compat_ids)
+    with parallel.Manager() as manager:
+      self.compat_ids = manager.dict()
+      parallel.RunTasksInProcessPool(self._FetchCompatId, board_keys)
+      return dict(self.compat_ids)

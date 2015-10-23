@@ -2,10 +2,18 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This script fetches and prepares an SDK chroot."""
+"""Manage SDK chroots.
+
+This script is used for manipulating local chroot environments; creating,
+deleting, downloading, etc.  If given --enter (or no args), it defaults
+to an interactive bash shell within the chroot.
+
+If given args those are passed to the chroot environment, and executed.
+"""
 
 from __future__ import print_function
 
+import argparse
 import glob
 import os
 import pwd
@@ -69,22 +77,49 @@ def GetStage3Urls(version):
           for ext in COMPRESSION_PREFERENCE]
 
 
-def FetchRemoteTarballs(storage_dir, urls):
+def GetToolchainsOverlayUrls(version, toolchains):
+  """Returns the URL(s) for a toolchains SDK overlay.
+
+  Args:
+    version: The SDK version used, e.g. 2015.05.27.145939. We use the year and
+        month components to point to a subdirectory on the SDK bucket where
+        overlays are stored (.../2015/05/ in this case).
+    toolchains: Iterable of toolchain target strings (e.g. 'i686-pc-linux-gnu').
+
+  Returns:
+    List of alternative download URLs for an SDK overlay tarball that contains
+    the given toolchains.
+  """
+  toolchains_desc = '-'.join(sorted(toolchains))
+  suburl_template = os.path.join(
+      *(version.split('.')[:2] +
+        ['cros-sdk-overlay-toolchains-%s-%s.tar.%%s' %
+         (toolchains_desc, version)]))
+  return [toolchain.GetSdkURL(suburl=suburl_template % ext)
+          for ext in COMPRESSION_PREFERENCE]
+
+
+def FetchRemoteTarballs(storage_dir, urls, desc, allow_none=False):
   """Fetches a tarball given by url, and place it in |storage_dir|.
 
   Args:
     storage_dir: Path where to save the tarball.
     urls: List of URLs to try to download. Download will stop on first success.
+    desc: A string describing what tarball we're downloading (for logging).
+    allow_none: Don't fail if none of the URLs worked.
 
   Returns:
-    Full path to the downloaded file
+    Full path to the downloaded file, or None if |allow_none| and no URL worked.
+
+  Raises:
+    ValueError: If |allow_none| is False and none of the URLs worked.
   """
 
   # Note we track content length ourselves since certain versions of curl
   # fail if asked to resume a complete file.
   # pylint: disable=C0301,W0631
   # https://sourceforge.net/tracker/?func=detail&atid=100976&aid=3482927&group_id=976
-  logging.notice('Downloading chroot files.')
+  logging.notice('Downloading %s tarball...', desc)
   for url in urls:
     # http://www.logilab.org/ticket/8766
     # pylint: disable=E1101
@@ -97,8 +132,8 @@ def FetchRemoteTarballs(storage_dir, urls):
     content_length = 0
     logging.debug('Attempting download from %s', url)
     result = retry_util.RunCurl(
-        ['-I', url], redirect_stdout=True, redirect_stderr=True,
-        print_cmd=False)
+        ['-I', url], fail=False, capture_output=False, redirect_stdout=True,
+        redirect_stderr=True, print_cmd=False, debug_level=logging.NOTICE)
     successful = False
     for header in result.output.splitlines():
       # We must walk the output to find the string '200 OK' for use cases where
@@ -112,7 +147,9 @@ def FetchRemoteTarballs(storage_dir, urls):
     if successful:
       break
   else:
-    raise Exception('No valid URLs found!')
+    if allow_none:
+      return None
+    raise ValueError('No valid URLs found!')
 
   tarball_dest = os.path.join(storage_dir, tarball_name)
   current_size = 0
@@ -124,30 +161,38 @@ def FetchRemoteTarballs(storage_dir, urls):
 
   if current_size < content_length:
     retry_util.RunCurl(
-        ['-f', '-L', '-y', '30', '-C', '-', '--output', tarball_dest, url],
-        print_cmd=False)
+        ['-L', '-y', '30', '-C', '-', '--output', tarball_dest, url],
+        print_cmd=False, capture_output=False, debug_level=logging.NOTICE)
 
   # Cleanup old tarballs now since we've successfull fetched; only cleanup
-  # the tarballs for our prefix, or unknown ones.
-  ignored_prefix = ('stage3-' if tarball_name.startswith('cros-sdk-')
-                    else 'cros-sdk-')
+  # the tarballs for our prefix, or unknown ones. This gets a bit tricky
+  # because we might have partial overlap between known prefixes.
+  my_prefix = tarball_name.rsplit('-', 1)[0] + '-'
+  all_prefixes = ('stage3-amd64-', 'cros-sdk-', 'cros-sdk-overlay-')
+  ignored_prefixes = [prefix for prefix in all_prefixes if prefix != my_prefix]
   for filename in os.listdir(storage_dir):
-    if filename == tarball_name or filename.startswith(ignored_prefix):
+    if (filename == tarball_name or
+        any([(filename.startswith(p) and
+              not (len(my_prefix) > len(p) and filename.startswith(my_prefix)))
+             for p in ignored_prefixes])):
       continue
-
-    logging.info('Cleaning up old tarball: %s' % (filename,))
+    logging.info('Cleaning up old tarball: %s', filename)
     osutils.SafeUnlink(os.path.join(storage_dir, filename))
 
   return tarball_dest
 
 
-def CreateChroot(chroot_path, sdk_tarball, cache_dir, nousepkg=False,
-                 workspace=None):
+def CreateChroot(chroot_path, sdk_tarball, toolchains_overlay_tarball,
+                 cache_dir, nousepkg=False, workspace=None):
   """Creates a new chroot from a given SDK"""
 
   cmd = MAKE_CHROOT + ['--stage3_path', sdk_tarball,
                        '--chroot', chroot_path,
                        '--cache_dir', cache_dir]
+
+  if toolchains_overlay_tarball:
+    cmd.extend(['--toolchains_overlay_path', toolchains_overlay_tarball])
+
   if nousepkg:
     cmd.append('--nousepkg')
 
@@ -430,50 +475,60 @@ def _ReExecuteIfNeeded(argv):
 
 def _CreateParser(sdk_latest_version, bootstrap_latest_version):
   """Generate and return the parser with all the options."""
-  usage = """usage: %prog [options] [VAR1=val1 .. VARn=valn -- args]
-
-This script is used for manipulating local chroot environments; creating,
-deleting, downloading, etc.  If given --enter (or no args), it defaults
-to an interactive bash shell within the chroot.
-
-If given args those are passed to the chroot environment, and executed."""
-
-  parser = commandline.OptionParser(usage=usage, caching=True)
+  usage = ('usage: %(prog)s [options] '
+           '[VAR1=val1 ... VAR2=val2] [--] [command [args]]')
+  parser = commandline.ArgumentParser(usage=usage, description=__doc__,
+                                      caching=True)
 
   # Global options.
   default_chroot = os.path.join(constants.SOURCE_ROOT,
                                 constants.DEFAULT_CHROOT_DIR)
-  parser.add_option(
+  parser.add_argument(
       '--chroot', dest='chroot', default=default_chroot, type='path',
       help=('SDK chroot dir name [%s]' % constants.DEFAULT_CHROOT_DIR))
 
-  parser.add_option('--chrome_root', default=None, type='path',
-                    help='Mount this chrome root into the SDK chroot')
-  parser.add_option('--chrome_root_mount', default=None, type='path',
-                    help='Mount chrome into this path inside SDK chroot')
-  parser.add_option('--nousepkg', action='store_true', default=False,
-                    help='Do not use binary packages when creating a chroot.')
-  parser.add_option('-u', '--url',
-                    dest='sdk_url', default=None,
-                    help=('''Use sdk tarball located at this url.
-                             Use file:// for local files.'''))
-  parser.add_option('--sdk-version', default=None,
-                    help=('Use this sdk version.  For prebuilt, current is %r'
-                          ', for bootstrapping it is %r.'
-                          % (sdk_latest_version, bootstrap_latest_version)))
-  parser.add_option('--workspace', default=None,
-                    help='Workspace directory to mount into the chroot.')
+  parser.add_argument('--chrome_root', type='path',
+                      help='Mount this chrome root into the SDK chroot')
+  parser.add_argument('--chrome_root_mount', type='path',
+                      help='Mount chrome into this path inside SDK chroot')
+  parser.add_argument('--nousepkg', action='store_true', default=False,
+                      help='Do not use binary packages when creating a chroot.')
+  parser.add_argument('-u', '--url', dest='sdk_url',
+                      help='Use sdk tarball located at this url. Use file:// '
+                           'for local files.')
+  parser.add_argument('--sdk-version',
+                      help=('Use this sdk version.  For prebuilt, current is %r'
+                            ', for bootstrapping it is %r.'
+                            % (sdk_latest_version, bootstrap_latest_version)))
+  parser.add_argument('--workspace',
+                      help='Workspace directory to mount into the chroot.')
+  parser.add_argument('commands', nargs=argparse.REMAINDER)
+
+  # SDK overlay tarball options (mutually exclusive).
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument('--toolchains',
+                     help=('Comma-separated list of toolchains we expect to be '
+                           'using on the chroot. Used for downloading a '
+                           'corresponding SDK toolchains group (if one is '
+                           'found), which may speed up chroot initialization '
+                           'when building for the first time. Otherwise this '
+                           'has no effect and will not restrict the chroot in '
+                           'any way. Ignored if using --bootstrap.'))
+  group.add_argument('--board',
+                     help=('The board we intend to be building in the chroot. '
+                           'Used for deriving the list of required toolchains '
+                           '(see --toolchains).'))
 
   # Commands.
-  group = parser.add_option_group('Commands')
-  group.add_option(
+  group = parser.add_argument_group('Commands')
+  group.add_argument(
       '--enter', action='store_true', default=False,
       help='Enter the SDK chroot.  Implies --create.')
-  group.add_option(
+  group.add_argument(
       '--create', action='store_true', default=False,
       help='Create the chroot only if it does not already exist.  '
       'Implies --download.')
-  group.add_option(
+  group.add_argument(
       '--bootstrap', action='store_true', default=False,
       help='Build everything from scratch, including the sdk.  '
       'Use this only if you need to validate a change '
@@ -481,35 +536,36 @@ If given args those are passed to the chroot environment, and executed."""
       'build are typically the only folk who need this).  '
       'Note this will quite heavily slow down the build.  '
       'This option implies --create --nousepkg.')
-  group.add_option(
+  group.add_argument(
       '-r', '--replace', action='store_true', default=False,
       help='Replace an existing SDK chroot.  Basically an alias '
       'for --delete --create.')
-  group.add_option(
+  group.add_argument(
       '--delete', action='store_true', default=False,
       help='Delete the current SDK chroot if it exists.')
-  group.add_option(
+  group.add_argument(
       '--download', action='store_true', default=False,
       help='Download the sdk.')
   commands = group
 
   # Namespace options.
-  group = parser.add_option_group('Namespaces')
-  group.add_option('--proxy-sim', action='store_true', default=False,
-                   help='Simulate a restrictive network requiring an outbound'
-                        ' proxy.')
-  group.add_option('--no-ns-pid', dest='ns_pid',
-                   default=True, action='store_false',
-                   help='Do not create a new PID namespace.')
+  group = parser.add_argument_group('Namespaces')
+  group.add_argument('--proxy-sim', action='store_true', default=False,
+                     help='Simulate a restrictive network requiring an outbound'
+                          ' proxy.')
+  group.add_argument('--no-ns-pid', dest='ns_pid',
+                     default=True, action='store_false',
+                     help='Do not create a new PID namespace.')
 
   # Internal options.
-  group = parser.add_option_group(
+  group = parser.add_argument_group(
       'Internal Chromium OS Build Team Options',
       'Caution: these are for meant for the Chromium OS build team only')
-  group.add_option('--buildbot-log-version', default=False, action='store_true',
-                   help='Log SDK version for buildbot consumption')
+  group.add_argument('--buildbot-log-version', default=False,
+                     action='store_true',
+                     help='Log SDK version for buildbot consumption')
 
-  return (parser, commands)
+  return parser, commands
 
 
 def main(argv):
@@ -519,7 +575,8 @@ def main(argv):
   sdk_latest_version = conf.get('SDK_LATEST_VERSION', '<unknown>')
   bootstrap_latest_version = conf.get('BOOTSTRAP_LATEST_VERSION', '<unknown>')
   parser, commands = _CreateParser(sdk_latest_version, bootstrap_latest_version)
-  options, chroot_command = parser.parse_args(argv)
+  options = parser.parse_args(argv)
+  chroot_command = options.commands
 
   # Some sanity checks first, before we ask for sudo credentials.
   cros_build_lib.AssertOutsideChroot()
@@ -548,8 +605,12 @@ def main(argv):
     options.create = True
 
   # If a command is not given, default to enter.
+  # pylint: disable=protected-access
+  # This _group_actions access sucks, but upstream decided to not include an
+  # alternative to optparse's option_list, and this is what they recommend.
   options.enter |= not any(getattr(options, x.dest)
-                           for x in commands.option_list)
+                           for x in commands._group_actions)
+  # pylint: enable=protected-access
   options.enter |= bool(chroot_command)
 
   if options.enter and options.delete and not options.create:
@@ -577,7 +638,7 @@ def main(argv):
   if options.buildbot_log_version:
     cros_build_lib.PrintBuildbotStepText(sdk_version)
 
-  # Based on selections, fetch the tarball.
+  # Based on selections, determine the tarball to fetch.
   if options.sdk_url:
     urls = [options.sdk_url]
   elif options.bootstrap:
@@ -585,11 +646,25 @@ def main(argv):
   else:
     urls = GetArchStageTarballs(sdk_version)
 
+  # Get URLs for the toolchains overlay, if one is to be used.
+  toolchains_overlay_urls = None
+  if not options.bootstrap:
+    toolchains = None
+    if options.toolchains:
+      toolchains = options.toolchains.split(',')
+    elif options.board:
+      toolchains = toolchain.GetToolchainsForBoard(options.board).keys()
+
+    if toolchains:
+      toolchains_overlay_urls = GetToolchainsOverlayUrls(sdk_version,
+                                                         toolchains)
+
   lock_path = os.path.dirname(options.chroot)
   lock_path = os.path.join(
       lock_path, '.%s_lock' % os.path.basename(options.chroot).lstrip('.'))
   with cgroups.SimpleContainChildren('cros_sdk', pid=first_pid):
     with locking.FileLock(lock_path, 'chroot lock') as lock:
+      toolchains_overlay_tarball = None
 
       if options.proxy_sim:
         _ProxySimSetup(options)
@@ -629,11 +704,17 @@ def main(argv):
 
       if options.download:
         lock.write_lock()
-        sdk_tarball = FetchRemoteTarballs(sdk_cache, urls)
+        sdk_tarball = FetchRemoteTarballs(
+            sdk_cache, urls, 'stage3' if options.bootstrap else 'SDK')
+        if toolchains_overlay_urls:
+          toolchains_overlay_tarball = FetchRemoteTarballs(
+              sdk_cache, toolchains_overlay_urls, 'SDK toolchains overlay',
+              allow_none=True)
 
       if options.create:
         lock.write_lock()
-        CreateChroot(options.chroot, sdk_tarball, options.cache_dir,
+        CreateChroot(options.chroot, sdk_tarball, toolchains_overlay_tarball,
+                     options.cache_dir,
                      nousepkg=(options.bootstrap or options.nousepkg),
                      workspace=options.workspace)
 

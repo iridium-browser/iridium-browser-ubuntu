@@ -67,6 +67,26 @@ nacl_toolchain("newlib_x64") {
   ld = cxx
 }
 
+nacl_toolchain("newlib_pnacl") {
+  toolchain_package = "pnacl_newlib"
+  toolchain_revision = pnacl_newlib_rev
+  toolchain_cpu = "pnacl"
+  toolprefix = "${os_toolchain_dir}/${toolchain_package}/bin/pnacl-"
+
+  cc = toolprefix + "clang"
+  cxx = toolprefix + "clang++"
+  ar = toolprefix + "ar"
+  ld = cxx
+  executable_extension = ".pexe.debug"
+
+  finalize = toolprefix + "finalize"
+  nonfinal_file =
+    "{{root_out_dir}}/{{target_output_name}}${executable_extension}"
+  finalized_file = "{{root_out_dir}}/{{target_output_name}}.pexe"
+  postlink = "$finalize $nonfinal_file -o $finalized_file"
+  link_outputs = [ finalized_file ]
+}
+
 nacl_toolchain("glibc_x86") {
   toolchain_package = "nacl_x86_glibc"
   toolchain_revision = nacl_x86_glibc_rev

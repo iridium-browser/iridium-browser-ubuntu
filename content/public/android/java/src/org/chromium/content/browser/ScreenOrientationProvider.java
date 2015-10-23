@@ -7,12 +7,12 @@ package org.chromium.content.browser;
 import android.app.Activity;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
-import android.util.Log;
 
 import org.chromium.base.ApplicationStatus;
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content_public.common.ScreenOrientationConstants;
 import org.chromium.content_public.common.ScreenOrientationValues;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
@@ -22,7 +22,7 @@ import org.chromium.ui.gfx.DeviceDisplayInfo;
  */
 @JNINamespace("content")
 public class ScreenOrientationProvider {
-    private static final String TAG = "ScreenOrientationProvider";
+    private static final String TAG = "cr.ScreenOrientation";
 
     private static int getOrientationFromWebScreenOrientations(byte orientation,
             Activity activity) {

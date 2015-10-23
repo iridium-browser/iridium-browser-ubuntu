@@ -9,6 +9,7 @@
 #include "base/lazy_instance.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_thread.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/guest_view/extensions_guest_view_messages.h"
@@ -18,7 +19,7 @@
 #include "extensions/renderer/scripts_run_info.h"
 #include "grit/extensions_renderer_resources.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
@@ -125,10 +126,6 @@ UserScript::InjectionType UserScriptInjector::script_type() const {
   return UserScript::CONTENT_SCRIPT;
 }
 
-bool UserScriptInjector::ShouldExecuteInChildFrames() const {
-  return false;
-}
-
 bool UserScriptInjector::ShouldExecuteInMainWorld() const {
   return false;
 }
@@ -155,42 +152,44 @@ bool UserScriptInjector::ShouldInjectCss(
 
 PermissionsData::AccessType UserScriptInjector::CanExecuteOnFrame(
     const InjectionHost* injection_host,
-    blink::WebFrame* web_frame,
-    int tab_id,
-    const GURL& top_url) const {
-  GURL effective_document_url = ScriptContext::GetEffectiveDocumentURL(
-      web_frame, web_frame->document().url(), script_->match_about_blank());
-  PermissionsData::AccessType can_execute = injection_host->CanExecuteOnFrame(
-      effective_document_url, top_url, tab_id, is_declarative_);
-  if (script_->consumer_instance_type() !=
-          UserScript::ConsumerInstanceType::WEBVIEW ||
-      can_execute == PermissionsData::ACCESS_DENIED)
-    return can_execute;
+    blink::WebLocalFrame* web_frame,
+    int tab_id) const {
+  if (script_->consumer_instance_type() ==
+          UserScript::ConsumerInstanceType::WEBVIEW) {
+    int routing_id = content::RenderView::FromWebView(web_frame->top()->view())
+                        ->GetRoutingID();
 
-  int routing_id = content::RenderView::FromWebView(web_frame->top()->view())
-                      ->GetRoutingID();
+    RoutingInfoKey key(routing_id, script_->id());
 
-  RoutingInfoKey key(routing_id, script_->id());
+    RoutingInfoMap& map = g_routing_info_map.Get();
+    auto iter = map.find(key);
 
-  RoutingInfoMap& map = g_routing_info_map.Get();
-  auto iter = map.find(key);
+    bool allowed = false;
+    if (iter != map.end()) {
+      allowed = iter->second;
+    } else {
+      // Send a SYNC IPC message to the browser to check if this is allowed.
+      // This is not ideal, but is mitigated by the fact that this is only done
+      // for webviews, and then only once per host.
+      // TODO(hanxi): Find a more efficient way to do this.
+      content::RenderThread::Get()->Send(
+          new ExtensionsGuestViewHostMsg_CanExecuteContentScriptSync(
+              routing_id, script_->id(), &allowed));
+      map.insert(std::pair<RoutingInfoKey, bool>(key, allowed));
+    }
 
-  bool allowed = false;
-  if (iter != map.end()) {
-    allowed = iter->second;
-  } else {
-    // Send a SYNC IPC message to the browser to check if this is allowed. This
-    // is not ideal, but is mitigated by the fact that this is only done for
-    // webviews, and then only once per host.
-    // TODO(hanxi): Find a more efficient way to do this.
-    content::RenderThread::Get()->Send(
-        new ExtensionsGuestViewHostMsg_CanExecuteContentScriptSync(
-            routing_id, script_->id(), &allowed));
-    map.insert(std::pair<RoutingInfoKey, bool>(key, allowed));
+    return allowed ? PermissionsData::ACCESS_ALLOWED
+                   : PermissionsData::ACCESS_DENIED;
   }
 
-  return allowed ? PermissionsData::ACCESS_ALLOWED
-                 : PermissionsData::ACCESS_DENIED;
+  GURL effective_document_url = ScriptContext::GetEffectiveDocumentURL(
+      web_frame, web_frame->document().url(), script_->match_about_blank());
+
+  return injection_host->CanExecuteOnFrame(
+      effective_document_url,
+      content::RenderFrame::FromWebFrame(web_frame),
+      tab_id,
+      is_declarative_);
 }
 
 std::vector<blink::WebScriptSource> UserScriptInjector::GetJsSources(
@@ -260,7 +259,7 @@ void UserScriptInjector::GetRunInfo(
 }
 
 void UserScriptInjector::OnInjectionComplete(
-    scoped_ptr<base::ListValue> execution_results,
+    scoped_ptr<base::Value> execution_result,
     UserScript::RunLocation run_location) {
 }
 

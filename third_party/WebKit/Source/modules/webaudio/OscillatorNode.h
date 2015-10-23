@@ -35,7 +35,8 @@
 
 namespace blink {
 
-class AudioContext;
+class AbstractAudioContext;
+class ExceptionState;
 class PeriodicWave;
 
 // OscillatorNode is an audio generator of periodic waveforms.
@@ -53,13 +54,13 @@ public:
     };
 
     static PassRefPtr<OscillatorHandler> create(AudioNode&, float sampleRate, AudioParamHandler& frequency, AudioParamHandler& detune);
-    virtual ~OscillatorHandler();
+    ~OscillatorHandler() override;
 
     // AudioHandler
-    virtual void process(size_t framesToProcess) override;
+    void process(size_t framesToProcess) override;
 
     String type() const;
-    void setType(const String&);
+    void setType(const String&, ExceptionState&);
 
     void setPeriodicWave(PeriodicWave*);
 
@@ -70,7 +71,7 @@ private:
     // Returns true if there are sample-accurate timeline parameter changes.
     bool calculateSampleAccuratePhaseIncrements(size_t framesToProcess);
 
-    virtual bool propagatesSilence() const override;
+    bool propagatesSilence() const override;
 
     // One of the waveform types defined in the enum.
     unsigned short m_type;
@@ -102,17 +103,17 @@ private:
 class OscillatorNode final : public AudioScheduledSourceNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static OscillatorNode* create(AudioContext&, float sampleRate);
+    static OscillatorNode* create(AbstractAudioContext&, float sampleRate);
     DECLARE_VIRTUAL_TRACE();
 
     String type() const;
-    void setType(const String&);
+    void setType(const String&, ExceptionState&);
     AudioParam* frequency();
     AudioParam* detune();
     void setPeriodicWave(PeriodicWave*);
 
 private:
-    OscillatorNode(AudioContext&, float sampleRate);
+    OscillatorNode(AbstractAudioContext&, float sampleRate);
     OscillatorHandler& oscillatorHandler() const;
 
     Member<AudioParam> m_frequency;

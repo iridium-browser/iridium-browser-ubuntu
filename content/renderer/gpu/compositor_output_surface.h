@@ -26,7 +26,6 @@ namespace cc {
 class CompositorFrame;
 class CompositorFrameAck;
 class GLFrameData;
-class SoftwareFrameData;
 }
 
 namespace content {
@@ -60,8 +59,7 @@ class CompositorOutputSurface
 
  protected:
   void ShortcutSwapAck(uint32 output_surface_id,
-                       scoped_ptr<cc::GLFrameData> gl_frame_data,
-                       scoped_ptr<cc::SoftwareFrameData> software_frame_data);
+                       scoped_ptr<cc::GLFrameData> gl_frame_data);
   virtual void OnSwapAck(uint32 output_surface_id,
                          const cc::CompositorFrameAck& ack);
   virtual void OnReclaimResources(uint32 output_surface_id,
@@ -102,8 +100,10 @@ class CompositorOutputSurface
   scoped_refptr<IPC::SyncMessageFilter> message_sender_;
   scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue_;
   int routing_id_;
+#if defined(OS_ANDROID)
   bool prefers_smoothness_;
-  base::PlatformThreadHandle main_thread_handle_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner_;
+#endif
 
   // TODO(danakj): Remove this when crbug.com/311404
   bool layout_test_mode_;

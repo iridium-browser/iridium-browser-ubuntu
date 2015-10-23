@@ -63,11 +63,12 @@ void SurfaceContextFactory::RemoveCompositor(ui::Compositor* compositor) {
 }
 
 bool SurfaceContextFactory::DoesCreateTestContexts() {
-  NOTIMPLEMENTED();
   return false;
 }
 
-uint32 SurfaceContextFactory::GetImageTextureTarget() {
+uint32 SurfaceContextFactory::GetImageTextureTarget(gfx::BufferFormat format,
+                                                    gfx::BufferUsage usage) {
+  // No GpuMemoryBuffer support, so just return GL_TEXTURE_2D.
   return GL_TEXTURE_2D;
 }
 
@@ -78,13 +79,11 @@ cc::SharedBitmapManager* SurfaceContextFactory::GetSharedBitmapManager() {
 
 gpu::GpuMemoryBufferManager*
 SurfaceContextFactory::GetGpuMemoryBufferManager() {
-  NOTIMPLEMENTED();
-  return nullptr;
+  return &gpu_memory_buffer_manager_;
 }
 
 cc::TaskGraphRunner* SurfaceContextFactory::GetTaskGraphRunner() {
-  NOTIMPLEMENTED();
-  return nullptr;
+  return raster_thread_helper_.task_graph_runner();
 }
 
 scoped_ptr<cc::SurfaceIdAllocator>

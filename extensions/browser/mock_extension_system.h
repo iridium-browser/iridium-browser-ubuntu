@@ -25,22 +25,17 @@ class MockExtensionSystem : public ExtensionSystem {
 
   content::BrowserContext* browser_context() { return browser_context_; }
 
-  void set_event_router(EventRouter* router) { event_router_ = router; }
-
   // ExtensionSystem overrides:
   void InitForRegularProfile(bool extensions_enabled) override;
   ExtensionService* extension_service() override;
   RuntimeData* runtime_data() override;
   ManagementPolicy* management_policy() override;
   SharedUserScriptMaster* shared_user_script_master() override;
-  DeclarativeUserScriptManager* declarative_user_script_manager() override;
   StateStore* state_store() override;
   StateStore* rules_store() override;
   InfoMap* info_map() override;
-  LazyBackgroundTaskQueue* lazy_background_task_queue() override;
-  EventRouter* event_router() override;
-  InstallVerifier* install_verifier() override;
   QuotaService* quota_service() override;
+  AppSorting* app_sorting() override;
   const OneShotEvent& ready() const override;
   ContentVerifier* content_verifier() override;
   scoped_ptr<ExtensionSet> GetDependentExtensions(
@@ -49,9 +44,6 @@ class MockExtensionSystem : public ExtensionSystem {
  private:
   content::BrowserContext* browser_context_;
   OneShotEvent ready_;
-
-  // Not owned, defaults to null.
-  EventRouter* event_router_;
 
   DISALLOW_COPY_AND_ASSIGN(MockExtensionSystem);
 };

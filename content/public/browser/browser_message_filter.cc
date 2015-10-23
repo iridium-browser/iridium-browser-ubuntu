@@ -17,6 +17,10 @@
 #include "ipc/ipc_sync_message.h"
 #include "ipc/message_filter.h"
 
+#if defined(OS_ANDROID)
+#include "content/browser/android/child_process_launcher_android.h"
+#endif
+
 using content::BrowserMessageFilter;
 
 namespace content {
@@ -176,14 +180,20 @@ bool BrowserMessageFilter::CheckCanDispatchOnUI(const IPC::Message& message,
   return true;
 }
 
-void BrowserMessageFilter::BadMessageReceived() {
+void BrowserMessageFilter::ShutdownForBadMessage() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kDisableKillAfterBadIPC))
     return;
 
   BrowserChildProcessHostImpl::HistogramBadMessageTerminated(
       PROCESS_TYPE_RENDERER);
+
+#if defined(OS_ANDROID)
+  // Android requires a different approach for killing.
+  StopChildProcess(peer_process_.Handle());
+#else
   peer_process_.Terminate(content::RESULT_CODE_KILLED_BAD_MESSAGE, false);
+#endif
 }
 
 BrowserMessageFilter::~BrowserMessageFilter() {

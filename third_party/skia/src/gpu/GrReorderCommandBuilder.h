@@ -15,28 +15,12 @@ public:
     typedef GrCommandBuilder::Cmd Cmd;
     typedef GrCommandBuilder::State State;
 
-    GrReorderCommandBuilder(GrGpu* gpu) : INHERITED(gpu) {}
+    GrReorderCommandBuilder() : INHERITED() {}
 
-    Cmd* recordDrawBatch(State*, GrBatch*) override;
-    Cmd* recordStencilPath(const GrPipelineBuilder&,
-                           const GrPathProcessor*,
-                           const GrPath*,
-                           const GrScissorState&,
-                           const GrStencilSettings&) override {
-        SkFAIL("Unsupported\n");
-        return NULL;
-    }
-
-    Cmd* recordDrawPath(State*,
-                        const GrPathProcessor*,
-                        const GrPath*,
-                        const GrStencilSettings&) override {
-        SkFAIL("Unsupported\n");
-        return NULL;
-    }
+    Cmd* recordDrawBatch(GrBatch*, const GrCaps&) override;
 
     Cmd* recordDrawPaths(State*,
-                         GrInOrderDrawBuffer*,
+                         GrBufferedDrawTarget*,
                          const GrPathProcessor*,
                          const GrPathRange*,
                          const void*,
@@ -45,7 +29,7 @@ public:
                          GrDrawTarget::PathTransformType ,
                          int,
                          const GrStencilSettings&,
-                         const GrDrawTarget::PipelineInfo&) override {
+                         const GrPipelineOptimizations&) override {
         SkFAIL("Unsupported\n");
         return NULL;
     }

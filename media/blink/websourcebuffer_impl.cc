@@ -81,6 +81,14 @@ blink::WebTimeRanges WebSourceBufferImpl::buffered() {
   return result;
 }
 
+bool WebSourceBufferImpl::evictCodedFrames(double currentPlaybackTime,
+                                           size_t newDataSize) {
+  return demuxer_->EvictCodedFrames(
+      id_,
+      base::TimeDelta::FromSecondsD(currentPlaybackTime),
+      newDataSize);
+}
+
 void WebSourceBufferImpl::append(
     const unsigned char* data,
     unsigned length,

@@ -21,7 +21,10 @@ using bookmarks::BookmarkNode;
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::AddURL;
 using bookmarks_helper::AwaitCountBookmarksWithTitlesMatching;
+using bookmarks_helper::AwaitCountBookmarksWithUrlsMatching;
 using bookmarks_helper::CountBookmarksWithTitlesMatching;
+using bookmarks_helper::CountBookmarksWithUrlsMatching;
+using bookmarks_helper::CountFoldersWithTitlesMatching;
 using bookmarks_helper::Create1xFaviconFromPNGFile;
 using bookmarks_helper::GetBookmarkBarNode;
 using bookmarks_helper::GetBookmarkModel;
@@ -59,12 +62,6 @@ void SingleClientBookmarksSyncTest::VerifyBookmarkModelMatchesFakeServer(
   fake_server::FakeServerVerifier fake_server_verifier(GetFakeServer());
   std::vector<BookmarkModel::URLAndTitle> local_bookmarks;
   GetBookmarkModel(index)->GetBookmarks(&local_bookmarks);
-
-  // Verify that the number of local bookmarks matches the number in the
-  // server.
-  ASSERT_TRUE(fake_server_verifier.VerifyEntityCountByType(
-      local_bookmarks.size(),
-      syncer::BOOKMARKS));
 
   // Verify that all local bookmark titles exist once on the server.
   std::vector<BookmarkModel::URLAndTitle>::const_iterator it;
@@ -213,10 +210,10 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, Sanity) {
 IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, InjectedBookmark) {
   std::string title = "Montreal Canadiens";
   fake_server::EntityBuilderFactory entity_builder_factory;
-  scoped_ptr<fake_server::FakeServerEntity> entity =
-      entity_builder_factory.NewBookmarkEntityBuilder(
-          title, GURL("http://canadiens.nhl.com")).Build();
-  fake_server_->InjectEntity(entity.Pass());
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(title);
+  fake_server_->InjectEntity(bookmark_builder.BuildBookmark(
+      GURL("http://canadiens.nhl.com")));
 
   DisableVerifier();
   ASSERT_TRUE(SetupClients());
@@ -338,10 +335,10 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest,
                        DownloadDeletedBookmark) {
   std::string title = "Patrick Star";
   fake_server::EntityBuilderFactory entity_builder_factory;
-  scoped_ptr<fake_server::FakeServerEntity> entity =
-      entity_builder_factory.NewBookmarkEntityBuilder(
-          title, GURL("http://en.wikipedia.org/wiki/Patrick_Star")).Build();
-  fake_server_->InjectEntity(entity.Pass());
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(title);
+  fake_server_->InjectEntity(bookmark_builder.BuildBookmark(
+      GURL("http://en.wikipedia.org/wiki/Patrick_Star")));
 
   DisableVerifier();
   ASSERT_TRUE(SetupSync());
@@ -362,4 +359,60 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest,
   const int kExpectedCountAfterDeletion = 0;
   ASSERT_TRUE(AwaitCountBookmarksWithTitlesMatching(
       kSingleProfileIndex, title, kExpectedCountAfterDeletion));
+}
+
+IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest,
+                       DownloadModifiedBookmark) {
+  std::string title = "Syrup";
+  GURL original_url = GURL("https://en.wikipedia.org/?title=Maple_syrup");
+  GURL updated_url = GURL("https://en.wikipedia.org/wiki/Xylem");
+
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(title);
+  fake_server_->InjectEntity(bookmark_builder.BuildBookmark(original_url));
+
+  DisableVerifier();
+  ASSERT_TRUE(SetupSync());
+
+  ASSERT_EQ(1, CountBookmarksWithTitlesMatching(kSingleProfileIndex, title));
+  ASSERT_EQ(1, CountBookmarksWithUrlsMatching(kSingleProfileIndex,
+                                              original_url));
+  ASSERT_EQ(0, CountBookmarksWithUrlsMatching(kSingleProfileIndex,
+                                              updated_url));
+
+  std::vector<sync_pb::SyncEntity> server_bookmarks =
+      GetFakeServer()->GetSyncEntitiesByModelType(syncer::BOOKMARKS);
+  ASSERT_EQ(1ul, server_bookmarks.size());
+  std::string entity_id = server_bookmarks[0].id_string();
+
+  sync_pb::EntitySpecifics specifics = server_bookmarks[0].specifics();
+  sync_pb::BookmarkSpecifics* bookmark_specifics = specifics.mutable_bookmark();
+  bookmark_specifics->set_url(updated_url.spec());
+  ASSERT_TRUE(GetFakeServer()->ModifyEntitySpecifics(entity_id, specifics));
+
+  const syncer::ModelTypeSet kBookmarksType(syncer::BOOKMARKS);
+  TriggerSyncForModelTypes(kSingleProfileIndex, kBookmarksType);
+
+  ASSERT_TRUE(AwaitCountBookmarksWithUrlsMatching(
+      kSingleProfileIndex, updated_url, 1));
+  ASSERT_EQ(0, CountBookmarksWithUrlsMatching(kSingleProfileIndex,
+                                              original_url));
+  ASSERT_EQ(1, CountBookmarksWithTitlesMatching(kSingleProfileIndex, title));
+}
+
+IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, DownloadBookmarkFolder) {
+  const std::string title = "Seattle Sounders FC";
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(title);
+  fake_server_->InjectEntity(bookmark_builder.BuildFolder());
+
+  DisableVerifier();
+  ASSERT_TRUE(SetupClients());
+  ASSERT_EQ(0, CountFoldersWithTitlesMatching(kSingleProfileIndex, title));
+
+  ASSERT_TRUE(SetupSync());
+
+  ASSERT_EQ(1, CountFoldersWithTitlesMatching(kSingleProfileIndex, title));
 }

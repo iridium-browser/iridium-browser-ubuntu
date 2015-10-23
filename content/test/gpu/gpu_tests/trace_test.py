@@ -1,14 +1,14 @@
 # Copyright (c) 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import gpu_test_base
 import page_sets
 import trace_test_expectations
 
-from telemetry import benchmark
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.page import page_test
 from telemetry.timeline import model as model_module
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 
 TOPLEVEL_GL_CATEGORY = 'gpu_toplevel'
 TOPLEVEL_SERVICE_CATEGORY = 'disabled-by-default-gpu.service'
@@ -30,11 +30,11 @@ test_harness_script = r"""
 """
 
 
-class _TraceValidatorBase(page_test.PageTest):
+class TraceValidatorBase(gpu_test_base.ValidatorBase):
   def GetCategoryName(self):
     raise NotImplementedError("GetCategoryName() Not implemented!")
 
-  def ValidateAndMeasurePage(self, page, tab, results):
+  def ValidateAndMeasurePageInner(self, page, tab, results):
     timeline_data = tab.browser.platform.tracing_controller.Stop()
     timeline_model = model_module.TimelineModel(timeline_data)
 
@@ -51,7 +51,7 @@ class _TraceValidatorBase(page_test.PageTest):
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-logging')
 
-  def WillNavigateToPage(self, page, tab):
+  def WillNavigateToPageInner(self, page, tab):
     cat_string = ','.join(TOPLEVEL_CATEGORIES)
     cat_filter = tracing_category_filter.TracingCategoryFilter(cat_string)
     options = tracing_options.TracingOptions()
@@ -62,27 +62,28 @@ class _TraceValidatorBase(page_test.PageTest):
     return 'Trace markers for GPU category was not found: %s' % category
 
 
-class _TraceValidator(_TraceValidatorBase):
+class _TraceValidator(TraceValidatorBase):
   def GetCategoryName(self):
     return TOPLEVEL_SERVICE_CATEGORY
 
 
-class _DeviceTraceValidator(_TraceValidatorBase):
+class _DeviceTraceValidator(TraceValidatorBase):
   def GetCategoryName(self):
     return TOPLEVEL_DEVICE_CATEGORY
 
 
-class _TraceTestBase(benchmark.Benchmark):
+class TraceTestBase(gpu_test_base.TestBase):
   """Base class for the trace tests."""
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     # Utilize pixel tests page set as a set of simple pages to load.
-    page_set = page_sets.PixelTestsPageSet(base_name=self.name)
-    for page in page_set.pages:
-      page.script_to_evaluate_on_commit = test_harness_script
-    return page_set
+    story_set = page_sets.PixelTestsStorySet(self.GetExpectations(),
+                                             base_name=self.name)
+    for story in story_set:
+      story.script_to_evaluate_on_commit = test_harness_script
+    return story_set
 
 
-class TraceTest(_TraceTestBase):
+class TraceTest(TraceTestBase):
   """Tests GPU traces are plumbed through properly."""
   test = _TraceValidator
   name = 'TraceTest'
@@ -91,11 +92,11 @@ class TraceTest(_TraceTestBase):
   def Name(cls):
     return 'trace_test'
 
-  def CreateExpectations(self):
+  def _CreateExpectations(self):
     return trace_test_expectations.TraceTestExpectations()
 
 
-class DeviceTraceTest(_TraceTestBase):
+class DeviceTraceTest(TraceTestBase):
   """Tests GPU Device traces show up on devices that support it."""
   test = _DeviceTraceValidator
   name = 'DeviceTraceTest'
@@ -104,5 +105,5 @@ class DeviceTraceTest(_TraceTestBase):
   def Name(cls):
     return 'device_trace_test'
 
-  def CreateExpectations(self):
+  def _CreateExpectations(self):
     return trace_test_expectations.DeviceTraceTestExpectations()

@@ -55,6 +55,9 @@ void DriverWGL::InitializeStaticBindings() {
   fn.wglSwapIntervalEXTFn = 0;
   fn.wglSwapLayerBuffersFn = reinterpret_cast<wglSwapLayerBuffersProc>(
       GetGLProcAddress("wglSwapLayerBuffers"));
+}
+
+void DriverWGL::InitializeExtensionBindings() {
   std::string extensions(GetPlatformExtensions());
   extensions += " ";
   ALLOW_UNUSED_LOCAL(extensions);
@@ -146,8 +149,9 @@ Debug_wglChoosePixelFormatARB(HDC dc,
   return result;
 }
 
-static BOOL GL_BINDING_CALL
-Debug_wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask) {
+static BOOL GL_BINDING_CALL Debug_wglCopyContext(HGLRC hglrcSrc,
+                                                 HGLRC hglrcDst,
+                                                 UINT mask) {
   GL_SERVICE_LOG("wglCopyContext"
                  << "(" << hglrcSrc << ", " << hglrcDst << ", " << mask << ")");
   BOOL result =
@@ -164,8 +168,8 @@ static HGLRC GL_BINDING_CALL Debug_wglCreateContext(HDC hdc) {
   return result;
 }
 
-static HGLRC GL_BINDING_CALL
-Debug_wglCreateLayerContext(HDC hdc, int iLayerPlane) {
+static HGLRC GL_BINDING_CALL Debug_wglCreateLayerContext(HDC hdc,
+                                                         int iLayerPlane) {
   GL_SERVICE_LOG("wglCreateLayerContext"
                  << "(" << hdc << ", " << iLayerPlane << ")");
   HGLRC result =
@@ -257,8 +261,9 @@ static BOOL GL_BINDING_CALL Debug_wglMakeCurrent(HDC hdc, HGLRC hglrc) {
   return result;
 }
 
-static BOOL GL_BINDING_CALL
-Debug_wglQueryPbufferARB(HPBUFFERARB hPbuffer, int iAttribute, int* piValue) {
+static BOOL GL_BINDING_CALL Debug_wglQueryPbufferARB(HPBUFFERARB hPbuffer,
+                                                     int iAttribute,
+                                                     int* piValue) {
   GL_SERVICE_LOG("wglQueryPbufferARB"
                  << "(" << hPbuffer << ", " << iAttribute << ", "
                  << static_cast<const void*>(piValue) << ")");
@@ -268,8 +273,8 @@ Debug_wglQueryPbufferARB(HPBUFFERARB hPbuffer, int iAttribute, int* piValue) {
   return result;
 }
 
-static int GL_BINDING_CALL
-Debug_wglReleasePbufferDCARB(HPBUFFERARB hPbuffer, HDC hDC) {
+static int GL_BINDING_CALL Debug_wglReleasePbufferDCARB(HPBUFFERARB hPbuffer,
+                                                        HDC hDC) {
   GL_SERVICE_LOG("wglReleasePbufferDCARB"
                  << "(" << hPbuffer << ", " << hDC << ")");
   int result = g_driver_wgl.debug_fn.wglReleasePbufferDCARBFn(hPbuffer, hDC);

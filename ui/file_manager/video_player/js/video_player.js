@@ -27,7 +27,21 @@ function FullWindowVideoControls(
   this.updateStyle();
   window.addEventListener('resize', this.updateStyle.wrap(this));
   document.addEventListener('keydown', function(e) {
-    switch (e.keyIdentifier) {
+    switch (util.getKeyModifiers(e) + e.keyIdentifier) {
+      // Handle debug shortcut keys.
+      case 'Ctrl-Shift-U+0049': // Ctrl+Shift+I
+        chrome.fileManagerPrivate.openInspector('normal');
+        break;
+      case 'Ctrl-Shift-U+004A': // Ctrl+Shift+J
+        chrome.fileManagerPrivate.openInspector('console');
+        break;
+      case 'Ctrl-Shift-U+0043': // Ctrl+Shift+C
+        chrome.fileManagerPrivate.openInspector('element');
+        break;
+      case 'Ctrl-Shift-U+0042': // Ctrl+Shift+B
+        chrome.fileManagerPrivate.openInspector('background');
+        break;
+
       case 'U+0020': // Space
       case 'MediaPlayPause':
         this.togglePlayStateWithFeedback();
@@ -169,7 +183,7 @@ function VideoPlayer() {
   this.videoElement_ = null;
 
   /**
-   * @type {Array.<!FileEntry>}
+   * @type {Array<!FileEntry>}
    * @private
    */
   this.videos_ = null;
@@ -196,7 +210,7 @@ VideoPlayer.prototype = /** @struct */ {
 /**
  * Initializes the video player window. This method must be called after DOM
  * initialization.
- * @param {!Array.<!FileEntry>} videos List of videos.
+ * @param {!Array<!FileEntry>} videos List of videos.
  */
 VideoPlayer.prototype.prepare = function(videos) {
   this.videos_ = videos;
@@ -561,7 +575,7 @@ VideoPlayer.prototype.onCastSelected_ = function(cast) {
 
 /**
  * Set the list of casts.
- * @param {Array.<Object>} casts List of casts.
+ * @param {Array<Object>} casts List of casts.
  */
 VideoPlayer.prototype.setCastList = function(casts) {
   var videoPlayerElement = queryRequiredElement(document, '#video-player');

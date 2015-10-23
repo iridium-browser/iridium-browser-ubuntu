@@ -16,7 +16,7 @@ function openSingleImage(testVolumeName, volumeType) {
   var launchedPromise = launch(testVolumeName, volumeType, [ENTRIES.desktop]);
   return launchedPromise.then(function(args) {
     var WIDTH = 880;
-    var HEIGHT = 570;
+    var HEIGHT = 603; /* Inner height 570px + native header 33px. */
     var appId = args.appId;
     var resizedWindowPromise = gallery.callRemoteTestUtil(
         'resizeWindow', appId, [WIDTH, HEIGHT]
@@ -67,20 +67,20 @@ function openSingleImage(testVolumeName, volumeType) {
  * @return {Promise} Promise to be fulfilled with on success.
  */
 function openMultipleImages(testVolumeName, volumeType) {
-  var testEntries = [ENTRIES.desktop, ENTRIES.image2, ENTRIES.image3];
+  var testEntries = [ENTRIES.desktop, ENTRIES.image3];
   var launchedPromise = launch(testVolumeName, volumeType, testEntries);
   return launchedPromise.then(function(args) {
     var appId = args.appId;
     var rootElementPromise =
-        gallery.waitForElement(appId, '.gallery[mode="mosaic"]');
+        gallery.waitForElement(appId, '.gallery[mode="thumbnail"]');
     var tilesPromise = repeatUntil(function() {
       return gallery.callRemoteTestUtil(
           'queryAllElements',
           appId,
-          ['.mosaic-tile']
+          ['.thumbnail-view .thumbnail']
       ).then(function(tiles) {
-        if (tiles.length !== 3)
-          return pending('The number of tiles is expected 3, but is %d',
+        if (tiles.length !== 2)
+          return pending('The number of tiles is expected 2, but is %d',
                          tiles.length);
         return tiles;
       });

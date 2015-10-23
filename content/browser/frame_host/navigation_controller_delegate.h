@@ -38,7 +38,6 @@ class NavigationControllerDelegate {
   virtual const std::string& GetContentsMimeType() const = 0;
   virtual void NotifyNavigationStateChanged(InvalidateTypes changed_flags) = 0;
   virtual void Stop() = 0;
-  virtual SiteInstance* GetPendingSiteInstance() const = 0;
   virtual int32 GetMaxPageID() = 0;
   virtual int32 GetMaxPageIDForSiteInstance(SiteInstance* site_instance) = 0;
   virtual bool IsLoading() const = 0;
@@ -51,8 +50,6 @@ class NavigationControllerDelegate {
   virtual void NotifyBeforeFormRepostWarningShow() = 0;
   virtual void NotifyNavigationEntryCommitted(
       const LoadCommittedDetails& load_details) = 0;
-  virtual bool NavigateToPendingEntry(
-      NavigationController::ReloadType reload_type) = 0;
   virtual void SetHistoryOffsetAndLength(int history_offset,
                                          int history_length) = 0;
   virtual void CopyMaxPageIDsFrom(WebContents* web_contents) = 0;

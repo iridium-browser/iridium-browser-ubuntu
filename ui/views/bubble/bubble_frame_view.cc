@@ -18,6 +18,7 @@
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/image_view.h"
+#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/window/client_view.h"
@@ -122,8 +123,8 @@ gfx::Rect BubbleFrameView::GetBoundsForClientView() const {
 
 gfx::Rect BubbleFrameView::GetWindowBoundsForClientBounds(
     const gfx::Rect& client_bounds) const {
-  return const_cast<BubbleFrameView*>(this)->GetUpdatedWindowBounds(
-      gfx::Rect(), client_bounds.size(), false);
+  gfx::Size size(GetSizeForClientSize(client_bounds.size()));
+  return bubble_border_->GetBounds(gfx::Rect(), size);
 }
 
 int BubbleFrameView::NonClientHitTest(const gfx::Point& point) {
@@ -210,11 +211,40 @@ gfx::Insets BubbleFrameView::GetInsets() const {
 }
 
 gfx::Size BubbleFrameView::GetPreferredSize() const {
-  return GetSizeForClientSize(GetWidget()->client_view()->GetPreferredSize());
+  // Get the preferred size of the client area.
+  gfx::Size client_size = GetWidget()->client_view()->GetPreferredSize();
+  // Expand it to include the bubble border and space for the arrow.
+  return GetWindowBoundsForClientBounds(gfx::Rect(client_size)).size();
 }
 
 gfx::Size BubbleFrameView::GetMinimumSize() const {
-  return GetSizeForClientSize(GetWidget()->client_view()->GetMinimumSize());
+  // Get the minimum size of the client area.
+  gfx::Size client_size = GetWidget()->client_view()->GetMinimumSize();
+  // Expand it to include the bubble border and space for the arrow.
+  return GetWindowBoundsForClientBounds(gfx::Rect(client_size)).size();
+}
+
+gfx::Size BubbleFrameView::GetMaximumSize() const {
+#if defined(OS_WIN)
+  // On Windows, this causes problems, so do not set a maximum size (it doesn't
+  // take the drop shadow area into account, resulting in a too-small window;
+  // see http://crbug.com/506206). This isn't necessary on Windows anyway, since
+  // the OS doesn't give the user controls to resize a bubble.
+  return gfx::Size();
+#else
+#if defined(OS_MACOSX)
+  // Allow BubbleFrameView dialogs to be resizable on Mac.
+  if (GetWidget()->widget_delegate()->CanResize()) {
+    gfx::Size client_size = GetWidget()->client_view()->GetMaximumSize();
+    if (client_size.IsEmpty())
+      return client_size;
+    return GetWindowBoundsForClientBounds(gfx::Rect(client_size)).size();
+  }
+#endif  // OS_MACOSX
+  // Non-dialog bubbles should be non-resizable, so its max size is its
+  // preferred size.
+  return GetPreferredSize();
+#endif
 }
 
 void BubbleFrameView::Layout() {
@@ -332,7 +362,8 @@ gfx::Rect BubbleFrameView::GetUpdatedWindowBounds(const gfx::Rect& anchor_rect,
   return bubble_border_->GetBounds(anchor_rect, size);
 }
 
-gfx::Rect BubbleFrameView::GetAvailableScreenBounds(const gfx::Rect& rect) {
+gfx::Rect BubbleFrameView::GetAvailableScreenBounds(
+    const gfx::Rect& rect) const {
   // The bubble attempts to fit within the current screen bounds.
   // TODO(scottmg): Native is wrong. http://crbug.com/133312
   return gfx::Screen::GetNativeScreen()->GetDisplayNearestPoint(
@@ -343,8 +374,8 @@ bool BubbleFrameView::IsCloseButtonVisible() const {
   return close_->visible();
 }
 
-gfx::Rect BubbleFrameView::GetCloseButtonBounds() const {
-  return close_->bounds();
+gfx::Rect BubbleFrameView::GetCloseButtonMirroredBounds() const {
+  return close_->GetMirroredBounds();
 }
 
 void BubbleFrameView::MirrorArrowIfOffScreen(

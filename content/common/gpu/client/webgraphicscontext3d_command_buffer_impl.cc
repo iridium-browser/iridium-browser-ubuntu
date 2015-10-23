@@ -145,9 +145,6 @@ bool WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL() {
     return false;
   }
 
-  if (gl_ && attributes_.webGL)
-    gl_->EnableFeatureCHROMIUM("webgl_enable_glsl_webgl_validation");
-
   command_buffer_->SetContextLostCallback(
       base::Bind(&WebGraphicsContext3DCommandBufferImpl::OnContextLost,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -171,7 +168,7 @@ bool WebGraphicsContext3DCommandBufferImpl::InitializeCommandBuffer(
   CommandBufferProxyImpl* share_group_command_buffer = NULL;
 
   if (share_context) {
-    share_group_command_buffer = share_context->command_buffer_.get();
+    share_group_command_buffer = share_context->GetCommandBufferProxy();
   }
 
   ::gpu::gles2::ContextCreationAttribHelper attribs_for_gles2;
@@ -184,19 +181,15 @@ bool WebGraphicsContext3DCommandBufferImpl::InitializeCommandBuffer(
 
   // Create a proxy to a command buffer in the GPU process.
   if (onscreen) {
-    command_buffer_.reset(host_->CreateViewCommandBuffer(
-        surface_id_,
-        share_group_command_buffer,
-        attribs,
-        active_url_,
-        gpu_preference_));
+    command_buffer_ =
+        host_->CreateViewCommandBuffer(surface_id_, share_group_command_buffer,
+                                       GpuChannelHost::kDefaultStreamId,
+                                       attribs, active_url_, gpu_preference_);
   } else {
-    command_buffer_.reset(host_->CreateOffscreenCommandBuffer(
-        gfx::Size(1, 1),
-        share_group_command_buffer,
-        attribs,
-        active_url_,
-        gpu_preference_));
+    command_buffer_ = host_->CreateOffscreenCommandBuffer(
+        gfx::Size(1, 1), share_group_command_buffer,
+        GpuChannelHost::kDefaultStreamId, attribs, active_url_,
+        gpu_preference_);
   }
 
   if (!command_buffer_) {
@@ -258,14 +251,10 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(bool onscreen) {
   const bool bind_generates_resources = false;
   const bool support_client_side_arrays = false;
 
-  real_gl_.reset(
-      new gpu::gles2::GLES2Implementation(gles2_helper_.get(),
-                                          gles2_share_group.get(),
-                                          transfer_buffer_.get(),
-                                          bind_generates_resources,
-                                          lose_context_when_out_of_memory_,
-                                          support_client_side_arrays,
-                                          command_buffer_.get()));
+  real_gl_.reset(new gpu::gles2::GLES2Implementation(
+      gles2_helper_.get(), gles2_share_group.get(), transfer_buffer_.get(),
+      bind_generates_resources, lose_context_when_out_of_memory_,
+      support_client_side_arrays, command_buffer_.get()));
   setGLInterface(real_gl_.get());
 
   if (!real_gl_->Initialize(
@@ -321,12 +310,7 @@ void WebGraphicsContext3DCommandBufferImpl::Destroy() {
   transfer_buffer_.reset();
   gles2_helper_.reset();
   real_gl_.reset();
-
-  if (command_buffer_) {
-    if (host_.get())
-      host_->DestroyCommandBuffer(command_buffer_.release());
-    command_buffer_.reset();
-  }
+  command_buffer_.reset();
 
   host_ = NULL;
 }
@@ -334,21 +318,6 @@ void WebGraphicsContext3DCommandBufferImpl::Destroy() {
 gpu::ContextSupport*
 WebGraphicsContext3DCommandBufferImpl::GetContextSupport() {
   return real_gl_.get();
-}
-
-bool WebGraphicsContext3DCommandBufferImpl::isContextLost() {
-  return initialize_failed_ ||
-      (command_buffer_ && IsCommandBufferContextLost()) ||
-      context_lost_reason_ != GL_NO_ERROR;
-}
-
-WGC3Denum WebGraphicsContext3DCommandBufferImpl::getGraphicsResetStatusARB() {
-  if (IsCommandBufferContextLost() &&
-      context_lost_reason_ == GL_NO_ERROR) {
-    return GL_UNKNOWN_CONTEXT_RESET_ARB;
-  }
-
-  return context_lost_reason_;
 }
 
 bool WebGraphicsContext3DCommandBufferImpl::IsCommandBufferContextLost() {
@@ -385,33 +354,9 @@ WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
       share_context);
 }
 
-namespace {
-
-WGC3Denum convertReason(gpu::error::ContextLostReason reason) {
-  switch (reason) {
-  case gpu::error::kGuilty:
-    return GL_GUILTY_CONTEXT_RESET_ARB;
-  case gpu::error::kInnocent:
-    return GL_INNOCENT_CONTEXT_RESET_ARB;
-  case gpu::error::kOutOfMemory:
-  case gpu::error::kMakeCurrentFailed:
-  case gpu::error::kUnknown:
-  case gpu::error::kGpuChannelLost:
-    return GL_UNKNOWN_CONTEXT_RESET_ARB;
-  }
-
-  NOTREACHED();
-  return GL_UNKNOWN_CONTEXT_RESET_ARB;
-}
-
-}  // anonymous namespace
-
 void WebGraphicsContext3DCommandBufferImpl::OnContextLost() {
-  context_lost_reason_ =
-      convertReason(command_buffer_->GetLastState().context_lost_reason);
-  if (context_lost_callback_) {
+  if (context_lost_callback_)
     context_lost_callback_->onContextLost();
-  }
 
   share_group_->RemoveAllContexts();
 

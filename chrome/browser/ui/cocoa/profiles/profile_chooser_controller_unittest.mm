@@ -15,17 +15,19 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/services/gcm/fake_gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
+#include "chrome/browser/signin/account_fetcher_service_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
-#include "chrome/browser/signin/fake_account_tracker_service.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
+#include "chrome/browser/signin/fake_account_fetcher_service_builder.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/signin/core/browser/fake_account_fetcher_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -33,6 +35,7 @@
 const std::string kGaiaId = "gaiaid-user@gmail.com";
 const std::string kEmail = "user@gmail.com";
 const std::string kSecondaryEmail = "user2@gmail.com";
+const std::string kSecondaryGaiaId = "gaiaid-user2@gmail.com";
 const std::string kLoginToken = "oauth2_login_token";
 
 class ProfileChooserControllerTest : public CocoaProfileTest {
@@ -43,8 +46,8 @@ class ProfileChooserControllerTest : public CocoaProfileTest {
         std::make_pair(ProfileOAuth2TokenServiceFactory::GetInstance(),
                        BuildFakeProfileOAuth2TokenService));
     factories.push_back(
-        std::make_pair(AccountTrackerServiceFactory::GetInstance(),
-                       FakeAccountTrackerService::Build));
+        std::make_pair(AccountFetcherServiceFactory::GetInstance(),
+                       FakeAccountFetcherServiceBuilder::BuildForTests));
     AddTestingFactories(factories);
   }
 
@@ -401,14 +404,22 @@ TEST_F(ProfileChooserControllerTest, AccountManagementLayout) {
   // should be used.
   cache->SetProfileIsUsingDefaultNameAtIndex(0, false);
 
-  // Set up the signin manager and the OAuth2Tokens.
+  // Set up the AccountTrackerService, signin manager and the OAuth2Tokens.
   Profile* profile = browser()->profile();
-  SigninManagerFactory::GetForProfile(profile)->
-      SetAuthenticatedAccountInfo(kEmail, kEmail);
-  ProfileOAuth2TokenServiceFactory::GetForProfile(profile)->
-      UpdateCredentials(kEmail, kLoginToken);
-  ProfileOAuth2TokenServiceFactory::GetForProfile(profile)->
-      UpdateCredentials(kSecondaryEmail, kLoginToken);
+  AccountTrackerServiceFactory::GetForProfile(profile)
+      ->SeedAccountInfo(kGaiaId, kEmail);
+  AccountTrackerServiceFactory::GetForProfile(profile)
+      ->SeedAccountInfo(kSecondaryGaiaId, kSecondaryEmail);
+  SigninManagerFactory::GetForProfile(profile)
+      ->SetAuthenticatedAccountInfo(kGaiaId, kEmail);
+  std::string account_id =
+      SigninManagerFactory::GetForProfile(profile)->GetAuthenticatedAccountId();
+  ProfileOAuth2TokenServiceFactory::GetForProfile(profile)
+      ->UpdateCredentials(account_id, kLoginToken);
+  account_id = AccountTrackerServiceFactory::GetForProfile(profile)
+                   ->PickAccountIdForAccount(kSecondaryGaiaId, kSecondaryEmail);
+  ProfileOAuth2TokenServiceFactory::GetForProfile(profile)
+      ->UpdateCredentials(account_id, kLoginToken);
 
   StartProfileChooserController();
   [controller() initMenuContentsWithView:

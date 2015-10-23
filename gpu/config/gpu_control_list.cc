@@ -25,7 +25,9 @@ bool ProcessVersionString(const std::string& version_string,
                           char splitter,
                           std::vector<std::string>* version) {
   DCHECK(version);
-  base::SplitString(version_string, splitter, version);
+  *version = base::SplitString(
+      version_string, std::string(1, splitter),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (version->size() == 0)
     return false;
   // If the splitter is '-', we assume it's a date with format "mm-dd-yyyy";
@@ -723,6 +725,12 @@ GpuControlList::GpuControlListEntry::GetEntryFromValue(
     dictionary_entry_count++;
   }
 
+  bool in_process_gpu;
+  if (value->GetBoolean("in_process_gpu", &in_process_gpu)) {
+    entry->SetInProcessGPUInfo(in_process_gpu);
+    dictionary_entry_count++;
+  }
+
   if (top_level) {
     const base::ListValue* feature_value = NULL;
     if (value->GetList("features", &feature_value)) {
@@ -980,6 +988,10 @@ void GpuControlList::GpuControlListEntry::SetDirectRenderingInfo(bool value) {
   direct_rendering_info_.reset(new BoolInfo(value));
 }
 
+void GpuControlList::GpuControlListEntry::SetInProcessGPUInfo(bool value) {
+  in_process_gpu_info_.reset(new BoolInfo(value));
+}
+
 bool GpuControlList::GpuControlListEntry::SetFeatures(
     const std::vector<std::string>& feature_strings,
     const FeatureMap& feature_map,
@@ -1018,8 +1030,8 @@ bool GpuControlList::GpuControlListEntry::GLVersionInfoMismatch(
   if (gl_version_info_.get() == NULL && gl_type_ == kGLTypeNone)
     return false;
 
-  std::vector<std::string> segments;
-  base::SplitString(gl_version, ' ', &segments);
+  std::vector<std::string> segments = base::SplitString(
+      gl_version, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   std::string number;
   GLType gl_type = kGLTypeNone;
   if (segments.size() > 2 &&
@@ -1029,7 +1041,8 @@ bool GpuControlList::GpuControlListEntry::GLVersionInfoMismatch(
 
     gl_type = kGLTypeGLES;
     if (segments.size() > 3 &&
-        StartsWithASCII(segments[3], "(ANGLE", false)) {
+        base::StartsWith(segments[3], "(ANGLE",
+                         base::CompareCase::INSENSITIVE_ASCII)) {
       gl_type = kGLTypeANGLE;
     }
   } else {
@@ -1242,6 +1255,9 @@ bool GpuControlList::GpuControlListEntry::Contains(
   if (direct_rendering_info_.get() != NULL &&
       !direct_rendering_info_->Contains(gpu_info.direct_rendering))
     return false;
+  if (in_process_gpu_info_.get() != NULL &&
+      !in_process_gpu_info_->Contains(gpu_info.in_process_gpu))
+    return false;
   if (!cpu_brand_.empty()) {
     base::CPU cpu_info;
     if (StringMismatch(cpu_info.cpu_brand(), cpu_brand_))
@@ -1250,14 +1266,15 @@ bool GpuControlList::GpuControlListEntry::Contains(
 
   for (size_t i = 0; i < exceptions_.size(); ++i) {
     if (exceptions_[i]->Contains(os_type, os_version, gpu_info) &&
-        !exceptions_[i]->NeedsMoreInfo(gpu_info))
+        !exceptions_[i]->NeedsMoreInfo(gpu_info, true))
       return false;
   }
   return true;
 }
 
 bool GpuControlList::GpuControlListEntry::NeedsMoreInfo(
-    const GPUInfo& gpu_info) const {
+    const GPUInfo& gpu_info,
+    bool consider_exceptions) const {
   // We only check for missing info that might be collected with a gl context.
   // If certain info is missing due to some error, say, we fail to collect
   // vendor_id/device_id, then even if we launch GPU process and create a gl
@@ -1270,10 +1287,14 @@ bool GpuControlList::GpuControlListEntry::NeedsMoreInfo(
     return true;
   if (!gl_renderer_info_.empty() && gpu_info.gl_renderer.empty())
     return true;
-  for (size_t i = 0; i < exceptions_.size(); ++i) {
-    if (exceptions_[i]->NeedsMoreInfo(gpu_info))
-      return true;
+
+  if (consider_exceptions) {
+    for (size_t i = 0; i < exceptions_.size(); ++i) {
+      if (exceptions_[i]->NeedsMoreInfo(gpu_info, consider_exceptions))
+        return true;
+    }
   }
+
   return false;
 }
 
@@ -1337,8 +1358,7 @@ GpuControlList::~GpuControlList() {
 bool GpuControlList::LoadList(
     const std::string& json_context,
     GpuControlList::OsFilter os_filter) {
-  scoped_ptr<base::Value> root;
-  root.reset(base::JSONReader::Read(json_context));
+  scoped_ptr<base::Value> root = base::JSONReader::Read(json_context);
   if (root.get() == NULL || !root->IsType(base::Value::TYPE_DICTIONARY))
     return false;
 
@@ -1396,7 +1416,12 @@ std::set<int> GpuControlList::MakeDecision(
   std::set<int> features;
 
   needs_more_info_ = false;
-  std::set<int> possible_features;
+  // Has all features permanently in the list without any possibility of
+  // removal in the future (subset of "features" set).
+  std::set<int> permanent_features;
+  // Has all features absent from "features" set that could potentially be
+  // included later with more information.
+  std::set<int> potential_features;
 
   if (os == kOsAny)
     os = GetOsType();
@@ -1404,23 +1429,38 @@ std::set<int> GpuControlList::MakeDecision(
     os_version = base::SysInfo::OperatingSystemVersion();
 
   for (size_t i = 0; i < entries_.size(); ++i) {
-    if (entries_[i]->Contains(os, os_version, gpu_info)) {
-      bool needs_more_info = entries_[i]->NeedsMoreInfo(gpu_info);
-      if (!entries_[i]->disabled()) {
+    ScopedGpuControlListEntry entry = entries_[i];
+    if (entry->Contains(os, os_version, gpu_info)) {
+      bool needs_more_info_main = entry->NeedsMoreInfo(gpu_info, false);
+      bool needs_more_info_exception = entry->NeedsMoreInfo(gpu_info, true);
+
+      if (!entry->disabled()) {
         if (control_list_logging_enabled_)
-          entries_[i]->LogControlListMatch(control_list_logging_name_);
-        MergeFeatureSets(&possible_features, entries_[i]->features());
-        if (!needs_more_info)
-          MergeFeatureSets(&features, entries_[i]->features());
+          entry->LogControlListMatch(control_list_logging_name_);
+        // Only look at main entry info when deciding what to add to "features"
+        // set. If we don't have enough info for an exception, it's safer if we
+        // just ignore the exception and assume the exception doesn't apply.
+        for (std::set<int>::const_iterator iter = entry->features().begin();
+             iter != entry->features().end(); ++iter) {
+          if (needs_more_info_main) {
+            if (!features.count(*iter))
+              potential_features.insert(*iter);
+          } else {
+            features.insert(*iter);
+            potential_features.erase(*iter);
+            if (!needs_more_info_exception)
+              permanent_features.insert(*iter);
+          }
+        }
       }
-      if (!needs_more_info)
-        active_entries_.push_back(entries_[i]);
+
+      if (!needs_more_info_main)
+        active_entries_.push_back(entry);
     }
   }
 
-  if (possible_features.size() > features.size())
-    needs_more_info_ = true;
-
+  needs_more_info_ = permanent_features.size() < features.size() ||
+                     !potential_features.empty();
   return features;
 }
 

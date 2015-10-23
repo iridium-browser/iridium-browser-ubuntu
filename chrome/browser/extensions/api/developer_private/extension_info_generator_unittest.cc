@@ -146,15 +146,15 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
     std::string actual_string;
     for (base::DictionaryValue::Iterator field(*expected_output_data);
          !field.IsAtEnd(); field.Advance()) {
-      const base::Value* expected_value = &field.value();
+      const base::Value& expected_value = field.value();
       base::Value* actual_value = nullptr;
       EXPECT_TRUE(actual_output_data->Get(field.key(), &actual_value)) <<
           field.key() + " is missing" + paths_details;
       if (!actual_value)
         continue;
-      if (!actual_value->Equals(expected_value)) {
+      if (!actual_value->Equals(&expected_value)) {
         base::JSONWriter::Write(expected_value, &expected_string);
-        base::JSONWriter::Write(actual_value, &actual_string);
+        base::JSONWriter::Write(*actual_value, &actual_string);
         EXPECT_EQ(expected_string, actual_string) <<
             field.key() << paths_details;
       }
@@ -289,10 +289,10 @@ TEST_F(ExtensionInfoGeneratorUnitTest, GenerateExtensionsJSONData) {
   InspectableViewsFinder::ViewList views;
   views.push_back(InspectableViewsFinder::ConstructView(
       GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/bar.html"),
-      42, 88, false, VIEW_TYPE_TAB_CONTENTS));
+      42, 88, true, false, VIEW_TYPE_TAB_CONTENTS));
   views.push_back(InspectableViewsFinder::ConstructView(
       GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/dog.html"),
-      0, 0, false, VIEW_TYPE_TAB_CONTENTS));
+      0, 0, false, true, VIEW_TYPE_TAB_CONTENTS));
 
   base::FilePath expected_outputs_path =
       data_dir().AppendASCII("api_test")

@@ -45,18 +45,6 @@ namespace ui {
 // Returns true if the system supports XINPUT2.
 UI_BASE_EXPORT bool IsXInput2Available();
 
-// X shared memory comes in three flavors:
-// 1) No SHM support,
-// 2) SHM putimage,
-// 3) SHM pixmaps + putimage.
-enum SharedMemorySupport {
-  SHARED_MEMORY_NONE,
-  SHARED_MEMORY_PUTIMAGE,
-  SHARED_MEMORY_PIXMAP
-};
-// Return the shared memory type of our X connection.
-UI_BASE_EXPORT SharedMemorySupport QuerySharedMemorySupport(XDisplay* dpy);
-
 // Return true iff the display supports Xrender
 UI_BASE_EXPORT bool QueryRenderSupport(XDisplay* dpy);
 
@@ -314,25 +302,6 @@ class UI_BASE_EXPORT XRefcountedMemory : public base::RefCountedMemory {
   size_t length_;
 
   DISALLOW_COPY_AND_ASSIGN(XRefcountedMemory);
-};
-
-// Keeps track of an image returned by an X function (e.g. XGetImage) and
-// makes sure it's XDestroyImage'd.
-class UI_BASE_EXPORT XScopedImage {
- public:
-  explicit XScopedImage(XImage* image) : image_(image) {}
-  ~XScopedImage();
-
-  XImage* get() const { return image_; }
-
-  XImage* operator->() const { return image_; }
-
-  void reset(XImage* image);
-
- private:
-  XImage* image_;
-
-  DISALLOW_COPY_AND_ASSIGN(XScopedImage);
 };
 
 // Keeps track of a cursor returned by an X function and makes sure it's

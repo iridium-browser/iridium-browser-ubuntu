@@ -11,6 +11,8 @@ import android.os.Build;
 import android.os.StrictMode;
 import android.util.Log;
 
+import org.chromium.base.annotations.CalledByNative;
+
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.regex.Matcher;
@@ -134,6 +136,6 @@ public class SysUtils {
             return false;
         }
 
-        return ramSizeMB < ANDROID_LOW_MEMORY_DEVICE_THRESHOLD_MB;
+        return ramSizeMB <= ANDROID_LOW_MEMORY_DEVICE_THRESHOLD_MB;
     }
 }

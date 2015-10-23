@@ -11,17 +11,21 @@
 #include "webrtc/modules/remote_bitrate_estimator/test/estimators/send_side.h"
 
 #include "webrtc/base/logging.h"
+#include "webrtc/modules/remote_bitrate_estimator/remote_bitrate_estimator_abs_send_time.h"
 #include "webrtc/modules/remote_bitrate_estimator/test/bwe_test_logging.h"
 
 namespace webrtc {
 namespace testing {
 namespace bwe {
 
+const int kFeedbackIntervalMs = 50;
+
 FullBweSender::FullBweSender(int kbps, BitrateObserver* observer, Clock* clock)
     : bitrate_controller_(
           BitrateController::CreateBitrateController(clock, observer)),
-      rbe_(AbsoluteSendTimeRemoteBitrateEstimatorFactory()
-               .Create(this, clock, kAimdControl, 1000 * kMinBitrateKbps)),
+      rbe_(new RemoteBitrateEstimatorAbsSendTime(this,
+                                                 clock,
+                                                 1000 * kMinBitrateKbps)),
       feedback_observer_(bitrate_controller_->CreateRtcpBandwidthObserver()),
       clock_(clock),
       send_time_history_(10000),
@@ -38,7 +42,7 @@ FullBweSender::~FullBweSender() {
 }
 
 int FullBweSender::GetFeedbackIntervalMs() const {
-  return 100;
+  return kFeedbackIntervalMs;
 }
 
 void FullBweSender::GiveFeedback(const FeedbackPacket& feedback) {
@@ -57,7 +61,7 @@ void FullBweSender::GiveFeedback(const FeedbackPacket& feedback) {
 
   int64_t rtt_ms =
       clock_->TimeInMilliseconds() - feedback.latest_send_time_ms();
-  rbe_->OnRttUpdate(rtt_ms);
+  rbe_->OnRttUpdate(rtt_ms, rtt_ms);
   BWE_TEST_LOGGING_PLOT(1, "RTT", clock_->TimeInMilliseconds(), rtt_ms);
 
   rbe_->IncomingPacketFeedbackVector(packet_feedback_vector);
@@ -123,12 +127,15 @@ SendSideBweReceiver::~SendSideBweReceiver() {
 void SendSideBweReceiver::ReceivePacket(int64_t arrival_time_ms,
                                         const MediaPacket& media_packet) {
   packet_feedback_vector_.push_back(PacketInfo(
-      arrival_time_ms, media_packet.sender_timestamp_us() / 1000,
-      media_packet.header().sequenceNumber, media_packet.payload_size()));
+      arrival_time_ms, media_packet.sender_timestamp_ms(),
+      media_packet.header().sequenceNumber, media_packet.payload_size(), true));
+
+  // Log received packet information.
+  BweReceiver::ReceivePacket(arrival_time_ms, media_packet);
 }
 
 FeedbackPacket* SendSideBweReceiver::GetFeedback(int64_t now_ms) {
-  if (now_ms - last_feedback_ms_ < 100)
+  if (now_ms - last_feedback_ms_ < kFeedbackIntervalMs)
     return NULL;
   last_feedback_ms_ = now_ms;
   int64_t corrected_send_time_ms =

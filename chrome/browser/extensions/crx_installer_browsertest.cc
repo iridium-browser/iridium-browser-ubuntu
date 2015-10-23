@@ -544,7 +544,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, KioskOnlyTest) {
 
 #if defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, InstallToSharedLocation) {
-  base::ShadowingAtExitManager at_exit_manager;
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       chromeos::switches::kEnableExtensionAssetsSharing);
   base::ScopedTempDir cache_dir;
@@ -584,8 +583,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, DoNotSync) {
   const ExtensionPrefs* extension_prefs =
       ExtensionPrefs::Get(browser()->profile());
   EXPECT_TRUE(extension_prefs->DoNotSync(crx_installer->extension()->id()));
-  EXPECT_FALSE(extensions::util::ShouldSyncApp(crx_installer->extension(),
-                                               browser()->profile()));
+  EXPECT_FALSE(extensions::util::ShouldSync(crx_installer->extension(),
+                                            browser()->profile()));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, ManagementPolicy) {

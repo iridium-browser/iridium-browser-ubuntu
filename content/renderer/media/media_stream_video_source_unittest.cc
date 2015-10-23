@@ -30,8 +30,7 @@ ACTION_P(RunClosure, closure) {
   closure.Run();
 }
 
-class MediaStreamVideoSourceTest
-    : public ::testing::Test {
+class MediaStreamVideoSourceTest : public ::testing::Test {
  public:
   MediaStreamVideoSourceTest()
       : child_process_(new ChildProcess()),
@@ -42,13 +41,13 @@ class MediaStreamVideoSourceTest
         mock_source_(new MockMediaStreamVideoSource(true)) {
     media::VideoCaptureFormats formats;
     formats.push_back(media::VideoCaptureFormat(
-        gfx::Size(1280, 720), 30, media::PIXEL_FORMAT_I420));
+        gfx::Size(1280, 720), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
     formats.push_back(media::VideoCaptureFormat(
-        gfx::Size(640, 480), 30, media::PIXEL_FORMAT_I420));
+        gfx::Size(640, 480), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
     formats.push_back(media::VideoCaptureFormat(
-        gfx::Size(352, 288), 30, media::PIXEL_FORMAT_I420));
+        gfx::Size(352, 288), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
     formats.push_back(media::VideoCaptureFormat(
-        gfx::Size(320, 240), 30, media::PIXEL_FORMAT_I420));
+        gfx::Size(320, 240), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
     mock_source_->SetSupportedFormats(formats);
     webkit_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                               blink::WebMediaStreamSource::TypeVideo,
@@ -70,9 +69,8 @@ class MediaStreamVideoSourceTest
     bool enabled = true;
     return MediaStreamVideoTrack::CreateVideoTrack(
         mock_source_, constraints,
-        base::Bind(
-            &MediaStreamVideoSourceTest::OnConstraintsApplied,
-            base::Unretained(this)),
+        base::Bind(&MediaStreamVideoSourceTest::OnConstraintsApplied,
+                   base::Unretained(this)),
         enabled);
   }
 
@@ -175,8 +173,7 @@ class MediaStreamVideoSourceTest
         CreateTrackAndStartSource(constraints1, capture_width, capture_height,
                                   MediaStreamVideoSource::kDefaultFrameRate);
 
-    blink::WebMediaStreamTrack track2 =
-        CreateTrack("dummy", constraints2);
+    blink::WebMediaStreamTrack track2 = CreateTrack("dummy", constraints2);
 
     MockMediaStreamVideoSink sink1;
     MediaStreamVideoSink::AddToVideoTrack(&sink1, sink1.GetDeliverFrameCB(),
@@ -234,8 +231,8 @@ class MediaStreamVideoSourceTest
       track_to_release_.reset();
     }
   }
-  base::MessageLoopForUI message_loop_;
-  scoped_ptr<ChildProcess> child_process_;
+  const base::MessageLoopForUI message_loop_;
+  const scoped_ptr<ChildProcess> child_process_;
   blink::WebMediaStreamTrack track_to_release_;
   int number_of_successful_constraints_applied_;
   int number_of_failed_constraints_applied_;
@@ -314,8 +311,7 @@ TEST_F(MediaStreamVideoSourceTest, MandatoryMinVgaOptional720P) {
   factory.AddMandatory(MediaStreamVideoSource::kMinWidth, 640);
   factory.AddMandatory(MediaStreamVideoSource::kMinHeight, 480);
   factory.AddOptional(MediaStreamVideoSource::kMinWidth, 1280);
-  factory.AddOptional(MediaStreamVideoSource::kMinAspectRatio,
-                      1280.0 / 720);
+  factory.AddOptional(MediaStreamVideoSource::kMinAspectRatio, 1280.0 / 720);
 
   CreateTrackAndStartSource(factory.CreateWebMediaConstraints(), 1280, 720, 30);
 }
@@ -327,8 +323,7 @@ TEST_F(MediaStreamVideoSourceTest, MandatoryAspectRatio4To3) {
   MockMediaConstraintFactory factory;
   factory.AddMandatory(MediaStreamVideoSource::kMinWidth, 640);
   factory.AddMandatory(MediaStreamVideoSource::kMinHeight, 480);
-  factory.AddMandatory(MediaStreamVideoSource::kMaxAspectRatio,
-                       640.0 / 480);
+  factory.AddMandatory(MediaStreamVideoSource::kMaxAspectRatio, 640.0 / 480);
   factory.AddOptional(MediaStreamVideoSource::kMinWidth, 1280);
 
   TestSourceCropFrame(1280, 720,
@@ -432,9 +427,8 @@ TEST_F(MediaStreamVideoSourceTest, OptionalAspectRatioTooHigh) {
   mock_source()->CompleteGetSupportedFormats();
 
   const media::VideoCaptureFormat& format = mock_source()->start_format();
-  double aspect_ratio =
-      static_cast<double>(format.frame_size.width()) /
-      format.frame_size.height();
+  const double aspect_ratio = static_cast<double>(format.frame_size.width()) /
+                              format.frame_size.height();
   EXPECT_LT(aspect_ratio, 2);
 }
 
@@ -446,7 +440,7 @@ TEST_F(MediaStreamVideoSourceTest, DefaultCapability) {
       gfx::Size(MediaStreamVideoSource::kDefaultWidth,
                 MediaStreamVideoSource::kDefaultHeight),
       MediaStreamVideoSource::kDefaultFrameRate,
-      media::PIXEL_FORMAT_I420));
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
   mock_source()->SetSupportedFormats(formats);
 
   blink::WebMediaConstraints constraints;
@@ -483,8 +477,8 @@ TEST_F(MediaStreamVideoSourceTest, InvalidOptionalConstraint) {
 // constraints for screencast.
 TEST_F(MediaStreamVideoSourceTest, ScreencastResolutionWithConstraint) {
   media::VideoCaptureFormats formats;
-      formats.push_back(media::VideoCaptureFormat(
-          gfx::Size(480, 270), 30, media::PIXEL_FORMAT_I420));
+  formats.push_back(media::VideoCaptureFormat(
+      gfx::Size(480, 270), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
   mock_source()->SetSupportedFormats(formats);
   MockMediaConstraintFactory factory;
   factory.AddMandatory(MediaStreamVideoSource::kMaxWidth, 480);
@@ -724,9 +718,9 @@ TEST_F(MediaStreamVideoSourceTest, IsConstraintSupported) {
 TEST_F(MediaStreamVideoSourceTest, Use0FpsSupportedFormat) {
   media::VideoCaptureFormats formats;
   formats.push_back(media::VideoCaptureFormat(
-      gfx::Size(640, 480), 0.0f, media::PIXEL_FORMAT_I420));
+      gfx::Size(640, 480), 0.0f, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
   formats.push_back(media::VideoCaptureFormat(
-      gfx::Size(320, 240), 0.0f, media::PIXEL_FORMAT_I420));
+      gfx::Size(320, 240), 0.0f, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
   mock_source()->SetSupportedFormats(formats);
 
   blink::WebMediaConstraints constraints;
@@ -756,8 +750,8 @@ TEST_F(MediaStreamVideoSourceTest, MutedSource) {
   // the muted event faster. This is since the frame monitoring uses
   // PostDelayedTask that is dependent on the source frame rate.
   media::VideoCaptureFormats formats;
-      formats.push_back(media::VideoCaptureFormat(
-          gfx::Size(640, 480), 2000, media::PIXEL_FORMAT_I420));
+  formats.push_back(media::VideoCaptureFormat(
+      gfx::Size(640, 480), 2000, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420));
   SetSourceSupportedFormats(formats);
 
   MockMediaConstraintFactory factory;

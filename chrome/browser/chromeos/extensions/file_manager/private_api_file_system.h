@@ -9,10 +9,11 @@
 
 #include <string>
 
-#include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
+#include "components/drive/file_errors.h"
+#include "device/media_transfer_protocol/mtp_storage_info.pb.h"
 #include "extensions/browser/extension_function.h"
 #include "storage/browser/fileapi/file_system_url.h"
 
@@ -76,8 +77,9 @@ class FileManagerPrivateGrantAccessFunction : public UIThreadExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateGrantAccessFunction);
 };
 
-// Base class for FileManagerPrivateAddFileWatchFunction and
-// FileManagerPrivateRemoveFileWatchFunction. Although it's called "FileWatch",
+// Base class for FileManagerPrivateInternalAddFileWatchFunction and
+// FileManagerPrivateInternalRemoveFileWatchFunction. Although it's called
+// "FileWatch",
 // the class and its sub classes are used only for watching changes in
 // directories.
 class FileWatchFunctionBase : public LoggedAsyncExtensionFunction {
@@ -100,13 +102,14 @@ class FileWatchFunctionBase : public LoggedAsyncExtensionFunction {
 
 // Implements the chrome.fileManagerPrivate.addFileWatch method.
 // Starts watching changes in directories.
-class FileManagerPrivateAddFileWatchFunction : public FileWatchFunctionBase {
+class FileManagerPrivateInternalAddFileWatchFunction
+    : public FileWatchFunctionBase {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.addFileWatch",
-                             FILEMANAGERPRIVATE_ADDFILEWATCH)
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.addFileWatch",
+                             FILEMANAGERPRIVATEINTERNAL_ADDFILEWATCH)
 
  protected:
-  ~FileManagerPrivateAddFileWatchFunction() override {}
+  ~FileManagerPrivateInternalAddFileWatchFunction() override {}
 
   // FileWatchFunctionBase override.
   void PerformFileWatchOperation(
@@ -118,13 +121,14 @@ class FileManagerPrivateAddFileWatchFunction : public FileWatchFunctionBase {
 
 // Implements the chrome.fileManagerPrivate.removeFileWatch method.
 // Stops watching changes in directories.
-class FileManagerPrivateRemoveFileWatchFunction : public FileWatchFunctionBase {
+class FileManagerPrivateInternalRemoveFileWatchFunction
+    : public FileWatchFunctionBase {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.removeFileWatch",
-                             FILEMANAGERPRIVATE_REMOVEFILEWATCH)
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.removeFileWatch",
+                             FILEMANAGERPRIVATEINTERNAL_REMOVEFILEWATCH)
 
  protected:
-  ~FileManagerPrivateRemoveFileWatchFunction() override {}
+  ~FileManagerPrivateInternalRemoveFileWatchFunction() override {}
 
   // FileWatchFunctionBase override.
   void PerformFileWatchOperation(
@@ -151,19 +155,23 @@ class FileManagerPrivateGetSizeStatsFunction
                                       int64 bytes_total,
                                       int64 bytes_used);
 
+  void GetMtpAvailableSpaceCallback(const MtpStorageInfo& mtp_storage_info,
+                                    const bool error);
+
   void GetSizeStatsCallback(const uint64* total_size,
                             const uint64* remaining_size);
 };
 
 // Implements the chrome.fileManagerPrivate.validatePathNameLength method.
-class FileManagerPrivateValidatePathNameLengthFunction
+class FileManagerPrivateInternalValidatePathNameLengthFunction
     : public LoggedAsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.validatePathNameLength",
-                             FILEMANAGERPRIVATE_VALIDATEPATHNAMELENGTH)
+  DECLARE_EXTENSION_FUNCTION(
+      "fileManagerPrivateInternal.validatePathNameLength",
+      FILEMANAGERPRIVATEINTERNAL_VALIDATEPATHNAMELENGTH)
 
  protected:
-  ~FileManagerPrivateValidatePathNameLengthFunction() override {}
+  ~FileManagerPrivateInternalValidatePathNameLengthFunction() override {}
 
   void OnFilePathLimitRetrieved(size_t current_length, size_t max_length);
 
@@ -187,14 +195,14 @@ class FileManagerPrivateFormatVolumeFunction
 };
 
 // Implements the chrome.fileManagerPrivate.startCopy method.
-class FileManagerPrivateStartCopyFunction
+class FileManagerPrivateInternalStartCopyFunction
     : public LoggedAsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.startCopy",
-                             FILEMANAGERPRIVATE_STARTCOPY)
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.startCopy",
+                             FILEMANAGERPRIVATEINTERNAL_STARTCOPY)
 
  protected:
-  ~FileManagerPrivateStartCopyFunction() override {}
+  ~FileManagerPrivateInternalStartCopyFunction() override {}
 
   // AsyncExtensionFunction overrides.
   bool RunAsync() override;
@@ -248,16 +256,16 @@ class FileManagerPrivateInternalResolveIsolatedEntriesFunction
       file_manager::util::EntryDefinitionList> entry_definition_list);
 };
 
-class FileManagerPrivateComputeChecksumFunction
+class FileManagerPrivateInternalComputeChecksumFunction
     : public LoggedAsyncExtensionFunction {
  public:
-  FileManagerPrivateComputeChecksumFunction();
+  FileManagerPrivateInternalComputeChecksumFunction();
 
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.computeChecksum",
-                             FILEMANAGERPRIVATE_COMPUTECHECKSUM)
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.computeChecksum",
+                             FILEMANAGERPRIVATEINTERNAL_COMPUTECHECKSUM)
 
  protected:
-  ~FileManagerPrivateComputeChecksumFunction() override;
+  ~FileManagerPrivateInternalComputeChecksumFunction() override;
 
   // AsyncExtensionFunction overrides.
   bool RunAsync() override;
@@ -304,13 +312,14 @@ class FileManagerPrivateIsUMAEnabledFunction
 };
 
 // Implements the chrome.fileManagerPrivate.setEntryTag method.
-class FileManagerPrivateSetEntryTagFunction : public UIThreadExtensionFunction {
+class FileManagerPrivateInternalSetEntryTagFunction
+    : public UIThreadExtensionFunction {
  public:
-  FileManagerPrivateSetEntryTagFunction();
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.setEntryTag",
-                             FILEMANAGERPRIVATE_SETENTRYTAG)
+  FileManagerPrivateInternalSetEntryTagFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.setEntryTag",
+                             FILEMANAGERPRIVATEINTERNAL_SETENTRYTAG)
  protected:
-  ~FileManagerPrivateSetEntryTagFunction() override {}
+  ~FileManagerPrivateInternalSetEntryTagFunction() override {}
 
  private:
   const ChromeExtensionFunctionDetails chrome_details_;
@@ -319,7 +328,7 @@ class FileManagerPrivateSetEntryTagFunction : public UIThreadExtensionFunction {
   void OnSetEntryPropertyCompleted(drive::FileError result);
 
   ExtensionFunction::ResponseAction Run() override;
-  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateSetEntryTagFunction);
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateInternalSetEntryTagFunction);
 };
 
 }  // namespace extensions

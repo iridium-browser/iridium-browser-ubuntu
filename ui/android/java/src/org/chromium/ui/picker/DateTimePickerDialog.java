@@ -8,7 +8,6 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnClickListener;
-import android.text.format.Time;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.DatePicker;
@@ -16,7 +15,12 @@ import android.widget.DatePicker.OnDateChangedListener;
 import android.widget.TimePicker;
 import android.widget.TimePicker.OnTimeChangedListener;
 
+import org.chromium.base.VisibleForTesting;
 import org.chromium.ui.R;
+
+import java.util.Calendar;
+import java.util.GregorianCalendar;
+import java.util.TimeZone;
 
 public class DateTimePickerDialog extends AlertDialog implements OnClickListener,
         OnDateChangedListener, OnTimeChangedListener {
@@ -118,18 +122,25 @@ public class DateTimePickerDialog extends AlertDialog implements OnClickListener
 
     @Override
     public void onTimeChanged(TimePicker view, int hourOfDay, int minute) {
-        Time time = new Time();
-        time.set(0, mTimePicker.getCurrentMinute(),
-                mTimePicker.getCurrentHour(), mDatePicker.getDayOfMonth(),
-                mDatePicker.getMonth(), mDatePicker.getYear());
+        onTimeChangedInternal(mDatePicker.getYear(), mDatePicker.getMonth(),
+                mDatePicker.getDayOfMonth(), mTimePicker, mMinTimeMillis, mMaxTimeMillis);
+    }
+    @VisibleForTesting
+    public static void onTimeChangedInternal(int year, int month, int day, TimePicker picker,
+            long minTimeMillis, long maxTimeMillis) {
+        // Need to use a calendar object for UTC because we'd like to compare
+        // it with minimum/maximum values in UTC.
+        Calendar calendar = new GregorianCalendar(TimeZone.getTimeZone("UTC"));
+        calendar.clear();
+        calendar.set(year, month, day, picker.getCurrentHour(), picker.getCurrentMinute(), 0);
 
-        if (time.toMillis(true) < mMinTimeMillis) {
-            time.set(mMinTimeMillis);
-        } else if (time.toMillis(true) > mMaxTimeMillis) {
-            time.set(mMaxTimeMillis);
+        if (calendar.getTimeInMillis() < minTimeMillis) {
+            calendar.setTimeInMillis(minTimeMillis);
+        } else if (calendar.getTimeInMillis() > maxTimeMillis) {
+            calendar.setTimeInMillis(maxTimeMillis);
         }
-        mTimePicker.setCurrentHour(time.hour);
-        mTimePicker.setCurrentMinute(time.minute);
+        picker.setCurrentHour(calendar.get(Calendar.HOUR_OF_DAY));
+        picker.setCurrentMinute(calendar.get(Calendar.MINUTE));
     }
 
     /**

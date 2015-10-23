@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "content/public/renderer/render_process_observer.h"
@@ -33,6 +34,8 @@ class ChromeRenderProcessObserver : public content::RenderProcessObserver,
 
   static bool is_incognito_process() { return is_incognito_process_; }
 
+  bool webkit_initialized() const { return webkit_initialized_; }
+
   // Returns a pointer to the content setting rules owned by
   // |ChromeRenderProcessObserver|.
   const RendererContentSettingRules* content_setting_rules() const;
@@ -54,13 +57,14 @@ class ChromeRenderProcessObserver : public content::RenderProcessObserver,
   void OnGetCacheResourceStats();
   void OnSetFieldTrialGroup(const std::string& fiel_trial_name,
                             const std::string& group_name);
-  void OnGetV8HeapStats();
 
   static bool is_incognito_process_;
   scoped_ptr<content::ResourceDispatcherDelegate> resource_delegate_;
   RendererContentSettingRules content_setting_rules_;
 
   bool webkit_initialized_;
+
+  base::WeakPtrFactory<ChromeRenderProcessObserver> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderProcessObserver);
 };

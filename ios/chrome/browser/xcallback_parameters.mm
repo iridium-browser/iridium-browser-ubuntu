@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/xcallback_parameters.h"
 
+#include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 
@@ -39,6 +40,11 @@ NSString* const kCreateNewTabKey = @"createNewTab";
     _createNewTab = createNewTab;
   }
   return self;
+}
+
+- (instancetype)init {
+  NOTREACHED();
+  return nil;
 }
 
 - (NSString*)description {
@@ -83,11 +89,11 @@ NSString* const kCreateNewTabKey = @"createNewTab";
 #pragma mark - NSCopying Methods
 
 - (instancetype)copyWithZone:(NSZone*)zone {
-  XCallbackParameters* copy = [[[self class] allocWithZone:zone] init];
-  copy->_sourceAppId.reset([_sourceAppId copy]);
-  copy->_sourceAppName.reset([_sourceAppName copy]);
-  copy->_successURL = _successURL;
-  copy->_createNewTab = _createNewTab;
+  XCallbackParameters* copy =
+      [[[self class] allocWithZone:zone] initWithSourceAppId:_sourceAppId
+                                               sourceAppName:_sourceAppName
+                                                  successURL:_successURL
+                                                createNewTab:_createNewTab];
   return copy;
 }
 

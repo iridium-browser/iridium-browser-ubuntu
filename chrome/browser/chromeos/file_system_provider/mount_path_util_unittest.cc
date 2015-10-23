@@ -56,13 +56,6 @@ storage::FileSystemURL CreateFileSystemURL(
       base::FilePath(mount_path.BaseName().Append(relative_path)));
 }
 
-// Creates a Service instance. Used to be able to destroy the service in
-// TearDown().
-KeyedService* CreateService(content::BrowserContext* context) {
-  return new Service(Profile::FromBrowserContext(context),
-                     extensions::ExtensionRegistry::Get(context));
-}
-
 }  // namespace
 
 class FileSystemProviderMountPathUtilTest : public testing::Test {
@@ -78,16 +71,9 @@ class FileSystemProviderMountPathUtilTest : public testing::Test {
     user_manager_ = new FakeChromeUserManager();
     user_manager_enabler_.reset(new ScopedUserManagerEnabler(user_manager_));
     user_manager_->AddUser(profile_->GetProfileUserName());
-    ServiceFactory::GetInstance()->SetTestingFactory(profile_, &CreateService);
     file_system_provider_service_ = Service::Get(profile_);
     file_system_provider_service_->SetFileSystemFactoryForTesting(
         base::Bind(&FakeProvidedFileSystem::Create));
-  }
-
-  void TearDown() override {
-    // Setting the testing factory to NULL will destroy the created service
-    // associated with the testing profile.
-    ServiceFactory::GetInstance()->SetTestingFactory(profile_, NULL);
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
@@ -180,7 +166,7 @@ TEST_F(FileSystemProviderMountPathUtilTest, Parser_WrongUrl) {
   const ProvidedFileSystemInfo file_system_info(
       kExtensionId, MountOptions(kFileSystemId, kDisplayName),
       GetMountPath(profile_, kExtensionId, kFileSystemId),
-      false /* configurable */, extensions::SOURCE_FILE);
+      false /* configurable */, true /* watchable */, extensions::SOURCE_FILE);
 
   const base::FilePath kFilePath = base::FilePath(FILE_PATH_LITERAL("/hello"));
   const storage::FileSystemURL url =

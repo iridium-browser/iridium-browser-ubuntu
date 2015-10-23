@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 // Include test fixture.
-GEN_INCLUDE(['chrome/browser/resources/chromeos/chromevox/testing/' +
-    'chromevox_e2e_test_base.js']);
+GEN_INCLUDE(['chromevox_e2e_test_base.js']);
 
 /**
  * Base test fixture for ChromeVox Next end to end tests.
@@ -22,17 +21,22 @@ ChromeVoxNextE2ETest.prototype = {
   __proto__: ChromeVoxE2ETest.prototype,
 
   /**
-   * Launches a new tab with the given document, and runs callback when a load
-   * complete fires.
+   * Gets the desktop from the automation API and Launches a new tab with
+   * the given document, and runs |callback| when a load complete fires.
+   * Arranges to call |testDone()| after |callback| returns.
+   * NOTE: Callbacks creatd instide |opt_callback| must be wrapped with
+   * |this.newCallback| if passed to asynchonous calls.  Otherwise, the test
+   * will be finished prematurely.
    * @param {function() : void} doc Snippet wrapped inside of a function.
-   * @param {function()} opt_callback Called once the document is ready.
+   * @param {function(chrome.automation.AutomationNode)} callback
+   *     Called once the document is ready.
    */
   runWithLoadedTree: function(doc, callback) {
     callback = this.newCallback(callback);
     chrome.automation.getDesktop(function(r) {
       var listener = function(evt) {
-        if (!evt.target.attributes.url ||
-            evt.target.attributes.url.indexOf('test') == -1)
+        if (!evt.target.docUrl ||
+            evt.target.docUrl.indexOf('test') == -1)
           return;
 
         r.removeEventListener(listener);
@@ -42,5 +46,13 @@ ChromeVoxNextE2ETest.prototype = {
       r.addEventListener('loadComplete', listener, true);
       this.runWithTab(doc);
     }.bind(this));
+  },
+
+  listenOnce: function(node, eventType, callback, capture) {
+    var innerCallback = this.newCallback(function() {
+      node.removeEventListener(eventType, innerCallback, capture);
+      callback();
+    });
+    node.addEventListener(eventType, innerCallback, capture);
   }
 };

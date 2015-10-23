@@ -74,11 +74,19 @@
         'mac/process_types_test.cc',
         'mac/system_snapshot_mac_test.cc',
         'minidump/process_snapshot_minidump_test.cc',
+        'win/cpu_context_win_test.cc',
+        'win/exception_snapshot_win_test.cc',
+        'win/pe_image_annotations_reader_test.cc',
+        'win/pe_image_reader_test.cc',
         'win/process_reader_win_test.cc',
         'win/system_snapshot_win_test.cc',
       ],
       'conditions': [
         ['OS=="mac"', {
+          'dependencies': [
+            'crashpad_snapshot_test_module_crashy_initializer',
+            'crashpad_snapshot_test_no_op',
+          ],
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/OpenCL.framework',
@@ -101,5 +109,25 @@
         'crashpad_info_client_options_test_module.cc',
       ],
     },
+  ],
+  'conditions': [
+    ['OS=="mac"', {
+      'targets': [
+        {
+          'target_name': 'crashpad_snapshot_test_module_crashy_initializer',
+          'type': 'loadable_module',
+          'sources': [
+            'mac/mach_o_image_annotations_reader_test_module_crashy_initializer.cc',
+          ],
+        },
+        {
+          'target_name': 'crashpad_snapshot_test_no_op',
+          'type': 'executable',
+          'sources': [
+            'mac/mach_o_image_annotations_reader_test_no_op.cc',
+          ],
+        },
+      ],
+    }],
   ],
 }

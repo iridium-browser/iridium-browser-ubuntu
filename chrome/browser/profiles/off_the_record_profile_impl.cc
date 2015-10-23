@@ -39,7 +39,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/render_messages.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/ui/zoom/zoom_event_manager.h"
@@ -61,7 +60,7 @@
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
 #include "base/prefs/scoped_user_pref_update.h"
-#include "chrome/browser/prefs/proxy_prefs.h"
+#include "components/proxy_config/proxy_prefs.h"
 #endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 #if defined(OS_CHROMEOS)
@@ -97,14 +96,14 @@ namespace {
 
 void NotifyOTRProfileCreatedOnIOThread(void* original_profile,
                                        void* otr_profile) {
-  ExtensionWebRequestEventRouter::GetInstance()->OnOTRBrowserContextCreated(
-      original_profile, otr_profile);
+  extensions::ExtensionWebRequestEventRouter::GetInstance()
+      ->OnOTRBrowserContextCreated(original_profile, otr_profile);
 }
 
 void NotifyOTRProfileDestroyedOnIOThread(void* original_profile,
                                          void* otr_profile) {
-  ExtensionWebRequestEventRouter::GetInstance()->OnOTRBrowserContextDestroyed(
-      original_profile, otr_profile);
+  extensions::ExtensionWebRequestEventRouter::GetInstance()
+      ->OnOTRBrowserContextDestroyed(original_profile, otr_profile);
 }
 
 }  // namespace
@@ -143,14 +142,6 @@ void OffTheRecordProfileImpl::Init() {
   DCHECK(profile_->IsGuestSession() ||
          IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
              IncognitoModePrefs::DISABLED);
-
-  // TODO(oshima): Remove the need to eagerly initialize the request context
-  // getter. chromeos::OnlineAttempt is illegally trying to access this
-  // Profile member from a thread other than the UI thread, so we need to
-  // prevent a race.
-#if defined(OS_CHROMEOS)
-  GetRequestContext();
-#endif  // defined(OS_CHROMEOS)
 
   TrackZoomLevelsFromParent();
 
@@ -288,18 +279,18 @@ ExtensionSpecialStoragePolicy*
   return GetOriginalProfile()->GetExtensionSpecialStoragePolicy();
 }
 
-bool OffTheRecordProfileImpl::IsSupervised() {
-  return GetOriginalProfile()->IsSupervised();
+bool OffTheRecordProfileImpl::IsSupervised() const {
+  return profile_->IsSupervised();
 }
 
-bool OffTheRecordProfileImpl::IsChild() {
+bool OffTheRecordProfileImpl::IsChild() const {
   // TODO(treib): If we ever allow incognito for child accounts, evaluate
   // whether we want to just return false here.
-  return GetOriginalProfile()->IsChild();
+  return profile_->IsChild();
 }
 
-bool OffTheRecordProfileImpl::IsLegacySupervised() {
-  return GetOriginalProfile()->IsLegacySupervised();
+bool OffTheRecordProfileImpl::IsLegacySupervised() const {
+  return profile_->IsLegacySupervised();
 }
 
 PrefService* OffTheRecordProfileImpl::GetPrefs() {
@@ -506,9 +497,9 @@ chrome_browser_net::Predictor* OffTheRecordProfileImpl::GetNetworkPredictor() {
   return NULL;
 }
 
-DevToolsNetworkController*
-OffTheRecordProfileImpl::GetDevToolsNetworkController() {
-  return io_data_->GetDevToolsNetworkController();
+DevToolsNetworkControllerHandle*
+OffTheRecordProfileImpl::GetDevToolsNetworkControllerHandle() {
+  return io_data_->GetDevToolsNetworkControllerHandle();
 }
 
 void OffTheRecordProfileImpl::ClearNetworkingHistorySince(

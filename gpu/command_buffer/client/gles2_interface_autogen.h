@@ -235,6 +235,9 @@ virtual void GetAttachedShaders(GLuint program,
                                 GLuint* shaders) = 0;
 virtual GLint GetAttribLocation(GLuint program, const char* name) = 0;
 virtual void GetBooleanv(GLenum pname, GLboolean* params) = 0;
+virtual void GetBufferParameteri64v(GLenum target,
+                                    GLenum pname,
+                                    GLint64* params) = 0;
 virtual void GetBufferParameteriv(GLenum target,
                                   GLenum pname,
                                   GLint* params) = 0;
@@ -590,13 +593,22 @@ virtual void TexStorage2DEXT(GLenum target,
                              GLsizei height) = 0;
 virtual void GenQueriesEXT(GLsizei n, GLuint* queries) = 0;
 virtual void DeleteQueriesEXT(GLsizei n, const GLuint* queries) = 0;
+virtual void QueryCounterEXT(GLuint id, GLenum target) = 0;
 virtual GLboolean IsQueryEXT(GLuint id) = 0;
 virtual void BeginQueryEXT(GLenum target, GLuint id) = 0;
 virtual void BeginTransformFeedback(GLenum primitivemode) = 0;
 virtual void EndQueryEXT(GLenum target) = 0;
 virtual void EndTransformFeedback() = 0;
 virtual void GetQueryivEXT(GLenum target, GLenum pname, GLint* params) = 0;
+virtual void GetQueryObjectivEXT(GLuint id, GLenum pname, GLint* params) = 0;
 virtual void GetQueryObjectuivEXT(GLuint id, GLenum pname, GLuint* params) = 0;
+virtual void GetQueryObjecti64vEXT(GLuint id,
+                                   GLenum pname,
+                                   GLint64* params) = 0;
+virtual void GetQueryObjectui64vEXT(GLuint id,
+                                    GLenum pname,
+                                    GLuint64* params) = 0;
+virtual void SetDisjointValueSyncCHROMIUM() = 0;
 virtual void InsertEventMarkerEXT(GLsizei length, const GLchar* marker) = 0;
 virtual void PushGroupMarkerEXT(GLsizei length, const GLchar* marker) = 0;
 virtual void PopGroupMarkerEXT() = 0;
@@ -681,12 +693,34 @@ virtual void CopyTextureCHROMIUM(GLenum target,
                                  GLenum source_id,
                                  GLenum dest_id,
                                  GLint internalformat,
-                                 GLenum dest_type) = 0;
+                                 GLenum dest_type,
+                                 GLboolean unpack_flip_y,
+                                 GLboolean unpack_premultiply_alpha,
+                                 GLboolean unpack_unmultiply_alpha) = 0;
 virtual void CopySubTextureCHROMIUM(GLenum target,
                                     GLenum source_id,
                                     GLenum dest_id,
                                     GLint xoffset,
-                                    GLint yoffset) = 0;
+                                    GLint yoffset,
+                                    GLint x,
+                                    GLint y,
+                                    GLsizei width,
+                                    GLsizei height,
+                                    GLboolean unpack_flip_y,
+                                    GLboolean unpack_premultiply_alpha,
+                                    GLboolean unpack_unmultiply_alpha) = 0;
+virtual void CompressedCopyTextureCHROMIUM(GLenum target,
+                                           GLenum source_id,
+                                           GLenum dest_id) = 0;
+virtual void CompressedCopySubTextureCHROMIUM(GLenum target,
+                                              GLenum source_id,
+                                              GLenum dest_id,
+                                              GLint xoffset,
+                                              GLint yoffset,
+                                              GLint x,
+                                              GLint y,
+                                              GLsizei width,
+                                              GLsizei height) = 0;
 virtual void DrawArraysInstancedANGLE(GLenum mode,
                                       GLint first,
                                       GLsizei count,
@@ -763,7 +797,39 @@ virtual void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
                                           GLfloat uv_width,
                                           GLfloat uv_height) = 0;
 virtual void SwapInterval(GLint interval) = 0;
+virtual void FlushDriverCachesCHROMIUM() = 0;
 virtual void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) = 0;
 virtual void MatrixLoadIdentityCHROMIUM(GLenum matrixMode) = 0;
+virtual GLuint GenPathsCHROMIUM(GLsizei range) = 0;
+virtual void DeletePathsCHROMIUM(GLuint path, GLsizei range) = 0;
+virtual GLboolean IsPathCHROMIUM(GLuint path) = 0;
+virtual void PathCommandsCHROMIUM(GLuint path,
+                                  GLsizei numCommands,
+                                  const GLubyte* commands,
+                                  GLsizei numCoords,
+                                  GLenum coordType,
+                                  const GLvoid* coords) = 0;
+virtual void PathParameterfCHROMIUM(GLuint path,
+                                    GLenum pname,
+                                    GLfloat value) = 0;
+virtual void PathParameteriCHROMIUM(GLuint path, GLenum pname, GLint value) = 0;
+virtual void PathStencilFuncCHROMIUM(GLenum func, GLint ref, GLuint mask) = 0;
+virtual void StencilFillPathCHROMIUM(GLuint path,
+                                     GLenum fillMode,
+                                     GLuint mask) = 0;
+virtual void StencilStrokePathCHROMIUM(GLuint path,
+                                       GLint reference,
+                                       GLuint mask) = 0;
+virtual void CoverFillPathCHROMIUM(GLuint path, GLenum coverMode) = 0;
+virtual void CoverStrokePathCHROMIUM(GLuint path, GLenum coverMode) = 0;
+virtual void StencilThenCoverFillPathCHROMIUM(GLuint path,
+                                              GLenum fillMode,
+                                              GLuint mask,
+                                              GLenum coverMode) = 0;
+virtual void StencilThenCoverStrokePathCHROMIUM(GLuint path,
+                                                GLint reference,
+                                                GLuint mask,
+                                                GLenum coverMode) = 0;
+virtual GLenum GetGraphicsResetStatusKHR() = 0;
 virtual void BlendBarrierKHR() = 0;
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_AUTOGEN_H_

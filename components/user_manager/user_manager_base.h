@@ -137,6 +137,9 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   void SetKnownUserDeviceId(const UserID& user_id,
                             const std::string& device_id) override;
   std::string GetKnownUserDeviceId(const UserID& user_id) override;
+  void SetKnownUserGAPSCookie(const UserID& user_id,
+                              const std::string& gaps_cookie) override;
+  std::string GetKnownUserGAPSCookie(const UserID& user_id) override;
   void UpdateReauthReason(const std::string& user_id,
                           const int reauth_reason) override;
   bool FindReauthReason(const std::string& user_id, int* out_value) override;
@@ -273,6 +276,9 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // Indicates that a supervised user just logged in.
   virtual void SupervisedUserLoggedIn(const std::string& user_id) = 0;
 
+  // Should be called when regular user was removed.
+  virtual void OnUserRemoved(const std::string& user_id) = 0;
+
   // Getters/setters for private members.
 
   virtual void SetCurrentUserIsOwner(bool is_current_user_owner);
@@ -396,10 +402,10 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // been read from trusted device policy yet.
   std::string owner_email_;
 
-  ObserverList<UserManager::Observer> observer_list_;
+  base::ObserverList<UserManager::Observer> observer_list_;
 
   // TODO(nkostylev): Merge with session state refactoring CL.
-  ObserverList<UserManager::UserSessionStateObserver>
+  base::ObserverList<UserManager::UserSessionStateObserver>
       session_state_observer_list_;
 
   // Time at which this object was created.

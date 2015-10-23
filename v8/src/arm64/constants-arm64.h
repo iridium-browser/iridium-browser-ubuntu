@@ -5,6 +5,8 @@
 #ifndef V8_ARM64_CONSTANTS_ARM64_H_
 #define V8_ARM64_CONSTANTS_ARM64_H_
 
+#include "src/base/macros.h"
+#include "src/globals.h"
 
 // Assert that this is an LP64 system.
 STATIC_ASSERT(sizeof(int) == sizeof(int32_t));     // NOLINT(runtime/sizeof)
@@ -84,6 +86,8 @@ const int64_t kXMaxInt = 0x7fffffffffffffffL;
 const int64_t kXMinInt = 0x8000000000000000L;
 const int32_t kWMaxInt = 0x7fffffff;
 const int32_t kWMinInt = 0x80000000;
+const unsigned kIp0Code = 16;
+const unsigned kIp1Code = 17;
 const unsigned kFramePointerRegCode = 29;
 const unsigned kLinkRegCode = 30;
 const unsigned kZeroRegCode = 31;
@@ -758,20 +762,6 @@ enum LoadStorePairOffsetOp {
   A##_##B##_off = LoadStorePairOffsetFixed | A##_##B
   LOAD_STORE_PAIR_OP_LIST(LOAD_STORE_PAIR_OFFSET)
   #undef LOAD_STORE_PAIR_OFFSET
-};
-
-enum LoadStorePairNonTemporalOp {
-  LoadStorePairNonTemporalFixed = 0x28000000,
-  LoadStorePairNonTemporalFMask = 0x3B800000,
-  LoadStorePairNonTemporalMask  = 0xFFC00000,
-  STNP_w = LoadStorePairNonTemporalFixed | STP_w,
-  LDNP_w = LoadStorePairNonTemporalFixed | LDP_w,
-  STNP_x = LoadStorePairNonTemporalFixed | STP_x,
-  LDNP_x = LoadStorePairNonTemporalFixed | LDP_x,
-  STNP_s = LoadStorePairNonTemporalFixed | STP_s,
-  LDNP_s = LoadStorePairNonTemporalFixed | LDP_s,
-  STNP_d = LoadStorePairNonTemporalFixed | STP_d,
-  LDNP_d = LoadStorePairNonTemporalFixed | LDP_d
 };
 
 // Load literal.

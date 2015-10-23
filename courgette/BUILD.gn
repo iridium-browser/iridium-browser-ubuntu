@@ -47,6 +47,7 @@ static_library("courgette_lib") {
     "third_party/bsdiff_apply.cc",
     "third_party/bsdiff_create.cc",
     "third_party/paged_array.h",
+    "third_party/qsufsort.h",
     "types_elf.h",
     "types_win_pe.h",
   ]
@@ -101,8 +102,10 @@ test("courgette_unittests") {
     "encode_decode_unittest.cc",
     "encoded_program_unittest.cc",
     "ensemble_unittest.cc",
+    "memory_allocator_unittest.cc",
     "streams_unittest.cc",
     "third_party/paged_array_unittest.cc",
+    "third_party/qsufsort_unittest.cc",
     "typedrva_unittest.cc",
     "versioning_unittest.cc",
   ]

@@ -41,6 +41,11 @@ PERF_MEASUREMENTS_PATH = 'tools/perf/measurements'
 BUILDBOT_BUILDERNAME = 'BUILDBOT_BUILDERNAME'
 BENCHMARKS_JSON_FILE = 'benchmarks.json'
 
+# This is used to identify tryjobs triggered by the commit queue.
+_COMMIT_QUEUE_USERS = [
+    '5071639625-1lppvbtck1morgivc6sq4dul7klu27sd@developer.gserviceaccount.com',
+    'commit-bot@chromium.org']
+
 class Goma(object):
 
   def __init__(self, path_to_goma):
@@ -223,7 +228,10 @@ def _CreateBisectOptionsFromConfig(config):
       raise RuntimeError('CrOS build selected, but BISECT_CROS_IP or'
           'BISECT_CROS_BOARD undefined.')
   elif 'android' in config['command']:
-    if 'android-chrome-shell' in config['command']:
+    # TODO (prasadv): Remove android-chrome-shell check once we confirm that
+    # there are no pending bisect jobs with this in command.
+    if any(item in config['command']
+           for item in ['android-chrome-shell', 'android-chromium']):
       opts_dict['target_platform'] = 'android'
     elif 'android-chrome' in config['command']:
       opts_dict['target_platform'] = 'android-chrome'
@@ -523,7 +531,10 @@ def _RunBisectionScript(
 
   # Possibly set the target platform name based on the browser name in a
   # Telemetry command.
-  if 'android-chrome-shell' in config['command']:
+  # TODO (prasadv): Remove android-chrome-shell check once we confirm there are
+  # no pending bisect jobs with this in command.
+  if any(item in config['command']
+         for item in ['android-chrome-shell', 'android-chromium']):
     cmd.extend(['--target_platform', 'android'])
   elif 'android-chrome' in config['command']:
     cmd.extend(['--target_platform', 'android-chrome'])
@@ -578,7 +589,7 @@ def _PrintConfigStep(config):
 def _GetBrowserType(bot_platform):
   """Gets the browser type to be used in the run benchmark command."""
   if bot_platform == 'android':
-    return 'android-chrome-shell'
+    return 'android-chromium'
   elif 'x64' in bot_platform:
     return 'release_x64'
 
@@ -616,7 +627,10 @@ def _GetConfigBasedOnPlatform(config, bot_name, test_name):
     opts_dict['use_goma'] = config['use_goma']
   if 'goma_dir' in config:
     opts_dict['goma_dir'] = config['goma_dir']
-  if 'android-chrome-shell' in opts_dict['command']:
+  # TODO (prasadv): Remove android-chrome-shell check once we confirm there are
+  # no pending bisect jobs with this in command.
+  if any(item in opts_dict['command']
+         for item in ['android-chrome-shell', 'android-chromium']):
     opts_dict['target_platform'] = 'android'
 
   return bisect_perf_regression.BisectOptions.FromDict(opts_dict)
@@ -851,9 +865,9 @@ def main():
       return _SetupAndRunPerformanceTest(config, opts.path_to_goma)
 
   # If there are no changes to config file, then check if the request is
-  # from commit-bot, if so then run the modified Telemetry benchmarks for the
-  # patch.
-  if opts.build_properties.get('requester') == 'commit-bot@chromium.org':
+  # from the commit queue, if so then run the modified Telemetry benchmarks for
+  # the patch.
+  if opts.build_properties.get('requester') in _COMMIT_QUEUE_USERS:
     return _SetupAndRunPerformanceTest(
         config={}, path_to_goma=opts.path_to_goma, is_cq_tryjob=True)
 

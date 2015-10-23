@@ -7,9 +7,12 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/preferences_private/preferences_private_api.h"
@@ -54,9 +57,10 @@ class FakeProfileSyncService : public ProfileSyncService {
 
   ~FakeProfileSyncService() override {}
 
-  static KeyedService* BuildFakeProfileSyncService(
+  static scoped_ptr<KeyedService> BuildFakeProfileSyncService(
       content::BrowserContext* context) {
-    return new FakeProfileSyncService(static_cast<Profile*>(context));
+    return make_scoped_ptr(
+        new FakeProfileSyncService(static_cast<Profile*>(context)));
   }
 
   void set_sync_initialized(bool sync_initialized) {
@@ -66,7 +70,7 @@ class FakeProfileSyncService : public ProfileSyncService {
   bool initialized_state_violation() { return initialized_state_violation_; }
 
   // ProfileSyncService:
-  bool SyncActive() const override { return sync_initialized_; }
+  bool IsSyncActive() const override { return sync_initialized_; }
 
   void AddObserver(sync_driver::SyncServiceObserver* observer) override {
     if (sync_initialized_)
@@ -74,7 +78,7 @@ class FakeProfileSyncService : public ProfileSyncService {
     // Set sync initialized state to true so the function will run after
     // OnStateChanged is called.
     sync_initialized_ = true;
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&sync_driver::SyncServiceObserver::OnStateChanged,
                               base::Unretained(observer)));
   }

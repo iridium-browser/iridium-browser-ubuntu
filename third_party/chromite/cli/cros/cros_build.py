@@ -15,6 +15,7 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import operation
 from chromite.lib import parallel
+from chromite.lib import toolchain
 from chromite.lib import workon_helper
 
 
@@ -156,6 +157,8 @@ To just build a single package:
 
   def Run(self):
     """Run cros build."""
+    self.options.Freeze()
+
     if not self.host:
       if not (self.board or self.brick or self.blueprint):
         cros_build_lib.Die('You did not specify a board/brick to build for. '
@@ -166,7 +169,16 @@ To just build a single package:
         cros_build_lib.Die('--brick should not be used with board names. Use '
                            '--board=%s instead.' % self.brick.config['name'])
 
-    commandline.RunInsideChroot(self, auto_detect_brick=True)
+    if self.blueprint:
+      chroot_args = ['--toolchains',
+                     ','.join(toolchain.GetToolchainsForBrick(
+                         self.blueprint.GetBSP()).iterkeys())]
+    elif self.board:
+      chroot_args = ['--board', self.board]
+    else:
+      chroot_args = None
+
+    commandline.RunInsideChroot(self, chroot_args=chroot_args)
 
     if not (self.build_pkgs or self.options.init_only):
       cros_build_lib.Die('No packages found, nothing to build.')
@@ -186,7 +198,7 @@ To just build a single package:
           use_binary=self.options.binary)
 
     if not self.options.init_only:
-      # Preliminary: enable building all packages that only have a live ebuild.
+      # Preliminary: enable all packages that only have a live ebuild.
       if self.options.enable_only_latest:
         workon = workon_helper.WorkonHelper(self.sysroot)
         workon.StartWorkingOnPackages([], use_workon_only=True)
@@ -198,3 +210,4 @@ To just build a single package:
             log_level=logging.DEBUG)
       else:
         parallel.RunParallelSteps([self._CheckDependencies, self._Build])
+      logging.notice('Build completed successfully.')

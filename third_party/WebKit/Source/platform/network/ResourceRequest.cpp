@@ -61,6 +61,7 @@ PassOwnPtr<ResourceRequest> ResourceRequest::adopt(PassOwnPtr<CrossThreadResourc
     request->setFrameType(data->m_frameType);
     request->setFetchRequestMode(data->m_fetchRequestMode);
     request->setFetchCredentialsMode(data->m_fetchCredentialsMode);
+    request->setFetchRedirectMode(data->m_fetchRedirectMode);
     request->m_referrerPolicy = data->m_referrerPolicy;
     request->m_didSetHTTPReferrer = data->m_didSetHTTPReferrer;
     request->m_checkForBrowserSideNavigation = data->m_checkForBrowserSideNavigation;
@@ -100,6 +101,7 @@ PassOwnPtr<CrossThreadResourceRequestData> ResourceRequest::copyData() const
     data->m_frameType = m_frameType;
     data->m_fetchRequestMode = m_fetchRequestMode;
     data->m_fetchCredentialsMode = m_fetchCredentialsMode;
+    data->m_fetchRedirectMode = m_fetchRedirectMode;
     data->m_referrerPolicy = m_referrerPolicy;
     data->m_didSetHTTPReferrer = m_didSetHTTPReferrer;
     data->m_checkForBrowserSideNavigation = m_checkForBrowserSideNavigation;
@@ -222,11 +224,6 @@ void ResourceRequest::setHTTPReferrer(const Referrer& referrer)
         setHTTPHeaderField("Referer", referrer.referrer);
     m_referrerPolicy = referrer.referrerPolicy;
     m_didSetHTTPReferrer = true;
-}
-
-void ResourceRequest::clearHTTPAuthorization()
-{
-    m_httpHeaderFields.remove("Authorization");
 }
 
 void ResourceRequest::clearHTTPReferrer()
@@ -423,16 +420,6 @@ bool ResourceRequest::hasCacheValidatorFields() const
     return !m_httpHeaderFields.get(lastModifiedHeader).isEmpty() || !m_httpHeaderFields.get(eTagHeader).isEmpty();
 }
 
-double ResourceRequest::defaultTimeoutInterval()
-{
-    return s_defaultTimeoutInterval;
-}
-
-void ResourceRequest::setDefaultTimeoutInterval(double timeoutInterval)
-{
-    s_defaultTimeoutInterval = timeoutInterval;
-}
-
 void ResourceRequest::initialize(const KURL& url)
 {
     m_url = url;
@@ -459,6 +446,7 @@ void ResourceRequest::initialize(const KURL& url)
     // with CORS modes in updateRequestForAccessControl if we're called in a
     // context which requires it.
     m_fetchCredentialsMode = WebURLRequest::FetchCredentialsModeSameOrigin;
+    m_fetchRedirectMode = WebURLRequest::FetchRedirectModeFollow;
     m_referrerPolicy = ReferrerPolicyDefault;
     m_didSetHTTPReferrer = false;
     m_checkForBrowserSideNavigation = true;
@@ -466,15 +454,7 @@ void ResourceRequest::initialize(const KURL& url)
     m_originatesFromReservedIPRange = false;
     m_inputPerfMetricReportPolicy = InputToLoadPerfMetricReportPolicy::NoReport;
     m_followedRedirect = false;
-}
-
-// This is used by the loader to control the number of issued parallel load requests.
-unsigned initializeMaximumHTTPConnectionCountPerHost()
-{
-    // The chromium network stack already handles limiting the number of
-    // parallel requests per host, so there's no need to do it here.  Therefore,
-    // this is set to a high value that should never be hit in practice.
-    return 10000;
+    m_requestorOrigin = SecurityOrigin::createUnique();
 }
 
 } // namespace blink

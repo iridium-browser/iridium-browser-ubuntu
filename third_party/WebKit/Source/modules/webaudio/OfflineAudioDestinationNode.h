@@ -33,24 +33,24 @@
 
 namespace blink {
 
+class AbstractAudioContext;
 class AudioBus;
-class AudioContext;
 
 class OfflineAudioDestinationHandler final : public AudioDestinationHandler {
 public:
     static PassRefPtr<OfflineAudioDestinationHandler> create(AudioNode&, AudioBuffer* renderTarget);
-    virtual ~OfflineAudioDestinationHandler();
+    ~OfflineAudioDestinationHandler() override;
 
     // AudioHandler
-    virtual void dispose() override;
-    virtual void initialize() override;
-    virtual void uninitialize() override;
+    void dispose() override;
+    void initialize() override;
+    void uninitialize() override;
 
     // AudioDestinationHandler
-    virtual void startRendering() override;
-    virtual void stopRendering() override;
+    void startRendering() override;
+    void stopRendering() override;
 
-    virtual float sampleRate()  const override { return m_renderTarget->sampleRate(); }
+    float sampleRate()  const override { return m_renderTarget->sampleRate(); }
 
 private:
     OfflineAudioDestinationHandler(AudioNode&, AudioBuffer* renderTarget);
@@ -74,10 +74,10 @@ private:
 
 class OfflineAudioDestinationNode final : public AudioDestinationNode {
 public:
-    static OfflineAudioDestinationNode* create(AudioContext*, AudioBuffer* renderTarget);
+    static OfflineAudioDestinationNode* create(AbstractAudioContext*, AudioBuffer* renderTarget);
 
 private:
-    OfflineAudioDestinationNode(AudioContext&, AudioBuffer* renderTarget);
+    OfflineAudioDestinationNode(AbstractAudioContext&, AudioBuffer* renderTarget);
 };
 
 } // namespace blink

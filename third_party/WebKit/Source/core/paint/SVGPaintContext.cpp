@@ -31,7 +31,6 @@
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
-#include "core/paint/SVGFilterPainter.h"
 #include "core/paint/SVGMaskPainter.h"
 #include "platform/FloatConversion.h"
 
@@ -42,7 +41,8 @@ SVGPaintContext::~SVGPaintContext()
     if (m_filter) {
         ASSERT(SVGResourcesCache::cachedResourcesForLayoutObject(m_object));
         ASSERT(SVGResourcesCache::cachedResourcesForLayoutObject(m_object)->filter() == m_filter);
-        SVGFilterPainter(*m_filter).finishEffect(*m_object, m_originalPaintInfo->context);
+        ASSERT(m_filterRecordingContext);
+        SVGFilterPainter(*m_filter).finishEffect(*m_object, *m_filterRecordingContext);
 
         // Reset the paint info after the filter effect has been completed.
         // This isn't strictly required (e.g., m_paintInfo.rect is not used
@@ -111,9 +111,9 @@ void SVGPaintContext::applyCompositingIfNecessary()
     WebBlendMode blendMode = style.hasBlendMode() && m_object->isBlendingAllowed() ?
         style.blendMode() : WebBlendModeNormal;
     if (opacity < 1 || blendMode != WebBlendModeNormal) {
-        m_clipRecorder = adoptPtr(new FloatClipRecorder(*m_paintInfo.context, *m_object, m_paintInfo.phase, m_object->paintInvalidationRectInLocalCoordinates()));
+        const FloatRect compositingBounds = m_object->paintInvalidationRectInLocalCoordinates();
         m_compositingRecorder = adoptPtr(new CompositingRecorder(*m_paintInfo.context, *m_object,
-            WebCoreCompositeToSkiaComposite(CompositeSourceOver, blendMode), opacity));
+            WebCoreCompositeToSkiaComposite(CompositeSourceOver, blendMode), opacity, &compositingBounds));
     }
 }
 
@@ -132,7 +132,7 @@ bool SVGPaintContext::applyClipIfNecessary(SVGResources* resources)
             ShapeClipPathOperation* clipPath = toShapeClipPathOperation(clipPathOperation);
             if (!clipPath->isValid())
                 return false;
-            m_clipPathRecorder = adoptPtr(new ClipPathRecorder(*m_paintInfo.context, *m_object, clipPath->path(m_object->objectBoundingBox()), clipPath->windRule()));
+            m_clipPathRecorder = adoptPtr(new ClipPathRecorder(*m_paintInfo.context, *m_object, clipPath->path(m_object->objectBoundingBox())));
         }
     }
     return true;
@@ -154,8 +154,9 @@ bool SVGPaintContext::applyFilterIfNecessary(SVGResources* resources)
         if (m_object->style()->svgStyle().hasFilter())
             return false;
     } else if (LayoutSVGResourceFilter* filter = resources->filter()) {
+        m_filterRecordingContext = adoptPtr(new SVGFilterRecordingContext(m_paintInfo.context));
         m_filter = filter;
-        GraphicsContext* filterContext = SVGFilterPainter(*filter).prepareEffect(*m_object, m_paintInfo.context);
+        GraphicsContext* filterContext = SVGFilterPainter(*filter).prepareEffect(*m_object, *m_filterRecordingContext);
         if (!filterContext)
             return false;
 
@@ -188,7 +189,7 @@ void SVGPaintContext::paintSubtree(GraphicsContext* context, LayoutObject* item)
     ASSERT(item);
     ASSERT(!item->needsLayout());
 
-    PaintInfo info(context, LayoutRect::infiniteIntRect(), PaintPhaseForeground, PaintBehaviorNormal);
+    PaintInfo info(context, LayoutRect::infiniteIntRect(), PaintPhaseForeground, GlobalPaintNormalPhase, PaintLayerNoFlag);
     item->paint(info, IntPoint());
 }
 
@@ -213,7 +214,10 @@ bool SVGPaintContext::paintForLayoutObject(const PaintInfo& paintInfo, const Com
     float paintAlpha = resourceMode == ApplyToFillMode ? svgStyle.fillOpacity() : svgStyle.strokeOpacity();
     paintServer.applyToSkPaint(paint, paintAlpha);
 
-    paint.setFilterQuality(WebCoreInterpolationQualityToSkFilterQuality(InterpolationDefault));
+    // We always set filter quality to 'low' here. This value will only have an
+    // effect for patterns, which are SkPictures, so using high-order filter
+    // should have little effect on the overall quality.
+    paint.setFilterQuality(kLow_SkFilterQuality);
 
     // TODO(fs): The color filter can set when generating a picture for a mask -
     // due to color-interpolation. We could also just apply the

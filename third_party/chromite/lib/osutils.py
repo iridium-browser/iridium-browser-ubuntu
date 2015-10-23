@@ -52,6 +52,27 @@ def GetNonRootUser():
     return user
 
 
+def IsChildProcess(pid, name=None):
+  """Return True if pid is a child of the current process.
+
+  Args:
+    pid: Child pid to search for in current process's pstree.
+    name: Name of the child process.
+
+  Note:
+    This function is not fool proof. If the process tree contains wierd names,
+    an incorrect match might be possible.
+  """
+  cmd = ['pstree', '-Ap', str(os.getpid())]
+  pstree = cros_build_lib.RunCommand(
+      cmd, capture_output=True, print_cmd=False).output
+  if name is None:
+    match = '(%d)' % pid
+  else:
+    match = '-%s(%d)' % (name, pid)
+  return match in pstree
+
+
 def ExpandPath(path):
   """Returns path after passing through realpath and expanduser."""
   return os.path.realpath(os.path.expanduser(path))
@@ -71,13 +92,8 @@ def WriteFile(path, content, mode='w', atomic=False, makedirs=False,
     makedirs: If True, create missing leading directories in the path.
     sudo: If True, write the file as root.
   """
-  if sudo:
-    if 'a' in mode or '+' in mode:
-      raise ValueError('append mode does not work in sudo mode')
-
-    if atomic:
-      raise ValueError('atomic is not supported in sudo mode')
-
+  if sudo and ('a' in mode or '+' in mode):
+    raise ValueError('append mode does not work in sudo mode')
 
   if makedirs:
     SafeMakedirs(os.path.dirname(path), sudo=sudo)
@@ -91,12 +107,18 @@ def WriteFile(path, content, mode='w', atomic=False, makedirs=False,
     os.chmod(write_path, 0o644)
 
     try:
-      cros_build_lib.SudoRunCommand(['mv', write_path, path],
+      mv_target = path if not atomic else path + '.tmp'
+      cros_build_lib.SudoRunCommand(['mv', write_path, mv_target],
                                     print_cmd=False, redirect_stderr=True)
-      cros_build_lib.SudoRunCommand(['chown', 'root:root', path],
+      cros_build_lib.SudoRunCommand(['chown', 'root:root', mv_target],
                                     print_cmd=False, redirect_stderr=True)
+      if atomic:
+        cros_build_lib.SudoRunCommand(['mv', mv_target, path],
+                                      print_cmd=False, redirect_stderr=True)
+
     except cros_build_lib.RunCommandError:
       SafeUnlink(write_path)
+      SafeUnlink(mv_target)
       raise
 
   else:
@@ -699,11 +721,14 @@ def UmountDir(path, lazy=True, sudo=True, cleanup=True):
       # that rm failed.  Assume it's this issue as -rf will ignore most things.
       if isinstance(e, cros_build_lib.RunCommandError):
         return True
-      else:
+      elif isinstance(e, OSError):
         # When we aren't using sudo, we do the unlink ourselves, so the exact
         # errno is bubbled up to us and we can detect it specifically without
         # potentially ignoring all other possible failures.
         return e.errno == errno.EBUSY
+      else:
+        # Something else, we don't know so do not retry.
+        return False
     retry_util.GenericRetry(_retry, 60, RmDir, path, sudo=sudo, sleep=1)
 
 
@@ -1067,6 +1092,91 @@ class MountImageContext(object):
     self._CleanUp()
 
 
+def _SameFileSystem(path1, path2):
+  """Determine whether two paths are on the same filesystem.
+
+  Be resilient to nonsense paths. Return False instead of blowing up.
+  """
+  try:
+    return os.stat(path1).st_dev == os.stat(path2).st_dev
+  except OSError:
+    return False
+
+
+class MountOverlayContext(object):
+  """A context manager for mounting an OverlayFS directory.
+
+  An overlay filesystem will be mounted at |mount_dir|, and will be unmounted
+  when the context exits.
+
+  Args:
+    lower_dir: The lower directory (read-only).
+    upper_dir: The upper directory (read-write).
+    mount_dir: The mount point for the merged overlay.
+    cleanup: Whether to remove the mount point after unmounting. This uses an
+        internal retry logic for cases where unmount is successful but the
+        directory still appears busy, and is generally more resilient than
+        removing it independently.
+  """
+
+  OVERLAY_FS_MOUNT_ERRORS = (32,)
+  def __init__(self, lower_dir, upper_dir, mount_dir, cleanup=False):
+    self._lower_dir = lower_dir
+    self._upper_dir = upper_dir
+    self._mount_dir = mount_dir
+    self._cleanup = cleanup
+    self.tempdir = None
+
+  def __enter__(self):
+    # Upstream Kernel 3.18 and the ubuntu backport of overlayfs have different
+    # APIs. We must support both.
+    try_legacy = False
+    stashed_e_overlay_str = None
+
+    # We must ensure that upperdir and workdir are on the same filesystem.
+    if _SameFileSystem(self._upper_dir, GetGlobalTempDir()):
+      _TempDirSetup(self)
+    elif _SameFileSystem(self._upper_dir, os.path.dirname(self._upper_dir)):
+      _TempDirSetup(self, base_dir=os.path.dirname(self._upper_dir))
+    else:
+      logging.debug('Could create find a workdir on the same filesystem as %s. '
+                    'Trying legacy API instead.',
+                    self._upper_dir)
+      try_legacy = True
+
+    if not try_legacy:
+      try:
+        MountDir('overlay', self._mount_dir, fs_type='overlay', makedirs=False,
+                 mount_opts=('lowerdir=%s' % self._lower_dir,
+                             'upperdir=%s' % self._upper_dir,
+                             'workdir=%s' % self.tempdir))
+      except cros_build_lib.RunCommandError as e_overlay:
+        if e_overlay.result.returncode not in self.OVERLAY_FS_MOUNT_ERRORS:
+          raise
+        logging.debug('Failed to mount overlay filesystem. Trying legacy API.')
+        stashed_e_overlay_str = str(e_overlay)
+        try_legacy = True
+
+    if try_legacy:
+      try:
+        MountDir('overlayfs', self._mount_dir, fs_type='overlayfs',
+                 makedirs=False,
+                 mount_opts=('lowerdir=%s' % self._lower_dir,
+                             'upperdir=%s' % self._upper_dir))
+      except cros_build_lib.RunCommandError as e_overlayfs:
+        logging.error('All attempts at mounting overlay filesystem failed.')
+        if stashed_e_overlay_str is not None:
+          logging.error('overlay: %s', stashed_e_overlay_str)
+        logging.error('overlayfs: %s', str(e_overlayfs))
+        raise
+
+    return self
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    UmountDir(self._mount_dir, cleanup=self._cleanup)
+    _TempDirTearDown(self, force_sudo=True)
+
+
 MountInfo = collections.namedtuple(
     'MountInfo',
     'source destination filesystem options')
@@ -1128,12 +1238,12 @@ def ResolveSymlink(file_name, root='/'):
 def IsInsideVm():
   """Return True if we are running inside a virtual machine.
 
-  This function only supports VirtualBox at the moment. The detection is based
-  on the model of the hard drive.
+  The detection is based on the model of the hard drive.
   """
   for blk_model in glob.glob('/sys/block/*/device/model'):
     if os.path.isfile(blk_model):
-      if ReadFile(blk_model).startswith('VBOX'):
+      model = ReadFile(blk_model)
+      if model.startswith('VBOX') or model.startswith('VMware'):
         return True
 
   return False

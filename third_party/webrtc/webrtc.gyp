@@ -16,6 +16,21 @@
         'webrtc_tests.gypi',
       ],
     }],
+    ['enable_protobuf==1', {
+      'targets': [
+        {
+          # This target should only be built if enable_protobuf is defined
+          'target_name': 'rtc_event_log_proto',
+          'type': 'static_library',
+          'sources': ['video/rtc_event_log.proto',],
+          'variables': {
+            'proto_in_dir': 'video',
+            'proto_out_dir': 'webrtc/video',
+          },
+        'includes': ['build/protoc.gypi'],
+        },
+      ],
+    }],
   ],
   'includes': [
     'build/common.gypi',
@@ -32,7 +47,6 @@
       'p2p/p2p.gyp:*',
       'system_wrappers/system_wrappers.gyp:*',
       'tools/tools.gyp:*',
-      'video_engine/video_engine.gyp:*',
       'voice_engine/voice_engine.gyp:*',
       '<(webrtc_vp8_dir)/vp8.gyp:*',
       '<(webrtc_vp9_dir)/vp9.gyp:*',
@@ -50,26 +64,27 @@
         ['include_tests==1', {
           'dependencies': [
             'common_video/common_video_unittests.gyp:*',
+            'rtc_unittests',
             'system_wrappers/system_wrappers_tests.gyp:*',
             'test/metrics.gyp:*',
             'test/test.gyp:*',
             'test/webrtc_test_common.gyp:webrtc_test_common_unittests',
+            'video_engine/video_engine_core_unittests.gyp:video_engine_core_unittests',
             'webrtc_tests',
-            'rtc_unittests',
           ],
         }],
       ],
     },
     {
-      # TODO(pbos): This is intended to contain audio parts as well as soon as
-      #             VoiceEngine moves to the same new API format.
       'target_name': 'webrtc',
       'type': 'static_library',
       'sources': [
+        'audio_receive_stream.h',
+        'audio_send_stream.h',
         'call.h',
         'config.h',
-        'experiments.h',
         'frame_callback.h',
+        'stream.h',
         'transport.h',
         'video_receive_stream.h',
         'video_renderer.h',
@@ -80,6 +95,7 @@
       'dependencies': [
         'common.gyp:*',
         '<@(webrtc_video_dependencies)',
+        'rtc_event_log',
       ],
       'conditions': [
         # TODO(andresp): Chromium libpeerconnection should link directly with
@@ -92,5 +108,26 @@
         }],
       ],
     },
+    {
+      'target_name': 'rtc_event_log',
+      'type': 'static_library',
+      'sources': [
+        'video/rtc_event_log.cc',
+        'video/rtc_event_log.h',
+      ],
+      'conditions': [
+        # If enable_protobuf is defined, we want to compile the protobuf
+        # and add rtc_event_log.pb.h and rtc_event_log.pb.cc to the sources.
+        ['enable_protobuf==1', {
+          'dependencies': [
+            'rtc_event_log_proto',
+          ],
+          'defines': [
+            'ENABLE_RTC_EVENT_LOG',
+          ],
+        }],
+      ],
+    },
+
   ],
 }

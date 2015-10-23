@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
@@ -15,6 +18,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/guest_view/browser/guest_view_manager.h"
+#include "components/guest_view/browser/guest_view_manager_delegate.h"
 #include "components/guest_view/browser/guest_view_manager_factory.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -25,9 +29,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
-#include "extensions/browser/guest_view/extensions_guest_view_manager_delegate.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/ime/composition_text.h"
@@ -36,7 +40,7 @@
 #include "ui/events/keycodes/keyboard_codes.h"
 
 using extensions::AppWindow;
-using extensions::ExtensionsGuestViewManagerDelegate;
+using extensions::ExtensionsAPIClient;
 using guest_view::GuestViewBase;
 using guest_view::GuestViewManager;
 using guest_view::TestGuestViewManager;
@@ -63,9 +67,8 @@ class WebViewInteractiveTest
       manager = static_cast<TestGuestViewManager*>(
           GuestViewManager::CreateWithDelegate(
               browser()->profile(),
-              scoped_ptr<guest_view::GuestViewManagerDelegate>(
-                  new ExtensionsGuestViewManagerDelegate(
-                      browser()->profile()))));
+              ExtensionsAPIClient::Get()->CreateGuestViewManagerDelegate(
+                  browser()->profile())));
     }
     return manager;
   }
@@ -242,7 +245,7 @@ class WebViewInteractiveTest
     content::Source<content::NavigationController> source =
         guest_observer.source();
     EXPECT_TRUE(source->GetWebContents()->GetRenderProcessHost()->
-        IsIsolatedGuest());
+        IsForGuestsOnly());
 
     guest_web_contents_ = source->GetWebContents();
     embedder_web_contents_ =
@@ -295,36 +298,24 @@ class WebViewInteractiveTest
    public:
     PopupCreatedObserver()
         : initial_widget_count_(0),
-          last_render_widget_host_(NULL),
-          seen_new_widget_(false) {}
+          last_render_widget_host_(NULL) {}
 
     ~PopupCreatedObserver() {}
 
     void Wait() {
-      size_t current_widget_count = CountWidgets();
-      if (!seen_new_widget_ &&
-          current_widget_count == initial_widget_count_ + 1) {
-        seen_new_widget_ = true;
+      if (CountWidgets() == initial_widget_count_ + 1) {
+        gfx::Rect popup_bounds =
+            last_render_widget_host_->GetView()->GetViewBounds();
+        if (!popup_bounds.size().IsEmpty()) {
+          if (message_loop_.get())
+            message_loop_->Quit();
+          return;
+        }
       }
 
       // If we haven't seen any new widget or we get 0 size widget, we need to
       // schedule waiting.
-      bool needs_to_schedule_wait = true;
-
-      if (seen_new_widget_) {
-        gfx::Rect popup_bounds =
-            last_render_widget_host_->GetView()->GetViewBounds();
-        if (!popup_bounds.size().IsEmpty())
-          needs_to_schedule_wait = false;
-      }
-
-      if (needs_to_schedule_wait) {
-        ScheduleWait();
-      } else {
-        // We are done.
-        if (message_loop_.get())
-          message_loop_->Quit();
-      }
+      ScheduleWait();
 
       if (!message_loop_.get()) {
         message_loop_ = new content::MessageLoopRunner;
@@ -341,7 +332,7 @@ class WebViewInteractiveTest
 
    private:
     void ScheduleWait() {
-      base::MessageLoop::current()->PostDelayedTask(
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&PopupCreatedObserver::Wait, base::Unretained(this)),
           base::TimeDelta::FromMilliseconds(200));
@@ -367,14 +358,6 @@ class WebViewInteractiveTest
 
     DISALLOW_COPY_AND_ASSIGN(PopupCreatedObserver);
   };
-
-  void WaitForTitle(const char* title) {
-    base::string16 expected_title(base::ASCIIToUTF16(title));
-    base::string16 error_title(base::ASCIIToUTF16("FAILED"));
-    content::TitleWatcher title_watcher(guest_web_contents(), expected_title);
-    title_watcher.AlsoWaitForTitle(error_title);
-    ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-  }
 
   void PopupTestHelper(const gfx::Point& padding) {
     PopupCreatedObserver popup_observer;
@@ -421,10 +404,9 @@ class WebViewInteractiveTest
     MoveMouseInsideWindow(gfx::Point(78, 12));
 
     // Now wait a bit before moving mouse to initiate drag/drop.
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&WebViewInteractiveTest::DragTestStep2,
-                   base::Unretained(this)),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&WebViewInteractiveTest::DragTestStep2,
+                              base::Unretained(this)),
         base::TimeDelta::FromMilliseconds(200));
   }
 
@@ -738,7 +720,13 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_NoName) {
              NEEDS_TEST_SERVER);
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_Redirect) {
+// Flaky on win_chromium_rel_ng. https://crbug.com/504054
+#if defined(OS_WIN)
+#define MAYBE_NewWindow_Redirect DISABLED_NewWindow_Redirect
+#else
+#define MAYBE_NewWindow_Redirect NewWindow_Redirect
+#endif
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, MAYBE_NewWindow_Redirect) {
   TestHelper("testNewWindowRedirect",
              "web_view/newwindow",
              NEEDS_TEST_SERVER);
@@ -835,7 +823,7 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
   TestHelper("testNewWindowOpenerDestroyedWhileUnattached",
              "web_view/newwindow",
              NEEDS_TEST_SERVER);
-  ASSERT_EQ(2, GetGuestViewManager()->num_guests_created());
+  ASSERT_EQ(2u, GetGuestViewManager()->num_guests_created());
 
   // We have two guests in this test, one is the intial one, the other
   // is the newwindow one.

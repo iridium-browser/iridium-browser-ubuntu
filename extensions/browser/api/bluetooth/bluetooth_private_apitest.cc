@@ -30,8 +30,8 @@ using testing::ReturnPointee;
 using testing::WithArgs;
 using testing::WithoutArgs;
 
-namespace bt = extensions::core_api::bluetooth;
-namespace bt_private = extensions::core_api::bluetooth_private;
+namespace bt = extensions::api::bluetooth;
+namespace bt_private = extensions::api::bluetooth_private;
 
 namespace extensions {
 
@@ -101,8 +101,9 @@ class BluetoothPrivateApiTest : public ExtensionApiTest {
 
     scoped_ptr<base::ListValue> args =
         bt_private::OnPairing::Create(pairing_event);
-    scoped_ptr<Event> event(
-        new Event(bt_private::OnPairing::kEventName, args.Pass()));
+    scoped_ptr<Event> event(new Event(events::BLUETOOTH_PRIVATE_ON_PAIRING,
+                                      bt_private::OnPairing::kEventName,
+                                      args.Pass()));
     EventRouter::Get(browser()->profile())->DispatchEventToExtension(
         kTestExtensionId, event.Pass());
   }

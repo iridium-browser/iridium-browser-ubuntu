@@ -37,7 +37,7 @@ namespace blink {
 class CORE_EXPORT MediaKeyEvent final : public Event {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    virtual ~MediaKeyEvent();
+    ~MediaKeyEvent() override;
 
     static PassRefPtrWillBeRawPtr<MediaKeyEvent> create()
     {
@@ -49,7 +49,7 @@ public:
         return adoptRefWillBeNoop(new MediaKeyEvent(type, initializer));
     }
 
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
 
     String keySystem() const { return m_keySystem; }
     String sessionId() const { return m_sessionId; }
@@ -70,7 +70,7 @@ private:
     RefPtr<DOMUint8Array> m_initData;
     RefPtr<DOMUint8Array> m_message;
     String m_defaultURL;
-    RefPtrWillBeMember<MediaKeyError> m_errorCode;
+    PersistentWillBeMember<MediaKeyError> m_errorCode;
     unsigned short m_systemCode;
 };
 

@@ -98,7 +98,7 @@ TEST_P(CubeMapTextureTest, RenderToFacesConsecutively)
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     EXPECT_GL_NO_ERROR();
 
-    for (size_t face = 0; face < 6; face++)
+    for (GLenum face = 0; face < 6; face++)
     {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, tex, 0);
         EXPECT_GL_NO_ERROR();
@@ -112,7 +112,7 @@ TEST_P(CubeMapTextureTest, RenderToFacesConsecutively)
         EXPECT_GL_NO_ERROR();
     }
 
-    for (size_t face = 0; face < 6; face++)
+    for (GLenum face = 0; face < 6; face++)
     {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, tex, 0);
         EXPECT_GL_NO_ERROR();
@@ -129,4 +129,4 @@ TEST_P(CubeMapTextureTest, RenderToFacesConsecutively)
 }
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
-ANGLE_INSTANTIATE_TEST(CubeMapTextureTest, ES2_D3D11(), ES2_D3D11_FL9_3());
+ANGLE_INSTANTIATE_TEST(CubeMapTextureTest, ES2_D3D11(), ES2_D3D11_FL9_3(), ES2_OPENGL(), ES3_OPENGL());

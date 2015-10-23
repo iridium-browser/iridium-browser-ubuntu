@@ -27,6 +27,36 @@ function wait(time) {
 }
 
 /**
+ * Verifies if there are no Javascript errors in any of the app windows.
+ * @param {function()} Completion callback.
+ */
+function checkIfNoErrorsOccuredOnApp(app, callback) {
+  var countPromise = app.callRemoteTestUtil('getErrorCount', null, []);
+  countPromise.then(function(count) {
+    chrome.test.assertEq(0, count, 'The error count is not 0.');
+    callback();
+  });
+}
+
+/**
+ * Adds check of chrome.test to the end of the given promise.
+ * @param {Promise} promise Promise.
+ */
+function testPromiseAndApps(promise, apps) {
+  promise.then(function() {
+    return Promise.all(
+        apps.map(function(app) {
+          return new Promise(checkIfNoErrorsOccuredOnApp.bind(null, app));
+        }));
+  }).then(chrome.test.callbackPass(function() {
+    // The callbacPass is necessary to avoid prematurely finishing tests.
+    // Don't put chrome.test.succeed() here to avoid doubled success log.
+  }), function(error) {
+    chrome.test.fail(error.stack || error);
+  });
+};
+
+/**
  * Interval milliseconds between checks of repeatUntil.
  * @type {number}
  * @const
@@ -44,7 +74,7 @@ var LOG_INTERVAL = 3000;
  * Returns a pending marker. See also the repeatUntil function.
  * @param {string} message Pending reason including %s, %d, or %j markers. %j
  *     format an object as JSON.
- * @param {Array.<*>} var_args Values to be assigined to %x markers.
+ * @param {Array<*>} var_args Values to be assigined to %x markers.
  * @return {Object} Object which returns true for the expression: obj instanceof
  *     pending.
  */
@@ -93,8 +123,8 @@ function repeatUntil(checkFunction) {
 
 /**
  * Adds the givin entries to the target volume(s).
- * @param {Array.<string>} volumeNames Names of target volumes.
- * @param {Array.<TestEntryInfo>} entries List of entries to be added.
+ * @param {Array<string>} volumeNames Names of target volumes.
+ * @param {Array<TestEntryInfo>} entries List of entries to be added.
  * @param {function(boolean)=} opt_callback Callback function to be passed the
  *     result of function. The argument is true on success.
  * @return {Promise} Promise to be fulfilled when the entries are added.
@@ -194,7 +224,7 @@ TestEntryInfo.prototype.getExpectedRow = function() {
 
 /**
  * Filesystem entries used by the test cases.
- * @type {Object.<string, TestEntryInfo>}
+ * @type {Object<TestEntryInfo>}
  * @const
  */
 var ENTRIES = {
@@ -205,7 +235,7 @@ var ENTRIES = {
 
   world: new TestEntryInfo(
       EntryType.FILE, 'video.ogv', 'world.ogv',
-      'text/plain', SharedOption.NONE, 'Jul 4, 2012, 10:35 AM',
+      'video/ogg', SharedOption.NONE, 'Jul 4, 2012, 10:35 AM',
       'world.ogv', '59 KB', 'OGG video'),
 
   unsupported: new TestEntryInfo(
@@ -218,19 +248,23 @@ var ENTRIES = {
       'image/png', SharedOption.NONE, 'Jan 18, 2038, 1:02 AM',
       'My Desktop Background.png', '272 bytes', 'PNG image'),
 
+  // An image file without an extension, to confirm that file type detection
+  // using mime types works fine.
   image2: new TestEntryInfo(
-      EntryType.FILE, 'image2.png', 'image2.png',
+      EntryType.FILE, 'image2.png', 'image2',
       'image/png', SharedOption.NONE, 'Jan 18, 2038, 1:02 AM',
-      'image2.png', '4 KB', 'PNG image'),
+      'image2', '4 KB', 'PNG image'),
 
   image3: new TestEntryInfo(
       EntryType.FILE, 'image3.jpg', 'image3.jpg',
-      'image/jpg', SharedOption.NONE, 'Jan 18, 2038, 1:02 AM',
-      'image3.jpg', '272 bytes', 'JPEG image'),
+      'image/jpeg', SharedOption.NONE, 'Jan 18, 2038, 1:02 AM',
+      'image3.jpg', '3 KB', 'JPEG image'),
 
+  // An ogg file without a mime type, to confirm that file type detection using
+  // file extensions works fine.
   beautiful: new TestEntryInfo(
       EntryType.FILE, 'music.ogg', 'Beautiful Song.ogg',
-      'text/plain', SharedOption.NONE, 'Nov 12, 2086, 12:00 PM',
+      null, SharedOption.NONE, 'Nov 12, 2086, 12:00 PM',
       'Beautiful Song.ogg', '14 KB', 'OGG audio'),
 
   photos: new TestEntryInfo(

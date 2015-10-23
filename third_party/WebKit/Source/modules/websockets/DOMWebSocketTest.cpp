@@ -18,7 +18,6 @@
 #include "platform/heap/Handle.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
-#include "wtf/testing/WTFTestHelpers.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/WTFString.h"
 #include <gmock/gmock.h>
@@ -44,7 +43,7 @@ public:
         return new testing::StrictMock<MockWebSocketChannel>();
     }
 
-    virtual ~MockWebSocketChannel()
+    ~MockWebSocketChannel() override
     {
     }
 
@@ -75,7 +74,7 @@ public:
 
     MockWebSocketChannel* channel() { return m_channel.get(); }
 
-    virtual WebSocketChannel* createChannel(ExecutionContext*, WebSocketChannelClient*) override
+    WebSocketChannel* createChannel(ExecutionContext*, WebSocketChannelClient*) override
     {
         ASSERT(!m_hasCreatedChannel);
         m_hasCreatedChannel = true;

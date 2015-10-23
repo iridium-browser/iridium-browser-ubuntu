@@ -6,7 +6,10 @@
 #define BASE_TEST_HISTOGRAM_TESTER_H_
 
 #include <map>
+#include <ostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -15,6 +18,7 @@
 
 namespace base {
 
+struct Bucket;
 class HistogramSamples;
 
 // HistogramTester provides a simple interface for examining histograms, UMA
@@ -22,6 +26,8 @@ class HistogramSamples;
 // getting logged as intended.
 class HistogramTester {
  public:
+  using CountsMap = std::map<std::string, base::HistogramBase::Count>;
+
   // The constructor will call StatisticsRecorder::Initialize() for you. Also,
   // this takes a snapshot of all current histograms counts.
   HistogramTester();
@@ -47,10 +53,48 @@ class HistogramTester {
   void ExpectTotalCount(const std::string& name,
                         base::HistogramBase::Count count) const;
 
+  // Returns a list of all of the buckets recorded since creation of this
+  // object, as vector<Bucket>, where the Bucket represents the min boundary of
+  // the bucket and the count of samples recorded to that bucket since creation.
+  //
+  // Example usage, using gMock:
+  //   EXPECT_THAT(histogram_tester.GetAllSamples("HistogramName"),
+  //               ElementsAre(Bucket(1, 5), Bucket(2, 10), Bucket(3, 5)));
+  //
+  // If you build the expected list programmatically, you can use ContainerEq:
+  //   EXPECT_THAT(histogram_tester.GetAllSamples("HistogramName"),
+  //               ContainerEq(expected_buckets));
+  //
+  // or EXPECT_EQ if you prefer not to depend on gMock, at the expense of a
+  // slightly less helpful failure message:
+  //   EXPECT_EQ(expected_buckets,
+  //             histogram_tester.GetAllSamples("HistogramName"));
+  std::vector<Bucket> GetAllSamples(const std::string& name) const;
+
+  // Finds histograms whose names start with |query|, and returns them along
+  // with the counts of any samples added since the creation of this object.
+  // Histograms that are unchanged are omitted from the result. The return value
+  // is a map whose keys are the histogram name, and whose values are the sample
+  // count.
+  //
+  // This is useful for cases where the code under test is choosing among a
+  // family of related histograms and incrementing one of them. Typically you
+  // should pass the result of this function directly to EXPECT_THAT.
+  //
+  // Example usage, using gmock (which produces better failure messages):
+  //   #include "testing/gmock/include/gmock/gmock.h"
+  // ...
+  //   base::HistogramTester::CountsMap expected_counts;
+  //   expected_counts["MyMetric.A"] = 1;
+  //   expected_counts["MyMetric.B"] = 1;
+  //   EXPECT_THAT(histogram_tester.GetTotalCountsForPrefix("MyMetric."),
+  //               testing::ContainerEq(expected_counts));
+  CountsMap GetTotalCountsForPrefix(const std::string& query) const;
+
   // Access a modified HistogramSamples containing only what has been logged
   // to the histogram since the creation of this object.
   scoped_ptr<HistogramSamples> GetHistogramSamplesSinceCreation(
-      const std::string& histogram_name);
+      const std::string& histogram_name) const;
 
  private:
   // Verifies and asserts that value in the |sample| bucket matches the
@@ -75,6 +119,18 @@ class HistogramTester {
 
   DISALLOW_COPY_AND_ASSIGN(HistogramTester);
 };
+
+struct Bucket {
+  Bucket(base::HistogramBase::Sample min, base::HistogramBase::Count count)
+      : min(min), count(count) {}
+
+  bool operator==(const Bucket& other) const;
+
+  base::HistogramBase::Sample min;
+  base::HistogramBase::Count count;
+};
+
+void PrintTo(const Bucket& value, std::ostream* os);
 
 }  // namespace base
 

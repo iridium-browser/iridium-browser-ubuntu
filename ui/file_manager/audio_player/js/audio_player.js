@@ -24,7 +24,8 @@ function AudioPlayer(container) {
   Object.observe(this.model_, function(changes) {
     for (var i = 0; i < changes.length; i++) {
       var change = changes[i];
-      if (change.name == 'expanded' && change.type == 'update') {
+      if (change.name == 'expanded' &&
+          (change.type == 'add' || change.type == 'update')) {
         this.onModelExpandedChanged(change.oldValue, change.object.expanded);
         break;
       }
@@ -49,7 +50,9 @@ function AudioPlayer(container) {
     /** @type {AudioPlayerElement} */ (document.querySelector('audio-player'));
   // TODO(yoshiki): Move tracks into the model.
   this.player_.tracks = [];
-  this.player_.model = this.model_;
+  this.model_.initialize(function() {
+    this.player_.model = this.model_;
+  }.bind(this));
 
   // Run asynchronously after an event of model change is delivered.
   setTimeout(function() {
@@ -67,6 +70,7 @@ function AudioPlayer(container) {
         this.onExternallyUnmounted_.bind(this));
 
     window.addEventListener('resize', this.onResize_.bind(this));
+    document.addEventListener('keydown', this.onKeyDown_.bind(this));
 
     // Show the window after DOM is processed.
     var currentWindow = chrome.app.window.current();
@@ -99,7 +103,7 @@ function unload() {
  * Reloads the player.
  */
 function reload() {
-  AudioPlayer.instance.load(window.appState);
+  AudioPlayer.instance.load(/** @type {Playlist} */ (window.appState));
 }
 
 /**
@@ -112,14 +116,15 @@ AudioPlayer.prototype.load = function(playlist) {
 
   // Save the app state, in case of restart. Make a copy of the object, so the
   // playlist member is not changed after entries are resolved.
-  window.appState = JSON.parse(JSON.stringify(playlist));  // cloning
+  window.appState = /** @type {Playlist} */ (
+      JSON.parse(JSON.stringify(playlist)));  // cloning
   util.saveAppState();
 
-  this.isExpanded_ = this.model_.expanded;
+  this.isExpanded_ = this.player_.expanded;
 
   // Resolving entries has to be done after the volume manager is initialized.
   this.volumeManager_.ensureInitialized(function() {
-    util.URLsToEntries(playlist.items, function(entries) {
+    util.URLsToEntries(playlist.items || [], function(entries) {
       this.entries_ = entries;
 
       var position = playlist.position || 0;
@@ -134,8 +139,7 @@ AudioPlayer.prototype.load = function(playlist) {
 
       for (var i = 0; i != this.entries_.length; i++) {
         var entry = this.entries_[i];
-        var onClick = this.select_.bind(this, i);
-        newTracks.push(new AudioPlayer.TrackInfo(entry, onClick));
+        newTracks.push(new AudioPlayer.TrackInfo(entry));
 
         if (unchanged && entry.toURL() !== currentTracks[i].url)
           unchanged = false;
@@ -147,7 +151,7 @@ AudioPlayer.prototype.load = function(playlist) {
       // Run asynchronously, to makes it sure that the handler of the track list
       // is called, before the handler of the track index.
       setTimeout(function() {
-        this.select_(position, !!time);
+        this.select_(position);
 
         // Load the selected track metadata first, then load the rest.
         this.loadMetadata_(position);
@@ -209,20 +213,19 @@ AudioPlayer.prototype.onUnload = function() {
 /**
  * Selects a new track to play.
  * @param {number} newTrack New track number.
- * @param {number} time New playback position (in second).
  * @private
  */
-AudioPlayer.prototype.select_ = function(newTrack, time) {
+AudioPlayer.prototype.select_ = function(newTrack) {
   if (this.currentTrackIndex_ == newTrack) return;
 
   this.currentTrackIndex_ = newTrack;
   this.player_.currentTrackIndex = this.currentTrackIndex_;
-  this.player_.audioController.time = time;
+  this.player_.time = 0;
 
   // Run asynchronously after an event of current track change is delivered.
   setTimeout(function() {
     if (!window.appReopen)
-      this.player_.audioElement.play();
+      this.player_.$.audio.play();
 
     window.appState.position = this.currentTrackIndex_;
     window.appState.time = 0;
@@ -269,7 +272,7 @@ AudioPlayer.prototype.onError_ = function() {
         var error = (!navigator.onLine && !metadata.present) ?
             this.offlineString_ : this.errorString_;
         this.displayMetadata_(track, metadata, error);
-        this.scheduleAutoAdvance_();
+        this.player_.onAudioError();
       }.bind(this));
 };
 
@@ -283,11 +286,35 @@ AudioPlayer.prototype.onResize_ = function(event) {
   if (!this.isExpanded_ &&
       window.innerHeight >= AudioPlayer.EXPANDED_MODE_MIN_HEIGHT) {
     this.isExpanded_ = true;
-    this.model_.expanded = true;
+    this.player_.expanded = true;
   } else if (this.isExpanded_ &&
              window.innerHeight < AudioPlayer.EXPANDED_MODE_MIN_HEIGHT) {
     this.isExpanded_ = false;
-    this.model_.expanded = false;
+    this.player_.expanded = false;
+  }
+};
+
+/**
+ * Handles keydown event to open inspector with shortcut keys.
+ *
+ * @param {Event} event KeyDown event.
+ * @private
+ */
+AudioPlayer.prototype.onKeyDown_ = function(event) {
+  switch (util.getKeyModifiers(event) + event.keyIdentifier) {
+    // Handle debug shortcut keys.
+    case 'Ctrl-Shift-U+0049': // Ctrl+Shift+I
+      chrome.fileManagerPrivate.openInspector('normal');
+      break;
+    case 'Ctrl-Shift-U+004A': // Ctrl+Shift+J
+      chrome.fileManagerPrivate.openInspector('console');
+      break;
+    case 'Ctrl-Shift-U+0043': // Ctrl+Shift+C
+      chrome.fileManagerPrivate.openInspector('element');
+      break;
+    case 'Ctrl-Shift-U+0042': // Ctrl+Shift+B
+      chrome.fileManagerPrivate.openInspector('background');
+      break;
   }
 };
 
@@ -358,7 +385,7 @@ AudioPlayer.prototype.onModelExpandedChanged = function(oldValue, newValue) {
 AudioPlayer.prototype.syncHeight_ = function() {
   var targetHeight;
 
-  if (this.model_.expanded) {
+  if (this.player_.expanded) {
     // Expanded.
     if (!this.lastExpandedHeight_ ||
         this.lastExpandedHeight_ < AudioPlayer.EXPANDED_MODE_MIN_HEIGHT) {
@@ -382,10 +409,9 @@ AudioPlayer.prototype.syncHeight_ = function() {
  * Create a TrackInfo object encapsulating the information about one track.
  *
  * @param {FileEntry} entry FileEntry to be retrieved the track info from.
- * @param {function(MouseEvent)} onClick Click handler.
  * @constructor
  */
-AudioPlayer.TrackInfo = function(entry, onClick) {
+AudioPlayer.TrackInfo = function(entry) {
   this.url = entry.toURL();
   this.title = this.getDefaultTitle();
   this.artist = this.getDefaultArtist();
@@ -431,6 +457,6 @@ AudioPlayer.TrackInfo.prototype.setMetadata = function(
 };
 
 // Starts loading the audio player.
-window.addEventListener('polymer-ready', function(e) {
+window.addEventListener('DOMContentLoaded', function(e) {
   AudioPlayer.load();
 });

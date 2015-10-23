@@ -96,6 +96,30 @@ static bool from_c_info(const sk_imageinfo_t& cinfo, SkImageInfo* info) {
     return true;
 }
 
+const struct {
+    sk_pixelgeometry_t fC;
+    SkPixelGeometry    fSK;
+} gPixelGeometryMap[] = {
+    { UNKNOWN_SK_PIXELGEOMETRY, kUnknown_SkPixelGeometry },
+    { RGB_H_SK_PIXELGEOMETRY,   kRGB_H_SkPixelGeometry   },
+    { BGR_H_SK_PIXELGEOMETRY,   kBGR_H_SkPixelGeometry   },
+    { RGB_V_SK_PIXELGEOMETRY,   kRGB_V_SkPixelGeometry   },
+    { BGR_V_SK_PIXELGEOMETRY,   kBGR_V_SkPixelGeometry   },
+};
+
+
+static bool from_c_pixelgeometry(sk_pixelgeometry_t cGeom, SkPixelGeometry* skGeom) {
+    for (size_t i = 0; i < SK_ARRAY_COUNT(gPixelGeometryMap); ++i) {
+        if (gPixelGeometryMap[i].fC == cGeom) {
+            if (skGeom) {
+                *skGeom = gPixelGeometryMap[i].fSK;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 static void from_c_matrix(const sk_matrix_t* cmatrix, SkMatrix* matrix) {
     matrix->setAll(cmatrix->mat[0], cmatrix->mat[1], cmatrix->mat[2],
                    cmatrix->mat[3], cmatrix->mat[4], cmatrix->mat[5],
@@ -136,10 +160,6 @@ static sk_rect_t ToRect(const SkRect& rect) {
 
 static const SkRect& AsRect(const sk_rect_t& crect) {
     return reinterpret_cast<const SkRect&>(crect);
-}
-
-static const SkRect* AsRect(const sk_rect_t* crect) {
-    return reinterpret_cast<const SkRect*>(crect);
 }
 
 static const SkPath& AsPath(const sk_path_t& cpath) {
@@ -207,8 +227,9 @@ sk_image_t* sk_image_new_raster_copy(const sk_imageinfo_t* cinfo, const void* pi
     return (sk_image_t*)SkImage::NewRasterCopy(info, pixels, rowBytes);
 }
 
-sk_image_t* sk_image_new_from_data(const sk_data_t* cdata) {
-    return ToImage(SkImage::NewFromData(AsData(cdata)));
+sk_image_t* sk_image_new_from_encoded(const sk_data_t* cdata, const sk_irect_t* subset) {
+    return ToImage(SkImage::NewFromEncoded(AsData(cdata),
+                                           reinterpret_cast<const SkIRect*>(subset)));
 }
 
 sk_data_t* sk_image_encode(const sk_image_t* cimage) {
@@ -374,7 +395,16 @@ void sk_canvas_draw_image(sk_canvas_t* ccanvas, const sk_image_t* cimage, float 
 void sk_canvas_draw_image_rect(sk_canvas_t* ccanvas, const sk_image_t* cimage,
                                const sk_rect_t* csrcR, const sk_rect_t* cdstR,
                                const sk_paint_t* cpaint) {
-    AsCanvas(ccanvas)->drawImageRect(AsImage(cimage), AsRect(csrcR), AsRect(*cdstR), AsPaint(cpaint));
+    SkCanvas* canvas = AsCanvas(ccanvas);
+    const SkImage* image = AsImage(cimage);
+    const SkRect& dst = AsRect(*cdstR);
+    const SkPaint* paint = AsPaint(cpaint);
+
+    if (csrcR) {
+        canvas->drawImageRect(image, AsRect(*csrcR), dst, paint);
+    } else {
+        canvas->drawImageRect(image, dst, paint);
+    }
 }
 
 void sk_canvas_draw_picture(sk_canvas_t* ccanvas, const sk_picture_t* cpicture,
@@ -390,21 +420,35 @@ void sk_canvas_draw_picture(sk_canvas_t* ccanvas, const sk_picture_t* cpicture,
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-sk_surface_t* sk_surface_new_raster(const sk_imageinfo_t* cinfo) {
+sk_surface_t* sk_surface_new_raster(const sk_imageinfo_t* cinfo,
+                                    const sk_surfaceprops_t* props) {
     SkImageInfo info;
     if (!from_c_info(*cinfo, &info)) {
         return NULL;
     }
-    return (sk_surface_t*)SkSurface::NewRaster(info);
+    SkPixelGeometry geo = kUnknown_SkPixelGeometry;
+    if (props && !from_c_pixelgeometry(props->pixelGeometry, &geo)) {
+        return NULL;
+    }
+
+    SkSurfaceProps surfProps(0, geo);
+    return (sk_surface_t*)SkSurface::NewRaster(info, &surfProps);
 }
 
 sk_surface_t* sk_surface_new_raster_direct(const sk_imageinfo_t* cinfo, void* pixels,
-                                           size_t rowBytes) {
+                                           size_t rowBytes,
+                                           const sk_surfaceprops_t* props) {
     SkImageInfo info;
     if (!from_c_info(*cinfo, &info)) {
         return NULL;
     }
-    return (sk_surface_t*)SkSurface::NewRasterDirect(info, pixels, rowBytes);
+    SkPixelGeometry geo = kUnknown_SkPixelGeometry;
+    if (props && !from_c_pixelgeometry(props->pixelGeometry, &geo)) {
+        return NULL;
+    }
+
+    SkSurfaceProps surfProps(0, geo);
+    return (sk_surface_t*)SkSurface::NewRasterDirect(info, pixels, rowBytes, &surfProps);
 }
 
 void sk_surface_unref(sk_surface_t* csurf) {
@@ -512,6 +556,86 @@ sk_shader_t* sk_shader_new_linear_gradient(const sk_point_t pts[2],
     return (sk_shader_t*)s;
 }
 
+static const SkPoint& to_skpoint(const sk_point_t& p) {
+    return reinterpret_cast<const SkPoint&>(p);
+}
+
+sk_shader_t* sk_shader_new_radial_gradient(const sk_point_t* ccenter,
+                                           float radius,
+                                           const sk_color_t colors[],
+                                           const float colorPos[],
+                                           int colorCount,
+                                           sk_shader_tilemode_t cmode,
+                                           const sk_matrix_t* cmatrix) {
+    SkShader::TileMode mode;
+    if (!from_c_tilemode(cmode, &mode)) {
+        return NULL;
+    }
+    SkMatrix matrix;
+    if (cmatrix) {
+        from_c_matrix(cmatrix, &matrix);
+    } else {
+        matrix.setIdentity();
+    }
+    SkPoint center = to_skpoint(*ccenter);
+    SkShader* s = SkGradientShader::CreateRadial(
+            center, (SkScalar)radius,
+            reinterpret_cast<const SkColor*>(colors),
+            reinterpret_cast<const SkScalar*>(colorPos),
+            colorCount, mode, 0, &matrix);
+    return (sk_shader_t*)s;
+}
+
+sk_shader_t* sk_shader_new_sweep_gradient(const sk_point_t* ccenter,
+                                          const sk_color_t colors[],
+                                          const float colorPos[],
+                                          int colorCount,
+                                          const sk_matrix_t* cmatrix) {
+    SkMatrix matrix;
+    if (cmatrix) {
+        from_c_matrix(cmatrix, &matrix);
+    } else {
+        matrix.setIdentity();
+    }
+    SkShader* s = SkGradientShader::CreateSweep(
+            (SkScalar)(ccenter->x),
+            (SkScalar)(ccenter->y),
+            reinterpret_cast<const SkColor*>(colors),
+            reinterpret_cast<const SkScalar*>(colorPos),
+            colorCount, 0, &matrix);
+    return (sk_shader_t*)s;
+}
+
+sk_shader_t* sk_shader_new_two_point_conical_gradient(const sk_point_t* start,
+                                                      float startRadius,
+                                                      const sk_point_t* end,
+                                                      float endRadius,
+                                                      const sk_color_t colors[],
+                                                      const float colorPos[],
+                                                      int colorCount,
+                                                      sk_shader_tilemode_t cmode,
+                                                      const sk_matrix_t* cmatrix) {
+    SkShader::TileMode mode;
+    if (!from_c_tilemode(cmode, &mode)) {
+        return NULL;
+    }
+    SkMatrix matrix;
+    if (cmatrix) {
+        from_c_matrix(cmatrix, &matrix);
+    } else {
+        matrix.setIdentity();
+    }
+    SkPoint skstart = to_skpoint(*start);
+    SkPoint skend = to_skpoint(*end);
+    SkShader* s = SkGradientShader::CreateTwoPointConical(
+            skstart, (SkScalar)startRadius,
+            skend, (SkScalar)endRadius,
+            reinterpret_cast<const SkColor*>(colors),
+            reinterpret_cast<const SkScalar*>(colorPos),
+            colorCount, mode, 0, &matrix);
+    return (sk_shader_t*)s;
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 #include "../../include/effects/SkBlurMaskFilter.h"
@@ -586,47 +710,3 @@ const void* sk_data_get_data(const sk_data_t* cdata) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////
-
-void sk_test_capi(SkCanvas* canvas) {
-    sk_imageinfo_t cinfo;
-    cinfo.width = 100;
-    cinfo.height = 100;
-    cinfo.colorType = (sk_colortype_t)kN32_SkColorType;
-    cinfo.alphaType = (sk_alphatype_t)kPremul_SkAlphaType;
-    
-    sk_surface_t* csurface = sk_surface_new_raster(&cinfo);
-    sk_canvas_t* ccanvas = sk_surface_get_canvas(csurface);
-    
-    sk_paint_t* cpaint = sk_paint_new();
-    sk_paint_set_antialias(cpaint, true);
-    sk_paint_set_color(cpaint, 0xFFFF0000);
-    
-    sk_rect_t cr = { 5, 5, 95, 95 };
-    sk_canvas_draw_oval(ccanvas, &cr, cpaint);
-    
-    cr.left += 25;
-    cr.top += 25;
-    cr.right -= 25;
-    cr.bottom -= 25;
-    sk_paint_set_color(cpaint, 0xFF00FF00);
-    sk_canvas_draw_rect(ccanvas, &cr, cpaint);
-    
-    sk_path_t* cpath = sk_path_new();
-    sk_path_move_to(cpath, 50, 50);
-    sk_path_line_to(cpath, 100, 100);
-    sk_path_line_to(cpath, 50, 100);
-    sk_path_close(cpath);
-
-    sk_canvas_draw_path(ccanvas, cpath, cpaint);
-
-    sk_image_t* cimage = sk_surface_new_image_snapshot(csurface);
-    
-    // HERE WE CROSS THE C..C++ boundary
-    canvas->drawImage((const SkImage*)cimage, 20, 20, NULL);
-    
-    sk_path_delete(cpath);
-    sk_paint_delete(cpaint);
-    sk_image_unref(cimage);
-    sk_surface_unref(csurface);
-}

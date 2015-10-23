@@ -27,7 +27,6 @@
 #include "bindings/core/v8/V8PerIsolateData.h"
 
 #include "bindings/core/v8/DOMDataStore.h"
-#include "bindings/core/v8/ScriptDebugServer.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8HiddenValue.h"
@@ -35,6 +34,7 @@
 #include "bindings/core/v8/V8RecursionScope.h"
 #include "bindings/core/v8/V8ScriptRunner.h"
 #include "core/frame/UseCounter.h"
+#include "core/inspector/ScriptDebuggerBase.h"
 #include "public/platform/Platform.h"
 #include "wtf/MainThread.h"
 
@@ -66,6 +66,9 @@ static void useCounterCallback(v8::Isolate* isolate, v8::Isolate::UseCounterFeat
     case v8::Isolate::kLegacyConst:
         UseCounter::count(callingExecutionContext(isolate), UseCounter::LegacyConst);
         break;
+    case v8::Isolate::kObjectObserve:
+        UseCounter::count(callingExecutionContext(isolate), UseCounter::ObjectObserve);
+        break;
     default:
         // This can happen if V8 has added counters that this version of Blink
         // does not know about. It's harmless.
@@ -77,7 +80,7 @@ V8PerIsolateData::V8PerIsolateData()
     : m_destructionPending(false)
     , m_isolateHolder(adoptPtr(new gin::IsolateHolder()))
     , m_stringCache(adoptPtr(new StringCache(isolate())))
-    , m_hiddenValue(adoptPtr(new V8HiddenValue()))
+    , m_hiddenValue(V8HiddenValue::create())
     , m_constructorMode(ConstructorMode::CreateNewObject)
     , m_recursionLevel(0)
     , m_isHandlingRecursionLevelError(false)
@@ -101,10 +104,6 @@ V8PerIsolateData::V8PerIsolateData()
 
 V8PerIsolateData::~V8PerIsolateData()
 {
-    if (m_scriptRegexpScriptState)
-        m_scriptRegexpScriptState->disposePerContextData();
-    if (isMainThread())
-        mainThreadPerIsolateData = 0;
 }
 
 v8::Isolate* V8PerIsolateData::mainThreadIsolate()
@@ -122,6 +121,11 @@ v8::Isolate* V8PerIsolateData::initialize()
     return isolate;
 }
 
+void V8PerIsolateData::enableIdleTasks(v8::Isolate* isolate, PassOwnPtr<gin::V8IdleTaskRunner> taskRunner)
+{
+    from(isolate)->m_isolateHolder->EnableIdleTasks(scoped_ptr<gin::V8IdleTaskRunner>(taskRunner.leakPtr()));
+}
+
 v8::Persistent<v8::Value>& V8PerIsolateData::ensureLiveRoot()
 {
     if (m_liveRoot.isEmpty())
@@ -129,6 +133,8 @@ v8::Persistent<v8::Value>& V8PerIsolateData::ensureLiveRoot()
     return m_liveRoot.getUnsafe();
 }
 
+// willBeDestroyed() clear things that should be cleared before
+// ThreadState::detach() gets called.
 void V8PerIsolateData::willBeDestroyed(v8::Isolate* isolate)
 {
     V8PerIsolateData* data = from(isolate);
@@ -136,11 +142,14 @@ void V8PerIsolateData::willBeDestroyed(v8::Isolate* isolate)
     ASSERT(!data->m_destructionPending);
     data->m_destructionPending = true;
 
+    data->m_scriptDebugger.clear();
     // Clear any data that may have handles into the heap,
     // prior to calling ThreadState::detach().
     data->clearEndOfScopeTasks();
 }
 
+// destroy() clear things that should be cleared after ThreadState::detach()
+// gets called but before the Isolate exits.
 void V8PerIsolateData::destroy(v8::Isolate* isolate)
 {
 #if ENABLE(ASSERT)
@@ -148,9 +157,22 @@ void V8PerIsolateData::destroy(v8::Isolate* isolate)
         isolate->RemoveCallCompletedCallback(&assertV8RecursionScope);
 #endif
     V8PerIsolateData* data = from(isolate);
+
+    // Clear everything before exiting the Isolate.
+    if (data->m_scriptRegexpScriptState)
+        data->m_scriptRegexpScriptState->disposePerContextData();
+    data->m_liveRoot.clear();
+    data->m_hiddenValue.clear();
+    data->m_stringCache->dispose();
+    data->m_stringCache.clear();
+    data->m_toStringTemplate.clear();
+    data->m_domTemplateMapForNonMainWorld.clear();
+    data->m_domTemplateMapForMainWorld.clear();
+    if (isMainThread())
+        mainThreadPerIsolateData = 0;
+
     // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
     isolate->Exit();
-    data->m_scriptDebugger.clear();
     delete data;
 }
 
@@ -277,7 +299,7 @@ void V8PerIsolateData::clearEndOfScopeTasks()
     m_endOfScopeTasks.clear();
 }
 
-void V8PerIsolateData::setScriptDebugger(PassOwnPtrWillBeRawPtr<ScriptDebuggerBase> debugger)
+void V8PerIsolateData::setScriptDebugger(PassOwnPtr<ScriptDebuggerBase> debugger)
 {
     ASSERT(!m_scriptDebugger);
     m_scriptDebugger = debugger;

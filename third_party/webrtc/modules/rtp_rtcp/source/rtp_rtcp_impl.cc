@@ -30,19 +30,20 @@ RtpRtcp::Configuration::Configuration()
     : id(-1),
       audio(false),
       receiver_only(false),
-      clock(NULL),
+      clock(nullptr),
       receive_statistics(NullObjectReceiveStatistics()),
-      outgoing_transport(NULL),
-      intra_frame_callback(NULL),
-      bandwidth_callback(NULL),
-      rtt_stats(NULL),
-      rtcp_packet_type_counter_observer(NULL),
+      outgoing_transport(nullptr),
+      intra_frame_callback(nullptr),
+      bandwidth_callback(nullptr),
+      rtt_stats(nullptr),
+      rtcp_packet_type_counter_observer(nullptr),
       audio_messages(NullObjectRtpAudioFeedback()),
-      remote_bitrate_estimator(NULL),
-      paced_sender(NULL),
-      send_bitrate_observer(NULL),
-      send_frame_count_observer(NULL),
-      send_side_delay_observer(NULL) {
+      remote_bitrate_estimator(nullptr),
+      paced_sender(nullptr),
+      packet_router(nullptr),
+      send_bitrate_observer(nullptr),
+      send_frame_count_observer(nullptr),
+      send_side_delay_observer(nullptr) {
 }
 
 RtpRtcp* RtpRtcp::CreateRtpRtcp(const RtpRtcp::Configuration& configuration) {
@@ -65,6 +66,8 @@ ModuleRtpRtcpImpl::ModuleRtpRtcpImpl(const Configuration& configuration)
                   configuration.outgoing_transport,
                   configuration.audio_messages,
                   configuration.paced_sender,
+                  configuration.packet_router,
+                  configuration.send_time_callback,
                   configuration.send_bitrate_observer,
                   configuration.send_frame_count_observer,
                   configuration.send_side_delay_observer),
@@ -429,13 +432,6 @@ size_t ModuleRtpRtcpImpl::TimeToSendPadding(size_t bytes) {
   return rtp_sender_.TimeToSendPadding(bytes);
 }
 
-bool ModuleRtpRtcpImpl::GetSendSideDelay(int* avg_send_delay_ms,
-                                         int* max_send_delay_ms) const {
-  DCHECK(avg_send_delay_ms);
-  DCHECK(max_send_delay_ms);
-  return rtp_sender_.GetSendSideDelay(avg_send_delay_ms, max_send_delay_ms);
-}
-
 uint16_t ModuleRtpRtcpImpl::MaxPayloadLength() const {
   return rtp_sender_.MaxPayloadLength();
 }
@@ -479,10 +475,7 @@ int32_t ModuleRtpRtcpImpl::SetTransportOverhead(
 }
 
 int32_t ModuleRtpRtcpImpl::SetMaxTransferUnit(const uint16_t mtu) {
-  if (mtu > IP_PACKET_SIZE) {
-    LOG(LS_ERROR) << "Invalid mtu: " << mtu;
-    return -1;
-  }
+  DCHECK_LE(mtu, IP_PACKET_SIZE) << "Invalid mtu: " << mtu;
   return rtp_sender_.SetMaxPayloadLength(mtu - packet_overhead_,
                                          packet_overhead_);
 }
@@ -500,12 +493,11 @@ void ModuleRtpRtcpImpl::SetRTCPStatus(const RTCPMethod method) {
   rtcp_receiver_.SetRTCPStatus(method);
 }
 
-int32_t ModuleRtpRtcpImpl::SetCNAME(const char c_name[RTCP_CNAME_SIZE]) {
+int32_t ModuleRtpRtcpImpl::SetCNAME(const char* c_name) {
   return rtcp_sender_.SetCNAME(c_name);
 }
 
-int32_t ModuleRtpRtcpImpl::AddMixedCNAME(uint32_t ssrc,
-                                         const char c_name[RTCP_CNAME_SIZE]) {
+int32_t ModuleRtpRtcpImpl::AddMixedCNAME(uint32_t ssrc, const char* c_name) {
   return rtcp_sender_.AddMixedCNAME(ssrc, c_name);
 }
 
@@ -546,12 +538,6 @@ int32_t ModuleRtpRtcpImpl::RTT(const uint32_t remote_ssrc,
     *rtt = rtt_ms();
   }
   return ret;
-}
-
-// Reset RTP data counters for the sending side.
-int32_t ModuleRtpRtcpImpl::ResetSendDataCountersRTP() {
-  rtp_sender_.ResetDataCounters();
-  return 0;  // TODO(pwestin): change to void.
 }
 
 // Force a send of an RTCP packet.
@@ -618,6 +604,31 @@ void ModuleRtpRtcpImpl::GetSendStreamDataCounters(
   rtp_sender_.GetDataCounters(rtp_counters, rtx_counters);
 }
 
+void ModuleRtpRtcpImpl::GetRtpPacketLossStats(
+    bool outgoing,
+    uint32_t ssrc,
+    struct RtpPacketLossStats* loss_stats) const {
+  if (!loss_stats) return;
+  const PacketLossStats* stats_source = NULL;
+  if (outgoing) {
+    if (SSRC() == ssrc) {
+      stats_source = &send_loss_stats_;
+    }
+  } else {
+    if (rtcp_receiver_.RemoteSSRC() == ssrc) {
+      stats_source = &receive_loss_stats_;
+    }
+  }
+  if (stats_source) {
+    loss_stats->single_packet_loss_count =
+        stats_source->GetSingleLossCount();
+    loss_stats->multiple_packet_loss_event_count =
+        stats_source->GetMultipleLossEventCount();
+    loss_stats->multiple_packet_loss_packet_count =
+        stats_source->GetMultipleLossPacketCount();
+  }
+}
+
 int32_t ModuleRtpRtcpImpl::RemoteRTCPStat(RTCPSenderInfo* sender_info) {
   return rtcp_receiver_.SenderInfoReceived(sender_info);
 }
@@ -626,17 +637,6 @@ int32_t ModuleRtpRtcpImpl::RemoteRTCPStat(RTCPSenderInfo* sender_info) {
 int32_t ModuleRtpRtcpImpl::RemoteRTCPStat(
     std::vector<RTCPReportBlock>* receive_blocks) const {
   return rtcp_receiver_.StatisticsReceived(receive_blocks);
-}
-
-int32_t ModuleRtpRtcpImpl::AddRTCPReportBlock(
-    const uint32_t ssrc,
-    const RTCPReportBlock* report_block) {
-  return rtcp_sender_.AddExternalReportBlock(ssrc, report_block);
-}
-
-int32_t ModuleRtpRtcpImpl::RemoveRTCPReportBlock(
-  const uint32_t ssrc) {
-  return rtcp_sender_.RemoveExternalReportBlock(ssrc);
 }
 
 // (REMB) Receiver Estimated Max Bitrate.
@@ -651,15 +651,6 @@ void ModuleRtpRtcpImpl::SetREMBStatus(const bool enable) {
 void ModuleRtpRtcpImpl::SetREMBData(const uint32_t bitrate,
                                     const std::vector<uint32_t>& ssrcs) {
   rtcp_sender_.SetREMBData(bitrate, ssrcs);
-}
-
-// (IJ) Extended jitter report.
-bool ModuleRtpRtcpImpl::IJ() const {
-  return rtcp_sender_.IJ();
-}
-
-void ModuleRtpRtcpImpl::SetIJStatus(const bool enable) {
-  rtcp_sender_.SetIJStatus(enable);
 }
 
 int32_t ModuleRtpRtcpImpl::RegisterSendRtpHeaderExtension(
@@ -702,6 +693,9 @@ int ModuleRtpRtcpImpl::SetSelectiveRetransmissions(uint8_t settings) {
 // Send a Negative acknowledgment packet.
 int32_t ModuleRtpRtcpImpl::SendNACK(const uint16_t* nack_list,
                                     const uint16_t size) {
+  for (int i = 0; i < size; ++i) {
+    receive_loss_stats_.AddLostPacket(nack_list[i]);
+  }
   uint16_t nack_length = size;
   uint16_t start_id = 0;
   int64_t now = clock_->TimeInMilliseconds();
@@ -834,20 +828,17 @@ int32_t ModuleRtpRtcpImpl::SendRTCPSliceLossIndication(
       GetFeedbackState(), kRtcpSli, 0, 0, false, picture_id);
 }
 
-int32_t ModuleRtpRtcpImpl::SetGenericFECStatus(
+void ModuleRtpRtcpImpl::SetGenericFECStatus(
     const bool enable,
     const uint8_t payload_type_red,
     const uint8_t payload_type_fec) {
-  return rtp_sender_.SetGenericFECStatus(enable,
-                                         payload_type_red,
-                                         payload_type_fec);
+  rtp_sender_.SetGenericFECStatus(enable, payload_type_red, payload_type_fec);
 }
 
-int32_t ModuleRtpRtcpImpl::GenericFECStatus(
-    bool& enable,
-    uint8_t& payload_type_red,
-    uint8_t& payload_type_fec) {
-  return rtp_sender_.GenericFECStatus(&enable, &payload_type_red,
+void ModuleRtpRtcpImpl::GenericFECStatus(bool& enable,
+                                         uint8_t& payload_type_red,
+                                         uint8_t& payload_type_fec) {
+  rtp_sender_.GenericFECStatus(&enable, &payload_type_red,
                                       &payload_type_fec);
 }
 
@@ -917,6 +908,9 @@ bool ModuleRtpRtcpImpl::SendTimeOfXrRrReport(
 
 void ModuleRtpRtcpImpl::OnReceivedNACK(
     const std::list<uint16_t>& nack_sequence_numbers) {
+  for (uint16_t nack_sequence_number : nack_sequence_numbers) {
+    send_loss_stats_.AddLostPacket(nack_sequence_number);
+  }
   if (!rtp_sender_.StorePackets() ||
       nack_sequence_numbers.size() == 0) {
     return;

@@ -8,7 +8,6 @@
 #include "base/android/jni_string.h"
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/string_util.h"
 #include "jni/MediaPlayerBridge_jni.h"
 #include "media/base/android/media_common_android.h"
@@ -161,7 +160,7 @@ void MediaPlayerBridge::SetDataSource(const std::string& url) {
     DCHECK(j_context);
 
     const std::string data_uri_prefix("data:");
-    if (StartsWithASCII(url, data_uri_prefix, true)) {
+    if (base::StartsWith(url, data_uri_prefix, base::CompareCase::SENSITIVE)) {
       if (!Java_MediaPlayerBridge_setDataUriDataSource(
           env, j_media_player_bridge_.obj(), j_context, j_url_string.obj())) {
         OnMediaError(MEDIA_ERROR_FORMAT);
@@ -329,7 +328,7 @@ void MediaPlayerBridge::SeekTo(base::TimeDelta timestamp) {
   if (j_media_player_bridge_.is_null())
     Prepare();
   else if (prepared_)
-    SeekInternal(timestamp);
+    SeekInternal(GetCurrentTime(), timestamp);
 }
 
 base::TimeDelta MediaPlayerBridge::GetCurrentTime() {
@@ -456,6 +455,11 @@ void MediaPlayerBridge::UpdateAllowedOperations() {
 }
 
 void MediaPlayerBridge::StartInternal() {
+  if (!manager()->RequestPlay(player_id())) {
+    Pause(true);
+    return;
+  }
+
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_MediaPlayerBridge_start(env, j_media_player_bridge_.obj());
   if (!time_update_timer_.IsRunning()) {
@@ -477,10 +481,19 @@ void MediaPlayerBridge::PauseInternal() {
 }
 
 void MediaPlayerBridge::PendingSeekInternal(const base::TimeDelta& time) {
-  SeekInternal(time);
+  SeekInternal(GetCurrentTime(), time);
 }
 
-void MediaPlayerBridge::SeekInternal(base::TimeDelta time) {
+bool MediaPlayerBridge::SeekInternal(base::TimeDelta current_time,
+                                     base::TimeDelta time) {
+  // Seeking on content like live streams may cause the media player to
+  // get stuck in an error state.
+  if (time < current_time && !CanSeekBackward())
+    return false;
+
+  if (time >= current_time && !CanSeekForward())
+    return false;
+
   if (time > duration_)
     time = duration_;
 
@@ -488,7 +501,7 @@ void MediaPlayerBridge::SeekInternal(base::TimeDelta time) {
   // error state.
   if (time < base::TimeDelta()) {
     DCHECK_EQ(-1.0, time.InMillisecondsF());
-    return;
+    return false;
   }
 
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -496,6 +509,7 @@ void MediaPlayerBridge::SeekInternal(base::TimeDelta time) {
   int time_msec = static_cast<int>(time.InMilliseconds());
   Java_MediaPlayerBridge_seekTo(
       env, j_media_player_bridge_.obj(), time_msec);
+  return true;
 }
 
 void MediaPlayerBridge::OnTimeUpdateTimerFired() {

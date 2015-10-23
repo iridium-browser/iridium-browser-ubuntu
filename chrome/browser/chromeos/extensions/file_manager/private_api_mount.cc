@@ -14,10 +14,10 @@
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
-#include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
 #include "chromeos/disks/disk_mount_manager.h"
+#include "components/drive/event_logger.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/task_util.h"
 #include "ui/shell_dialogs/selected_file_info.h"
@@ -60,7 +60,7 @@ bool FileManagerPrivateAddMountFunction::RunAsync() {
   set_log_on_completion(true);
 
   const base::FilePath path = file_manager::util::GetLocalPathFromURL(
-      render_view_host(), GetProfile(), GURL(params->source));
+      render_frame_host(), GetProfile(), GURL(params->source));
 
   if (path.empty())
     return false;

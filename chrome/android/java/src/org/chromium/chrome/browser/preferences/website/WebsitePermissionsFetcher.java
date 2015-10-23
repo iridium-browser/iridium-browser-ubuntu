@@ -63,8 +63,6 @@ public class WebsitePermissionsFetcher {
         queue.add(new CookieInfoFetcher());
         // Fullscreen are stored per-origin.
         queue.add(new FullscreenInfoFetcher());
-        // Images exceptions are host-based patterns.
-        queue.add(new ImagesExceptionInfoFetcher());
         // Local storage info is per-origin.
         queue.add(new LocalStorageInfoFetcher());
         // Website storage is per-host.
@@ -87,55 +85,51 @@ public class WebsitePermissionsFetcher {
     }
 
     /**
-     * Fetches preferences for all sites that have them that apply to the given
-     * filter.
+     * Fetches all preferences within a specific category.
      *
-     * @param filter A filter to apply to sites to fetch. See
-     *               WebsiteSettingsCategoryFilter for a list of valid filters.
+     * @param catgory A category to fetch.
      */
-    public void fetchPreferencesWithFilter(String filter) {
-        WebsiteSettingsCategoryFilter filterHelper = new WebsiteSettingsCategoryFilter();
-        if (filterHelper.showAllSites(filter)) {
+    public void fetchPreferencesForCategory(SiteSettingsCategory category) {
+        if (category.showAllSites()) {
             fetchAllPreferences();
             return;
         }
 
         TaskQueue queue = new TaskQueue();
         // Populate features from more specific to less specific.
-        if (filterHelper.showGeolocationSites(filter)) {
+        if (category.showGeolocationSites()) {
             // Geolocation lookup permission is per-origin and per-embedder.
             queue.add(new GeolocationInfoFetcher());
-        } else if (filterHelper.showCookiesSites(filter)) {
+        } else if (category.showCookiesSites()) {
             // Cookies are stored per-origin.
             queue.add(new CookieInfoFetcher());
-        } else if (filterHelper.showStorageSites(filter)) {
+        } else if (category.showStorageSites()) {
             // Local storage info is per-origin.
             queue.add(new LocalStorageInfoFetcher());
-        } else if (filterHelper.showFullscreenSites(filter)) {
-            // Local storage info is per-origin.
+            // Website storage is per-host.
+            queue.add(new WebStorageInfoFetcher());
+        } else if (category.showFullscreenSites()) {
+            // Full screen is per-origin.
             queue.add(new FullscreenInfoFetcher());
-        } else if (filterHelper.showCameraSites(filter)) {
+        } else if (category.showCameraSites()) {
             // Camera capture permission is per-origin and per-embedder.
             queue.add(new CameraCaptureInfoFetcher());
-        } else if (filterHelper.showMicrophoneSites(filter)) {
+        } else if (category.showMicrophoneSites()) {
             // Micropohone capture permission is per-origin and per-embedder.
             queue.add(new MicrophoneCaptureInfoFetcher());
-        } else if (filterHelper.showPopupSites(filter)) {
+        } else if (category.showPopupSites()) {
             // Popup exceptions are host-based patterns (unless we start
             // synchronizing popup exceptions with desktop Chrome.)
             queue.add(new PopupExceptionInfoFetcher());
-        } else if (filterHelper.showJavaScriptSites(filter)) {
+        } else if (category.showJavaScriptSites()) {
             // JavaScript exceptions are host-based patterns.
             queue.add(new JavaScriptExceptionInfoFetcher());
-        } else if (filterHelper.showPushNotificationsSites(filter)) {
+        } else if (category.showNotificationsSites()) {
             // Push notification permission is per-origin and per-embedder.
             queue.add(new PushNotificationInfoFetcher());
-        } else if (filterHelper.showProtectedMediaSites(filter)) {
+        } else if (category.showProtectedMediaSites()) {
             // Protected media identifier permission is per-origin and per-embedder.
             queue.add(new ProtectedMediaIdentifierInfoFetcher());
-        } else if (filterHelper.showImagesSites(filter)) {
-            // Images exceptions are host-based patterns.
-            queue.add(new ImagesExceptionInfoFetcher());
         }
         queue.add(new PermissionsAvailableCallbackRunner());
         queue.next();
@@ -273,28 +267,6 @@ public class WebsitePermissionsFetcher {
                 WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
                 if (address == null) continue;
                 createSiteByOriginAndHost(address).setFullscreenInfo(info);
-            }
-            queue.next();
-        }
-    }
-
-    /**
-     * Class for fetching the images information.
-     */
-    private class ImagesExceptionInfoFetcher implements Task {
-        @Override
-        public void run(TaskQueue queue) {
-            for (ContentSettingException exception
-                    : WebsitePreferenceBridge.getContentSettingsExceptions(
-                            ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES)) {
-                // The pattern "*" represents the default setting, not a specific website.
-                if (exception.getPattern().equals("*")) continue;
-                WebsiteAddress address = WebsiteAddress.create(exception.getPattern());
-                if (address == null) continue;
-                Set<Website> sites = findOrCreateSitesByHost(address);
-                for (Website site : sites) {
-                    site.setImagesException(exception);
-                }
             }
             queue.next();
         }

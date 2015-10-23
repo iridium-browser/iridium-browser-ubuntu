@@ -38,13 +38,10 @@
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/net/predictor.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -74,7 +71,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/pref_names.h"
@@ -105,6 +101,10 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "chrome/browser/apps/app_launch_for_metro_restart_win.h"
+#endif
+
+#if defined(ENABLE_RLZ)
+#include "components/rlz/rlz_tracker.h"
 #endif
 
 using content::ChildProcessSecurityPolicy;
@@ -242,37 +242,6 @@ void RecordAppLaunches(Profile* profile,
   }
 }
 
-class WebContentsCloseObserver : public content::NotificationObserver {
- public:
-  WebContentsCloseObserver() : contents_(NULL) {}
-  ~WebContentsCloseObserver() override {}
-
-  void SetContents(content::WebContents* contents) {
-    DCHECK(!contents_);
-    contents_ = contents;
-
-    registrar_.Add(this,
-                   content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                   content::Source<content::WebContents>(contents_));
-  }
-
-  content::WebContents* contents() { return contents_; }
-
- private:
-  // content::NotificationObserver overrides:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    DCHECK_EQ(type, content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
-    contents_ = NULL;
-  }
-
-  content::WebContents* contents_;
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebContentsCloseObserver);
-};
-
 // TODO(koz): Consolidate this function and remove the special casing.
 const Extension* GetPlatformApp(Profile* profile,
                                 const std::string& extension_id) {
@@ -332,9 +301,6 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   DCHECK(profile);
   profile_ = profile;
 
-  if (command_line_.HasSwitch(switches::kDnsLogDetails))
-    chrome_browser_net::EnablePredictorDetailedLog(true);
-
   if (AppListService::HandleLaunchCommandLine(command_line_, profile))
     return true;
 
@@ -353,7 +319,7 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
       // If we are being launched from the command line, default to native
       // desktop.
       params.desktop_type = chrome::HOST_DESKTOP_TYPE_NATIVE;
-      OpenApplicationWithReenablePrompt(params);
+      ::OpenApplicationWithReenablePrompt(params);
       return true;
     }
   }
@@ -365,8 +331,7 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   // not as chrome.
   // Special case is when app switches are passed but we do want to restore
   // session. In that case open app window + focus it after session is restored.
-  content::WebContents* app_contents = NULL;
-  if (OpenApplicationWindow(profile, &app_contents)) {
+  if (OpenApplicationWindow(profile)) {
     RecordLaunchModeHistogram(LM_AS_WEBAPP);
   } else {
     RecordLaunchModeHistogram(urls_to_open.empty() ?
@@ -447,19 +412,13 @@ bool StartupBrowserCreatorImpl::OpenApplicationTab(Profile* profile) {
 
   RecordCmdLineAppHistogram(extension->GetType());
 
-  WebContents* app_tab = OpenApplication(
+  WebContents* app_tab = ::OpenApplication(
       AppLaunchParams(profile, extension, extensions::LAUNCH_CONTAINER_TAB,
                       NEW_FOREGROUND_TAB, extensions::SOURCE_COMMAND_LINE));
   return (app_tab != NULL);
 }
 
-bool StartupBrowserCreatorImpl::OpenApplicationWindow(
-    Profile* profile,
-    content::WebContents** out_app_contents) {
-  // Set |out_app_contents| to NULL early on (just in case).
-  if (out_app_contents)
-    *out_app_contents = NULL;
-
+bool StartupBrowserCreatorImpl::OpenApplicationWindow(Profile* profile) {
   std::string url_string, app_id;
   if (!IsAppLaunch(&url_string, &app_id))
     return false;
@@ -487,10 +446,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
                            extensions::SOURCE_COMMAND_LINE);
     params.command_line = command_line_;
     params.current_directory = cur_dir_;
-    WebContents* tab_in_app_window = OpenApplication(params);
-
-    if (out_app_contents)
-      *out_app_contents = tab_in_app_window;
+    WebContents* tab_in_app_window = ::OpenApplication(params);
 
     // Platform apps fire off a launch event which may or may not open a window.
     return (tab_in_app_window != NULL || CanLaunchViaEvent(extension));
@@ -500,7 +456,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
     return false;
 
 #if defined(OS_WIN)  // Fix up Windows shortcuts.
-  ReplaceSubstringsAfterOffset(&url_string, 0, "\\x", "%");
+  base::ReplaceSubstringsAfterOffset(&url_string, 0, "\\x", "%");
 #endif
   GURL url(url_string);
 
@@ -521,11 +477,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
             extensions::Manifest::TYPE_HOSTED_APP);
       }
 
-      WebContents* app_tab = OpenAppShortcutWindow(profile, url);
-
-      if (out_app_contents)
-        *out_app_contents = app_tab;
-
+      WebContents* app_tab = ::OpenAppShortcutWindow(profile, url);
       return (app_tab != NULL);
     }
   }
@@ -814,12 +766,11 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
                                   ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
     params.disposition = first_tab ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
     params.tabstrip_add_types = add_types;
-    params.extension_app_id = tabs[i].app_id;
 
 #if defined(ENABLE_RLZ) && !defined(OS_IOS)
     if (process_startup && google_util::IsGoogleHomePageUrl(tabs[i].url)) {
-      params.extra_headers = RLZTracker::GetAccessPointHttpHeader(
-          RLZTracker::ChromeHomePage());
+      params.extra_headers = rlz::RLZTracker::GetAccessPointHttpHeader(
+          rlz::RLZTracker::ChromeHomePage());
     }
 #endif  // defined(ENABLE_RLZ) && !defined(OS_IOS)
 
@@ -828,7 +779,7 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
     first_tab = false;
   }
   if (!browser->tab_strip_model()->GetActiveWebContents()) {
-    // TODO: this is a work around for 110909. Figure out why it's needed.
+    // TODO(sky): this is a work around for 110909. Figure out why it's needed.
     if (!browser->tab_strip_model()->count())
       chrome::AddTabAt(browser, GURL(), -1, true);
     else

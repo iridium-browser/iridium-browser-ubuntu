@@ -4,20 +4,19 @@
 
 #include "chrome/browser/android/most_visited_sites.h"
 
-#include <string>
-#include <vector>
-
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "chrome/browser/android/popular_sites.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
@@ -26,6 +25,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
+#include "chrome/common/chrome_switches.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/suggestions/suggestions_service.h"
 #include "components/suggestions/suggestions_utils.h"
@@ -35,15 +35,13 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "url/gurl.h"
 
 using base::android::AttachCurrentThread;
-using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::ToJavaArrayOfStrings;
-using base::android::CheckException;
-using base::WeakPtr;
 using content::BrowserThread;
 using history::TopSites;
 using suggestions::ChromeSuggestion;
@@ -111,9 +109,22 @@ SyncState GetSyncState(Profile* profile) {
   if (!sync)
     return SyncState::SYNC_OR_HISTORY_SYNC_DISABLED;
   return suggestions::GetSyncState(
-      sync->IsSyncEnabledAndLoggedIn(),
-      sync->SyncActive() && sync->ConfigurationDone(),
+      sync->CanSyncStart(),
+      sync->IsSyncActive() && sync->ConfigurationDone(),
       sync->GetActiveDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES));
+}
+
+bool ShouldShowPopularSites() {
+  // Note: It's important to query the field trial state first, to ensure that
+  // UMA reports the correct group.
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("NTPPopularSites");
+  base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableNTPPopularSites))
+    return false;
+  if (cmd_line->HasSwitch(switches::kEnableNTPPopularSites))
+    return true;
+  return group_name == "Enabled";
 }
 
 }  // namespace
@@ -135,6 +146,13 @@ MostVisitedSites::MostVisitedSites(Profile* profile)
       ProfileSyncServiceFactory::GetForProfile(profile_);
   if (profile_sync_service)
     profile_sync_service->AddObserver(this);
+
+  if (ShouldShowPopularSites()) {
+    popular_sites_.reset(new PopularSites(
+        profile_->GetRequestContext(),
+        base::Bind(&MostVisitedSites::OnPopularSitesAvailable,
+                   base::Unretained(this))));
+  }
 }
 
 MostVisitedSites::~MostVisitedSites() {
@@ -246,25 +264,20 @@ void MostVisitedSites::BlacklistUrl(JNIEnv* env,
                                     jstring j_url) {
   GURL url(ConvertJavaStringToUTF8(env, j_url));
 
-  switch (mv_source_) {
-    case TOP_SITES: {
-      scoped_refptr<TopSites> top_sites =
-          TopSitesFactory::GetForProfile(profile_);
-      DCHECK(top_sites);
-      top_sites->AddBlacklistedURL(url);
-      break;
-    }
+  // Always blacklist in the local TopSites.
+  scoped_refptr<TopSites> top_sites = TopSitesFactory::GetForProfile(profile_);
+  if (top_sites)
+    top_sites->AddBlacklistedURL(url);
 
-    case SUGGESTIONS_SERVICE: {
-      SuggestionsService* suggestions_service =
-          SuggestionsServiceFactory::GetForProfile(profile_);
-      DCHECK(suggestions_service);
-      suggestions_service->BlacklistURL(
-          url, base::Bind(&MostVisitedSites::OnSuggestionsProfileAvailable,
-                          weak_ptr_factory_.GetWeakPtr()),
-          base::Closure());
-      break;
-    }
+  // Only blacklist in the server-side suggestions service if it's active.
+  if (mv_source_ == SUGGESTIONS_SERVICE) {
+    SuggestionsService* suggestions_service =
+        SuggestionsServiceFactory::GetForProfile(profile_);
+    DCHECK(suggestions_service);
+    suggestions_service->BlacklistURL(
+        url, base::Bind(&MostVisitedSites::OnSuggestionsProfileAvailable,
+                        weak_ptr_factory_.GetWeakPtr()),
+        base::Closure());
   }
 }
 
@@ -351,6 +364,7 @@ void MostVisitedSites::OnMostVisitedURLsAvailable(
     }
   }
   mv_source_ = TOP_SITES;
+  AddPopularSites(&titles, &urls);
   NotifyMostVisitedURLsObserver(titles, urls);
 }
 
@@ -385,7 +399,107 @@ void MostVisitedSites::OnSuggestionsProfileAvailable(
   mv_source_ = SUGGESTIONS_SERVICE;
   // Keep a copy of the suggestions for eventual logging.
   server_suggestions_ = suggestions_profile;
+  AddPopularSites(&titles, &urls);
   NotifyMostVisitedURLsObserver(titles, urls);
+}
+
+void MostVisitedSites::AddPopularSites(std::vector<base::string16>* titles,
+                                       std::vector<std::string>* urls) const {
+  if (!popular_sites_)
+    return;
+
+  DCHECK_EQ(titles->size(), urls->size());
+  DCHECK_LE(static_cast<int>(titles->size()), num_sites_);
+
+  // Collect all non-blacklisted popular suggestions.
+  std::vector<base::string16> new_titles;
+  std::vector<std::string> new_urls;
+  scoped_refptr<TopSites> top_sites(TopSitesFactory::GetForProfile(profile_));
+  for (const PopularSites::Site& popular_site : popular_sites_->sites()) {
+    // Skip blacklisted sites.
+    if (top_sites && top_sites->IsBlacklisted(popular_site.url))
+      continue;
+
+    new_titles.push_back(popular_site.title);
+    new_urls.push_back(popular_site.url.spec());
+    if (static_cast<int>(new_titles.size()) >= num_sites_)
+      break;
+  }
+
+  AddPopularSitesImpl(num_sites_, titles, urls, new_titles, new_urls);
+}
+
+// static
+void MostVisitedSites::AddPopularSitesImpl(
+    int num_sites,
+    std::vector<base::string16>* titles,
+    std::vector<std::string>* urls,
+    const std::vector<base::string16>& popular_titles,
+    const std::vector<std::string>& popular_urls) {
+  // Start off with the popular suggestions.
+  std::vector<base::string16> new_titles(popular_titles);
+  std::vector<std::string> new_urls(popular_urls);
+
+  // Now, go over the personalized suggestions and replace matching popular
+  // suggestions. This is so that when some of the popular suggestions become
+  // personal, they retain their absolute positions.
+  std::vector<bool> new_is_personalized(new_titles.size(), false);
+  std::vector<base::string16> titles_to_insert;
+  std::vector<std::string> urls_to_insert;
+  for (size_t site_index = 0; site_index < titles->size(); site_index++) {
+    const base::string16& title = (*titles)[site_index];
+    const std::string& url = (*urls)[site_index];
+    // See if we already have a matching popular site.
+    bool found = false;
+    for (size_t i = 0; i < new_urls.size(); i++) {
+      if (!new_is_personalized[i] &&
+          GURL(new_urls[i]).host() == GURL(url).host()) {
+        // We have a matching popular sites suggestion. Replace it with the
+        // actual URL and title.
+        new_titles[i] = title;
+        new_urls[i] = url;
+        new_is_personalized[i] = true;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      titles_to_insert.push_back(title);
+      urls_to_insert.push_back(url);
+    }
+  }
+
+  // Append personalized suggestions at the end if there's room.
+  size_t num_to_append =
+      std::min(static_cast<size_t>(num_sites) - new_titles.size(),
+               titles_to_insert.size());
+  new_titles.insert(new_titles.end(),
+                    titles_to_insert.end() - num_to_append,
+                    titles_to_insert.end());
+  new_urls.insert(new_urls.end(),
+                  urls_to_insert.end() - num_to_append,
+                  urls_to_insert.end());
+  new_is_personalized.insert(new_is_personalized.end(), num_to_append, true);
+
+  // Finally, go over the remaining personalized suggestions and evict popular
+  // suggestions to accommodate them. Do it in reverse order, so the least
+  // important popular suggestions will be evicted.
+  for (size_t i = titles_to_insert.size() - num_to_append; i > 0; --i) {
+    const base::string16& title = titles_to_insert[i - 1];
+    const std::string& url = urls_to_insert[i - 1];
+    for (size_t insert_i = new_titles.size(); insert_i > 0; --insert_i) {
+      size_t insert_index = insert_i - 1;
+      if (!new_is_personalized[insert_index]) {
+        new_titles[insert_index] = title;
+        new_urls[insert_index] = url;
+        new_is_personalized[insert_index] = true;
+        break;
+      }
+    }
+  }
+
+  titles->swap(new_titles);
+  urls->swap(new_urls);
 }
 
 void MostVisitedSites::NotifyMostVisitedURLsObserver(
@@ -401,6 +515,29 @@ void MostVisitedSites::NotifyMostVisitedURLsObserver(
       ToJavaArrayOfStrings(env, urls).obj());
 }
 
+void MostVisitedSites::OnPopularSitesAvailable(bool success) {
+  if (!success) {
+    LOG(WARNING) << "Download of popular sites failed";
+    return;
+  }
+
+  if (observer_.is_null())
+    return;
+
+  std::vector<std::string> urls;
+  std::vector<std::string> favicon_urls;
+  for (const PopularSites::Site& popular_site : popular_sites_->sites()) {
+    urls.push_back(popular_site.url.spec());
+    favicon_urls.push_back(popular_site.favicon_url.spec());
+  }
+  JNIEnv* env = AttachCurrentThread();
+  Java_MostVisitedURLsObserver_onPopularURLsAvailable(
+      env, observer_.obj(), ToJavaArrayOfStrings(env, urls).obj(),
+      ToJavaArrayOfStrings(env, favicon_urls).obj());
+
+  QueryMostVisitedURLs();
+}
+
 void MostVisitedSites::RecordUMAMetrics() {
   UMA_HISTOGRAM_SPARSE_SLOWLY(kNumLocalThumbnailTilesHistogramName,
                               num_local_thumbs_);
@@ -414,7 +551,8 @@ void MostVisitedSites::RecordUMAMetrics() {
 void MostVisitedSites::TopSitesLoaded(history::TopSites* top_sites) {
 }
 
-void MostVisitedSites::TopSitesChanged(history::TopSites* top_sites) {
+void MostVisitedSites::TopSitesChanged(history::TopSites* top_sites,
+                                       ChangeReason change_reason) {
   if (mv_source_ == TOP_SITES) {
     // The displayed suggestions are invalidated.
     QueryMostVisitedURLs();

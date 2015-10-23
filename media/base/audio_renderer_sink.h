@@ -5,13 +5,23 @@
 #ifndef MEDIA_BASE_AUDIO_RENDERER_SINK_H_
 #define MEDIA_BASE_AUDIO_RENDERER_SINK_H_
 
+#include <string>
 #include <vector>
+
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "media/audio/audio_output_ipc.h"
 #include "media/audio/audio_parameters.h"
 #include "media/base/audio_bus.h"
 #include "media/base/media_export.h"
+#include "media/base/output_device.h"
+#include "url/gurl.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace media {
 
@@ -55,6 +65,13 @@ class AudioRendererSink
   // Sets the playback volume, with range [0.0, 1.0] inclusive.
   // Returns |true| on success.
   virtual bool SetVolume(double volume) = 0;
+
+  // Returns a pointer to the internal output device.
+  // This pointer is not to be owned by the caller and is valid only during
+  // the lifetime of the AudioRendererSink.
+  // It can be null, which means that access to the output device is not
+  // supported.
+  virtual OutputDevice* GetOutputDevice() = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<AudioRendererSink>;

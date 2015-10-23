@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -17,9 +18,9 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/error_page/common/error_page_params.h"
 #include "components/error_page/common/net_error_info.h"
+#include "components/url_formatter/url_formatter.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -33,12 +34,6 @@
 #include "chrome/common/chrome_switches.h"
 #endif
 
-#if defined(ENABLE_EXTENSIONS)
-#include "extensions/common/constants.h"
-#include "extensions/common/extension_icon_set.h"
-#include "extensions/common/manifest_handlers/icons_handler.h"
-#endif
-
 using blink::WebURLError;
 
 // Some error pages have no details.
@@ -47,15 +42,13 @@ const unsigned int kErrorPagesNoDetails = 0;
 namespace {
 
 static const char kRedirectLoopLearnMoreUrl[] =
-    "https://www.google.com/support/chrome/bin/answer.py?answer=95626";
+    "https://support.google.com/chrome/answer/95626";
 static const char kWeakDHKeyLearnMoreUrl[] =
-    "http://sites.google.com/a/chromium.org/dev/"
-    "err_ssl_weak_server_ephemeral_dh_key";
-#if defined(OS_CHROMEOS)
-static const char kAppWarningLearnMoreUrl[] =
-    "chrome-extension://honijodknafkokifofgiaalefdiedpko/main.html"
-    "?answer=1721911";
-#endif  // defined(OS_CHROMEOS)
+    "https://support.google.com/chrome?p=dh_error";
+static const char kCachedCopyButtonFieldTrial[] =
+    "EnableGoogleCachedCopyTextExperiment";
+static const char kCachedCopyButtonExpTypeControl[] = "control";
+static const int kGoogleCachedCopySuggestionType = 0;
 
 enum NAV_SUGGESTIONS {
   SUGGEST_NONE                  = 0,
@@ -256,13 +249,6 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_NONE,
   },
-  {net::ERR_SSL_UNSAFE_NEGOTIATION,
-   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
-   IDS_ERRORPAGES_HEADING_SSL_PROTOCOL_ERROR,
-   IDS_ERRORPAGES_SUMMARY_SSL_PROTOCOL_ERROR,
-   IDS_ERRORPAGES_DETAILS_SSL_UNSAFE_NEGOTIATION,
-   SUGGEST_NONE,
-  },
   {net::ERR_BAD_SSL_CLIENT_AUTH_CERT,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
    IDS_ERRORPAGES_HEADING_BAD_SSL_CLIENT_AUTH_CERT,
@@ -331,6 +317,20 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_HEADING_SSL_VERSION_OR_CIPHER_MISMATCH,
    IDS_ERRORPAGES_SUMMARY_SSL_VERSION_OR_CIPHER_MISMATCH,
    IDS_ERRORPAGES_DETAILS_SSL_VERSION_OR_CIPHER_MISMATCH,
+   SUGGEST_NONE,
+  },
+  {net::ERR_TEMPORARY_BACKOFF,
+   IDS_ERRORPAGES_TITLE_ACCESS_DENIED,
+   IDS_ERRORPAGES_HEADING_ACCESS_DENIED,
+   IDS_ERRORPAGES_SUMMARY_TEMPORARY_BACKOFF,
+   IDS_ERRORPAGES_DETAILS_TEMPORARY_BACKOFF,
+   SUGGEST_NONE,
+  },
+  {net::ERR_SSL_SERVER_CERT_BAD_FORMAT,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_SSL_PROTOCOL_ERROR,
+   IDS_ERRORPAGES_SUMMARY_SSL_PROTOCOL_ERROR,
+   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_NONE,
   },
 };
@@ -408,7 +408,7 @@ const LocalizedErrorMap http_error_options[] = {
 };
 
 const LocalizedErrorMap dns_probe_error_options[] = {
-  {chrome_common_net::DNS_PROBE_POSSIBLE,
+  {error_page::DNS_PROBE_POSSIBLE,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
    IDS_ERRORPAGES_SUMMARY_DNS_PROBE_RUNNING,
@@ -419,7 +419,7 @@ const LocalizedErrorMap dns_probe_error_options[] = {
   // DNS_PROBE_NOT_RUN is not here; NetErrorHelper will restore the original
   // error, which might be one of several DNS-related errors.
 
-  {chrome_common_net::DNS_PROBE_STARTED,
+  {error_page::DNS_PROBE_STARTED,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
    IDS_ERRORPAGES_SUMMARY_DNS_PROBE_RUNNING,
@@ -431,21 +431,21 @@ const LocalizedErrorMap dns_probe_error_options[] = {
   // DNS_PROBE_FINISHED_UNKNOWN is not here; NetErrorHelper will restore the
   // original error, which might be one of several DNS-related errors.
 
-  {chrome_common_net::DNS_PROBE_FINISHED_NO_INTERNET,
+  {error_page::DNS_PROBE_FINISHED_NO_INTERNET,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_INTERNET_DISCONNECTED,
    IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED,
    IDS_ERRORPAGES_DETAILS_INTERNET_DISCONNECTED,
    SUGGEST_RELOAD | SUGGEST_CHECK_CONNECTION | SUGGEST_FIREWALL_CONFIG,
   },
-  {chrome_common_net::DNS_PROBE_FINISHED_BAD_CONFIG,
+  {error_page::DNS_PROBE_FINISHED_BAD_CONFIG,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
    IDS_ERRORPAGES_SUMMARY_NAME_NOT_RESOLVED,
    IDS_ERRORPAGES_DETAILS_NAME_NOT_RESOLVED,
    SUGGEST_RELOAD | SUGGEST_DNS_CONFIG | SUGGEST_FIREWALL_CONFIG,
   },
-  {chrome_common_net::DNS_PROBE_FINISHED_NXDOMAIN,
+  {error_page::DNS_PROBE_FINISHED_NXDOMAIN,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
    IDS_ERRORPAGES_SUMMARY_NAME_NOT_RESOLVED,
@@ -478,7 +478,7 @@ const LocalizedErrorMap* LookupErrorMap(const std::string& error_domain,
     return FindErrorMapInArray(http_error_options,
                                arraysize(http_error_options),
                                error_code);
-  } else if (error_domain == chrome_common_net::kDnsProbeErrorDomain) {
+  } else if (error_domain == error_page::kDnsProbeErrorDomain) {
     const LocalizedErrorMap* map =
         FindErrorMapInArray(dns_probe_error_options,
                             arraysize(dns_probe_error_options),
@@ -507,8 +507,8 @@ const char* GetIconClassForError(const std::string& error_domain,
                                  int error_code) {
   if ((error_code == net::ERR_INTERNET_DISCONNECTED &&
        error_domain == net::kErrorDomain) ||
-      (error_code == chrome_common_net::DNS_PROBE_FINISHED_NO_INTERNET &&
-       error_domain == chrome_common_net::kDnsProbeErrorDomain))
+      (error_code == error_page::DNS_PROBE_FINISHED_NO_INTERNET &&
+       error_domain == error_page::kDnsProbeErrorDomain))
     return "icon-offline";
 
   return "icon-generic";
@@ -523,6 +523,7 @@ void LocalizedError::GetStrings(int error_code,
                                 const GURL& failed_url,
                                 bool is_post,
                                 bool stale_copy_in_cache,
+                                bool can_show_network_diagnostics_dialog,
                                 const std::string& locale,
                                 const std::string& accept_languages,
                                 scoped_ptr<error_page::ErrorPageParams> params,
@@ -559,9 +560,9 @@ void LocalizedError::GetStrings(int error_code,
     options.suggestions = SUGGEST_NONE;
   }
 
-  base::string16 failed_url_string(net::FormatUrl(
-      failed_url, accept_languages, net::kFormatUrlOmitNothing,
-      net::UnescapeRule::NORMAL, NULL, NULL, NULL));
+  base::string16 failed_url_string(url_formatter::FormatUrl(
+      failed_url, accept_languages, url_formatter::kFormatUrlOmitNothing,
+      net::UnescapeRule::NORMAL, nullptr, nullptr, nullptr));
   // URLs are always LTR.
   if (base::i18n::IsRTL())
     base::i18n::WrapStringWithLTRFormatting(&failed_url_string);
@@ -577,7 +578,7 @@ void LocalizedError::GetStrings(int error_code,
 
   // For offline show a summary message underneath the heading.
   if (error_code == net::ERR_INTERNET_DISCONNECTED ||
-      error_code == chrome_common_net::DNS_PROBE_FINISHED_NO_INTERNET) {
+      error_code == error_page::DNS_PROBE_FINISHED_NO_INTERNET) {
     error_strings->SetString("primaryParagraph",
         l10n_util::GetStringUTF16(options.summary_resource_id));
 
@@ -598,8 +599,8 @@ void LocalizedError::GetStrings(int error_code,
         l10n_util::GetStringUTF16(options.summary_resource_id));
   }
   summary->SetString("failedUrl", failed_url_string);
-  summary->SetString("hostName", net::IDNToUnicode(failed_url.host(),
-                                                   accept_languages));
+  summary->SetString("hostName", url_formatter::IDNToUnicode(failed_url.host(),
+                                                             accept_languages));
   summary->SetString("productName",
                      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
 
@@ -619,9 +620,9 @@ void LocalizedError::GetStrings(int error_code,
   if (error_domain == net::kErrorDomain) {
     // Non-internationalized error string, for debugging Chrome itself.
     error_string = base::ASCIIToUTF16(net::ErrorToShortString(error_code));
-  } else if (error_domain == chrome_common_net::kDnsProbeErrorDomain) {
+  } else if (error_domain == error_page::kDnsProbeErrorDomain) {
     std::string ascii_error_string =
-        chrome_common_net::DnsProbeStatusToString(error_code);
+        error_page::DnsProbeStatusToString(error_code);
     error_string = base::ASCIIToUTF16(ascii_error_string);
   } else {
     DCHECK_EQ(LocalizedError::kHttpErrorDomain, error_domain);
@@ -671,6 +672,7 @@ void LocalizedError::GetStrings(int error_code,
   } else {
     suggestions = params->override_suggestions.release();
     use_default_suggestions = false;
+    EnableGoogleCachedCopyButtonExperiment(suggestions, error_strings);
   }
 
   error_strings->Set("suggestions", suggestions);
@@ -739,9 +741,15 @@ void LocalizedError::GetStrings(int error_code,
   }
 
 #if defined(OS_CHROMEOS)
-  error_strings->SetString(
-      "diagnose", l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_DIAGNOSE));
-#endif  // defined(OS_CHROMEOS)
+  // ChromeOS has its own diagnostics extension, which doesn't rely on a
+  // browser-initiated dialog.
+  can_show_network_diagnostics_dialog = true;
+#endif
+  if (can_show_network_diagnostics_dialog && failed_url.is_valid() &&
+      failed_url.SchemeIsHTTPOrHTTPS()) {
+    error_strings->SetString(
+        "diagnose", l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_DIAGNOSE));
+  }
 
   if (options.suggestions & SUGGEST_CHECK_CONNECTION) {
     base::DictionaryValue* suggest_check_connection = new base::DictionaryValue;
@@ -886,44 +894,38 @@ bool LocalizedError::HasStrings(const std::string& error_domain,
   return LookupErrorMap(error_domain, error_code, /*is_post=*/false) != NULL;
 }
 
-#if defined(ENABLE_EXTENSIONS)
-void LocalizedError::GetAppErrorStrings(
-    const GURL& display_url,
-    const extensions::Extension* app,
-    const std::string& locale,
+void LocalizedError::EnableGoogleCachedCopyButtonExperiment(
+    base::ListValue* suggestions,
     base::DictionaryValue* error_strings) {
-  DCHECK(app);
+  std::string field_trial_exp_type_ =
+      base::FieldTrialList::FindFullName(kCachedCopyButtonFieldTrial);
 
-  webui::SetLoadTimeDataDefaults(locale, error_strings);
+  // Google cache copy button experiment.
+  // If the first suggestion is for a Google cache copy. Promote the
+  // suggestion to a separate set of strings for displaying as a button.
+  if (!suggestions->empty() && !field_trial_exp_type_.empty() &&
+      field_trial_exp_type_ != kCachedCopyButtonExpTypeControl) {
+    base::DictionaryValue* suggestion;
+    suggestions->GetDictionary(0, &suggestion);
+    int type = -1;
+    suggestion->GetInteger("type", &type);
 
-  base::string16 failed_url(base::ASCIIToUTF16(display_url.spec()));
-  // URLs are always LTR.
-  if (base::i18n::IsRTL())
-    base::i18n::WrapStringWithLTRFormatting(&failed_url);
-  error_strings->SetString(
-     "url", l10n_util::GetStringFUTF16(IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
-                                       failed_url.c_str()));
+    if (type == kGoogleCachedCopySuggestionType) {
+      base::string16 cache_url;
+      suggestion->GetString("urlCorrection", &cache_url);
+      int cache_tracking_id = -1;
+      suggestion->GetInteger("trackingId", &cache_tracking_id);
+      scoped_ptr<base::DictionaryValue> cache_button(new base::DictionaryValue);
+      cache_button->SetString(
+            "msg",
+            l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_SHOW_SAVED_COPY));
+      cache_button->SetString("cacheUrl", cache_url);
+      cache_button->SetInteger("trackingId", cache_tracking_id);
+      error_strings->Set("cacheButton", cache_button.release());
 
-  error_strings->SetString("title", app->name());
-  error_strings->SetString(
-      "icon",
-      extensions::IconsInfo::GetIconURL(
-          app,
-          extension_misc::EXTENSION_ICON_GIGANTOR,
-          ExtensionIconSet::MATCH_SMALLER).spec());
-  error_strings->SetString("name", app->name());
-  error_strings->SetString(
-      "msg",
-      l10n_util::GetStringUTF16(IDS_ERRORPAGES_APP_WARNING));
-
-#if defined(OS_CHROMEOS)
-  GURL learn_more_url(kAppWarningLearnMoreUrl);
-  base::DictionaryValue* suggest_learn_more = new base::DictionaryValue();
-  suggest_learn_more->SetString("msg",
-                                l10n_util::GetStringUTF16(
-                                    IDS_ERRORPAGES_SUGGESTION_LEARNMORE_BODY));
-  suggest_learn_more->SetString("learnMoreUrl", learn_more_url.spec());
-  error_strings->Set("suggestionsLearnMore", suggest_learn_more);
-#endif  // defined(OS_CHROMEOS)
+      // Remove the item from suggestions dictionary so that it does not get
+      // displayed by the template in the details section.
+      suggestions->Remove(0, nullptr);
+    }
+  }
 }
-#endif

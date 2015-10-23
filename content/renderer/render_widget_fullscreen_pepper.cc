@@ -104,8 +104,8 @@ WebMouseEvent WebMouseEventFromGestureEvent(const WebGestureEvent& gesture) {
 
   mouse.x = gesture.x;
   mouse.y = gesture.y;
-  mouse.windowX = gesture.globalX;
-  mouse.windowY = gesture.globalY;
+  mouse.windowX = gesture.x;
+  mouse.windowY = gesture.y;
   mouse.globalX = gesture.globalX;
   mouse.globalY = gesture.globalY;
 
@@ -189,8 +189,8 @@ class PepperWidget : public WebWidget {
 
           mouse.x = gesture_event->x;
           mouse.y = gesture_event->y;
-          mouse.windowX = gesture_event->globalX;
-          mouse.windowY = gesture_event->globalY;
+          mouse.windowX = gesture_event->x;
+          mouse.windowY = gesture_event->y;
           mouse.globalX = gesture_event->globalX;
           mouse.globalY = gesture_event->globalY;
           mouse.movementX = 0;
@@ -270,23 +270,23 @@ RenderWidgetFullscreenPepper* RenderWidgetFullscreenPepper::Create(
     const blink::WebScreenInfo& screen_info) {
   DCHECK_NE(MSG_ROUTING_NONE, opener_id);
   scoped_refptr<RenderWidgetFullscreenPepper> widget(
-      new RenderWidgetFullscreenPepper(plugin, active_url, screen_info));
-  widget->Init(opener_id, compositor_deps);
+      new RenderWidgetFullscreenPepper(compositor_deps, plugin, active_url,
+                                       screen_info));
+  widget->Init(opener_id);
   widget->AddRef();
   return widget.get();
 }
 
 RenderWidgetFullscreenPepper::RenderWidgetFullscreenPepper(
+    CompositorDependencies* compositor_deps,
     PepperPluginInstanceImpl* plugin,
     const GURL& active_url,
     const blink::WebScreenInfo& screen_info)
-    : RenderWidgetFullscreen(screen_info),
+    : RenderWidgetFullscreen(compositor_deps, screen_info),
       active_url_(active_url),
       plugin_(plugin),
       layer_(NULL),
-      mouse_lock_dispatcher_(new FullscreenMouseLockDispatcher(
-          this)) {
-}
+      mouse_lock_dispatcher_(new FullscreenMouseLockDispatcher(this)) {}
 
 RenderWidgetFullscreenPepper::~RenderWidgetFullscreenPepper() {
 }

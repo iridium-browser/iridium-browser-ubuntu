@@ -80,6 +80,26 @@ public class AwContentsClientCallbackHelper {
         }
     }
 
+    private static class DoUpdateVisitedHistoryInfo {
+        final String mUrl;
+        final boolean mIsReload;
+
+        DoUpdateVisitedHistoryInfo(String url, boolean isReload) {
+            mUrl = url;
+            mIsReload = isReload;
+        }
+    }
+
+    private static class OnFormResubmissionInfo {
+        final Message mDontResend;
+        final Message mResend;
+
+        OnFormResubmissionInfo(Message dontResend, Message resend) {
+            mDontResend = dontResend;
+            mResend = resend;
+        }
+    }
+
     private static final int MSG_ON_LOAD_RESOURCE = 1;
     private static final int MSG_ON_PAGE_STARTED = 2;
     private static final int MSG_ON_DOWNLOAD_START = 3;
@@ -89,8 +109,11 @@ public class AwContentsClientCallbackHelper {
     private static final int MSG_ON_SCALE_CHANGED_SCALED = 7;
     private static final int MSG_ON_RECEIVED_HTTP_ERROR = 8;
     private static final int MSG_ON_PAGE_FINISHED = 9;
+    private static final int MSG_ON_RECEIVED_TITLE = 10;
     private static final int MSG_ON_PROGRESS_CHANGED = 11;
     private static final int MSG_SYNTHESIZE_PAGE_LOADING = 12;
+    private static final int MSG_DO_UPDATE_VISITED_HISTORY = 13;
+    private static final int MSG_ON_FORM_RESUBMISSION = 14;
 
     // Minimum period allowed between consecutive onNewPicture calls, to rate-limit the callbacks.
     private static final long ON_NEW_PICTURE_MIN_PERIOD_MILLIS = 500;
@@ -165,6 +188,11 @@ public class AwContentsClientCallbackHelper {
                     mContentsClient.onPageFinished(url);
                     break;
                 }
+                case MSG_ON_RECEIVED_TITLE: {
+                    final String title = (String) msg.obj;
+                    mContentsClient.onReceivedTitle(title);
+                    break;
+                }
                 case MSG_ON_PROGRESS_CHANGED: {
                     mContentsClient.onProgressChanged(msg.arg1);
                     break;
@@ -175,6 +203,16 @@ public class AwContentsClientCallbackHelper {
                     mContentsClient.onLoadResource(url);
                     mContentsClient.onProgressChanged(100);
                     mContentsClient.onPageFinished(url);
+                    break;
+                }
+                case MSG_DO_UPDATE_VISITED_HISTORY: {
+                    final DoUpdateVisitedHistoryInfo info = (DoUpdateVisitedHistoryInfo) msg.obj;
+                    mContentsClient.doUpdateVisitedHistory(info.mUrl, info.mIsReload);
+                    break;
+                }
+                case MSG_ON_FORM_RESUBMISSION: {
+                    final OnFormResubmissionInfo info = (OnFormResubmissionInfo) msg.obj;
+                    mContentsClient.onFormResubmission(info.mDontResend, info.mResend);
                     break;
                 }
                 default:
@@ -244,11 +282,29 @@ public class AwContentsClientCallbackHelper {
         mHandler.sendMessage(mHandler.obtainMessage(MSG_ON_PAGE_FINISHED, url));
     }
 
+    public void postOnReceivedTitle(String title) {
+        mHandler.sendMessage(mHandler.obtainMessage(MSG_ON_RECEIVED_TITLE, title));
+    }
+
     public void postOnProgressChanged(int progress) {
         mHandler.sendMessage(mHandler.obtainMessage(MSG_ON_PROGRESS_CHANGED, progress, 0));
     }
 
     public void postSynthesizedPageLoadingForUrlBarUpdate(String url) {
         mHandler.sendMessage(mHandler.obtainMessage(MSG_SYNTHESIZE_PAGE_LOADING, url));
+    }
+
+    public void postDoUpdateVisitedHistory(String url, boolean isReload) {
+        DoUpdateVisitedHistoryInfo info = new DoUpdateVisitedHistoryInfo(url, isReload);
+        mHandler.sendMessage(mHandler.obtainMessage(MSG_DO_UPDATE_VISITED_HISTORY, info));
+    }
+
+    public void postOnFormResubmission(Message dontResend, Message resend) {
+        OnFormResubmissionInfo info = new OnFormResubmissionInfo(dontResend, resend);
+        mHandler.sendMessage(mHandler.obtainMessage(MSG_ON_FORM_RESUBMISSION, info));
+    }
+
+    void removeCallbacksAndMessages() {
+        mHandler.removeCallbacksAndMessages(null);
     }
 }

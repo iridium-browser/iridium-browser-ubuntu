@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/website_settings/website_settings.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "content/public/common/signed_certificate_timestamp_id_and_status.h"
 #include "ui/gfx/native_widget_types.h"
 
 
@@ -83,15 +82,12 @@ class WebsiteSettingsUI {
     // Status of the site's identity.
     WebsiteSettings::SiteIdentityStatus identity_status;
     // Helper to get the status text to display to the user.
-    base::string16 GetIdentityStatusText() const;
+    base::string16 GetSecuritySummary() const;
     // Textual description of the site's identity status that is displayed to
     // the user.
     std::string identity_status_description;
     // The ID is the server certificate of a secure connection or 0.
     int cert_id;
-    // Signed Certificate Timestamp ids and status
-    content::SignedCertificateTimestampIDStatusList
-        signed_certificate_timestamp_ids;
     // Status of the site's connection.
     WebsiteSettings::SiteConnectionStatus connection_status;
     // Textual description of the site's connection status that is displayed to
@@ -152,12 +148,6 @@ class WebsiteSettingsUI {
   static const gfx::Image& GetConnectionIcon(
       WebsiteSettings::SiteConnectionStatus status);
 
-  // Returns the icon ID to show along with the first visit information.
-  static int GetFirstVisitIconID(const base::string16& first_visit);
-
-  // Returns the icon to show along with the first visit information.
-  static const gfx::Image& GetFirstVisitIcon(const base::string16& first_visit);
-
   // Sets cookie information.
   virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) = 0;
 
@@ -167,9 +157,6 @@ class WebsiteSettingsUI {
 
   // Sets site identity information.
   virtual void SetIdentityInfo(const IdentityInfo& identity_info) = 0;
-
-  // Sets the first visited data. |first_visit| can be an empty string.
-  virtual void SetFirstVisit(const base::string16& first_visit) = 0;
 
   // Selects the tab with the given |tab_id|.
   virtual void SetSelectedTab(TabId tab_id) = 0;

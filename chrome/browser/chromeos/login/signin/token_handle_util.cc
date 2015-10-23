@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -95,8 +96,7 @@ void TokenHandleUtil::CheckToken(const user_manager::UserID& user_id,
 
   validation_delegates_.set(
       token, scoped_ptr<TokenDelegate>(new TokenDelegate(
-                 weak_factory_.GetWeakPtr(), false /* validate */, user_id,
-                 token, callback)));
+                 weak_factory_.GetWeakPtr(), user_id, token, callback)));
   gaia_client_->GetTokenHandleInfo(token, kMaxRetries,
                                    validation_delegates_.get(token));
 }
@@ -117,33 +117,15 @@ void TokenHandleUtil::OnObtainTokenComplete(
   obtain_delegates_.erase(user_id);
 }
 
-void TokenHandleUtil::GetTokenHandle(const user_manager::UserID& user_id,
-                                     const std::string& access_token,
-                                     const TokenValidationCallback& callback) {
-  if (!gaia_client_.get()) {
-    auto request_context =
-        chromeos::ProfileHelper::Get()->GetSigninProfile()->GetRequestContext();
-    gaia_client_.reset(new gaia::GaiaOAuthClient(request_context));
-  }
-
-  obtain_delegates_.set(
-      user_id, scoped_ptr<TokenDelegate>(new TokenDelegate(
-                   weak_factory_.GetWeakPtr(), true /* obtain */, user_id,
-                   std::string(), callback)));
-  gaia_client_->GetTokenInfo(access_token, kMaxRetries,
-                             obtain_delegates_.get(user_id));
-}
-
 TokenHandleUtil::TokenDelegate::TokenDelegate(
     const base::WeakPtr<TokenHandleUtil>& owner,
-    bool obtain,
     const user_manager::UserID& user_id,
     const std::string& token,
     const TokenValidationCallback& callback)
     : owner_(owner),
-      obtain_(obtain),
       user_id_(user_id),
       token_(token),
+      tokeninfo_response_start_time_(base::TimeTicks::Now()),
       callback_(callback) {
 }
 
@@ -155,13 +137,10 @@ void TokenHandleUtil::TokenDelegate::OnOAuthError() {
   NotifyDone();
 }
 
+// Warning: NotifyDone() deletes |this|
 void TokenHandleUtil::TokenDelegate::NotifyDone() {
-  if (owner_) {
-    if (obtain_)
-      owner_->OnObtainTokenComplete(user_id_);
-    else
+  if (owner_)
       owner_->OnValidationComplete(token_);
-  }
 }
 
 void TokenHandleUtil::TokenDelegate::OnNetworkError(int response_code) {
@@ -172,22 +151,15 @@ void TokenHandleUtil::TokenDelegate::OnNetworkError(int response_code) {
 void TokenHandleUtil::TokenDelegate::OnGetTokenInfoResponse(
     scoped_ptr<base::DictionaryValue> token_info) {
   TokenHandleStatus outcome = UNKNOWN;
-  if (obtain_) {
-    if (!token_info->HasKey("error")) {
-      std::string handle;
-      if (token_info->GetString("token_handle", &handle)) {
-        outcome = VALID;
-        if (owner_)
-          owner_->StoreTokenHandle(user_id_, handle);
-      }
-    }
-  } else {
-    if (!token_info->HasKey("error")) {
-      int expires_in = 0;
-      if (token_info->GetInteger("expires_in", &expires_in))
-        outcome = (expires_in < 0) ? INVALID : VALID;
-    }
+  if (!token_info->HasKey("error")) {
+    int expires_in = 0;
+    if (token_info->GetInteger("expires_in", &expires_in))
+      outcome = (expires_in < 0) ? INVALID : VALID;
   }
+
+  const base::TimeDelta duration =
+      base::TimeTicks::Now() - tokeninfo_response_start_time_;
+  UMA_HISTOGRAM_TIMES("Login.TokenCheckResponseTime", duration);
   callback_.Run(user_id_, outcome);
   NotifyDone();
 }

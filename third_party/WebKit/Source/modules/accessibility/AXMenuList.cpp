@@ -26,20 +26,21 @@
 #include "config.h"
 #include "modules/accessibility/AXMenuList.h"
 
+#include "core/html/HTMLSelectElement.h"
 #include "core/layout/LayoutMenuList.h"
 #include "modules/accessibility/AXMenuListPopup.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 
 namespace blink {
 
-AXMenuList::AXMenuList(LayoutMenuList* layoutObject, AXObjectCacheImpl* axObjectCache)
+AXMenuList::AXMenuList(LayoutMenuList* layoutObject, AXObjectCacheImpl& axObjectCache)
     : AXLayoutObject(layoutObject, axObjectCache)
 {
 }
 
-PassRefPtr<AXMenuList> AXMenuList::create(LayoutMenuList* layoutObject, AXObjectCacheImpl* axObjectCache)
+PassRefPtrWillBeRawPtr<AXMenuList> AXMenuList::create(LayoutMenuList* layoutObject, AXObjectCacheImpl& axObjectCache)
 {
-    return adoptRef(new AXMenuList(layoutObject, axObjectCache));
+    return adoptRefWillBeNoop(new AXMenuList(layoutObject, axObjectCache));
 }
 
 AccessibilityRole AXMenuList::determineAccessibilityRole()
@@ -55,11 +56,11 @@ bool AXMenuList::press() const
     if (!m_layoutObject)
         return false;
 
-    LayoutMenuList* menuList = toLayoutMenuList(m_layoutObject);
-    if (menuList->popupIsVisible())
-        menuList->hidePopup();
+    HTMLSelectElement* select = toLayoutMenuList(m_layoutObject)->selectElement();
+    if (select->popupIsVisible())
+        select->hidePopup();
     else
-        menuList->showPopup();
+        select->showPopup();
     return true;
 }
 
@@ -80,15 +81,15 @@ void AXMenuList::addChildren()
 {
     m_haveChildren = true;
 
-    AXObjectCacheImpl* cache = axObjectCache();
+    AXObjectCacheImpl& cache = axObjectCache();
 
-    AXObject* list = cache->getOrCreate(MenuListPopupRole);
+    AXObject* list = cache.getOrCreate(MenuListPopupRole);
     if (!list)
         return;
 
     toAXMockObject(list)->setParent(this);
     if (list->accessibilityIsIgnored()) {
-        cache->remove(list->axObjectID());
+        cache.remove(list->axObjectID());
         return;
     }
 
@@ -104,7 +105,7 @@ bool AXMenuList::isCollapsed() const
     if (!m_layoutObject)
         return true;
 
-    return !toLayoutMenuList(m_layoutObject)->popupIsVisible();
+    return !toLayoutMenuList(m_layoutObject)->selectElement()->popupIsVisible();
 }
 
 AccessibilityExpanded AXMenuList::isExpanded() const
@@ -136,7 +137,7 @@ void AXMenuList::didUpdateActiveOption(int optionIndex)
         }
     }
 
-    axObjectCache()->postNotification(this, AXObjectCacheImpl::AXMenuListValueChanged);
+    axObjectCache().postNotification(this, AXObjectCacheImpl::AXMenuListValueChanged);
 }
 
 void AXMenuList::didShowPopup()
@@ -157,7 +158,7 @@ void AXMenuList::didHidePopup()
     popup->didHide();
 
     if (node() && node()->focused())
-        axObjectCache()->postNotification(this, AXObjectCacheImpl::AXFocusedUIElementChanged);
+        axObjectCache().postNotification(this, AXObjectCacheImpl::AXFocusedUIElementChanged);
 }
 
 } // namespace blink

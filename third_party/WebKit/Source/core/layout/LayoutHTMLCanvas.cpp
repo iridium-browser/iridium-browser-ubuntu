@@ -29,7 +29,6 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLCanvasElement.h"
-#include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
 #include "core/paint/HTMLCanvasPainter.h"
@@ -97,6 +96,12 @@ CompositingReasons LayoutHTMLCanvas::additionalCompositingReasons() const
     if (toHTMLCanvasElement(node())->shouldBeDirectComposited())
         return CompositingReasonCanvas;
     return CompositingReasonNone;
+}
+
+void LayoutHTMLCanvas::styleDidChange(StyleDifference diff, const ComputedStyle* oldStyle)
+{
+    LayoutReplaced::styleDidChange(diff, oldStyle);
+    toHTMLCanvasElement(node())->styleDidChange(oldStyle, styleRef());
 }
 
 } // namespace blink

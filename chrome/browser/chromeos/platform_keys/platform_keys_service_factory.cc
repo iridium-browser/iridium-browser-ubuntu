@@ -16,6 +16,7 @@
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/platform_keys_certificate_selector_chromeos.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "extensions/browser/extension_registry.h"
@@ -24,24 +25,6 @@
 
 namespace chromeos {
 namespace {
-
-// This SelectDelegate always selects no certificate.
-class NoOpSelectDelegate
-    : public chromeos::PlatformKeysService::SelectDelegate {
- public:
-  NoOpSelectDelegate() {}
-
-  void Select(const std::string& extension_id,
-              const net::CertificateList& certs,
-              const CertificateSelectedCallback& callback,
-              content::WebContents* web_contents,
-              content::BrowserContext* context) override {
-    callback.Run(nullptr);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NoOpSelectDelegate);
-};
 
 // This delegate selects a certificate by showing the certificate selection
 // dialog to the user.
@@ -103,6 +86,7 @@ PlatformKeysServiceFactory::PlatformKeysServiceFactory()
           "PlatformKeysService",
           BrowserContextDependencyManager::GetInstance()) {
   DependsOn(extensions::ExtensionSystemFactory::GetInstance());
+  DependsOn(policy::ProfilePolicyConnectorFactory::GetInstance());
 }
 
 PlatformKeysServiceFactory::~PlatformKeysServiceFactory() {
@@ -117,20 +101,17 @@ KeyedService* PlatformKeysServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   extensions::StateStore* const store =
       extensions::ExtensionSystem::Get(context)->state_store();
-  DCHECK(store);
-  PlatformKeysService* const service = new PlatformKeysService(context, store);
 
-  policy::ProfilePolicyConnector* const connector =
+  policy::ProfilePolicyConnector* const policy_connector =
       policy::ProfilePolicyConnectorFactory::GetForBrowserContext(context);
-  // Only allow the user to grant certificate permissions to extensions if the
-  // user is not managed by policy. Otherwise the user might leak access to
-  // (private keys of) certificates against the intentions of the administrator.
-  // TODO(pneubeck): Remove this once the respective policy is implemented.
-  //   https://crbug.com/460232
-  if (connector->IsManaged())
-    service->SetSelectDelegate(make_scoped_ptr(new NoOpSelectDelegate()));
-  else
-    service->SetSelectDelegate(make_scoped_ptr(new DefaultSelectDelegate()));
+
+  Profile* const profile = Profile::FromBrowserContext(context);
+
+  PlatformKeysService* const service = new PlatformKeysService(
+      policy_connector->IsManaged(), profile->GetPrefs(),
+      policy_connector->policy_service(), context, store);
+
+  service->SetSelectDelegate(make_scoped_ptr(new DefaultSelectDelegate()));
   return service;
 }
 

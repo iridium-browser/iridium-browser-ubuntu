@@ -51,7 +51,6 @@ class FileWrapper;
 class ProcessThread;
 class ReceiveStatistics;
 class RemoteNtpTimeEstimator;
-class RtpDump;
 class RTPPayloadRegistry;
 class RtpReceiver;
 class RTPReceiverAudio;
@@ -275,11 +274,10 @@ public:
     // VoEVideoSync
     bool GetDelayEstimate(int* jitter_buffer_delay_ms,
                           int* playout_buffer_delay_ms) const;
-    int least_required_delay_ms() const { return least_required_delay_ms_; }
+    int LeastRequiredDelayMs() const;
     int SetInitialPlayoutDelay(int delay_ms);
     int SetMinimumPlayoutDelay(int delayMs);
     int GetPlayoutTimestamp(unsigned int& timestamp);
-    void UpdatePlayoutTimestamp(bool rtcp);
     int SetInitTimestamp(unsigned int timestamp);
     int SetInitSequenceNumber(short sequenceNumber);
 
@@ -339,9 +337,6 @@ public:
     int SetCodecFECStatus(bool enable);
     bool GetCodecFECStatus();
     void SetNACKStatus(bool enable, int maxNumberOfPackets);
-    int StartRTPDump(const char fileNameUTF8[1024], RTPDirections direction);
-    int StopRTPDump(RTPDirections direction);
-    bool RTPDumpIsActive(RTPDirections direction);
 
     // From AudioPacketizationCallback in the ACM
     int32_t SendData(FrameType frameType,
@@ -372,7 +367,6 @@ public:
                                 uint32_t rate) override;
     void OnIncomingSSRCChanged(int32_t id, uint32_t ssrc) override;
     void OnIncomingCSRCChanged(int32_t id, uint32_t CSRC, bool added) override;
-    void ResetStatistics(uint32_t ssrc) override;
 
     // From RtpAudioFeedback in the RTP/RTCP module
     void OnPlayTelephoneEvent(int32_t id,
@@ -469,6 +463,7 @@ private:
     int32_t MixOrReplaceAudioWithFile(int mixingFrequency);
     int32_t MixAudioWithFile(AudioFrame& audioFrame, int mixingFrequency);
     int32_t SendPacketRaw(const void *data, size_t len, bool RTCP);
+    void UpdatePlayoutTimestamp(bool rtcp);
     void UpdatePacketDelay(uint32_t timestamp,
                            uint16_t sequenceNumber);
     void RegisterReceiveCodecsToRTPModule();
@@ -496,8 +491,6 @@ private:
     TelephoneEventHandler* telephone_event_handler_;
     rtc::scoped_ptr<RtpRtcp> _rtpRtcpModule;
     rtc::scoped_ptr<AudioCodingModule> audio_coding_;
-    RtpDump& _rtpDumpIn;
-    RtpDump& _rtpDumpOut;
     AudioLevel _outputAudioLevel;
     bool _externalTransport;
     AudioFrame _audioFrame;
@@ -523,9 +516,9 @@ private:
 
     // Timestamp of the audio pulled from NetEq.
     uint32_t jitter_buffer_playout_timestamp_;
-    uint32_t playout_timestamp_rtp_;
+    uint32_t playout_timestamp_rtp_ GUARDED_BY(video_sync_lock_);
     uint32_t playout_timestamp_rtcp_;
-    uint32_t playout_delay_ms_;
+    uint32_t playout_delay_ms_ GUARDED_BY(video_sync_lock_);
     uint32_t _numberOfDiscardedPackets;
     uint16_t send_sequence_number_;
     uint8_t restored_packet_[kVoiceEngineMaxIpPacketSizeBytes];
@@ -571,10 +564,10 @@ private:
     // VoENetwork
     AudioFrame::SpeechType _outputSpeechType;
     // VoEVideoSync
-    uint32_t _average_jitter_buffer_delay_us;
-    int least_required_delay_ms_;
+    rtc::scoped_ptr<CriticalSectionWrapper> video_sync_lock_;
+    uint32_t _average_jitter_buffer_delay_us GUARDED_BY(video_sync_lock_);
     uint32_t _previousTimestamp;
-    uint16_t _recPacketDelayMs;
+    uint16_t _recPacketDelayMs GUARDED_BY(video_sync_lock_);
     // VoEAudioProcessing
     bool _RxVadDetection;
     bool _rxAgcIsEnabled;

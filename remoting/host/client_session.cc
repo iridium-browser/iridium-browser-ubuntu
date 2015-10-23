@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/command_line.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "remoting/base/capabilities.h"
@@ -40,6 +41,9 @@ const int kDefaultDPI = 96;
 namespace remoting {
 
 namespace {
+
+// Name of command-line flag to disable use of I444 by default.
+const char kDisableI444SwitchName[] = "disable-i444";
 
 scoped_ptr<VideoEncoder> CreateVideoEncoder(
     const protocol::SessionConfig& config) {
@@ -107,7 +111,10 @@ ClientSession::ClientSession(
       is_authenticated_(false),
       pause_video_(false),
       lossless_video_encode_(false),
-      lossless_video_color_(false),
+      // Note that |lossless_video_color_| defaults to true, but actually only
+      // controls VP9 video stream color quality.
+      lossless_video_color_(!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kDisableI444SwitchName)),
       weak_factory_(this) {
   connection_->SetEventHandler(this);
 

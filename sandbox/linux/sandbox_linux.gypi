@@ -137,6 +137,8 @@
         'bpf_dsl/cons.h',
         'bpf_dsl/dump_bpf.cc',
         'bpf_dsl/dump_bpf.h',
+        'bpf_dsl/errorcode.cc',
+        'bpf_dsl/errorcode.h',
         'bpf_dsl/linux_syscall_ranges.h',
         'bpf_dsl/policy.cc',
         'bpf_dsl/policy.h',
@@ -151,8 +153,6 @@
         'bpf_dsl/verifier.h',
         'seccomp-bpf/die.cc',
         'seccomp-bpf/die.h',
-        'seccomp-bpf/errorcode.cc',
-        'seccomp-bpf/errorcode.h',
         'seccomp-bpf/sandbox_bpf.cc',
         'seccomp-bpf/sandbox_bpf.h',
         'seccomp-bpf/syscall.cc',
@@ -297,6 +297,7 @@
         'system_headers/linux_futex.h',
         'system_headers/linux_seccomp.h',
         'system_headers/linux_syscalls.h',
+        'system_headers/linux_time.h',
         'system_headers/linux_ucontext.h',
         'system_headers/mips_linux_syscalls.h',
         'system_headers/mips_linux_ucontext.h',
@@ -309,7 +310,8 @@
     },
     {
       # We make this its own target so that it does not interfere
-      # with our tests.
+      # with our tests, and so that it may be selectively included
+      # in ports which need it.
       'target_name': 'libc_urandom_override',
       'type': 'static_library',
       'sources': [

@@ -62,7 +62,7 @@ class MediaOptimization {
                           VCMProtectionCallback* protection_callback,
                           VCMQMSettingsCallback* qmsettings_callback);
 
-  void EnableProtectionMethod(bool enable, VCMProtectionMethodEnum method);
+  void SetProtectionMethod(VCMProtectionMethodEnum method);
   void EnableQM(bool enable);
   void EnableFrameDropper(bool enable);
 
@@ -79,6 +79,7 @@ class MediaOptimization {
   // Informs Media Optimization of encoded output.
   int32_t UpdateWithEncodedData(const EncodedImage& encoded_image);
 
+  // InputFrameRate 0 = no frame rate estimate available.
   uint32_t InputFrameRate();
   uint32_t SentFrameRate();
   uint32_t SentBitRate();

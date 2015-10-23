@@ -51,10 +51,6 @@ void TestWindowDelegate::OnBoundsChanged(const gfx::Rect& old_bounds,
                                          const gfx::Rect& new_bounds) {
 }
 
-ui::TextInputClient* TestWindowDelegate::GetFocusedTextInputClient() {
-  return &text_input_client_;
-}
-
 gfx::NativeCursor TestWindowDelegate::GetCursor(const gfx::Point& point) {
   return gfx::kNullCursor;
 }
@@ -112,6 +108,11 @@ ColorTestWindowDelegate::ColorTestWindowDelegate(SkColor color)
 ColorTestWindowDelegate::~ColorTestWindowDelegate() {
 }
 
+void ColorTestWindowDelegate::OnBoundsChanged(const gfx::Rect& old_bounds,
+                                              const gfx::Rect& new_bounds) {
+  window_size_ = new_bounds.size();
+}
+
 void ColorTestWindowDelegate::OnKeyEvent(ui::KeyEvent* event) {
   last_key_code_ = event->key_code();
   event->SetHandled();
@@ -122,7 +123,7 @@ void ColorTestWindowDelegate::OnWindowDestroyed(Window* window) {
 }
 
 void ColorTestWindowDelegate::OnPaint(const ui::PaintContext& context) {
-  ui::PaintRecorder recorder(context);
+  ui::PaintRecorder recorder(context, window_size_);
   recorder.canvas()->DrawColor(color_, SkXfermode::kSrc_Mode);
 }
 

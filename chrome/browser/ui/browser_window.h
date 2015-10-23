@@ -7,7 +7,7 @@
 
 #include "base/callback_forward.h"
 #include "chrome/browser/lifetime/browser_close_manager.h"
-#include "chrome/browser/signin/signin_header_helper.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/browser.h"
@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/translate/core/common/translate_errors.h"
 #include "ui/base/base_window.h"
 #include "ui/base/window_open_disposition.h"

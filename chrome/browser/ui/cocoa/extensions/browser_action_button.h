@@ -90,20 +90,18 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
 @interface BrowserActionButton(TestingAPI)
 // Sets a context menu to use for testing purposes.
 - (void)setTestContextMenu:(NSMenu*)testContextMenu;
+// Returns true if the action wants to run.
+- (BOOL)wantsToRunForTesting;
 @end
 
 @interface BrowserActionCell : ImageButtonCell {
  @private
   // The controller for the browser actions bar that owns the button. Weak.
   BrowserActionsController* browserActionsController_;
-
-  // The view controller for the parent button. Weak.
-  ToolbarActionViewController* viewController_;
 }
 
 @property(assign, nonatomic)
     BrowserActionsController* browserActionsController;
-@property(readwrite, nonatomic) ToolbarActionViewController* viewController;
 
 @end
 

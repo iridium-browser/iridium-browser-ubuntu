@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/task_management/web_contents_tags.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
@@ -43,7 +44,7 @@ BackgroundContents::BackgroundContents(
   WebContents::CreateParams create_params(profile_, site_instance);
   create_params.routing_id = routing_id;
   create_params.main_frame_routing_id = main_frame_routing_id;
-  create_params.renderer_initiated_creation = true;
+  create_params.renderer_initiated_creation = routing_id != MSG_ROUTING_NONE;
   if (session_storage_namespace) {
     content::SessionStorageNamespaceMap session_storage_namespace_map;
     session_storage_namespace_map.insert(
@@ -59,6 +60,10 @@ BackgroundContents::BackgroundContents(
   content::WebContentsObserver::Observe(web_contents_.get());
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents_.get());
+
+  // Add the TaskManager-specific tag for the BackgroundContents.
+  task_management::WebContentsTags::CreateForBackgroundContents(
+      web_contents_.get(), this);
 
   // Close ourselves when the application is shutting down.
   registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,

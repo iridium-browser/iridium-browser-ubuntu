@@ -11,16 +11,6 @@
 
 using content::BrowserThread;
 
-namespace {
-
-bool IsConnectionOrServiceError(const GoogleServiceAuthError& error) {
-  return error.state() == GoogleServiceAuthError::CONNECTION_FAILED ||
-         error.state() == GoogleServiceAuthError::SERVICE_UNAVAILABLE ||
-         error.state() == GoogleServiceAuthError::REQUEST_CANCELED;
-}
-
-}  // namespace
-
 namespace chromeos {
 
 OAuth2LoginVerifier::OAuth2LoginVerifier(
@@ -40,17 +30,17 @@ OAuth2LoginVerifier::~OAuth2LoginVerifier() {
   cookie_manager_service_->RemoveObserver(this);
 }
 
-void OAuth2LoginVerifier::VerifyUserCookies(Profile* profile) {
+void OAuth2LoginVerifier::VerifyUserCookies() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  std::vector<std::pair<std::string, bool> > accounts;
+  std::vector<gaia::ListedAccount> accounts;
   if (cookie_manager_service_->ListAccounts(&accounts)) {
     OnGaiaAccountsInCookieUpdated(
         accounts, GoogleServiceAuthError(GoogleServiceAuthError::NONE));
   }
 }
 
-void OAuth2LoginVerifier::VerifyProfileTokens(Profile* profile) {
+void OAuth2LoginVerifier::VerifyProfileTokens() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (access_token_.empty()) {
     cookie_manager_service_->AddAccountToCookie(primary_account_id_);
@@ -74,12 +64,12 @@ void OAuth2LoginVerifier::OnAddAccountToCookieCompleted(
 
   LOG(WARNING) << "Failed MergeSession request,"
                << " error: " << error.state();
-  delegate_->OnSessionMergeFailure(IsConnectionOrServiceError(error));
+  delegate_->OnSessionMergeFailure(error.IsTransientError());
 }
 
 void OAuth2LoginVerifier::OnGaiaAccountsInCookieUpdated(
-      const std::vector<std::pair<std::string, bool> >& accounts,
-      const GoogleServiceAuthError& error) {
+    const std::vector<gaia::ListedAccount>& accounts,
+    const GoogleServiceAuthError& error) {
   if (error.state() == GoogleServiceAuthError::State::NONE) {
     VLOG(1) << "ListAccounts successful.";
     delegate_->OnListAccountsSuccess(accounts);
@@ -88,7 +78,7 @@ void OAuth2LoginVerifier::OnGaiaAccountsInCookieUpdated(
 
   LOG(WARNING) << "Failed to get list of session accounts, "
                << " error: " << error.state();
-  delegate_->OnListAccountsFailure(IsConnectionOrServiceError(error));
+  delegate_->OnListAccountsFailure(error.IsTransientError());
 }
 
 }  // namespace chromeos

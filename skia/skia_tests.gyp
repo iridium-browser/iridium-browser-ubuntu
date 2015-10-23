@@ -27,6 +27,7 @@
         'ext/platform_canvas_unittest.cc',
         'ext/recursive_gaussian_convolution_unittest.cc',
         'ext/refptr_unittest.cc',
+        'ext/skia_memory_dump_provider_unittest.cc',
         'ext/skia_utils_ios_unittest.mm',
         'ext/skia_utils_mac_unittest.mm',
       ],
@@ -57,6 +58,23 @@
             'test_suite_name': 'skia_unittests',
           },
           'includes': [ '../build/apk_test.gypi' ],
+        },
+      ],
+    }],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'skia_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'skia_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'skia_unittests.isolate',
+          ],
         },
       ],
     }],

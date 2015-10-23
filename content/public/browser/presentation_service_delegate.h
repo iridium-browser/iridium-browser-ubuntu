@@ -5,6 +5,7 @@
 #ifndef CONTENT_PUBLIC_BROWSER_PRESENTATION_SERVICE_DELEGATE_H_
 #define CONTENT_PUBLIC_BROWSER_PRESENTATION_SERVICE_DELEGATE_H_
 
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
@@ -17,6 +18,16 @@
 namespace content {
 
 class PresentationScreenAvailabilityListener;
+
+using SessionStateChangedCallback =
+    base::Callback<void(const PresentationSessionInfo&,
+                        PresentationSessionState)>;
+
+// Param #0: a vector of messages that are received.
+// Param #1: tells the callback handler that it may reuse strings or buffers
+//           in the messages contained within param #0.
+using PresentationSessionMessageCallback = base::Callback<
+    void(const ScopedVector<content::PresentationSessionMessage>&, bool)>;
 
 // An interface implemented by embedders to handle presentation API calls
 // forwarded from PresentationServiceImpl.
@@ -43,9 +54,7 @@ class CONTENT_EXPORT PresentationServiceDelegate {
       base::Callback<void(const PresentationSessionInfo&)>;
   using PresentationSessionErrorCallback =
       base::Callback<void(const PresentationError&)>;
-  using PresentationSessionMessageCallback = base::Callback<void(
-      scoped_ptr<ScopedVector<PresentationSessionMessage>>)>;
-  using SendMessageCallback = base::Closure;
+  using SendMessageCallback = base::Callback<void(bool)>;
 
   virtual ~PresentationServiceDelegate() {}
 
@@ -91,25 +100,21 @@ class CONTENT_EXPORT PresentationServiceDelegate {
       int render_process_id,
       int render_frame_id) = 0;
 
-  // Sets the default presentation URL and ID for frame given by
-  // |render_process_id| and |render_frame_id|.
+  // Sets the default presentation URL for frame given by |render_process_id|
+  // and |render_frame_id|.
   // If |default_presentation_url| is empty, the default presentation URL will
   // be cleared.
   virtual void SetDefaultPresentationUrl(
       int render_process_id,
       int render_frame_id,
-      const std::string& default_presentation_url,
-      const std::string& default_presentation_id) = 0;
+      const std::string& default_presentation_url) = 0;
 
-  // Starts a new presentation session.
+  // Starts a new presentation session. The presentation id of the session will
+  // be the default presentation ID if any or a generated one otherwise.
   // Typically, the embedder will allow the user to select a screen to show
   // |presentation_url|.
   // |render_process_id|, |render_frame_id|: ID of originating frame.
   // |presentation_url|: URL of the presentation.
-  // |presentation_id|: The caller may provide an non-empty string to be used
-  // as the ID of the presentation. If empty, the default presentation ID
-  // will be used. If both are empty, the embedder will automatically generate
-  // one.
   // |success_cb|: Invoked with session info, if presentation session started
   // successfully.
   // |error_cb|: Invoked with error reason, if presentation session did not
@@ -118,7 +123,6 @@ class CONTENT_EXPORT PresentationServiceDelegate {
       int render_process_id,
       int render_frame_id,
       const std::string& presentation_url,
-      const std::string& presentation_id,
       const PresentationSessionSuccessCallback& success_cb,
       const PresentationSessionErrorCallback& error_cb) = 0;
 
@@ -138,24 +142,44 @@ class CONTENT_EXPORT PresentationServiceDelegate {
       const PresentationSessionSuccessCallback& success_cb,
       const PresentationSessionErrorCallback& error_cb) = 0;
 
-  // Gets the next batch of messages from all presentation sessions in the frame
+  // Close an existing presentation session.
   // |render_process_id|, |render_frame_id|: ID for originating frame.
-  // |message_cb|: Invoked with a non-empty list of messages.
+  // |presentation_id|: The ID of the presentation to close.
+  virtual void CloseSession(int render_process_id,
+                            int render_frame_id,
+                            const std::string& presentation_id) = 0;
+
+  // Listen for messages for a presentation session.
+  // |render_process_id|, |render_frame_id|: ID for originating frame.
+  // |session|: URL and ID of presentation session to listen for messages.
+  // |message_cb|: Invoked with a non-empty list of messages whenever there are
+  // messages.
   virtual void ListenForSessionMessages(
       int render_process_id,
       int render_frame_id,
+      const content::PresentationSessionInfo& session,
       const PresentationSessionMessageCallback& message_cb) = 0;
 
   // Sends a message (string or binary data) to a presentation session.
   // |render_process_id|, |render_frame_id|: ID of originating frame.
-  // |message_request|: Contains Presentation URL, ID and message to be sent
-  // and delegate is responsible for deallocating the message_request.
+  // |session|: The presentation session to send the message to.
+  // |message|: The message to send. The embedder takes ownership of |message|.
+  //            Must not be null.
   // |send_message_cb|: Invoked after handling the send message request.
-  virtual void SendMessage(
+  virtual void SendMessage(int render_process_id,
+                           int render_frame_id,
+                           const content::PresentationSessionInfo& session,
+                           scoped_ptr<PresentationSessionMessage> message,
+                           const SendMessageCallback& send_message_cb) = 0;
+
+  // Continuously listen for presentation session state changes for a frame.
+  // |render_process_id|, |render_frame_id|: ID of frame.
+  // |state_changed_cb|: Invoked with the session and its new state whenever
+  // there is a state change.
+  virtual void ListenForSessionStateChange(
       int render_process_id,
       int render_frame_id,
-      scoped_ptr<PresentationSessionMessage> message_request,
-      const SendMessageCallback& send_message_cb) = 0;
+      const SessionStateChangedCallback& state_changed_cb) = 0;
 };
 
 }  // namespace content

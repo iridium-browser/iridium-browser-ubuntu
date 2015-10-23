@@ -12,7 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/containers/linked_list.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
@@ -81,9 +81,10 @@ const unsigned kMaxCacheEntries = 256;
 // The number of seconds to cache entries.
 const unsigned kTTLSecs = 1800;  // 30 minutes.
 
-base::Value* CertVerifyResultCallback(const CertVerifyResult& verify_result,
-                                      NetLogCaptureMode capture_mode) {
-  base::DictionaryValue* results = new base::DictionaryValue();
+scoped_ptr<base::Value> CertVerifyResultCallback(
+    const CertVerifyResult& verify_result,
+    NetLogCaptureMode capture_mode) {
+  scoped_ptr<base::DictionaryValue> results(new base::DictionaryValue());
   results->SetBoolean("has_md5", verify_result.has_md5);
   results->SetBoolean("has_md2", verify_result.has_md2);
   results->SetBoolean("has_md4", verify_result.has_md4);
@@ -98,16 +99,16 @@ base::Value* CertVerifyResultCallback(const CertVerifyResult& verify_result,
                NetLogX509CertificateCallback(verify_result.verified_cert.get(),
                                              capture_mode));
 
-  base::ListValue* hashes = new base::ListValue();
+  scoped_ptr<base::ListValue> hashes(new base::ListValue());
   for (std::vector<HashValue>::const_iterator it =
            verify_result.public_key_hashes.begin();
        it != verify_result.public_key_hashes.end();
        ++it) {
     hashes->AppendString(it->ToString());
   }
-  results->Set("public_key_hashes", hashes);
+  results->Set("public_key_hashes", hashes.Pass());
 
-  return results;
+  return results.Pass();
 }
 
 }  // namespace
@@ -454,7 +455,7 @@ int MultiThreadedCertVerifier::Verify(X509Certificate* cert,
     if (!new_job->Start(verify_proc_, cert, hostname, ocsp_response, flags,
                         crl_set, additional_trust_anchors)) {
       // TODO(wtc): log to the NetLog.
-      LOG(ERROR) << "CertVerifierWorker couldn't be started.";
+      LOG(ERROR) << "CertVerifierJob couldn't be started.";
       return ERR_INSUFFICIENT_RESOURCES;  // Just a guess.
     }
 

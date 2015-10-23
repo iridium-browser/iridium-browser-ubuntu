@@ -22,7 +22,7 @@
 #include "ui/gfx/geometry/rect.h"
 
 namespace ui {
-struct LatencyInfo;
+class LatencyInfo;
 }
 
 namespace cc {
@@ -82,6 +82,10 @@ class CONTENT_EXPORT RenderWidgetCompositor
   // WebLayerTreeView implementation.
   virtual void setRootLayer(const blink::WebLayer& layer);
   virtual void clearRootLayer();
+  virtual void attachCompositorAnimationTimeline(
+      blink::WebCompositorAnimationTimeline* compositor_timeline);
+  virtual void detachCompositorAnimationTimeline(
+      blink::WebCompositorAnimationTimeline* compositor_timeline);
   virtual void setViewportSize(
       const blink::WebSize& unused_deprecated,
       const blink::WebSize& device_viewport_size);
@@ -104,7 +108,8 @@ class CONTENT_EXPORT RenderWidgetCompositor
                                        double duration_sec);
   virtual void heuristicsForGpuRasterizationUpdated(bool matches_heuristics);
   virtual void setNeedsAnimate();
-  virtual bool commitRequested() const;
+  virtual void setNeedsBeginFrame();
+  virtual void setNeedsCompositorUpdate();
   virtual void didStopFlinging();
   virtual void layoutAndPaintAsync(
       blink::WebLayoutAndPaintAsyncCallback* callback);
@@ -133,6 +138,7 @@ class CONTENT_EXPORT RenderWidgetCompositor
                               bool animate);
   virtual void setTopControlsHeight(float height, bool shrink);
   virtual void setTopControlsShownRatio(float);
+  virtual void setHidePinchScrollbarsNearMinScale(bool) override;
 
   // cc::LayerTreeHostClient implementation.
   void WillBeginMainFrame() override;
@@ -145,9 +151,6 @@ class CONTENT_EXPORT RenderWidgetCompositor
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override;
-  void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
-                           float page_scale,
-                           float top_controls_delta) override;
   void RequestNewOutputSurface() override;
   void DidInitializeOutputSurface() override;
   void DidFailToInitializeOutputSurface() override;
@@ -157,6 +160,10 @@ class CONTENT_EXPORT RenderWidgetCompositor
   void DidCompleteSwapBuffers() override;
   void DidCompletePageScaleAnimation() override;
   void RateLimitSharedMainThreadContext() override;
+  void RecordFrameTimingEvents(
+      scoped_ptr<cc::FrameTimingTracker::CompositeTimingSet> composite_events,
+      scoped_ptr<cc::FrameTimingTracker::MainFrameTimingSet> main_frame_events)
+      override;
 
   // cc::LayerTreeHostSingleThreadClient implementation.
   void ScheduleAnimation() override;
@@ -164,8 +171,8 @@ class CONTENT_EXPORT RenderWidgetCompositor
   void DidAbortSwapBuffers() override;
 
   enum {
-   OUTPUT_SURFACE_RETRIES_BEFORE_FALLBACK = 4,
-   MAX_OUTPUT_SURFACE_RETRIES = 5,
+    OUTPUT_SURFACE_RETRIES_BEFORE_FALLBACK = 4,
+    MAX_OUTPUT_SURFACE_RETRIES = 5,
   };
 
  protected:
@@ -176,9 +183,10 @@ class CONTENT_EXPORT RenderWidgetCompositor
   cc::LayerTreeHost* layer_tree_host() { return layer_tree_host_.get(); }
 
  private:
-  void ScheduleCommit();
-  bool CommitIsSynchronous() const;
-  void SynchronousCommit();
+  void LayoutAndUpdateLayers();
+  void InvokeLayoutAndPaintCallback();
+  bool CompositeIsSynchronous() const;
+  void SynchronouslyComposite();
 
   int num_failed_recreate_attempts_;
   RenderWidget* widget_;

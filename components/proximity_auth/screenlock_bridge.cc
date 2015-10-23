@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "base/strings/string16.h"
-#include "components/proximity_auth/proximity_auth_client.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -15,6 +14,9 @@
 
 namespace proximity_auth {
 namespace {
+
+base::LazyInstance<ScreenlockBridge> g_screenlock_bridge_instance =
+    LAZY_INSTANCE_INITIALIZER;
 
 // Ids for the icons that are supported by lock screen and signin screen
 // account picker as user pod custom icons.
@@ -48,14 +50,6 @@ std::string GetIdForIcon(ScreenlockBridge::UserPodCustomIcon icon) {
 }
 
 }  // namespace
-
-ScreenlockBridge::ScreenlockBridge(ProximityAuthClient* client)
-    : client_(client), lock_handler_(nullptr) {
-  DCHECK(client_);
-}
-
-ScreenlockBridge::~ScreenlockBridge() {
-}
 
 ScreenlockBridge::UserPodCustomIconOptions::UserPodCustomIconOptions()
     : autoshow_tooltip_(false),
@@ -116,6 +110,11 @@ void ScreenlockBridge::UserPodCustomIconOptions::SetTrialRun() {
   is_trial_run_ = true;
 }
 
+// static
+ScreenlockBridge* ScreenlockBridge::Get() {
+  return g_screenlock_bridge_instance.Pointer();
+}
+
 void ScreenlockBridge::SetLockHandler(LockHandler* lock_handler) {
   DCHECK(lock_handler_ == nullptr || lock_handler == nullptr);
 
@@ -150,19 +149,19 @@ bool ScreenlockBridge::IsLocked() const {
   return lock_handler_ != nullptr;
 }
 
-void ScreenlockBridge::Lock(content::BrowserContext* browser_context) {
+void ScreenlockBridge::Lock() {
 #if defined(OS_CHROMEOS)
   chromeos::SessionManagerClient* session_manager =
       chromeos::DBusThreadManager::Get()->GetSessionManagerClient();
   session_manager->RequestLockScreen();
 #else
-  client_->Lock(browser_context);
+  NOTIMPLEMENTED();
 #endif
 }
 
-void ScreenlockBridge::Unlock(content::BrowserContext* browser_context) {
+void ScreenlockBridge::Unlock(const std::string& user_email) {
   if (lock_handler_)
-    lock_handler_->Unlock(client_->GetAuthenticatedUsername(browser_context));
+    lock_handler_->Unlock(user_email);
 }
 
 void ScreenlockBridge::AddObserver(Observer* observer) {
@@ -171,6 +170,12 @@ void ScreenlockBridge::AddObserver(Observer* observer) {
 
 void ScreenlockBridge::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+ScreenlockBridge::ScreenlockBridge() : lock_handler_(nullptr) {
+}
+
+ScreenlockBridge::~ScreenlockBridge() {
 }
 
 }  // namespace proximity_auth

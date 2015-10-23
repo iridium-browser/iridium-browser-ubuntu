@@ -9,6 +9,7 @@
 #include "core/frame/Settings.h"
 #include "core/page/Page.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "public/platform/WebLayerTreeView.h"
 #include "public/web/WebDeviceEmulationParams.h"
 #include "web/InspectorEmulationAgent.h"
 #include "web/WebInputEventConversion.h"
@@ -59,6 +60,7 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* webViewImpl)
     , m_embedderDeviceScaleAdjustment(webViewImpl->page()->settings().deviceScaleAdjustment())
     , m_embedderPreferCompositingToLCDTextEnabled(webViewImpl->page()->settings().preferCompositingToLCDTextEnabled())
     , m_embedderUseMobileViewport(webViewImpl->page()->settings().useMobileViewportStyle())
+    , m_embedderPluginsEnabled(webViewImpl->page()->settings().pluginsEnabled())
     , m_touchEventEmulationEnabled(false)
     , m_doubleTapToZoomEnabled(false)
     , m_originalTouchEnabled(false)
@@ -67,11 +69,22 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* webViewImpl)
     , m_originalMaxTouchPoints(0)
     , m_embedderScriptEnabled(webViewImpl->page()->settings().scriptEnabled())
     , m_scriptExecutionDisabled(false)
+    , m_hidePinchScrollbarsNearMinScale(false)
 {
 }
 
 DevToolsEmulator::~DevToolsEmulator()
 {
+}
+
+PassOwnPtrWillBeRawPtr<DevToolsEmulator> DevToolsEmulator::create(WebViewImpl* webViewImpl)
+{
+    return adoptPtrWillBeNoop(new DevToolsEmulator(webViewImpl));
+}
+
+DEFINE_TRACE(DevToolsEmulator)
+{
+    visitor->trace(m_emulationAgent);
 }
 
 void DevToolsEmulator::setEmulationAgent(InspectorEmulationAgent* agent)
@@ -117,6 +130,14 @@ void DevToolsEmulator::setUseMobileViewportStyle(bool enabled)
         m_webViewImpl->page()->settings().setUseMobileViewportStyle(enabled);
 }
 
+void DevToolsEmulator::setPluginsEnabled(bool enabled)
+{
+    m_embedderPluginsEnabled = enabled;
+    bool emulateMobileEnabled = m_deviceMetricsEnabled && m_emulateMobileEnabled;
+    if (!emulateMobileEnabled)
+        m_webViewImpl->page()->settings().setPluginsEnabled(enabled);
+}
+
 void DevToolsEmulator::setScriptEnabled(bool enabled)
 {
     m_embedderScriptEnabled = enabled;
@@ -134,12 +155,19 @@ bool DevToolsEmulator::doubleTapToZoomEnabled() const
     return m_touchEventEmulationEnabled ? true : m_doubleTapToZoomEnabled;
 }
 
+void DevToolsEmulator::setHidePinchScrollbarsNearMinScale(bool enabled)
+{
+    m_hidePinchScrollbarsNearMinScale = enabled;
+    if (m_webViewImpl->layerTreeView())
+        m_webViewImpl->layerTreeView()->setHidePinchScrollbarsNearMinScale(enabled);
+}
+
 void DevToolsEmulator::enableDeviceEmulation(const WebDeviceEmulationParams& params)
 {
     if (!m_deviceMetricsEnabled) {
         m_deviceMetricsEnabled = true;
         m_webViewImpl->setBackgroundColorOverride(Color::darkGray);
-        m_webViewImpl->updateShowFPSCounterAndContinuousPainting();
+        m_webViewImpl->updateShowFPSCounter();
     }
 
     m_webViewImpl->page()->settings().setDeviceScaleAdjustment(calculateDeviceScaleAdjustment(params.viewSize.width, params.viewSize.height, params.deviceScaleFactor));
@@ -164,7 +192,7 @@ void DevToolsEmulator::disableDeviceEmulation()
 
     m_deviceMetricsEnabled = false;
     m_webViewImpl->setBackgroundColorOverride(Color::transparent);
-    m_webViewImpl->updateShowFPSCounterAndContinuousPainting();
+    m_webViewImpl->updateShowFPSCounter();
     m_webViewImpl->page()->settings().setDeviceScaleAdjustment(m_embedderDeviceScaleAdjustment);
     disableMobileEmulation();
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(0.f);
@@ -189,11 +217,14 @@ void DevToolsEmulator::enableMobileEmulation()
     m_webViewImpl->page()->settings().setTextAutosizingEnabled(true);
     m_webViewImpl->page()->settings().setPreferCompositingToLCDTextEnabled(true);
     m_webViewImpl->page()->settings().setUseMobileViewportStyle(true);
+    m_webViewImpl->page()->settings().setPluginsEnabled(false);
     m_webViewImpl->setZoomFactorOverride(1);
 
     m_originalDefaultMinimumPageScaleFactor = m_webViewImpl->defaultMinimumPageScaleFactor();
     m_originalDefaultMaximumPageScaleFactor = m_webViewImpl->defaultMaximumPageScaleFactor();
     m_webViewImpl->setDefaultPageScaleLimits(0.25f, 5);
+    if (m_webViewImpl->layerTreeView())
+        m_webViewImpl->layerTreeView()->setHidePinchScrollbarsNearMinScale(false);
 }
 
 void DevToolsEmulator::disableMobileEmulation()
@@ -207,11 +238,16 @@ void DevToolsEmulator::disableMobileEmulation()
     m_webViewImpl->page()->settings().setTextAutosizingEnabled(m_embedderTextAutosizingEnabled);
     m_webViewImpl->page()->settings().setPreferCompositingToLCDTextEnabled(m_embedderPreferCompositingToLCDTextEnabled);
     m_webViewImpl->page()->settings().setUseMobileViewportStyle(m_embedderUseMobileViewport);
+    m_webViewImpl->page()->settings().setPluginsEnabled(m_embedderPluginsEnabled);
     m_webViewImpl->setZoomFactorOverride(0);
     m_emulateMobileEnabled = false;
     m_webViewImpl->setDefaultPageScaleLimits(
         m_originalDefaultMinimumPageScaleFactor,
         m_originalDefaultMaximumPageScaleFactor);
+    if (m_webViewImpl->layerTreeView()) {
+        m_webViewImpl->layerTreeView()->setHidePinchScrollbarsNearMinScale(
+            m_hidePinchScrollbarsNearMinScale);
+    }
 }
 
 void DevToolsEmulator::setTouchEventEmulationEnabled(bool enabled)
@@ -264,7 +300,7 @@ bool DevToolsEmulator::handleInputEvent(const WebInputEvent& inputEvent)
             IntPoint anchorCss(*m_lastPinchAnchorDip.get());
             anchorCss.scale(1.f / newPageScaleFactor, 1.f / newPageScaleFactor);
             m_webViewImpl->setPageScaleFactor(newPageScaleFactor);
-            m_webViewImpl->setMainFrameScrollOffset(*m_lastPinchAnchorCss.get() - toIntSize(anchorCss));
+            m_webViewImpl->mainFrame()->setScrollOffset(toIntSize(*m_lastPinchAnchorCss.get() - toIntSize(anchorCss)));
         }
         if (gestureEvent.type() == PlatformEvent::GesturePinchEnd) {
             m_lastPinchAnchorCss.clear();

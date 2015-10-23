@@ -9,7 +9,7 @@
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 #include "sync/protocol/proto_value_conversions.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 NonBlockingTypeCommitContribution::NonBlockingTypeCommitContribution(
     const sync_pb::DataTypeContext& context,
@@ -39,9 +39,9 @@ void NonBlockingTypeCommitContribution::AddToCommitMessage(
     commit_message->add_client_contexts()->CopyFrom(context_);
 }
 
-SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
+syncer::SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
     const sync_pb::ClientToServerResponse& response,
-    sessions::StatusController* status) {
+    syncer::sessions::StatusController* status) {
   const sync_pb::CommitResponse& commit_response = response.commit();
 
   bool transient_error = false;
@@ -57,14 +57,14 @@ SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
     switch (entry_response.response_type()) {
       case sync_pb::CommitResponse::INVALID_MESSAGE:
         LOG(ERROR) << "Server reports commit message is invalid.";
-        DLOG(ERROR) << "Message was: " << SyncEntityToValue(entities_.Get(i),
-                                                            false);
+        DLOG(ERROR) << "Message was: "
+                    << syncer::SyncEntityToValue(entities_.Get(i), false);
         unknown_error = true;
         break;
       case sync_pb::CommitResponse::CONFLICT:
         DVLOG(1) << "Server reports conflict for commit message.";
-        DVLOG(1) << "Message was: " << SyncEntityToValue(entities_.Get(i),
-                                                         false);
+        DVLOG(1) << "Message was: "
+                 << syncer::SyncEntityToValue(entities_.Get(i), false);
         commit_conflict = true;
         break;
       case sync_pb::CommitResponse::SUCCESS: {
@@ -95,13 +95,13 @@ SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
 
   // Let the scheduler know about the failures.
   if (unknown_error) {
-    return SERVER_RETURN_UNKNOWN_ERROR;
+    return syncer::SERVER_RETURN_UNKNOWN_ERROR;
   } else if (transient_error) {
-    return SERVER_RETURN_TRANSIENT_ERROR;
+    return syncer::SERVER_RETURN_TRANSIENT_ERROR;
   } else if (commit_conflict) {
-    return SERVER_RETURN_CONFLICT;
+    return syncer::SERVER_RETURN_CONFLICT;
   } else {
-    return SYNCER_OK;
+    return syncer::SYNCER_OK;
   }
 }
 

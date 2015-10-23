@@ -14,19 +14,66 @@
 var remoting = remoting || {};
 
 /**
- * @param {Array<string>} appCapabilities Array of application capabilities.
+ * Parameters for the remoting.AppRemoting constructor.
+ *
+ * appId: The application ID. If this is not specified than the app id will
+ *     be extracted from the app's manifest.
+ *
+ * appCapabilites: Array of application capabilites.
+ *
+ * licenseManager: Licence manager for this application.
+ *
+ * @typedef {{
+ *   appId: (string|undefined),
+ *   appCapabilities: (Array<string>|undefined),
+ *   licenseManager: (remoting.LicenseManager|undefined)
+ * }}
+ */
+remoting.AppRemotingParams;
+
+/**
+ * @param {remoting.AppRemotingParams} args
  * @constructor
  * @implements {remoting.ApplicationInterface}
  * @extends {remoting.Application}
  */
-remoting.AppRemoting = function(appCapabilities) {
+remoting.AppRemoting = function(args) {
   base.inherits(this, remoting.Application);
+  remoting.app = this;
+
+  // Save recent errors for inclusion in user feedback.
+  remoting.ConsoleWrapper.getInstance().activate(
+      5,
+      remoting.ConsoleWrapper.LogType.ERROR,
+      remoting.ConsoleWrapper.LogType.ASSERT);
 
   /** @private {remoting.Activity} */
   this.activity_ = null;
 
+  /** @private {string} */
+  this.appId_ = (args.appId) ? args.appId : chrome.runtime.id;
+
   /** @private */
-  this.appCapabilities_ = appCapabilities;
+  this.licenseManager_ = (args.licenseManager) ?
+                             args.licenseManager :
+                             new remoting.GaiaLicenseManager();
+
+  /** @private */
+  this.appCapabilities_ = (args.appCapabilities) ? args.appCapabilities : [];
+
+  // This prefix must be added to message window paths so that the HTML
+  // files can be found in the shared module.
+  // TODO(garykac) Add support for dev/prod shared modules.
+  remoting.MessageWindow.htmlFilePrefix =
+      "_modules/koejkfhmphamcgafjmkellhnekdkopod/";
+};
+
+/**
+ * @return {string} Application Id.
+ * @override {remoting.ApplicationInterface}
+ */
+remoting.AppRemoting.prototype.getApplicationId = function() {
+  return this.appId_;
 };
 
 /**
@@ -56,9 +103,9 @@ remoting.AppRemoting.prototype.signInFailed_ = function(error) {
  * @override {remoting.ApplicationInterface}
  */
 remoting.AppRemoting.prototype.initApplication_ = function() {
-  remoting.windowShape.updateClientWindowShape();
-
-  this.activity_ = new remoting.AppRemotingActivity(this.appCapabilities_);
+  remoting.messageWindowManager = new remoting.MessageWindowManager(
+      /** @type {base.WindowMessageDispatcher} */
+      (this.windowMessageDispatcher_));
 };
 
 /**
@@ -66,13 +113,28 @@ remoting.AppRemoting.prototype.initApplication_ = function() {
  * @override {remoting.ApplicationInterface}
  */
 remoting.AppRemoting.prototype.startApplication_ = function(token) {
-  this.activity_.start();
+  var windowShape = new remoting.WindowShape();
+  windowShape.updateClientWindowShape();
+  var that = this;
+
+  this.licenseManager_.getSubscriptionToken(token).then(
+      function(/** string*/ subscriptionToken) {
+    that.activity_ = new remoting.AppRemotingActivity(
+        that.appCapabilities_, that, windowShape, subscriptionToken,
+        /** @type {base.WindowMessageDispatcher} */
+        (that.windowMessageDispatcher_));
+    that.activity_.start();
+  });
 };
 
 /**
  * @override {remoting.ApplicationInterface}
  */
 remoting.AppRemoting.prototype.exitApplication_ = function() {
-  this.activity_.dispose();
+  if (this.activity_) {
+    this.activity_.stop();
+    this.activity_.dispose();
+    this.activity_ = null;
+  }
   this.closeMainWindow_();
 };

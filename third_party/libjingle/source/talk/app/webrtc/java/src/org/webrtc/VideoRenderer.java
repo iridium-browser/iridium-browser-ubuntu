@@ -71,6 +71,9 @@ public class VideoRenderer {
       this.yuvPlanes = yuvPlanes;
       this.yuvFrame = true;
       this.rotationDegree = rotationDegree;
+      if (rotationDegree % 90 != 0) {
+        throw new IllegalArgumentException("Rotation degree not multiple of 90: " + rotationDegree);
+      }
     }
 
     /**
@@ -87,6 +90,17 @@ public class VideoRenderer {
       this.textureId = textureId;
       this.yuvFrame = false;
       this.rotationDegree = rotationDegree;
+      if (rotationDegree % 90 != 0) {
+        throw new IllegalArgumentException("Rotation degree not multiple of 90: " + rotationDegree);
+      }
+    }
+
+    public int rotatedWidth() {
+      return (rotationDegree % 180 == 0) ? width : height;
+    }
+
+    public int rotatedHeight() {
+      return (rotationDegree % 180 == 0) ? height : width;
     }
 
     /**
@@ -163,9 +177,9 @@ public class VideoRenderer {
   }
 
   // |this| either wraps a native (GUI) renderer or a client-supplied Callbacks
-  // (Java) implementation; so exactly one of these will be non-0/null.
-  final long nativeVideoRenderer;
-  private final Callbacks callbacks;
+  // (Java) implementation; this is indicated by |isWrappedVideoRenderer|.
+  long nativeVideoRenderer;
+  private final boolean isWrappedVideoRenderer;
 
   public static VideoRenderer createGui(int x, int y) {
     long nativeVideoRenderer = nativeCreateGuiVideoRenderer(x, y);
@@ -177,20 +191,25 @@ public class VideoRenderer {
 
   public VideoRenderer(Callbacks callbacks) {
     nativeVideoRenderer = nativeWrapVideoRenderer(callbacks);
-    this.callbacks = callbacks;
+    isWrappedVideoRenderer = true;
   }
 
   private VideoRenderer(long nativeVideoRenderer) {
     this.nativeVideoRenderer = nativeVideoRenderer;
-    callbacks = null;
+    isWrappedVideoRenderer = false;
   }
 
   public void dispose() {
-    if (callbacks == null) {
+    if (nativeVideoRenderer == 0) {
+      // Already disposed.
+      return;
+    }
+    if (!isWrappedVideoRenderer) {
       freeGuiVideoRenderer(nativeVideoRenderer);
     } else {
       freeWrappedVideoRenderer(nativeVideoRenderer);
     }
+    nativeVideoRenderer = 0;
   }
 
   private static native long nativeCreateGuiVideoRenderer(int x, int y);

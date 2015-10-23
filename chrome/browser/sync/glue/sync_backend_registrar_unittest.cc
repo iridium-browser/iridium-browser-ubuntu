@@ -4,7 +4,9 @@
 
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
 
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "chrome/browser/sync/glue/ui_model_worker.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync_driver/change_processor_mock.h"
@@ -42,6 +44,7 @@ void TriggerChanges(SyncBackendRegistrar* registrar, ModelType type) {
   registrar->OnChangesComplete(type);
 }
 
+// Flaky: https://crbug.com/498238
 class SyncBackendRegistrarTest : public testing::Test {
  public:
   void TestNonUIDataTypeActivationAsync(sync_driver::ChangeProcessor* processor,
@@ -77,10 +80,10 @@ class SyncBackendRegistrarTest : public testing::Test {
   void TearDown() override {
     registrar_->RequestWorkerStopOnUIThread();
     test_user_share_.TearDown();
-    sync_thread_->message_loop()->PostTask(
-        FROM_HERE,
-        base::Bind(&SyncBackendRegistrar::Shutdown,
-                   base::Unretained(registrar_.release())));
+    sync_thread_->task_runner()->PostTask(
+        FROM_HERE, base::Bind(&SyncBackendRegistrar::Shutdown,
+                              base::Unretained(registrar_.release())));
+    sync_thread_->WaitUntilThreadStarted();
     sync_thread_->message_loop()->RunUntilIdle();
   }
 
@@ -244,9 +247,9 @@ TEST_F(SyncBackendRegistrarTest, ActivateDeactivateNonUIDataType) {
       BrowserThread::DB,
       FROM_HERE,
       base::Bind(&SyncBackendRegistrarTest::TestNonUIDataTypeActivationAsync,
-                 base::Unretained(this),
-                 &change_processor_mock,
-                 &done));
+          base::Unretained(this),
+          &change_processor_mock,
+          &done));
   done.Wait();
 
   registrar_->DeactivateDataType(AUTOFILL);
@@ -331,10 +334,12 @@ TEST_F(SyncBackendRegistrarShutdownTest, BlockingShutdown) {
   // Start the shutdown.
   registrar->RequestWorkerStopOnUIThread();
 
-  sync_thread->message_loop()->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncBackendRegistrar::Shutdown,
-                 base::Unretained(registrar.release())));
+  sync_thread->task_runner()->PostTask(
+      FROM_HERE, base::Bind(&SyncBackendRegistrar::Shutdown,
+                            base::Unretained(registrar.release())));
+
+  // Make sure the thread starts running.
+  sync_thread->WaitUntilThreadStarted();
 
   // The test verifies that the sync thread doesn't block because
   // of the blocked DB thread and can finish the shutdown.

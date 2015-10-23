@@ -15,7 +15,7 @@
 #include "net/base/net_errors.h"
 
 namespace extensions {
-namespace core_api {
+namespace api {
 namespace cast_channel {
 namespace {
 
@@ -68,7 +68,7 @@ CastMessage KeepAliveDelegate::CreateKeepAliveMessage(
   output.set_namespace_(kHeartbeatNamespace);
   base::DictionaryValue type_dict;
   type_dict.SetString(kTypeNodeId, message_type);
-  if (!base::JSONWriter::Write(&type_dict, output.mutable_payload_utf8())) {
+  if (!base::JSONWriter::Write(type_dict, output.mutable_payload_utf8())) {
     LOG(ERROR) << "Failed to serialize dictionary.";
     return output;
   }
@@ -200,5 +200,5 @@ void KeepAliveDelegate::Stop() {
 }
 
 }  // namespace cast_channel
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions

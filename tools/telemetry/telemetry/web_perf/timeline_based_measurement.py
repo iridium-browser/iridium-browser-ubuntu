@@ -4,16 +4,20 @@
 
 from collections import defaultdict
 
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.timeline import model as model_module
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 from telemetry.value import trace
+from telemetry.web_perf.metrics import blob_timeline
 from telemetry.web_perf.metrics import gpu_timeline
 from telemetry.web_perf.metrics import layout
+from telemetry.web_perf.metrics import memory_timeline
 from telemetry.web_perf.metrics import responsiveness_metric
 from telemetry.web_perf.metrics import smoothness
-from telemetry.web_perf import timeline_interaction_record as tir_module
+from telemetry.web_perf.metrics import text_selection
 from telemetry.web_perf import smooth_gesture_util
+from telemetry.web_perf import story_test
+from telemetry.web_perf import timeline_interaction_record as tir_module
 
 # TimelineBasedMeasurement considers all instrumentation as producing a single
 # timeline. But, depending on the amount of instrumentation that is enabled,
@@ -37,7 +41,10 @@ def _GetAllTimelineBasedMetrics():
   return (smoothness.SmoothnessMetric(),
           responsiveness_metric.ResponsivenessMetric(),
           layout.LayoutMetric(),
-          gpu_timeline.GPUTimelineMetric())
+          gpu_timeline.GPUTimelineMetric(),
+          blob_timeline.BlobTimelineMetric(),
+          memory_timeline.MemoryTimelineMetric(),
+          text_selection.TextSelectionMetric())
 
 
 class InvalidInteractions(Exception):
@@ -47,9 +54,15 @@ class InvalidInteractions(Exception):
 # TODO(nednguyen): Get rid of this results wrapper hack after we add interaction
 # record to telemetry value system (crbug.com/453109)
 class ResultsWrapperInterface(object):
-  def __init__(self, results, label):
+  def __init__(self):
+    self._tir_label = None
+    self._results = None
+
+  def SetResults(self, results):
     self._results = results
-    self._result_prefix = label
+
+  def SetTirLabel(self, tir_label):
+    self._tir_label = tir_label
 
   @property
   def current_page(self):
@@ -62,7 +75,8 @@ class ResultsWrapperInterface(object):
 class _TBMResultWrapper(ResultsWrapperInterface):
 
   def AddValue(self, value):
-    value.name = '%s-%s' % (self._result_prefix, value.name)
+    assert self._tir_label
+    value.name = '%s-%s' % (self._tir_label, value.name)
     self._results.AddValue(value)
 
 
@@ -93,11 +107,11 @@ def _GetRendererThreadsToInteractionRecordsMap(model):
 
 class _TimelineBasedMetrics(object):
   def __init__(self, model, renderer_thread, interaction_records,
-              results_wrapper_class=_TBMResultWrapper):
+               results_wrapper):
     self._model = model
     self._renderer_thread = renderer_thread
     self._interaction_records = interaction_records
-    self._results_wrapper_class = results_wrapper_class
+    self._results_wrapper = results_wrapper
 
   def AddResults(self, results):
     interactions_by_label = defaultdict(list)
@@ -109,8 +123,9 @@ class _TimelineBasedMetrics(object):
       if not all(are_repeatable) and len(interactions) > 1:
         raise InvalidInteractions('Duplicate unrepeatable interaction records '
                                   'on the page')
-      wrapped_results = self._results_wrapper_class(results, label)
-      self.UpdateResultsByMetric(interactions, wrapped_results)
+      self._results_wrapper.SetResults(results)
+      self._results_wrapper.SetTirLabel(label)
+      self.UpdateResultsByMetric(interactions, self._results_wrapper)
 
   def UpdateResultsByMetric(self, interactions, wrapped_results):
     if not interactions:
@@ -137,34 +152,52 @@ class Options(object):
         one of NO_OVERHEAD_LEVEL, MINIMAL_OVERHEAD_LEVEL or
         DEBUG_OVERHEAD_LEVEL.
     """
-    if (not isinstance(overhead_level,
-                       tracing_category_filter.TracingCategoryFilter) and
-        overhead_level not in ALL_OVERHEAD_LEVELS):
+    self._category_filter = None
+    if isinstance(overhead_level,
+                  tracing_category_filter.TracingCategoryFilter):
+      self._category_filter = overhead_level
+    elif overhead_level in ALL_OVERHEAD_LEVELS:
+      if overhead_level == NO_OVERHEAD_LEVEL:
+        self._category_filter = tracing_category_filter.CreateNoOverheadFilter()
+      elif overhead_level == MINIMAL_OVERHEAD_LEVEL:
+        self._category_filter = (
+          tracing_category_filter.CreateMinimalOverheadFilter())
+      else:
+        self._category_filter = (
+          tracing_category_filter.CreateDebugOverheadFilter())
+    else:
       raise Exception("Overhead level must be a TracingCategoryFilter object"
                       " or valid overhead level string."
                       " Given overhead level: %s" % overhead_level)
 
-    self._overhead_level = overhead_level
-    self._extra_category_filters = []
+    self._tracing_options = tracing_options.TracingOptions()
+    self._tracing_options.enable_chrome_trace = True
+    self._tracing_options.enable_platform_display_trace = True
 
-  def ExtendTraceCategoryFilters(self, filters):
-    self._extra_category_filters.extend(filters)
+
+  def ExtendTraceCategoryFilter(self, filters):
+    for new_category_filter in filters:
+      self._category_filter.AddIncludedCategory(new_category_filter)
 
   @property
-  def extra_category_filters(self):
-    return self._extra_category_filters
+  def category_filter(self):
+    return self._category_filter
 
   @property
-  def overhead_level(self):
-    return self._overhead_level
+  def tracing_options(self):
+    return self._tracing_options
+
+  @tracing_options.setter
+  def tracing_options(self, value):
+    self._tracing_options = value
 
 
-class TimelineBasedMeasurement(object):
+class TimelineBasedMeasurement(story_test.StoryTest):
   """Collects multiple metrics based on their interaction records.
 
   A timeline based measurement shifts the burden of what metrics to collect onto
-  the user story under test. Instead of the measurement
-  having a fixed set of values it collects, the user story being tested
+  the story under test. Instead of the measurement
+  having a fixed set of values it collects, the story being tested
   issues (via javascript) an Interaction record into the user timing API that
   describing what is happening at that time, as well as a standardized set
   of flags describing the semantics of the work being done. The
@@ -173,7 +206,7 @@ class TimelineBasedMeasurement(object):
   Telemetry's various timeline-producing APIs, tracing especially.
 
   It then passes the recorded timeline to different TimelineBasedMetrics based
-  on those flags. As an example, this allows a single user story run to produce
+  on those flags. As an example, this allows a single story run to produce
   load timing data, smoothness data, critical jank information and overall cpu
   usage information.
 
@@ -183,17 +216,29 @@ class TimelineBasedMeasurement(object):
 
   Args:
       options: an instance of timeline_based_measurement.Options.
-      results_wrapper_class: A class that has the __init__ method takes in
+      results_wrapper: A class that has the __init__ method takes in
         the page_test_results object and the interaction record label. This
         class follows the ResultsWrapperInterface. Note: this class is not
         supported long term and to be removed when crbug.com/453109 is resolved.
   """
-  def __init__(self, options, results_wrapper_class=_TBMResultWrapper):
+  def __init__(self, options, results_wrapper=None):
     self._tbm_options = options
-    self._results_wrapper_class = results_wrapper_class
+    self._results_wrapper = results_wrapper or _TBMResultWrapper()
 
-  def WillRunUserStory(self, tracing_controller,
-                       synthetic_delay_categories=None):
+  def WillRunStory(self, platform):
+    """Set up test according to the tbm options."""
+    pass
+
+  def Measure(self, platform, results):
+    """Collect all possible metrics and added them to results."""
+    pass
+
+  def DidRunStory(self, platform):
+    """Clean up test according to the tbm options."""
+    pass
+
+  def WillRunStoryForPageTest(self, tracing_controller,
+                              synthetic_delay_categories=None):
     """Configure and start tracing.
 
     Args:
@@ -206,32 +251,14 @@ class TimelineBasedMeasurement(object):
     if not tracing_controller.IsChromeTracingSupported():
       raise Exception('Not supported')
 
-    if isinstance(self._tbm_options.overhead_level,
-                  tracing_category_filter.TracingCategoryFilter):
-      category_filter = self._tbm_options.overhead_level
-    else:
-      assert self._tbm_options.overhead_level in ALL_OVERHEAD_LEVELS, (
-          "Invalid TBM Overhead Level: %s" % self._tbm_options.overhead_level)
-
-      if self._tbm_options.overhead_level == NO_OVERHEAD_LEVEL:
-        category_filter = tracing_category_filter.CreateNoOverheadFilter()
-      elif self._tbm_options.overhead_level == MINIMAL_OVERHEAD_LEVEL:
-        category_filter = tracing_category_filter.CreateMinimalOverheadFilter()
-      else:
-        category_filter = tracing_category_filter.CreateDebugOverheadFilter()
-
-    for new_category_filter in self._tbm_options.extra_category_filters:
-      category_filter.AddIncludedCategory(new_category_filter)
-
+    category_filter = self._tbm_options.category_filter
     # TODO(slamm): Move synthetic_delay_categories to the TBM options.
     for delay in synthetic_delay_categories or []:
       category_filter.AddSyntheticDelay(delay)
-    options = tracing_options.TracingOptions()
-    options.enable_chrome_trace = True
-    options.enable_platform_display_trace = True
-    tracing_controller.Start(options, category_filter)
 
-  def Measure(self, tracing_controller, results):
+    tracing_controller.Start(self._tbm_options.tracing_options, category_filter)
+
+  def MeasureForPageTest(self, tracing_controller, results):
     """Collect all possible metrics and added them to results."""
     trace_result = tracing_controller.Stop()
     results.AddValue(trace.TraceValue(results.current_page, trace_result))
@@ -241,9 +268,9 @@ class TimelineBasedMeasurement(object):
         threads_to_records_map.iteritems()):
       meta_metrics = _TimelineBasedMetrics(
           model, renderer_thread, interaction_records,
-          self._results_wrapper_class)
+          self._results_wrapper)
       meta_metrics.AddResults(results)
 
-  def DidRunUserStory(self, tracing_controller):
+  def DidRunStoryForPageTest(self, tracing_controller):
     if tracing_controller.is_tracing_running:
       tracing_controller.Stop()

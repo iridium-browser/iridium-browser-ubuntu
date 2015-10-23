@@ -17,8 +17,9 @@
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/common/extensions/api/speech/tts_engine_manifest_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/console_message_level.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_host.h"
@@ -26,7 +27,6 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
 #include "net/base/network_change_notifier.h"
 
@@ -57,10 +57,9 @@ void WarnIfMissingPauseOrResumeListener(
   extensions::ExtensionHost* host =
       extensions::ProcessManager::Get(profile)
           ->GetBackgroundHostForExtension(extension_id);
-  host->render_process_host()->Send(new ExtensionMsg_AddMessageToConsole(
-      host->render_view_host()->GetRoutingID(),
+  host->host_contents()->GetMainFrame()->AddMessageToConsole(
       content::CONSOLE_MESSAGE_LEVEL_WARNING,
-      constants::kErrorMissingPauseOrResume));
+      constants::kErrorMissingPauseOrResume);
 }
 
 }  // namespace
@@ -191,10 +190,11 @@ void TtsExtensionEngine::Speak(Utterance* utterance,
   args->AppendInteger(utterance->id());
 
   std::string json;
-  base::JSONWriter::Write(args.get(), &json);
+  base::JSONWriter::Write(*args, &json);
 
-  scoped_ptr<extensions::Event> event(new extensions::Event(
-      tts_engine_events::kOnSpeak, args.Pass()));
+  scoped_ptr<extensions::Event> event(
+      new extensions::Event(extensions::events::TTS_ENGINE_ON_SPEAK,
+                            tts_engine_events::kOnSpeak, args.Pass()));
   Profile* profile = Profile::FromBrowserContext(utterance->browser_context());
   event->restrict_to_browser_context = profile;
   EventRouter::Get(profile)
@@ -203,8 +203,9 @@ void TtsExtensionEngine::Speak(Utterance* utterance,
 
 void TtsExtensionEngine::Stop(Utterance* utterance) {
   scoped_ptr<base::ListValue> args(new base::ListValue());
-  scoped_ptr<extensions::Event> event(new extensions::Event(
-      tts_engine_events::kOnStop, args.Pass()));
+  scoped_ptr<extensions::Event> event(
+      new extensions::Event(extensions::events::TTS_ENGINE_ON_STOP,
+                            tts_engine_events::kOnStop, args.Pass()));
   Profile* profile = Profile::FromBrowserContext(utterance->browser_context());
   event->restrict_to_browser_context = profile;
   EventRouter::Get(profile)
@@ -213,8 +214,9 @@ void TtsExtensionEngine::Stop(Utterance* utterance) {
 
 void TtsExtensionEngine::Pause(Utterance* utterance) {
   scoped_ptr<base::ListValue> args(new base::ListValue());
-  scoped_ptr<extensions::Event> event(new extensions::Event(
-      tts_engine_events::kOnPause, args.Pass()));
+  scoped_ptr<extensions::Event> event(
+      new extensions::Event(extensions::events::TTS_ENGINE_ON_PAUSE,
+                            tts_engine_events::kOnPause, args.Pass()));
   Profile* profile = Profile::FromBrowserContext(utterance->browser_context());
   event->restrict_to_browser_context = profile;
   EventRouter* event_router = EventRouter::Get(profile);
@@ -225,8 +227,9 @@ void TtsExtensionEngine::Pause(Utterance* utterance) {
 
 void TtsExtensionEngine::Resume(Utterance* utterance) {
   scoped_ptr<base::ListValue> args(new base::ListValue());
-  scoped_ptr<extensions::Event> event(new extensions::Event(
-      tts_engine_events::kOnResume, args.Pass()));
+  scoped_ptr<extensions::Event> event(
+      new extensions::Event(extensions::events::TTS_ENGINE_ON_RESUME,
+                            tts_engine_events::kOnResume, args.Pass()));
   Profile* profile = Profile::FromBrowserContext(utterance->browser_context());
   event->restrict_to_browser_context = profile;
   EventRouter* event_router = EventRouter::Get(profile);

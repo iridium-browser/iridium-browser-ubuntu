@@ -39,13 +39,12 @@
 #include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/layout/LayoutEmbeddedObject.h"
+#include "core/layout/LayoutHTMLCanvas.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutVideo.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
-#include "core/style/KeyframeList.h"
-#include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
@@ -58,6 +57,7 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/geometry/TransformState.h"
+#include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/ClipDisplayItem.h"
 #include "platform/graphics/paint/DisplayItemList.h"
@@ -75,10 +75,12 @@ static IntRect contentsRect(const LayoutObject* layoutObject)
 {
     if (!layoutObject->isBox())
         return IntRect();
+    if (layoutObject->isCanvas())
+        return pixelSnappedIntRect(toLayoutHTMLCanvas(layoutObject)->replacedContentRect());
+    if (layoutObject->isVideo())
+        return toLayoutVideo(layoutObject)->videoBox();
 
-    return layoutObject->isVideo() ?
-        toLayoutVideo(layoutObject)->videoBox() :
-        pixelSnappedIntRect(toLayoutBox(layoutObject)->contentBoxRect());
+    return pixelSnappedIntRect(toLayoutBox(layoutObject)->contentBoxRect());
 }
 
 static IntRect backgroundRect(const LayoutObject* layoutObject)
@@ -139,10 +141,10 @@ static bool contentLayerSupportsDirectBackgroundComposition(const LayoutObject* 
 static WebLayer* platformLayerForPlugin(LayoutObject* layoutObject)
 {
     if (!layoutObject->isEmbeddedObject())
-        return 0;
+        return nullptr;
     Widget* widget = toLayoutEmbeddedObject(layoutObject)->widget();
     if (!widget || !widget->isPluginView())
-        return 0;
+        return nullptr;
     return toPluginView(widget)->platformLayer();
 
 }
@@ -158,10 +160,7 @@ static inline bool isAcceleratedContents(LayoutObject* layoutObject)
 static ScrollingCoordinator* scrollingCoordinatorFromLayer(DeprecatedPaintLayer& layer)
 {
     Page* page = layer.layoutObject()->frame()->page();
-    if (!page)
-        return 0;
-
-    return page->scrollingCoordinator();
+    return (!page) ? nullptr : page->scrollingCoordinator();
 }
 
 CompositedDeprecatedPaintLayerMapping::CompositedDeprecatedPaintLayerMapping(DeprecatedPaintLayer& layer)
@@ -186,8 +185,10 @@ CompositedDeprecatedPaintLayerMapping::~CompositedDeprecatedPaintLayerMapping()
     // Do not leave the destroyed pointer dangling on any Layers that painted to this mapping's squashing layer.
     for (size_t i = 0; i < m_squashedLayers.size(); ++i) {
         DeprecatedPaintLayer* oldSquashedLayer = m_squashedLayers[i].paintLayer;
+        // Assert on incorrect mappings between layers and groups
+        ASSERT(oldSquashedLayer->groupedMapping() == this);
         if (oldSquashedLayer->groupedMapping() == this) {
-            oldSquashedLayer->setGroupedMapping(0, true);
+            oldSquashedLayer->setGroupedMapping(0, DeprecatedPaintLayer::DoNotInvalidateLayerAndRemoveFromMapping);
             oldSquashedLayer->setLostGroupedMapping(true);
         }
     }
@@ -206,9 +207,9 @@ CompositedDeprecatedPaintLayerMapping::~CompositedDeprecatedPaintLayerMapping()
 
 PassOwnPtr<GraphicsLayer> CompositedDeprecatedPaintLayerMapping::createGraphicsLayer(CompositingReasons reasons)
 {
-    GraphicsLayerFactory* graphicsLayerFactory = 0;
+    GraphicsLayerFactory* graphicsLayerFactory = nullptr;
     if (Page* page = layoutObject()->frame()->page())
-        graphicsLayerFactory = page->chrome().client().graphicsLayerFactory();
+        graphicsLayerFactory = page->chromeClient().graphicsLayerFactory();
 
     OwnPtr<GraphicsLayer> graphicsLayer = GraphicsLayer::create(graphicsLayerFactory, this);
 
@@ -223,11 +224,6 @@ void CompositedDeprecatedPaintLayerMapping::createPrimaryGraphicsLayer()
 {
     m_graphicsLayer = createGraphicsLayer(m_owningLayer.compositingReasons());
 
-#if !OS(ANDROID)
-    if (m_isMainFrameLayoutViewLayer)
-        m_graphicsLayer->contentLayer()->setDrawCheckerboardForMissingTiles(true);
-#endif
-
     updateOpacity(layoutObject()->styleRef());
     updateTransform(layoutObject()->styleRef());
     updateFilters(layoutObject()->styleRef());
@@ -236,8 +232,6 @@ void CompositedDeprecatedPaintLayerMapping::createPrimaryGraphicsLayer()
         updateLayerBlendMode(layoutObject()->styleRef());
         updateIsRootForIsolatedGroup();
     }
-
-    updateScrollBlocksOn(layoutObject()->styleRef());
 }
 
 void CompositedDeprecatedPaintLayerMapping::destroyGraphicsLayers()
@@ -270,7 +264,7 @@ void CompositedDeprecatedPaintLayerMapping::updateTransform(const ComputedStyle&
     // baked into it, and we don't want that.
     TransformationMatrix t;
     if (m_owningLayer.hasTransformRelatedProperty()) {
-        style.applyTransform(t, LayoutSize(toLayoutBox(layoutObject())->pixelSnappedSize()), ComputedStyle::ExcludeTransformOrigin);
+        style.applyTransform(t, LayoutSize(toLayoutBox(layoutObject())->pixelSnappedSize()), ComputedStyle::ExcludeTransformOrigin, ComputedStyle::IncludeMotionPath, ComputedStyle::IncludeIndependentTransformProperties);
         makeMatrixRenderable(t, compositor()->hasAcceleratedCompositing());
     }
 
@@ -295,18 +289,6 @@ void CompositedDeprecatedPaintLayerMapping::updateIsRootForIsolatedGroup()
     ASSERT(m_owningLayer.stackingNode()->isStackingContext() || !isolate);
 
     m_graphicsLayer->setIsRootForIsolatedGroup(isolate);
-}
-
-void CompositedDeprecatedPaintLayerMapping::updateScrollBlocksOn(const ComputedStyle& style)
-{
-    // Note that blink determines the default scroll blocking policy, even
-    // when the scroll-blocks-on CSS feature isn't enabled.
-    WebScrollBlocksOn blockingMode = WebScrollBlocksOnStartTouch | WebScrollBlocksOnWheelEvent;
-
-    if (RuntimeEnabledFeatures::cssScrollBlocksOnEnabled())
-        blockingMode = style.scrollBlocksOn();
-
-    m_graphicsLayer->setScrollBlocksOn(blockingMode);
 }
 
 void CompositedDeprecatedPaintLayerMapping::updateContentsOpaque()
@@ -507,7 +489,7 @@ bool CompositedDeprecatedPaintLayerMapping::updateGraphicsLayerConfiguration()
             m_graphicsLayer->setReplicatedByLayer(reflectionLayer);
         }
     } else {
-        m_graphicsLayer->setReplicatedByLayer(0);
+        m_graphicsLayer->setReplicatedByLayer(nullptr);
     }
 
     updateBackgroundColor();
@@ -516,7 +498,7 @@ bool CompositedDeprecatedPaintLayerMapping::updateGraphicsLayerConfiguration()
         if (isDirectlyCompositedImage()) {
             updateImageContents();
         } else if (m_graphicsLayer->hasContentsLayer()) {
-            m_graphicsLayer->setContentsToImage(0);
+            m_graphicsLayer->setContentsToImage(nullptr);
         }
     }
 
@@ -709,8 +691,8 @@ void CompositedDeprecatedPaintLayerMapping::updateGraphicsLayerGeometry(const De
     if (m_childContainmentLayer)
         clippingBox = clipBox(toLayoutBox(layoutObject()));
 
-    updateChildContainmentLayerGeometry(clippingBox, localCompositingBounds);
     updateChildTransformLayerGeometry();
+    updateChildContainmentLayerGeometry(clippingBox, localCompositingBounds);
 
     updateMaskLayerGeometry();
     updateTransformGeometry(snappedOffsetFromCompositedAncestor, relativeCompositingBounds);
@@ -739,8 +721,6 @@ void CompositedDeprecatedPaintLayerMapping::updateGraphicsLayerGeometry(const De
     updateScrollParent(scrollParent());
     registerScrollingLayers();
 
-    updateScrollBlocksOn(layoutObject()->styleRef());
-
     updateCompositingReasons();
 }
 
@@ -758,9 +738,9 @@ void CompositedDeprecatedPaintLayerMapping::updateMainGraphicsLayerGeometry(cons
     // descendants. So, the visibility flag for m_graphicsLayer should be true if there are any
     // non-compositing visible layers.
     bool contentsVisible = m_owningLayer.hasVisibleContent() || hasVisibleNonCompositingDescendant(&m_owningLayer);
-    if (RuntimeEnabledFeatures::overlayFullscreenVideoEnabled() && layoutObject()->isVideo()) {
+    if (layoutObject()->isVideo()) {
         HTMLVideoElement* videoElement = toHTMLVideoElement(layoutObject()->node());
-        if (videoElement->isFullscreen() && !HTMLMediaElement::isMediaStreamURL(videoElement->sourceURL().string()))
+        if (videoElement->isFullscreen() && videoElement->usesOverlayFullscreenVideo())
             contentsVisible = false;
     }
     m_graphicsLayer->setContentsVisible(contentsVisible);
@@ -852,11 +832,19 @@ void CompositedDeprecatedPaintLayerMapping::updateChildContainmentLayerGeometry(
     if (!m_childContainmentLayer)
         return;
 
-    m_childContainmentLayer->setPosition(FloatPoint(clippingBox.location() - localCompositingBounds.location() + roundedIntSize(m_owningLayer.subpixelAccumulation())));
+    FloatPoint clipPositionInLayoutObjectSpace(clippingBox.location() - localCompositingBounds.location() + roundedIntSize(m_owningLayer.subpixelAccumulation()));
+
+    // If there are layers between the the child containment layer and
+    // m_graphicsLayer (eg, the child transform layer), we must adjust the clip
+    // position to get it in the correct space.
+    FloatPoint clipPositionInParentSpace = clipPositionInLayoutObjectSpace;
+    for (GraphicsLayer* ancestor = m_childContainmentLayer->parent(); ancestor != mainGraphicsLayer(); ancestor = ancestor->parent())
+        clipPositionInParentSpace -= toFloatSize(ancestor->position());
+
+    m_childContainmentLayer->setPosition(clipPositionInParentSpace);
     m_childContainmentLayer->setSize(clippingBox.size());
     m_childContainmentLayer->setOffsetFromLayoutObject(toIntSize(clippingBox.location()));
     if (m_childClippingMaskLayer && !m_scrollingLayer && !layoutObject()->style()->clipPath()) {
-        m_childClippingMaskLayer->setPosition(m_childContainmentLayer->position());
         m_childClippingMaskLayer->setSize(m_childContainmentLayer->size());
         m_childClippingMaskLayer->setOffsetFromLayoutObject(m_childContainmentLayer->offsetFromLayoutObject());
     }
@@ -928,27 +916,27 @@ void CompositedDeprecatedPaintLayerMapping::updateScrollingLayerGeometry(const I
 
     ASSERT(m_scrollingContentsLayer);
     LayoutBox* layoutBox = toLayoutBox(layoutObject());
-    IntRect clientBox = enclosingIntRect(layoutBox->clientBoxRect());
+    IntRect overflowClipRect = enclosingIntRect(layoutBox->overflowClipRect(LayoutPoint()));
     DoubleSize adjustedScrollOffset = m_owningLayer.scrollableArea()->adjustedScrollOffset();
-    m_scrollingLayer->setPosition(FloatPoint(clientBox.location() - localCompositingBounds.location() + roundedIntSize(m_owningLayer.subpixelAccumulation())));
-    m_scrollingLayer->setSize(clientBox.size());
+    m_scrollingLayer->setPosition(FloatPoint(overflowClipRect.location() - localCompositingBounds.location() + roundedIntSize(m_owningLayer.subpixelAccumulation())));
+    m_scrollingLayer->setSize(overflowClipRect.size());
 
     IntSize oldScrollingLayerOffset = m_scrollingLayer->offsetFromLayoutObject();
-    m_scrollingLayer->setOffsetFromLayoutObject(-toIntSize(clientBox.location()));
+    m_scrollingLayer->setOffsetFromLayoutObject(-toIntSize(overflowClipRect.location()));
 
     if (m_childClippingMaskLayer && !layoutObject()->style()->clipPath()) {
         m_childClippingMaskLayer->setPosition(m_scrollingLayer->position());
         m_childClippingMaskLayer->setSize(m_scrollingLayer->size());
-        m_childClippingMaskLayer->setOffsetFromLayoutObject(toIntSize(clientBox.location()));
+        m_childClippingMaskLayer->setOffsetFromLayoutObject(toIntSize(overflowClipRect.location()));
     }
 
-    bool clientBoxOffsetChanged = oldScrollingLayerOffset != m_scrollingLayer->offsetFromLayoutObject();
+    bool overflowClipRectOffsetChanged = oldScrollingLayerOffset != m_scrollingLayer->offsetFromLayoutObject();
 
     IntSize scrollSize(layoutBox->scrollWidth(), layoutBox->scrollHeight());
-    if (scrollSize != m_scrollingContentsLayer->size() || clientBoxOffsetChanged)
+    if (scrollSize != m_scrollingContentsLayer->size() || overflowClipRectOffsetChanged)
         m_scrollingContentsLayer->setNeedsDisplay();
 
-    DoubleSize scrollingContentsOffset(clientBox.location().x() - adjustedScrollOffset.width(), clientBox.location().y() - adjustedScrollOffset.height());
+    DoubleSize scrollingContentsOffset(overflowClipRect.location().x() - adjustedScrollOffset.width(), overflowClipRect.location().y() - adjustedScrollOffset.height());
     // The scroll offset change is compared using floating point so that fractional scroll offset
     // change can be propagated to compositor.
     if (scrollingContentsOffset != m_scrollingContentsLayer->offsetDoubleFromLayoutObject() || scrollSize != m_scrollingContentsLayer->size()) {
@@ -1067,7 +1055,8 @@ void CompositedDeprecatedPaintLayerMapping::updateInternalHierarchy()
 
     // Layer to which children should be attached as we build the hierarchy.
     GraphicsLayer* bottomLayer = m_graphicsLayer.get();
-    auto updateBottomLayer = [&bottomLayer](GraphicsLayer* layer) {
+    auto updateBottomLayer = [&bottomLayer](GraphicsLayer* layer)
+    {
         if (layer) {
             bottomLayer->addChild(layer);
             bottomLayer = layer;
@@ -1112,7 +1101,8 @@ void CompositedDeprecatedPaintLayerMapping::updatePaintingPhases()
         if (!m_foregroundLayer)
             paintPhase |= GraphicsLayerPaintForeground;
         m_scrollingContentsLayer->setPaintingPhase(paintPhase);
-        m_scrollingBlockSelectionLayer->setPaintingPhase(paintPhase);
+        if (m_scrollingBlockSelectionLayer)
+            m_scrollingBlockSelectionLayer->setPaintingPhase(paintPhase);
     }
 }
 
@@ -1161,6 +1151,9 @@ void CompositedDeprecatedPaintLayerMapping::updateContentsOffsetInCompositingLay
 
 void CompositedDeprecatedPaintLayerMapping::updateScrollingBlockSelection()
 {
+    if (RuntimeEnabledFeatures::selectionPaintingWithoutSelectionGapsEnabled())
+        return;
+
     if (!m_scrollingBlockSelectionLayer)
         return;
 
@@ -1305,6 +1298,12 @@ bool CompositedDeprecatedPaintLayerMapping::toggleScrollbarLayerIfNeeded(OwnPtr<
 
 bool CompositedDeprecatedPaintLayerMapping::updateOverflowControlsLayers(bool needsHorizontalScrollbarLayer, bool needsVerticalScrollbarLayer, bool needsScrollCornerLayer, bool needsAncestorClip)
 {
+    // If the subtree is invisible, we don't actually need scrollbar layers.
+    bool invisible = m_owningLayer.subtreeIsInvisible();
+    needsHorizontalScrollbarLayer &= !invisible;
+    needsVerticalScrollbarLayer &= !invisible;
+    needsScrollCornerLayer &= !invisible;
+
     bool horizontalScrollbarLayerChanged = toggleScrollbarLayerIfNeeded(m_layerForHorizontalScrollbar, needsHorizontalScrollbarLayer, CompositingReasonLayerForHorizontalScrollbar);
     bool verticalScrollbarLayerChanged = toggleScrollbarLayerIfNeeded(m_layerForVerticalScrollbar, needsVerticalScrollbarLayer, CompositingReasonLayerForVerticalScrollbar);
     bool scrollCornerLayerChanged = toggleScrollbarLayerIfNeeded(m_layerForScrollCorner, needsScrollCornerLayer, CompositingReasonLayerForScrollCorner);
@@ -1508,19 +1507,12 @@ bool CompositedDeprecatedPaintLayerMapping::updateBackgroundLayer(bool needsBack
             m_backgroundLayer = createGraphicsLayer(CompositingReasonLayerForBackground);
             m_backgroundLayer->setTransformOrigin(FloatPoint3D());
             m_backgroundLayer->setPaintingPhase(GraphicsLayerPaintBackground);
-#if !OS(ANDROID)
-            m_backgroundLayer->contentLayer()->setDrawCheckerboardForMissingTiles(true);
-            m_graphicsLayer->contentLayer()->setDrawCheckerboardForMissingTiles(false);
-#endif
             layerChanged = true;
         }
     } else {
         if (m_backgroundLayer) {
             m_backgroundLayer->removeFromParent();
             m_backgroundLayer = nullptr;
-#if !OS(ANDROID)
-            m_graphicsLayer->contentLayer()->setDrawCheckerboardForMissingTiles(true);
-#endif
             layerChanged = true;
         }
     }
@@ -1580,9 +1572,11 @@ bool CompositedDeprecatedPaintLayerMapping::updateScrollingLayers(bool needsScro
             m_scrollingContentsLayer = createGraphicsLayer(CompositingReasonLayerForScrollingContents);
             m_scrollingLayer->addChild(m_scrollingContentsLayer.get());
 
-            m_scrollingBlockSelectionLayer = createGraphicsLayer(CompositingReasonLayerForScrollingBlockSelection);
-            m_scrollingBlockSelectionLayer->setDrawsContent(true);
-            m_scrollingContentsLayer->addChild(m_scrollingBlockSelectionLayer.get());
+            if (!RuntimeEnabledFeatures::selectionPaintingWithoutSelectionGapsEnabled()) {
+                m_scrollingBlockSelectionLayer = createGraphicsLayer(CompositingReasonLayerForScrollingBlockSelection);
+                m_scrollingBlockSelectionLayer->setDrawsContent(true);
+                m_scrollingContentsLayer->addChild(m_scrollingBlockSelectionLayer.get());
+            }
 
             layerChanged = true;
             if (scrollingCoordinator)
@@ -1743,11 +1737,7 @@ float CompositedDeprecatedPaintLayerMapping::compositingOpacity(float layoutObje
 
 Color CompositedDeprecatedPaintLayerMapping::layoutObjectBackgroundColor() const
 {
-    LayoutObject* backgroundLayoutObject = layoutObject();
-    if (backgroundLayoutObject->isDocumentElement())
-        backgroundLayoutObject = backgroundLayoutObject->layoutObjectForRootBackground();
-
-    return backgroundLayoutObject->resolveColor(CSSPropertyBackgroundColor);
+    return layoutObject()->resolveColor(CSSPropertyBackgroundColor);
 }
 
 void CompositedDeprecatedPaintLayerMapping::updateBackgroundColor()
@@ -1856,7 +1846,13 @@ bool CompositedDeprecatedPaintLayerMapping::isDirectlyCompositedImage() const
             return false;
 
         Image* image = cachedImage->imageForLayoutObject(imageLayoutObject);
-        return image->isBitmapImage();
+        if (!image->isBitmapImage())
+            return false;
+
+        // FIXME: We should be able to handle bitmap images using direct compositing
+        // no matter what image-orientation value. See crbug.com/502267
+        if (imageLayoutObject->style()->respectImageOrientation() != RespectImageOrientation)
+            return true;
     }
 
     return false;
@@ -1886,10 +1882,6 @@ void CompositedDeprecatedPaintLayerMapping::updateImageContents()
 
     Image* image = cachedImage->imageForLayoutObject(imageLayoutObject);
     if (!image)
-        return;
-
-    // We have to wait until the image is fully loaded before setting it on the layer.
-    if (!cachedImage->isLoaded())
         return;
 
     // This is a no-op if the layer doesn't have an inner layer for the image.
@@ -2046,8 +2038,7 @@ void CompositedDeprecatedPaintLayerMapping::invalidateDisplayItemClient(const Di
     // FIXME: need to split out paint invalidations for the background.
     // FIXME: need to distinguish invalidations for different layers (e.g. the main layer and scrolling layer). crbug.com/416535.
     ApplyToGraphicsLayers(this, [&displayItemClient](GraphicsLayer* layer) {
-        if (layer->drawsContent())
-            layer->invalidateDisplayItemClient(displayItemClient);
+        layer->invalidateDisplayItemClient(displayItemClient);
     }, ApplyToContentLayers);
 }
 
@@ -2057,7 +2048,7 @@ const GraphicsLayerPaintInfo* CompositedDeprecatedPaintLayerMapping::containingS
         if (layoutObject->isDescendantOf(layers[i].paintLayer->layoutObject()))
             return &layers[i];
     }
-    return 0;
+    return nullptr;
 }
 
 const GraphicsLayerPaintInfo* CompositedDeprecatedPaintLayerMapping::containingSquashedLayer(const LayoutObject* layoutObject, unsigned maxSquashedLayerIndex)
@@ -2119,13 +2110,13 @@ void CompositedDeprecatedPaintLayerMapping::doPaintTask(const GraphicsLayerPaint
 
     if (paintInfo.paintLayer->compositingState() != PaintsIntoGroupedBacking) {
         // FIXME: GraphicsLayers need a way to split for multicol.
-        DeprecatedPaintLayerPaintingInfo paintingInfo(paintInfo.paintLayer, LayoutRect(dirtyRect), PaintBehaviorNormal, paintInfo.paintLayer->subpixelAccumulation());
+        DeprecatedPaintLayerPaintingInfo paintingInfo(paintInfo.paintLayer, LayoutRect(dirtyRect), GlobalPaintNormalPhase, paintInfo.paintLayer->subpixelAccumulation());
         DeprecatedPaintLayerPainter(*paintInfo.paintLayer).paintLayerContents(context, paintingInfo, paintLayerFlags);
 
         if (paintInfo.paintLayer->containsDirtyOverlayScrollbars())
             DeprecatedPaintLayerPainter(*paintInfo.paintLayer).paintLayerContents(context, paintingInfo, paintLayerFlags | PaintLayerPaintingOverlayScrollbars);
     } else {
-        DeprecatedPaintLayerPaintingInfo paintingInfo(paintInfo.paintLayer, LayoutRect(dirtyRect), PaintBehaviorNormal, paintInfo.paintLayer->subpixelAccumulation());
+        DeprecatedPaintLayerPaintingInfo paintingInfo(paintInfo.paintLayer, LayoutRect(dirtyRect), GlobalPaintNormalPhase, paintInfo.paintLayer->subpixelAccumulation());
 
         // DeprecatedPaintLayer::paintLayer assumes that the caller clips to the passed rect. Squashed layers need to do this clipping in software,
         // since there is no graphics layer to clip them precisely. Furthermore, in some cases we squash layers that need clipping in software
@@ -2134,24 +2125,28 @@ void CompositedDeprecatedPaintLayerMapping::doPaintTask(const GraphicsLayerPaint
         // FIXME: Combine similar code here and LayerClipRecorder.
         dirtyRect.intersect(paintInfo.localClipRectForSquashedLayer);
         {
-            OwnPtr<DisplayItem> clipDisplayItem = ClipDisplayItem::create(*this, DisplayItem::ClipLayerOverflowControls, dirtyRect);
             if (context->displayItemList()) {
                 ASSERT(RuntimeEnabledFeatures::slimmingPaintEnabled());
                 if (!context->displayItemList()->displayItemConstructionIsDisabled())
-                    context->displayItemList()->add(clipDisplayItem.release());
+                    context->displayItemList()->createAndAppend<ClipDisplayItem>(*this, DisplayItem::ClipLayerOverflowControls, dirtyRect);
             } else {
-                clipDisplayItem->replay(*context);
+                ClipDisplayItem clipDisplayItem(*this, DisplayItem::ClipLayerOverflowControls, dirtyRect);
+                clipDisplayItem.replay(*context);
             }
         }
         DeprecatedPaintLayerPainter(*paintInfo.paintLayer).paintLayer(context, paintingInfo, paintLayerFlags);
         {
-            OwnPtr<DisplayItem> endClipDisplayItem = EndClipDisplayItem::create(*this, DisplayItem::clipTypeToEndClipType(DisplayItem::ClipLayerOverflowControls));
             if (context->displayItemList()) {
                 ASSERT(RuntimeEnabledFeatures::slimmingPaintEnabled());
-                if (!context->displayItemList()->displayItemConstructionIsDisabled())
-                    context->displayItemList()->add(endClipDisplayItem.release());
+                if (!context->displayItemList()->displayItemConstructionIsDisabled()) {
+                    if (context->displayItemList()->lastDisplayItemIsNoopBegin())
+                        context->displayItemList()->removeLastDisplayItem();
+                    else
+                        context->displayItemList()->createAndAppend<EndClipDisplayItem>(*this, DisplayItem::clipTypeToEndClipType(DisplayItem::ClipLayerOverflowControls));
+                }
             } else {
-                endClipDisplayItem->replay(*context);
+                EndClipDisplayItem endClipDisplayItem(*this, DisplayItem::clipTypeToEndClipType(DisplayItem::ClipLayerOverflowControls));
+                endClipDisplayItem.replay(*context);
             }
         }
     }
@@ -2179,7 +2174,7 @@ void CompositedDeprecatedPaintLayerMapping::paintContents(const GraphicsLayer* g
     if (Page* page = layoutObject()->frame()->page())
         page->setIsPainting(true);
 #endif
-    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Paint", "data", InspectorPaintEvent::data(m_owningLayer.layoutObject(), LayoutRect(clip), graphicsLayer));
+    TRACE_EVENT1("devtools.timeline", "Paint", "data", InspectorPaintEvent::data(m_owningLayer.layoutObject(), LayoutRect(clip), graphicsLayer));
 
     PaintLayerFlags paintLayerFlags = 0;
     if (graphicsLayerPaintingPhase & GraphicsLayerPaintBackground)
@@ -2259,7 +2254,22 @@ IntRect CompositedDeprecatedPaintLayerMapping::pixelSnappedCompositedBounds() co
     return pixelSnappedIntRect(bounds);
 }
 
-bool CompositedDeprecatedPaintLayerMapping::updateSquashingLayerAssignment(DeprecatedPaintLayer* squashedLayer, const DeprecatedPaintLayer& owningLayer, size_t nextSquashedLayerIndex)
+bool CompositedDeprecatedPaintLayerMapping::invalidateLayerIfNoPrecedingEntry(size_t indexToClear)
+{
+    DeprecatedPaintLayer* layerToRemove = m_squashedLayers[indexToClear].paintLayer;
+    size_t previousIndex = 0;
+    for (; previousIndex < indexToClear; ++previousIndex) {
+        if (m_squashedLayers[previousIndex].paintLayer == layerToRemove)
+            break;
+    }
+    if (previousIndex == indexToClear && layerToRemove->groupedMapping() == this) {
+        compositor()->paintInvalidationOnCompositingChange(layerToRemove);
+        return true;
+    }
+    return false;
+}
+
+bool CompositedDeprecatedPaintLayerMapping::updateSquashingLayerAssignment(DeprecatedPaintLayer* squashedLayer, size_t nextSquashedLayerIndex)
 {
     GraphicsLayerPaintInfo paintInfo;
     paintInfo.paintLayer = squashedLayer;
@@ -2268,44 +2278,69 @@ bool CompositedDeprecatedPaintLayerMapping::updateSquashingLayerAssignment(Depre
 
     // Change tracking on squashing layers: at the first sign of something changed, just invalidate the layer.
     // FIXME: Perhaps we can find a tighter more clever mechanism later.
-    bool updatedAssignment = false;
     if (nextSquashedLayerIndex < m_squashedLayers.size()) {
-        if (paintInfo.paintLayer != m_squashedLayers[nextSquashedLayerIndex].paintLayer) {
-            compositor()->paintInvalidationOnCompositingChange(squashedLayer);
-            updatedAssignment = true;
-            m_squashedLayers[nextSquashedLayerIndex] = paintInfo;
-        }
+        if (paintInfo.paintLayer == m_squashedLayers[nextSquashedLayerIndex].paintLayer)
+            return false;
+
+        // Must invalidate before adding the squashed layer to the mapping.
+        compositor()->paintInvalidationOnCompositingChange(squashedLayer);
+
+        // If the layer which was previously at |nextSquashedLayerIndex| is not earlier in the grouped mapping, invalidate its current
+        // backing now, since it will move later or be removed from the squashing layer.
+        invalidateLayerIfNoPrecedingEntry(nextSquashedLayerIndex);
+
+        m_squashedLayers.insert(nextSquashedLayerIndex, paintInfo);
     } else {
+        // Must invalidate before adding the squashed layer to the mapping.
         compositor()->paintInvalidationOnCompositingChange(squashedLayer);
         m_squashedLayers.append(paintInfo);
-        updatedAssignment = true;
     }
-    squashedLayer->setGroupedMapping(this);
-    return updatedAssignment;
+    squashedLayer->setGroupedMapping(this, DeprecatedPaintLayer::InvalidateLayerAndRemoveFromMapping);
+
+    return true;
 }
 
 void CompositedDeprecatedPaintLayerMapping::removeLayerFromSquashingGraphicsLayer(const DeprecatedPaintLayer* layer)
 {
-    size_t layerIndex = kNotFound;
-
-    for (size_t i = 0; i < m_squashedLayers.size(); ++i) {
-        if (m_squashedLayers[i].paintLayer == layer) {
-            layerIndex = i;
+    size_t layerIndex = 0;
+    for (; layerIndex < m_squashedLayers.size(); ++layerIndex) {
+        if (m_squashedLayers[layerIndex].paintLayer == layer)
             break;
-        }
     }
 
-    if (layerIndex == kNotFound)
+    // Assert on incorrect mappings between layers and groups
+    ASSERT(layerIndex < m_squashedLayers.size());
+    if (layerIndex == m_squashedLayers.size())
         return;
 
     m_squashedLayers.remove(layerIndex);
 }
 
+#if ENABLE(ASSERT)
+bool CompositedDeprecatedPaintLayerMapping::verifyLayerInSquashingVector(const DeprecatedPaintLayer* layer)
+{
+    for (size_t layerIndex = 0; layerIndex < m_squashedLayers.size(); ++layerIndex) {
+        if (m_squashedLayers[layerIndex].paintLayer == layer)
+            return true;
+    }
+
+    return false;
+}
+#endif
+
 void CompositedDeprecatedPaintLayerMapping::finishAccumulatingSquashingLayers(size_t nextSquashedLayerIndex)
 {
-    // Any additional squashed Layers in the array no longer exist, and removing invalidates the squashingLayer contents.
-    if (nextSquashedLayerIndex < m_squashedLayers.size())
+    if (nextSquashedLayerIndex < m_squashedLayers.size()) {
+        // Any additional squashed Layers in the array no longer belong here, but they might have been
+        // added already at an earlier index. Clear pointers on those that do not appear in the valid set
+        // before removing all the extra entries.
+        for (size_t i = nextSquashedLayerIndex; i < m_squashedLayers.size(); ++i) {
+            if (invalidateLayerIfNoPrecedingEntry(i))
+                m_squashedLayers[i].paintLayer->setGroupedMapping(nullptr, DeprecatedPaintLayer::DoNotInvalidateLayerAndRemoveFromMapping);
+        }
+
         m_squashedLayers.remove(nextSquashedLayerIndex, m_squashedLayers.size() - nextSquashedLayerIndex);
+    }
 }
 
 String CompositedDeprecatedPaintLayerMapping::debugName(const GraphicsLayer* graphicsLayer)

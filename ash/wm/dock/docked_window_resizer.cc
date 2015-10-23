@@ -4,7 +4,7 @@
 
 #include "ash/wm/dock/docked_window_resizer.h"
 
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
@@ -40,8 +40,9 @@ DockedWindowLayoutManager* GetDockedLayoutManagerAtPoint(
   gfx::Display display = ScreenUtil::FindDisplayContainingPoint(point);
   if (!display.is_valid())
     return NULL;
-  aura::Window* root = Shell::GetInstance()->display_controller()->
-      GetRootWindowForDisplayId(display.id());
+  aura::Window* root = Shell::GetInstance()
+                           ->window_tree_host_manager()
+                           ->GetRootWindowForDisplayId(display.id());
   aura::Window* dock_container = Shell::GetContainer(
       root, kShellWindowId_DockedContainer);
   return static_cast<DockedWindowLayoutManager*>(
@@ -236,12 +237,11 @@ void DockedWindowResizer::FinishedDragging(
       window->SetBounds(bounds);
     }
   }
-  // If a window has restore bounds, update the restore origin and width but not
-  // the height (since the height is auto-calculated for the docked windows).
+  // If a window has restore bounds, update the restore origin but not the size.
+  // The size gets restored when a window is undocked.
   if (is_resized && is_docked_ && window_state_->HasRestoreBounds()) {
     gfx::Rect restore_bounds = window->GetBoundsInScreen();
-    restore_bounds.set_height(
-        window_state_->GetRestoreBoundsInScreen().height());
+    restore_bounds.set_size(window_state_->GetRestoreBoundsInScreen().size());
     window_state_->SetRestoreBoundsInScreen(restore_bounds);
   }
 

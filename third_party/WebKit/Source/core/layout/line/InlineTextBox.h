@@ -24,7 +24,8 @@
 #define InlineTextBox_h
 
 #include "core/layout/LayoutText.h" // so textLayoutObject() can be inline
-#include "core/layout/line/FloatToLayoutUnit.h"
+#include "core/layout/api/LineLayoutText.h"
+#include "core/layout/api/SelectionState.h"
 #include "core/layout/line/InlineBox.h"
 #include "platform/text/TextRun.h"
 #include "wtf/Forward.h"
@@ -41,8 +42,8 @@ class InlineTextBox : public InlineBox {
 public:
     InlineTextBox(LayoutObject& obj, int start, unsigned short length)
         : InlineBox(obj)
-        , m_prevTextBox(0)
-        , m_nextTextBox(0)
+        , m_prevTextBox(nullptr)
+        , m_nextTextBox(nullptr)
         , m_start(start)
         , m_len(length)
         , m_truncation(cNoTruncation)
@@ -51,8 +52,9 @@ public:
     }
 
     LayoutText& layoutObject() const { return toLayoutText(InlineBox::layoutObject()); }
+    LineLayoutText lineLayoutItem() const { return LineLayoutText(InlineBox::lineLayoutItem()); }
 
-    virtual void destroy() override final;
+    void destroy() final;
 
     InlineTextBox* prevTextBox() const { return m_prevTextBox; }
     InlineTextBox* nextTextBox() const { return m_nextTextBox; }
@@ -68,7 +70,7 @@ public:
 
     unsigned short truncation() { return m_truncation; }
 
-    virtual void markDirty() override final;
+    void markDirty() final;
 
     using InlineBox::hasHyphen;
     using InlineBox::setHasHyphen;
@@ -77,8 +79,8 @@ public:
 
     static inline bool compareByStart(const InlineTextBox* first, const InlineTextBox* second) { return first->start() < second->start(); }
 
-    virtual int baselinePosition(FontBaseline) const override final;
-    virtual LayoutUnit lineHeight() const override final;
+    int baselinePosition(FontBaseline) const final;
+    LayoutUnit lineHeight() const final;
 
     bool getEmphasisMarkPosition(const ComputedStyle&, TextEmphasisPosition&) const;
 
@@ -88,47 +90,49 @@ public:
     LayoutUnit logicalBottomVisualOverflow() const { return logicalOverflowRect().maxY(); }
 
     // charactersWithHyphen, if provided, must not be destroyed before the TextRun.
-    TextRun constructTextRun(const ComputedStyle&, const Font&, StringBuilder* charactersWithHyphen = 0) const;
-    TextRun constructTextRun(const ComputedStyle&, const Font&, StringView, int maximumLength, StringBuilder* charactersWithHyphen = 0) const;
+    TextRun constructTextRun(const ComputedStyle&, const Font&, StringBuilder* charactersWithHyphen = nullptr) const;
+    TextRun constructTextRun(const ComputedStyle&, const Font&, StringView, int maximumLength, StringBuilder* charactersWithHyphen = nullptr) const;
 
 #ifndef NDEBUG
-    virtual void showBox(int = 0) const override;
+    void showBox(int = 0) const override;
 #endif
-    virtual const char* boxName() const override;
-    virtual String debugName() const override;
+    const char* boxName() const override;
+    String debugName() const override;
 
     String text() const;
 
 public:
     TextRun constructTextRunForInspector(const ComputedStyle&, const Font&) const;
-    virtual FloatRectWillBeLayoutRect calculateBoundaries() const override { return FloatRectWillBeLayoutRect(x(), y(), width(), height()); }
+    LayoutRect calculateBoundaries() const override { return LayoutRect(x(), y(), width(), height()); }
 
     virtual LayoutRect localSelectionRect(int startPos, int endPos);
     bool isSelected(int startPos, int endPos) const;
     void selectionStartEnd(int& sPos, int& ePos) const;
 
     // These functions both paint markers and update the DocumentMarker's renderedRect.
-    virtual void paintDocumentMarker(GraphicsContext*, const FloatPointWillBeLayoutPoint& boxOrigin, DocumentMarker*, const ComputedStyle&, const Font&, bool grammar);
-    virtual void paintTextMatchMarker(GraphicsContext*, const FloatPointWillBeLayoutPoint& boxOrigin, DocumentMarker*, const ComputedStyle&, const Font&);
+    virtual void paintDocumentMarker(GraphicsContext*, const LayoutPoint& boxOrigin, DocumentMarker*, const ComputedStyle&, const Font&, bool grammar);
+    virtual void paintTextMatchMarker(GraphicsContext*, const LayoutPoint& boxOrigin, DocumentMarker*, const ComputedStyle&, const Font&);
+
+    void move(const LayoutSize&) final;
 
 protected:
-    virtual void paint(const PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
-    virtual bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) override;
+    void paint(const PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
+    bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) override;
 
 private:
-    virtual void deleteLine() override final;
-    virtual void extractLine() override final;
-    virtual void attachLine() override final;
+    void deleteLine() final;
+    void extractLine() final;
+    void attachLine() final;
 
 public:
-    virtual LayoutObject::SelectionState selectionState() const override final;
+    SelectionState selectionState() const final;
 
 private:
-    virtual void clearTruncation() override final { m_truncation = cNoTruncation; }
-    virtual FloatWillBeLayoutUnit placeEllipsisBox(bool flowIsLTR, FloatWillBeLayoutUnit visibleLeftEdge, FloatWillBeLayoutUnit visibleRightEdge, FloatWillBeLayoutUnit ellipsisWidth, FloatWillBeLayoutUnit &truncatedWidth, bool& foundBox) override final;
+    void clearTruncation() final { m_truncation = cNoTruncation; }
+    LayoutUnit placeEllipsisBox(bool flowIsLTR, LayoutUnit visibleLeftEdge, LayoutUnit visibleRightEdge, LayoutUnit ellipsisWidth, LayoutUnit &truncatedWidth, bool& foundBox) final;
 
 public:
-    virtual bool isLineBreak() const override final;
+    bool isLineBreak() const final;
 
     void setExpansion(int newExpansion)
     {
@@ -138,22 +142,22 @@ public:
     }
 
 private:
-    virtual bool isInlineTextBox() const override final { return true; }
+    bool isInlineTextBox() const final { return true; }
 
 public:
-    virtual int caretMinOffset() const override final;
-    virtual int caretMaxOffset() const override final;
+    int caretMinOffset() const final;
+    int caretMaxOffset() const final;
 
-    FloatWillBeLayoutUnit textPos() const; // returns the x position relative to the left start of the text line.
+    LayoutUnit textPos() const; // returns the x position relative to the left start of the text line.
 
 public:
-    virtual int offsetForPosition(FloatWillBeLayoutUnit x, bool includePartialGlyphs = true) const;
-    virtual FloatWillBeLayoutUnit positionForOffset(int offset) const;
+    virtual int offsetForPosition(LayoutUnit x, bool includePartialGlyphs = true) const;
+    virtual LayoutUnit positionForOffset(int offset) const;
 
     bool containsCaretOffset(int offset) const; // false for offset after line break
 
     // Fills a vector with the pixel width of each character.
-    void characterWidths(Vector<FloatWillBeLayoutUnit>&) const;
+    void characterWidths(Vector<float>&) const;
 
 private:
     InlineTextBox* m_prevTextBox; // The previous box that also uses our LayoutObject
@@ -176,7 +180,7 @@ private:
 
 DEFINE_INLINE_BOX_TYPE_CASTS(InlineTextBox);
 
-void alignSelectionRectToDevicePixels(FloatRectWillBeLayoutRect&);
+void alignSelectionRectToDevicePixels(LayoutRect&);
 
 } // namespace blink
 

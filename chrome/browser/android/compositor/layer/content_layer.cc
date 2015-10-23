@@ -4,10 +4,12 @@
 
 #include "chrome/browser/android/compositor/layer/content_layer.h"
 
+#include "base/lazy_instance.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_lists.h"
 #include "chrome/browser/android/compositor/layer/thumbnail_layer.h"
 #include "chrome/browser/android/compositor/tab_content_manager.h"
+#include "content/public/browser/android/compositor.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace chrome {
@@ -64,7 +66,6 @@ void ContentLayer::SetProperties(int id,
                                  bool should_override_content_alpha,
                                  float content_alpha_override,
                                  float saturation,
-                                 float brightness,
                                  const gfx::Rect& desired_bounds,
                                  const gfx::Size& content_size) {
   scoped_refptr<cc::Layer> content_layer =
@@ -138,16 +139,6 @@ void ContentLayer::SetProperties(int id,
     }
     static_layer->layer()->SetFilters(static_filter_operations_);
   }
-
-  // Only worry about brightness on the content layer.
-  if (content_layer.get()) {
-    content_filter_operations_.Clear();
-    if (brightness < 1.0f) {
-      content_filter_operations_.Append(
-          cc::FilterOperation::CreateBrightnessFilter(brightness));
-    }
-    content_layer->SetFilters(content_filter_operations_);
-  }
 }
 
 gfx::Size ContentLayer::GetContentSize() {
@@ -161,7 +152,7 @@ scoped_refptr<cc::Layer> ContentLayer::layer() {
 }
 
 ContentLayer::ContentLayer(TabContentManager* tab_content_manager)
-    : layer_(cc::Layer::Create()),
+    : layer_(cc::Layer::Create(content::Compositor::LayerSettings())),
       content_attached_(false),
       static_attached_(false),
       tab_content_manager_(tab_content_manager) {

@@ -9,15 +9,14 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/browser_thread_model_worker.h"
 #include "chrome/browser/sync/glue/history_model_worker.h"
-#include "chrome/browser/sync/glue/password_model_worker.h"
 #include "chrome/browser/sync/glue/ui_model_worker.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/password_manager/sync/browser/password_model_worker.h"
 #include "components/sync_driver/change_processor.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/internal_api/public/engine/passive_model_worker.h"
@@ -64,9 +63,6 @@ SyncBackendRegistrar::SyncBackendRegistrar(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   CHECK(profile_);
 
-  // TODO(pavely): Remove ScopedTracker below once crbug.com/426272 is fixed.
-  tracked_objects::ScopedTracker tracker1(FROM_HERE_WITH_EXPLICIT_FUNCTION(
-      "426272 SyncBackendRegistrar::ctor thread"));
   sync_thread_ = sync_thread.Pass();
   if (!sync_thread_) {
     sync_thread_.reset(new base::Thread("Chrome_SyncThread"));
@@ -91,9 +87,6 @@ SyncBackendRegistrar::SyncBackendRegistrar(
       new syncer::PassiveModelWorker(sync_thread_->message_loop(), this);
   workers_[syncer::GROUP_PASSIVE]->RegisterForLoopDestruction();
 
-  // TODO(pavely): Remove ScopedTracker below once crbug.com/426272 is fixed.
-  tracked_objects::ScopedTracker tracker2(FROM_HERE_WITH_EXPLICIT_FUNCTION(
-      "426272 SyncBackendRegistrar::ctor history"));
   history::HistoryService* history_service =
       HistoryServiceFactory::GetForProfile(profile,
                                            ServiceAccessType::IMPLICIT_ACCESS);
@@ -104,9 +97,6 @@ SyncBackendRegistrar::SyncBackendRegistrar(
 
   }
 
-  // TODO(pavely): Remove ScopedTracker below once crbug.com/426272 is fixed.
-  tracked_objects::ScopedTracker tracker3(FROM_HERE_WITH_EXPLICIT_FUNCTION(
-      "426272 SyncBackendRegistrar::ctor passwords"));
   scoped_refptr<password_manager::PasswordStore> password_store =
       PasswordStoreFactory::GetForProfile(profile,
                                           ServiceAccessType::IMPLICIT_ACCESS);

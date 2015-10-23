@@ -19,6 +19,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -27,7 +28,6 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -50,7 +50,6 @@
 #include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/net/prediction_options.h"
-#include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/policy/cloud/test_request_interceptor.h"
@@ -62,6 +61,7 @@
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/ssl/ssl_blocking_page.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/cld_data_harness.h"
 #include "chrome/browser/translate/cld_data_harness_factory.h"
@@ -74,8 +74,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -90,6 +88,9 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/infobars/core/infobar.h"
+#include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/omnibox_edit_model.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
@@ -97,10 +98,12 @@
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_service_impl.h"
+#include "components/search/search.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_infobar_delegate.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -131,6 +134,7 @@
 #include "content/public/test/mock_notification_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -153,6 +157,7 @@
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
+#include "net/url_request/url_request_interceptor.h"
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -263,13 +268,22 @@ void UndoRedirectHostsToTestData(const char* const urls[], size_t size) {
 }
 
 // Fails requests using ERR_CONNECTION_RESET.
-net::URLRequestJob* FailedJobFactory(
-    net::URLRequest* request,
-    net::NetworkDelegate* network_delegate,
-    const std::string& scheme) {
-  return new net::URLRequestFailedJob(
-      request, network_delegate, net::ERR_CONNECTION_RESET);
-}
+class FailedJobInterceptor : public net::URLRequestInterceptor {
+ public:
+  FailedJobInterceptor() {}
+  ~FailedJobInterceptor() override {}
+
+  // URLRequestInterceptor implementation:
+  net::URLRequestJob* MaybeInterceptRequest(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override {
+    return new net::URLRequestFailedJob(request, network_delegate,
+                                        net::ERR_CONNECTION_RESET);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FailedJobInterceptor);
+};
 
 // While |MakeRequestFail| is in scope URLRequests to |host| will fail.
 class MakeRequestFail {
@@ -294,8 +308,12 @@ class MakeRequestFail {
   // Filters requests to the |host| such that they fail. Run on IO thread.
   static void MakeRequestFailOnIO(const std::string& host) {
     net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
-    filter->AddHostnameHandler("http", host, &FailedJobFactory);
-    filter->AddHostnameHandler("https", host, &FailedJobFactory);
+    filter->AddHostnameInterceptor(
+        "http", host,
+        scoped_ptr<net::URLRequestInterceptor>(new FailedJobInterceptor()));
+    filter->AddHostnameInterceptor(
+        "https", host,
+        scoped_ptr<net::URLRequestInterceptor>(new FailedJobInterceptor()));
   }
 
   // Remove filters for requests to the |host|. Run on IO thread.
@@ -508,7 +526,8 @@ class TestAudioObserver : public chromeos::CrasAudioHandler::AudioObserver {
 
  protected:
   // chromeos::CrasAudioHandler::AudioObserver overrides.
-  void OnOutputMuteChanged(bool /* mute_on */) override {
+  void OnOutputMuteChanged(bool /* mute_on */,
+                           bool /* system_adjust */) override {
     ++output_mute_changed_count_;
   }
 
@@ -1163,7 +1182,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ForceSafeSearch) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   MakeRequestFail make_request_fail("search.example");
 
-  chrome::EnableQueryExtractionForTesting();
+  search::EnableQueryExtractionForTesting();
 
   // Verifies that a default search is made using the provider configured via
   // policy. Also checks that default search can be completely disabled.
@@ -1664,7 +1683,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistSharedModules) {
 
   // Make sure that "import" and "export" are available to these extension IDs
   // by mocking the release channel.
-  extensions::ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  extensions::ScopedCurrentChannel channel(version_info::Channel::DEV);
 
   // Verify that the extensions are not installed initially.
   ExtensionService* service = extension_service();
@@ -1953,8 +1972,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionAllowedTypes) {
 #define MAYBE_ExtensionInstallSources ExtensionInstallSources
 #endif
 IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_ExtensionInstallSources) {
-  ExtensionInstallPrompt::g_auto_confirm_for_tests =
-      ExtensionInstallPrompt::ACCEPT;
+  extensions::ScopedTestDialogAutoConfirm auto_confirm(
+      extensions::ScopedTestDialogAutoConfirm::ACCEPT);
 
   const GURL install_source_url(URLRequestMockHTTPJob::GetMockUrl(
       base::FilePath(FILE_PATH_LITERAL("extensions/*"))));
@@ -2509,6 +2528,45 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   }
 }
 
+IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklistSubresources) {
+  // Checks that an image with a blacklisted URL is loaded, but an iframe with a
+  // blacklisted URL is not.
+
+  GURL main_url = URLRequestMockHTTPJob::GetMockUrl(
+      base::FilePath(FILE_PATH_LITERAL("policy/blacklist-subresources.html")));
+  GURL image_url = URLRequestMockHTTPJob::GetMockUrl(
+      base::FilePath(FILE_PATH_LITERAL("policy/pixel.png")));
+  GURL subframe_url = URLRequestMockHTTPJob::GetMockUrl(
+      base::FilePath(FILE_PATH_LITERAL("policy/blank.html")));
+
+  // Set a blacklist containing the image and the iframe which are used by the
+  // main document.
+  base::ListValue blacklist;
+  blacklist.Append(new base::StringValue(image_url.spec().c_str()));
+  blacklist.Append(new base::StringValue(subframe_url.spec().c_str()));
+  PolicyMap policies;
+  policies.Set(key::kURLBlacklist, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER, blacklist.DeepCopy(), NULL);
+  UpdateProviderPolicy(policies);
+  FlushBlacklistPolicy();
+
+  std::string blacklisted_image_load_result;
+  ui_test_utils::NavigateToURL(browser(), main_url);
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "window.domAutomationController.send(imageLoadResult)",
+      &blacklisted_image_load_result));
+  EXPECT_EQ("success", blacklisted_image_load_result);
+
+  std::string blacklisted_iframe_load_result;
+  ui_test_utils::NavigateToURL(browser(), main_url);
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "window.domAutomationController.send(iframeLoadResult)",
+      &blacklisted_iframe_load_result));
+  EXPECT_EQ("error", blacklisted_iframe_load_result);
+}
+
 #if defined(OS_MACOSX)
 // http://crbug.com/339240
 #define MAYBE_FileURLBlacklist DISABLED_FileURLBlacklist
@@ -2579,41 +2637,31 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_FileURLBlacklist) {
   CheckURLIsBlocked(browser(), file_path2.c_str());
 }
 
-static bool IsMinSSLVersionTLS12(Profile* profile) {
-  scoped_refptr<net::SSLConfigService> config_service(
-      profile->GetSSLConfigService());
+namespace {
+
+void GetSSLVersionFallbackMinOnIOThread(
+    const scoped_refptr<net::SSLConfigService>& config_service,
+    uint16_t* version_fallback_min) {
   net::SSLConfig config;
   config_service->GetSSLConfig(&config);
-  return config.version_min == net::SSL_PROTOCOL_VERSION_TLS1_2;
+  *version_fallback_min = config.version_fallback_min;
 }
 
-IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionMin) {
-  PrefService* prefs = g_browser_process->local_state();
-
-  const std::string new_value("tls1.2");
-  const std::string default_value(prefs->GetString(prefs::kSSLVersionMin));
-
-  EXPECT_NE(default_value, new_value);
-  EXPECT_FALSE(IsMinSSLVersionTLS12(browser()->profile()));
-
-  PolicyMap policies;
-  policies.Set(key::kSSLVersionMin,
-               POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER,
-               new base::StringValue(new_value),
-               NULL);
-  UpdateProviderPolicy(policies);
-
-  EXPECT_TRUE(IsMinSSLVersionTLS12(browser()->profile()));
-}
-
-static bool IsMinSSLFallbackVersionTLS12(Profile* profile) {
+uint16_t GetSSLVersionFallbackMin(Profile* profile) {
   scoped_refptr<net::SSLConfigService> config_service(
       profile->GetSSLConfigService());
-  net::SSLConfig config;
-  config_service->GetSSLConfig(&config);
-  return config.version_fallback_min == net::SSL_PROTOCOL_VERSION_TLS1_2;
+  uint16_t version_fallback_min;
+  base::RunLoop loop;
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&GetSSLVersionFallbackMinOnIOThread, config_service,
+                 base::Unretained(&version_fallback_min)),
+      loop.QuitClosure());
+  loop.Run();
+  return version_fallback_min;
 }
+
+}  // namespace
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionFallbackMin) {
   PrefService* prefs = g_browser_process->local_state();
@@ -2623,7 +2671,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionFallbackMin) {
       prefs->GetString(prefs::kSSLVersionFallbackMin));
 
   EXPECT_NE(default_value, new_value);
-  EXPECT_FALSE(IsMinSSLFallbackVersionTLS12(browser()->profile()));
+  EXPECT_NE(net::SSL_PROTOCOL_VERSION_TLS1_2,
+            GetSSLVersionFallbackMin(browser()->profile()));
 
   PolicyMap policies;
   policies.Set(key::kSSLVersionFallbackMin,
@@ -2633,7 +2682,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionFallbackMin) {
                NULL);
   UpdateProviderPolicy(policies);
 
-  EXPECT_TRUE(IsMinSSLFallbackVersionTLS12(browser()->profile()));
+  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1_2,
+            GetSSLVersionFallbackMin(browser()->profile()));
 }
 
 #if !defined(OS_MACOSX)
@@ -3350,18 +3400,17 @@ class MediaStreamDevicesControllerBrowserTest
       public testing::WithParamInterface<bool> {
  public:
   MediaStreamDevicesControllerBrowserTest()
-      : request_url_allowed_via_whitelist_(false) {
+      : request_url_allowed_via_whitelist_(false),
+        request_url_("http://www.example.com/foo") {
     policy_value_ = GetParam();
   }
   virtual ~MediaStreamDevicesControllerBrowserTest() {}
 
-  // Configure a given policy map.
-  // The |policy_name| is the name of either the audio or video capture allow
-  // policy and must never be NULL.
+  // Configure a given policy map. The |policy_name| is the name of either the
+  // audio or video capture allow policy and must never be NULL.
   // |whitelist_policy| and |allow_rule| are optional.  If NULL, no whitelist
-  // policy is set.  If non-NULL, the request_url_ will be set to be non empty
-  // and the whitelist policy is set to contain either the |allow_rule| (if
-  // non-NULL) or an "allow all" wildcard.
+  // policy is set.  If non-NULL, the whitelist policy is set to contain either
+  // the |allow_rule| (if non-NULL) or an "allow all" wildcard.
   void ConfigurePolicyMap(PolicyMap* policies, const char* policy_name,
                           const char* whitelist_policy,
                           const char* allow_rule) {
@@ -3372,15 +3421,8 @@ class MediaStreamDevicesControllerBrowserTest
                   NULL);
 
     if (whitelist_policy) {
-      // TODO(tommi): Remove the kiosk mode flag when the whitelist is visible
-      // in the media exceptions UI.
-      // See discussion here: https://codereview.chromium.org/15738004/
-      base::CommandLine::ForCurrentProcess()->AppendSwitch(
-          switches::kKioskMode);
-
       // Add an entry to the whitelist that allows the specified URL regardless
       // of the setting of kAudioCapturedAllowed.
-      request_url_ = GURL("http://www.example.com/foo");
       base::ListValue* list = new base::ListValue();
       if (allow_rule) {
         list->AppendString(allow_rule);
@@ -3420,14 +3462,13 @@ class MediaStreamDevicesControllerBrowserTest
     MediaStreamDevicesController controller(
         browser()->tab_strip_model()->GetActiveWebContents(), request,
         base::Bind(&MediaStreamDevicesControllerBrowserTest::Accept, this));
-    controller.Accept(false);
+    if (controller.IsAskingForAudio())
+      controller.PermissionGranted();
 
     base::MessageLoop::current()->QuitWhenIdle();
   }
 
   void FinishVideoTest() {
-    // TODO(raymes): Test MEDIA_DEVICE_OPEN (Pepper) which grants both webcam
-    // and microphone permissions at the same time.
     content::MediaStreamRequest request(0, 0, 0,
                                         request_url_.GetOrigin(), false,
                                         content::MEDIA_DEVICE_ACCESS,
@@ -3435,10 +3476,13 @@ class MediaStreamDevicesControllerBrowserTest
                                         std::string(),
                                         content::MEDIA_NO_SERVICE,
                                         content::MEDIA_DEVICE_VIDEO_CAPTURE);
+    // TODO(raymes): Test MEDIA_DEVICE_OPEN (Pepper) which grants both webcam
+    // and microphone permissions at the same time.
     MediaStreamDevicesController controller(
         browser()->tab_strip_model()->GetActiveWebContents(), request,
         base::Bind(&MediaStreamDevicesControllerBrowserTest::Accept, this));
-    controller.Accept(false);
+    if (controller.IsAskingForVideo())
+      controller.PermissionGranted();
 
     base::MessageLoop::current()->QuitWhenIdle();
   }
@@ -3654,7 +3698,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingAllowed) {
 }
 
 // Test that when SSL error overriding is disallowed by policy, the
-// proceed link does not appear on SSL blocking pages.
+// proceed link does not appear on SSL blocking pages and users should not
+// be able to proceed.
 IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingDisallowed) {
   net::SpawnedTestServer https_server_expired(
       net::SpawnedTestServer::TYPE_HTTPS,
@@ -3687,6 +3732,24 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingDisallowed) {
   // The interstitial should not display the proceed link.
   EXPECT_FALSE(chrome_browser_interstitials::IsInterstitialDisplayingText(
       interstitial, "proceed-link"));
+
+  // The interstitial should not proceed, even if the command is sent in
+  // some other way (e.g., via the keyboard shortcut).
+  content::InterstitialPageDelegate* interstitial_delegate =
+      content::InterstitialPage::GetInterstitialPage(
+          browser()->tab_strip_model()->GetActiveWebContents())
+          ->GetDelegateForTesting();
+  ASSERT_EQ(SSLBlockingPage::kTypeForTesting,
+            interstitial_delegate->GetTypeForTesting());
+  SSLBlockingPage* ssl_delegate =
+      static_cast<SSLBlockingPage*>(interstitial_delegate);
+  ssl_delegate->CommandReceived(
+      base::IntToString(SecurityInterstitialPage::CMD_PROCEED));
+  EXPECT_TRUE(interstitial);
+  EXPECT_TRUE(browser()
+                  ->tab_strip_model()
+                  ->GetActiveWebContents()
+                  ->ShowingInterstitialPage());
 }
 
 #if !defined(OS_CHROMEOS)
@@ -3714,7 +3777,8 @@ IN_PROC_BROWSER_TEST_F(PolicyVariationsServiceTest, VariationsURLIsValid) {
   const GURL url =
       chrome_variations::VariationsService::GetVariationsServerURL(
           g_browser_process->local_state(), std::string());
-  EXPECT_TRUE(StartsWithASCII(url.spec(), default_variations_url, true));
+  EXPECT_TRUE(base::StartsWith(url.spec(), default_variations_url,
+                               base::CompareCase::SENSITIVE));
   std::string value;
   EXPECT_TRUE(net::GetValueForKeyInQuery(url, "restrict", &value));
   EXPECT_EQ("restricted", value);
@@ -3770,5 +3834,32 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, NativeMessagingWhitelist) {
 }
 
 #endif  // !defined(CHROME_OS)
+
+
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+// Sets the hardware acceleration mode policy before the browser is started.
+class HardwareAccelerationModePolicyTest : public PolicyTest {
+ public:
+  HardwareAccelerationModePolicyTest() {}
+
+  void SetUpInProcessBrowserTestFixture() override {
+    PolicyTest::SetUpInProcessBrowserTestFixture();
+    PolicyMap policies;
+    policies.Set(key::kHardwareAccelerationModeEnabled,
+                 POLICY_LEVEL_MANDATORY,
+                 POLICY_SCOPE_USER,
+                 new base::FundamentalValue(false),
+                 NULL);
+    provider_.UpdateChromePolicy(policies);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(HardwareAccelerationModePolicyTest,
+                       HardwareAccelerationDisabled) {
+  // Verifies that hardware acceleration can be disabled with policy.
+  EXPECT_FALSE(
+      content::GpuDataManager::GetInstance()->GpuAccessAllowed(nullptr));
+}
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
 }  // namespace policy

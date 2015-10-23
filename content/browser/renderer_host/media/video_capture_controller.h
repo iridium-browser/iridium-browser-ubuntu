@@ -51,7 +51,7 @@
 #include "content/common/content_export.h"
 #include "content/common/media/video_capture.h"
 #include "media/base/video_capture_types.h"
-#include "media/video/capture/video_capture_device.h"
+#include "media/capture/video/video_capture_device.h"
 
 namespace content {
 class VideoCaptureBufferPool;
@@ -108,24 +108,26 @@ class CONTENT_EXPORT VideoCaptureController {
   // VideoCaptureControllerEventHandler::OnBufferReady. In the case that the
   // buffer was backed by a texture, |sync_point| will be waited on before
   // destroying or recycling the texture, to synchronize with texture users in
-  // the renderer process.
+  // the renderer process. If the consumer provided resource utilization
+  // feedback, this will be passed here (-1.0 indicates no feedback).
   void ReturnBuffer(VideoCaptureControllerID id,
                     VideoCaptureControllerEventHandler* event_handler,
                     int buffer_id,
-                    uint32 sync_point);
+                    uint32 sync_point,
+                    double consumer_resource_utilization);
 
   const media::VideoCaptureFormat& GetVideoCaptureFormat() const;
 
   bool has_received_frames() const { return has_received_frames_; }
 
   // Worker functions on IO thread. Called by the VideoCaptureDeviceClient.
-  void DoIncomingCapturedVideoFrameOnIOThread(
+  virtual void DoIncomingCapturedVideoFrameOnIOThread(
       scoped_ptr<media::VideoCaptureDevice::Client::Buffer> buffer,
       const scoped_refptr<media::VideoFrame>& frame,
       const base::TimeTicks& timestamp);
-  void DoErrorOnIOThread();
-  void DoLogOnIOThread(const std::string& message);
-  void DoBufferDestroyedOnIOThread(int buffer_id_to_drop);
+  virtual void DoErrorOnIOThread();
+  virtual void DoLogOnIOThread(const std::string& message);
+  virtual void DoBufferDestroyedOnIOThread(int buffer_id_to_drop);
 
  private:
   struct ControllerClient;

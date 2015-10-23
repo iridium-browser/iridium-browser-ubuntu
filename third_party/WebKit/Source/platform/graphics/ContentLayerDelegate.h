@@ -53,11 +53,12 @@ class PLATFORM_EXPORT ContentLayerDelegate : public WebContentLayerClient {
 
 public:
     explicit ContentLayerDelegate(GraphicsContextPainter*);
-    virtual ~ContentLayerDelegate();
+    ~ContentLayerDelegate() override;
 
     // WebContentLayerClient implementation.
-    virtual void paintContents(SkCanvas*, const WebRect& clip, WebContentLayerClient::PaintingControlSetting = PaintDefaultBehavior) override;
-    virtual void paintContents(WebDisplayItemList*, const WebRect& clip, WebContentLayerClient::PaintingControlSetting = PaintDefaultBehavior) override;
+    void paintContents(SkCanvas*, const WebRect& clip, WebContentLayerClient::PaintingControlSetting = PaintDefaultBehavior) override;
+    void paintContents(WebDisplayItemList*, const WebRect& clip, WebContentLayerClient::PaintingControlSetting = PaintDefaultBehavior) override;
+    size_t approximateUnsharedMemoryUsage() const override;
 
 private:
     GraphicsContextPainter* m_painter;

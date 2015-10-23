@@ -9,17 +9,18 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chromecast/media/cdm/browser_cdm_cast.h"
-#include "chromecast/media/cma/backend/media_clock_device.h"
-#include "chromecast/media/cma/backend/media_pipeline_device.h"
 #include "chromecast/media/cma/base/buffering_controller.h"
 #include "chromecast/media/cma/base/buffering_state.h"
 #include "chromecast/media/cma/base/cma_logging.h"
 #include "chromecast/media/cma/base/coded_frame_provider.h"
 #include "chromecast/media/cma/pipeline/audio_pipeline_impl.h"
 #include "chromecast/media/cma/pipeline/video_pipeline_impl.h"
+#include "chromecast/public/media/media_clock_device.h"
+#include "chromecast/public/media/media_pipeline_backend.h"
 #include "media/base/buffers.h"
 
 namespace chromecast {
@@ -69,11 +70,11 @@ MediaPipelineImpl::~MediaPipelineImpl() {
 
 void MediaPipelineImpl::Initialize(
     LoadType load_type,
-    scoped_ptr<MediaPipelineDevice> media_pipeline_device) {
+    scoped_ptr<MediaPipelineBackend> media_pipeline_backend) {
   CMALOG(kLogControl) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
-  media_pipeline_device_.reset(media_pipeline_device.release());
-  clock_device_ = media_pipeline_device_->GetMediaClockDevice();
+  media_pipeline_backend_.reset(media_pipeline_backend.release());
+  clock_device_ = media_pipeline_backend_->GetClock();
 
   if (load_type == kLoadTypeURL || load_type == kLoadTypeMediaSource) {
     base::TimeDelta low_threshold(kLowBufferThresholdURL);
@@ -89,11 +90,11 @@ void MediaPipelineImpl::Initialize(
         base::Bind(&MediaPipelineImpl::OnBufferingNotification, weak_this_)));
   }
 
-  audio_pipeline_.reset(new AudioPipelineImpl(
-      media_pipeline_device_->GetAudioPipelineDevice()));
+  audio_pipeline_.reset(
+      new AudioPipelineImpl(media_pipeline_backend_->GetAudio()));
 
-  video_pipeline_.reset(new VideoPipelineImpl(
-      media_pipeline_device_->GetVideoPipelineDevice()));
+  video_pipeline_.reset(
+      new VideoPipelineImpl(media_pipeline_backend_->GetVideo()));
 }
 
 void MediaPipelineImpl::SetClient(const MediaPipelineClient& client) {
@@ -143,7 +144,7 @@ void MediaPipelineImpl::InitializeAudio(
 }
 
 void MediaPipelineImpl::InitializeVideo(
-    const ::media::VideoDecoderConfig& config,
+    const std::vector<::media::VideoDecoderConfig>& configs,
     scoped_ptr<CodedFrameProvider> frame_provider,
     const ::media::PipelineStatusCB& status_cb) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -154,18 +155,18 @@ void MediaPipelineImpl::InitializeVideo(
     return;
   }
   has_video_ = true;
-  video_pipeline_->Initialize(config, frame_provider.Pass(), status_cb);
+  video_pipeline_->Initialize(configs, frame_provider.Pass(), status_cb);
 }
 
 void MediaPipelineImpl::StartPlayingFrom(base::TimeDelta time) {
   CMALOG(kLogControl) << __FUNCTION__ << " t0=" << time.InMilliseconds();
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(has_audio_ || has_video_);
-  DCHECK(!pending_callbacks_);
+  DCHECK(!pending_flush_callbacks_);
 
   // Reset the start of the timeline.
   DCHECK_EQ(clock_device_->GetState(), MediaClockDevice::kStateIdle);
-  clock_device_->ResetTimeline(time);
+  clock_device_->ResetTimeline(time.InMicroseconds());
 
   // Start the clock. If the playback rate is 0, then the clock is started
   // but does not increase.
@@ -179,9 +180,8 @@ void MediaPipelineImpl::StartPlayingFrom(base::TimeDelta time) {
   statistics_rolling_counter_ = 0;
   if (!pending_time_update_task_) {
     pending_time_update_task_ = true;
-    base::MessageLoopProxy::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&MediaPipelineImpl::UpdateMediaTime, weak_this_));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&MediaPipelineImpl::UpdateMediaTime, weak_this_));
   }
 
   // Setup the audio and video pipeline for the new timeline.
@@ -209,7 +209,9 @@ void MediaPipelineImpl::Flush(const ::media::PipelineStatusCB& status_cb) {
   CMALOG(kLogControl) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(has_audio_ || has_video_);
-  DCHECK(!pending_callbacks_);
+  DCHECK(!pending_flush_callbacks_);
+  DCHECK(clock_device_->GetState() == MediaClockDevice::kStateUninitialized ||
+         clock_device_->GetState() == MediaClockDevice::kStateRunning);
 
   // No need to update media time anymore.
   enable_time_update_ = false;
@@ -236,7 +238,7 @@ void MediaPipelineImpl::Flush(const ::media::PipelineStatusCB& status_cb) {
   }
   ::media::PipelineStatusCB transition_cb =
       base::Bind(&MediaPipelineImpl::StateTransition, weak_this_, status_cb);
-  pending_callbacks_ =
+  pending_flush_callbacks_ =
       ::media::SerialRunner::Run(bound_fns, transition_cb);
 }
 
@@ -244,7 +246,11 @@ void MediaPipelineImpl::Stop() {
   CMALOG(kLogControl) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(has_audio_ || has_video_);
-  DCHECK(!pending_callbacks_);
+
+  // Cancel pending flush callbacks since we are about to stop/shutdown
+  // audio/video pipelines. This will ensure A/V Flush won't happen in
+  // stopped state.
+  pending_flush_callbacks_.reset();
 
   // No need to update media time anymore.
   enable_time_update_ = false;
@@ -268,7 +274,7 @@ void MediaPipelineImpl::SetPlaybackRate(double rate) {
   DCHECK(thread_checker_.CalledOnValidThread());
   target_playback_rate_ = rate;
   if (!buffering_controller_ || !buffering_controller_->IsBuffering())
-    media_pipeline_device_->GetMediaClockDevice()->SetRate(rate);
+    media_pipeline_backend_->GetClock()->SetRate(rate);
 }
 
 AudioPipelineImpl* MediaPipelineImpl::GetAudioPipelineImpl() const {
@@ -282,7 +288,7 @@ VideoPipelineImpl* MediaPipelineImpl::GetVideoPipelineImpl() const {
 void MediaPipelineImpl::StateTransition(
     const ::media::PipelineStatusCB& status_cb,
     ::media::PipelineStatus status) {
-  pending_callbacks_.reset();
+  pending_flush_callbacks_.reset();
   status_cb.Run(status);
 }
 
@@ -297,17 +303,16 @@ void MediaPipelineImpl::OnBufferingNotification(bool is_buffering) {
     client_.buffering_state_cb.Run(buffering_state);
   }
 
-  if (media_pipeline_device_->GetMediaClockDevice()->GetState() ==
+  if (media_pipeline_backend_->GetClock()->GetState() ==
       MediaClockDevice::kStateUninitialized) {
     return;
   }
 
   if (is_buffering) {
     // Do not consume data in a rebuffering phase.
-    media_pipeline_device_->GetMediaClockDevice()->SetRate(0.0);
+    media_pipeline_backend_->GetClock()->SetRate(0.0);
   } else {
-    media_pipeline_device_->GetMediaClockDevice()->SetRate(
-        target_playback_rate_);
+    media_pipeline_backend_->GetClock()->SetRate(target_playback_rate_);
   }
 }
 
@@ -323,12 +328,12 @@ void MediaPipelineImpl::UpdateMediaTime() {
   statistics_rolling_counter_ =
       (statistics_rolling_counter_ + 1) % kStatisticsUpdatePeriod;
 
-  base::TimeDelta media_time(clock_device_->GetTime());
+  base::TimeDelta media_time =
+      base::TimeDelta::FromMicroseconds(clock_device_->GetTimeMicroseconds());
   if (media_time == ::media::kNoTimestamp()) {
     pending_time_update_task_ = true;
-    base::MessageLoopProxy::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&MediaPipelineImpl::UpdateMediaTime, weak_this_),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&MediaPipelineImpl::UpdateMediaTime, weak_this_),
         kTimeUpdateInterval);
     return;
   }
@@ -356,9 +361,8 @@ void MediaPipelineImpl::UpdateMediaTime() {
     client_.time_update_cb.Run(media_time, max_rendering_time, stc);
 
   pending_time_update_task_ = true;
-  base::MessageLoopProxy::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&MediaPipelineImpl::UpdateMediaTime, weak_this_),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&MediaPipelineImpl::UpdateMediaTime, weak_this_),
       kTimeUpdateInterval);
 }
 

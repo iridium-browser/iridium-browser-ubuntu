@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "chrome/browser/chromeos/login/test/https_forwarder.h"
+#include "chrome/browser/chromeos/login/test/js_checker.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -54,7 +55,6 @@ class OobeBaseTest : public ExtensionApiTest {
   // InProcessBrowserTest overrides.
   void SetUp() override;
   void SetUpInProcessBrowserTestFixture() override;
-  bool SetUpUserDataDirectory() override;
   void SetUpOnMainThread() override;
   void TearDownOnMainThread() override;
   void SetUpCommandLine(base::CommandLine* command_line) override;
@@ -73,8 +73,7 @@ class OobeBaseTest : public ExtensionApiTest {
   // Checks JavaScript |expression| in login screen.
   void JsExpect(const std::string& expression);
 
-  bool use_webview() { return use_webview_; }
-  void set_use_webview(bool use_webview) { use_webview_ = use_webview; }
+  test::JSChecker& JS() { return js_checker_; }
 
   bool initialize_fake_merge_session() {
     return initialize_fake_merge_session_;
@@ -106,8 +105,8 @@ class OobeBaseTest : public ExtensionApiTest {
   scoped_ptr<extensions::ScopedCurrentChannel> scoped_channel_;
   HTTPSForwarder gaia_https_forwarder_;
   std::string gaia_frame_parent_;
-  bool use_webview_;
   bool initialize_fake_merge_session_;
+  test::JSChecker js_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(OobeBaseTest);
 };

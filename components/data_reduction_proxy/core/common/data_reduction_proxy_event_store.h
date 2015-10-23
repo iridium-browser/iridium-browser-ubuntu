@@ -6,6 +6,7 @@
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_COMMON_DATA_REDUCTION_PROXY_EVENT_STORE_H_
 
 #include <deque>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -61,20 +62,17 @@ class DataReductionProxyEventStore
   void AddAndSetLastBypassEvent(scoped_ptr<base::Value> entry,
                                 int64 expiration_ticks) override;
 
+  // Returns the list of proxy servers for HTTP origins.
+  std::string GetHttpProxyList() const;
+
+  // Returns the list of proxy servers for HTTPS origins.
+  std::string GetHttpsProxyList() const;
+
+  // Returns a sanitized version of the last seen bypass event.
+  std::string SanitizedLastBypassEvent() const;
+
  private:
   friend class DataReductionProxyEventStoreTest;
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyEventStoreTest,
-                           TestAddProxyEnabledEvent);
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyEventStoreTest,
-                           TestAddProxyDisabledEvent);
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyEventStoreTest,
-                           TestAddBypassActionEvent);
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyEventStoreTest,
-                           TestAddBypassTypeEvent);
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyEventStoreTest,
-                           TestBeginSecureProxyCheck);
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyEventStoreTest,
-                           TestEndSecureProxyCheck);
 
   // A deque of data reduction proxy related events. It is used as a circular
   // buffer to prevent unbounded memory utilization.

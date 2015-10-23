@@ -120,6 +120,12 @@
         'usrsctplib/user_uma.h',
         'usrsctplib/usrsctp.h'
       ],  # sources
+      'variables': {
+        'clang_warning_flags': [
+          # atomic_init in user_atomic.h is a static function in a header.
+          '-Wno-unused-function',
+        ],
+      },
       'conditions': [
         ['OS=="linux" or OS=="android"', {
           'defines': [
@@ -162,7 +168,7 @@
           'cflags': [ '/w' ],
           # TODO(ldixon) : Remove this disabling of warnings by pushing a
           # fix upstream to usrsctp
-          'msvs_disabled_warnings': [ 4002, 4013, 4018, 4133, 4267, 4313, 4700 ],
+          'msvs_disabled_warnings': [ 4002, 4013, 4133, 4267, 4313, 4700 ],
         }, {  # OS != "win",
           'defines': [
             'NON_WINDOWS_DEFINE',

@@ -10,7 +10,7 @@
 
 #include "base/basictypes.h"
 #include "media/base/media_export.h"
-#include "media/base/video_frame.h"
+#include "media/base/video_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -67,6 +67,9 @@ enum VideoCodecProfile {
   VIDEO_CODEC_PROFILE_MAX = VP9PROFILE_MAX,
 };
 
+MEDIA_EXPORT VideoCodec
+VideoCodecProfileToVideoCodec(VideoCodecProfile profile);
+
 class MEDIA_EXPORT VideoDecoderConfig {
  public:
   // Constructs an uninitialized object. Clients should call Initialize() with
@@ -77,11 +80,13 @@ class MEDIA_EXPORT VideoDecoderConfig {
   // |extra_data|, otherwise the memory is copied.
   VideoDecoderConfig(VideoCodec codec,
                      VideoCodecProfile profile,
-                     VideoFrame::Format format,
+                     VideoPixelFormat format,
+                     ColorSpace color_space,
                      const gfx::Size& coded_size,
                      const gfx::Rect& visible_rect,
                      const gfx::Size& natural_size,
-                     const uint8* extra_data, size_t extra_data_size,
+                     const uint8* extra_data,
+                     size_t extra_data_size,
                      bool is_encrypted);
 
   ~VideoDecoderConfig();
@@ -89,13 +94,14 @@ class MEDIA_EXPORT VideoDecoderConfig {
   // Resets the internal state of this object.
   void Initialize(VideoCodec codec,
                   VideoCodecProfile profile,
-                  VideoFrame::Format format,
+                  VideoPixelFormat format,
+                  ColorSpace color_space,
                   const gfx::Size& coded_size,
                   const gfx::Rect& visible_rect,
                   const gfx::Size& natural_size,
-                  const uint8* extra_data, size_t extra_data_size,
-                  bool is_encrypted,
-                  bool record_stats);
+                  const uint8* extra_data,
+                  size_t extra_data_size,
+                  bool is_encrypted);
 
   // Returns true if this object has appropriate configuration values, false
   // otherwise.
@@ -111,38 +117,44 @@ class MEDIA_EXPORT VideoDecoderConfig {
 
   std::string GetHumanReadableCodecName() const;
 
-  VideoCodec codec() const;
-  VideoCodecProfile profile() const;
+  VideoCodec codec() const { return codec_; }
+  VideoCodecProfile profile() const { return profile_; }
 
   // Video format used to determine YUV buffer sizes.
-  VideoFrame::Format format() const;
+  VideoPixelFormat format() const { return format_; }
+
+  // The default color space of the decoded frames. Decoders should output
+  // frames tagged with this color space unless they find a different value in
+  // the bitstream.
+  ColorSpace color_space() const { return color_space_; }
 
   // Width and height of video frame immediately post-decode. Not all pixels
   // in this region are valid.
-  gfx::Size coded_size() const;
+  gfx::Size coded_size() const { return coded_size_; }
 
   // Region of |coded_size_| that is visible.
-  gfx::Rect visible_rect() const;
+  gfx::Rect visible_rect() const { return visible_rect_; }
 
   // Final visible width and height of a video frame with aspect ratio taken
   // into account.
-  gfx::Size natural_size() const;
+  gfx::Size natural_size() const { return natural_size_; }
 
   // Optional byte data required to initialize video decoders, such as H.264
   // AAVC data.
   const uint8* extra_data() const;
-  size_t extra_data_size() const;
+  size_t extra_data_size() const { return extra_data_.size(); }
 
   // Whether the video stream is potentially encrypted.
   // Note that in a potentially encrypted video stream, individual buffers
   // can be encrypted or not encrypted.
-  bool is_encrypted() const;
+  bool is_encrypted() const { return is_encrypted_; }
 
  private:
   VideoCodec codec_;
   VideoCodecProfile profile_;
 
-  VideoFrame::Format format_;
+  VideoPixelFormat format_;
+  ColorSpace color_space_;
 
   gfx::Size coded_size_;
   gfx::Rect visible_rect_;

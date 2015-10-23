@@ -54,10 +54,6 @@ std::string SearchTermsData::GetSuggestRequestIdentifier() const {
   return std::string();
 }
 
-bool SearchTermsData::EnableAnswersInSuggest() const {
-  return false;
-}
-
 bool SearchTermsData::IsShowingSearchTermsOnSearchResultsPages() const {
   return false;
 }
@@ -81,5 +77,9 @@ std::string SearchTermsData::NTPIsThemedParam() const {
 }
 
 std::string SearchTermsData::GoogleImageSearchSource() const {
+  return std::string();
+}
+
+std::string SearchTermsData::GetAcceptLanguages() const {
   return std::string();
 }

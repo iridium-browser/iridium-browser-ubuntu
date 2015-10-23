@@ -31,7 +31,7 @@ from chromite.lib.paygen import utils
 sys.path.insert(0, os.path.join(constants.SOURCE_ROOT, 'src', 'platform'))
 
 
-DESCRIPTION_FILE_VERSION = 1
+DESCRIPTION_FILE_VERSION = 2
 
 
 class Error(Exception):
@@ -129,16 +129,17 @@ class _PaygenPayload(object):
     return uri + '.json'
 
   def _PrepareGenerator(self):
-    """Download, and extract au-generate.zip into self.generator_dir."""
+    """Download, and extract au-generator.zip into self.generator_dir."""
     if self._au_generator_uri_override:
       generator_uri = self._au_generator_uri_override
     else:
       generator_uri = gspaths.ChromeosReleases.GeneratorUri(
           self.payload.tgt_image.channel,
           self.payload.tgt_image.board,
-          self.payload.tgt_image.version)
+          self.payload.tgt_image.version,
+          self.payload.tgt_image.bucket)
 
-    logging.info('Preparing au-generate.zip from %s.', generator_uri)
+    logging.info('Preparing au-generator.zip from %s.', generator_uri)
 
     # Extract zipped delta generator files to the expected directory.
     tmp_zip = self.cache.GetFileInTempFile(generator_uri)
@@ -321,18 +322,21 @@ class _PaygenPayload(object):
       self._RunGeneratorCmd(cmd)
       return payload_hash_file.read()
 
-  def _MetadataSize(self):
+  def _MetadataSize(self, payload_file):
     """Discover the metadata size.
 
     The payload generator should return this information when calculating the
     metadata hash, but would require a lot of new plumbing. Instead we just
     look it up ourselves.
 
+    Args:
+      payload_file: Which payload file to extract metadata size from.
+
     Returns:
       int value of the metadata size.
     """
-    with open(self.payload_file) as payload_file:
-      payload = self._update_payload.Payload(payload_file)
+    with open(payload_file) as payload_fd:
+      payload = self._update_payload.Payload(payload_fd)
       payload.Init()
       return payload.data_offset
 
@@ -464,7 +468,7 @@ class _PaygenPayload(object):
     fields populated.
 
     {
-      "version": 1,
+      "version": 2,
       "sha1_hex": <payload sha1 hash as a hex encoded string>,
       "sha256_hex": <payload sha256 hash as a hex encoded string>,
       "md5_hex": <payload md5 hash as a hex encoded string>,
@@ -475,9 +479,14 @@ class _PaygenPayload(object):
     Args:
       metadata_signatures: A list of signatures in binary string format.
     """
+    # Decide if we use the signed or unsigned payload file.
+    payload_file = self.payload_file
+    if self.signer:
+      payload_file = self.signed_payload_file
+
     # Locate everything we put in the json.
-    sha1_hex, sha256_hex = filelib.ShaSums(self.payload_file)
-    md5_hex = filelib.MD5Sum(self.payload_file)
+    sha1_hex, sha256_hex = filelib.ShaSums(payload_file)
+    md5_hex = filelib.MD5Sum(payload_file)
 
     metadata_signature = None
     if metadata_signatures:
@@ -494,7 +503,7 @@ class _PaygenPayload(object):
         'sha1_hex': sha1_hex,
         'sha256_hex': sha256_hex,
         'md5_hex': md5_hex,
-        'metadata_size': self._MetadataSize(),
+        'metadata_size': self._MetadataSize(payload_file),
         'metadata_signature': metadata_signature,
     }
 

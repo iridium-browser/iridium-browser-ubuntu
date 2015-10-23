@@ -39,8 +39,7 @@ struct crazy_context_t {
         java_vm(NULL),
         minimum_jni_version(0),
         callback_poster(NULL),
-        callback_poster_opaque(NULL),
-        no_map_exec_support_fallback_enabled(false) {
+        callback_poster_opaque(NULL) {
     ResetSearchPaths();
   }
 
@@ -54,7 +53,6 @@ struct crazy_context_t {
   int minimum_jni_version;
   crazy_callback_poster_t callback_poster;
   void* callback_poster_opaque;
-  bool no_map_exec_support_fallback_enabled;
 };
 
 void crazy_context_t::ResetSearchPaths() {
@@ -145,12 +143,6 @@ void crazy_context_get_java_vm(crazy_context_t* context,
   *minimum_jni_version = context->minimum_jni_version;
 }
 
-void crazy_context_set_no_map_exec_support_fallback_enabled(
-    crazy_context_t* context, bool no_map_exec_support_fallback_enabled) {
-  context->no_map_exec_support_fallback_enabled =
-      no_map_exec_support_fallback_enabled;
-}
-
 void crazy_context_set_callback_poster(crazy_context_t* context,
                                        crazy_callback_poster_t poster,
                                        void* poster_opaque) {
@@ -220,7 +212,6 @@ crazy_status_t crazy_library_open(crazy_library_t** library,
                                                   context->file_offset,
                                                   &context->search_paths,
                                                   false,
-                                                  false,
                                                   &context->error);
 
   if (!wrap)
@@ -253,7 +244,6 @@ crazy_status_t crazy_library_open_in_zip_file(crazy_library_t** library,
           RTLD_NOW,
           context->load_address,
           &context->search_paths,
-          context->no_map_exec_support_fallback_enabled,
           false,
           &context->error);
 
@@ -289,16 +279,6 @@ crazy_status_t crazy_library_get_info(crazy_library_t* library,
                      &context->error)) {
     return CRAZY_STATUS_FAILURE;
   }
-
-  return CRAZY_STATUS_SUCCESS;
-}
-
-crazy_status_t crazy_system_can_share_relro(void) {
-  crazy::AshmemRegion region;
-  if (!region.Allocate(PAGE_SIZE, NULL) ||
-      !region.SetProtectionFlags(PROT_READ) ||
-      !crazy::AshmemRegion::CheckFileDescriptorIsReadOnly(region.fd()))
-    return CRAZY_STATUS_FAILURE;
 
   return CRAZY_STATUS_SUCCESS;
 }
@@ -388,31 +368,6 @@ crazy_status_t crazy_library_find_from_address(void* address,
     *library = reinterpret_cast<crazy_library_t*>(wrap);
     return CRAZY_STATUS_SUCCESS;
   }
-}
-
-crazy_status_t crazy_library_file_path_in_zip_file(const char* lib_name,
-                                                   char* buffer,
-                                                   size_t buffer_size) {
-  crazy::String path = crazy::LibraryList::GetLibraryFilePathInZipFile(
-      lib_name);
-  if (path.size() >= buffer_size) {
-    return CRAZY_STATUS_FAILURE;
-  }
-
-  memcpy(buffer, path.c_str(), path.size());
-  buffer[path.size()] = '\0';
-  return CRAZY_STATUS_SUCCESS;
-}
-
-crazy_status_t crazy_linker_check_library_is_mappable_in_zip_file(
-    const char* zipfile_name,
-    const char* lib_name) {
-  Error error;
-  if (crazy::LibraryList::FindMappableLibraryInZipFile(
-          zipfile_name, lib_name, &error) == CRAZY_OFFSET_FAILED)
-    return CRAZY_STATUS_FAILURE;
-
-  return CRAZY_STATUS_SUCCESS;
 }
 
 void crazy_library_close(crazy_library_t* library) {

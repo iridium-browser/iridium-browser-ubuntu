@@ -5,8 +5,11 @@
 #include "components/scheduler/child/webthread_impl_for_worker_scheduler.h"
 
 #include "base/bind.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "components/scheduler/child/scheduler_message_loop_delegate.h"
+#include "components/scheduler/child/scheduler_task_runner_delegate_impl.h"
+#include "components/scheduler/child/task_queue.h"
 #include "components/scheduler/child/web_scheduler_impl.h"
 #include "components/scheduler/child/worker_scheduler_impl.h"
 #include "third_party/WebKit/public/platform/WebTraceLocation.h"
@@ -17,21 +20,31 @@ WebThreadImplForWorkerScheduler::WebThreadImplForWorkerScheduler(
     const char* name)
     : thread_(new base::Thread(name)) {
   thread_->Start();
+  thread_task_runner_ = thread_->task_runner();
 
   base::WaitableEvent completion(false, false);
-  thread_->message_loop()->PostTask(
+  thread_task_runner_->PostTask(
       FROM_HERE, base::Bind(&WebThreadImplForWorkerScheduler::InitOnThread,
                             base::Unretained(this), &completion));
   completion.Wait();
 }
 
 WebThreadImplForWorkerScheduler::~WebThreadImplForWorkerScheduler() {
+  base::WaitableEvent completion(false, false);
+  // Restore the original task runner so that the thread can tear itself down.
+  thread_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&WebThreadImplForWorkerScheduler::RestoreTaskRunnerOnThread,
+                 base::Unretained(this), &completion));
+  completion.Wait();
   thread_->Stop();
 }
 
 void WebThreadImplForWorkerScheduler::InitOnThread(
     base::WaitableEvent* completion) {
-  worker_scheduler_ = WorkerScheduler::Create(thread_->message_loop());
+  task_runner_delegate_ =
+      SchedulerTaskRunnerDelegateImpl::Create(thread_->message_loop());
+  worker_scheduler_ = WorkerScheduler::Create(task_runner_delegate_);
   worker_scheduler_->Init();
   task_runner_ = worker_scheduler_->DefaultTaskRunner();
   idle_task_runner_ = worker_scheduler_->IdleTaskRunner();
@@ -43,6 +56,12 @@ void WebThreadImplForWorkerScheduler::InitOnThread(
   completion->Signal();
 }
 
+void WebThreadImplForWorkerScheduler::RestoreTaskRunnerOnThread(
+    base::WaitableEvent* completion) {
+  task_runner_delegate_->RestoreDefaultTaskRunner();
+  completion->Signal();
+}
+
 void WebThreadImplForWorkerScheduler::WillDestroyCurrentMessageLoop() {
   task_runner_ = nullptr;
   idle_task_runner_ = nullptr;
@@ -51,7 +70,7 @@ void WebThreadImplForWorkerScheduler::WillDestroyCurrentMessageLoop() {
 }
 
 blink::PlatformThreadId WebThreadImplForWorkerScheduler::threadId() const {
-  return thread_->thread_id();
+  return thread_->GetThreadId();
 }
 
 blink::WebScheduler* WebThreadImplForWorkerScheduler::scheduler() const {

@@ -1,0 +1,61 @@
+/* Copyright 2015 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+#outerDiv {
+  -webkit-margin-end: 40px;
+}
+
+#titleDiv {
+  margin-bottom: 10px;
+}
+
+#networkIcon {
+  height: 32px;
+  width: 32px;
+}
+
+#networkName {
+  -webkit-margin-start: 10px;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+#networkState {
+  -webkit-margin-start: 10px;
+  font-size: 20px;
+}
+
+#networkState.connected {
+  color: green;
+}
+
+#simInfoDiv {
+  margin-left: 10px;
+}
+
+#infoDiv {
+  margin-left: 10px;
+}
+
+#infoDiv span {
+  margin-bottom: 8px;
+}
+
+#advancedDiv cr-button {
+  --paper-button: {
+    text-align: start;
+  };
+}
+
+#proxyDiv {
+  max-width: 500px;
+}
+
+cr-checkbox {
+  margin-bottom: 10px;
+}
+
+cr-collapse {
+  margin: 10px;
+}

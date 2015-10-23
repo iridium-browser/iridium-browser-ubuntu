@@ -13,8 +13,6 @@
 
 namespace extensions {
 
-class Extension;
-
 // A specialization of the ExternalLoader that loads a hard-coded list of
 // external extensions, that should be considered components of chrome (but
 // unlike Component extensions, these extensions are installed from the webstore
@@ -25,15 +23,14 @@ class ExternalComponentLoader : public ExternalLoader {
  public:
   explicit ExternalComponentLoader(Profile* profile);
 
-  // True if |extension| should be modifiable by the user.
-  static bool IsModifiable(const extensions::Extension* extension);
-
  protected:
   void StartLoading() override;
 
  private:
   friend class base::RefCountedThreadSafe<ExternalLoader>;
   ~ExternalComponentLoader() override;
+
+  void AddExternalExtension(const std::string& extension_id);
 
   // The profile that this loader is associated with. It listens for
   // preference changes for that profile.

@@ -21,10 +21,19 @@ remoting.testEvents;
 
 /**
  * @constructor
+ * @implements {base.Disposable}
  */
 remoting.Application = function() {
   // Create global factories.
   remoting.ClientPlugin.factory = new remoting.DefaultClientPluginFactory();
+
+  /** @protected {base.WindowMessageDispatcher} */
+  this.windowMessageDispatcher_ = new base.WindowMessageDispatcher();
+};
+
+remoting.Application.prototype.dispose = function() {
+  base.dispose(this.windowMessageDispatcher_);
+  this.windowMessageDispatcher_ = null;
 };
 
 /* Public method to exit the application. */
@@ -76,9 +85,11 @@ remoting.Application.prototype.initGlobalObjects_ = function() {
 
   console.log(this.getExtensionInfo());
   l10n.localize();
+
   var sandbox =
       /** @type {HTMLIFrameElement} */ (document.getElementById('wcs-sandbox'));
-  remoting.wcsSandbox = new remoting.WcsSandboxContainer(sandbox.contentWindow);
+  remoting.wcsSandbox = new remoting.WcsSandboxContainer(
+      sandbox.contentWindow, this.windowMessageDispatcher_);
   remoting.initModalDialogs();
 
   remoting.testEvents = new base.EventSourceImpl();
@@ -108,15 +119,20 @@ remoting.Application.prototype.getExtensionInfo = function() {
  */
 
 /** @return {string} */
+remoting.Application.prototype.getApplicationId = function() {
+  console.assert(false, 'Subclass must override');
+};
+
+/** @return {string} */
 remoting.Application.prototype.getApplicationName = function() {
-  base.debug.assert(false, 'Subclass must override');
+  console.assert(false, 'Subclass must override getApplicationName().');
 };
 
 /**
  * @return {remoting.Activity}  The Current activity.
  */
 remoting.Application.prototype.getActivity = function() {
-  base.debug.assert(false, 'Subclass must override');
+  console.assert(false, 'Subclass must override getActivity().');
 };
 
 /**
@@ -124,12 +140,12 @@ remoting.Application.prototype.getActivity = function() {
  * @protected
  */
 remoting.Application.prototype.signInFailed_ = function(error) {
-  base.debug.assert(false, 'Subclass must override');
+  console.assert(false, 'Subclass must override signInFailed().');
 };
 
 /** @protected */
 remoting.Application.prototype.initApplication_ = function() {
-  base.debug.assert(false, 'Subclass must override');
+  console.assert(false, 'Subclass must override initApplication().');
 };
 
 /**
@@ -137,12 +153,12 @@ remoting.Application.prototype.initApplication_ = function() {
  * @protected
  */
 remoting.Application.prototype.startApplication_ = function(token) {
-  base.debug.assert(false, 'Subclass must override');
+  console.assert(false, 'Subclass must override startApplication().');
 };
 
 /** @protected */
 remoting.Application.prototype.exitApplication_ = function() {
-  base.debug.assert(false, 'Subclass must override');
+  console.assert(false, 'Subclass must override exitApplication().');
 };
 
 /**
@@ -152,6 +168,11 @@ remoting.Application.prototype.exitApplication_ = function() {
  * @interface
  */
 remoting.ApplicationInterface = function() {};
+
+/**
+ * @return {string} Application Id.
+ */
+remoting.ApplicationInterface.prototype.getApplicationId = function() {};
 
 /**
  * @return {string} Application product name to be used in UI.

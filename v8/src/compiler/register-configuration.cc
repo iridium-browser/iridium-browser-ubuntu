@@ -21,8 +21,13 @@ class ArchDefaultRegisterConfiguration : public RegisterConfiguration {
  public:
   ArchDefaultRegisterConfiguration()
       : RegisterConfiguration(Register::kMaxNumAllocatableRegisters,
-                              DoubleRegister::kMaxNumAllocatableRegisters,
+#if V8_TARGET_ARCH_X87
+                              1,
+                              1,
+#else
+                              DoubleRegister::NumAllocatableRegisters(),
                               DoubleRegister::NumAllocatableAliasedRegisters(),
+#endif
                               general_register_name_table_,
                               double_register_name_table_) {
     DCHECK_EQ(Register::kMaxNumAllocatableRegisters,
@@ -30,7 +35,9 @@ class ArchDefaultRegisterConfiguration : public RegisterConfiguration {
     for (int i = 0; i < Register::kMaxNumAllocatableRegisters; ++i) {
       general_register_name_table_[i] = Register::AllocationIndexToString(i);
     }
-    for (int i = 0; i < DoubleRegister::kMaxNumAllocatableRegisters; ++i) {
+    DCHECK_GE(DoubleRegister::kMaxNumAllocatableRegisters,
+              DoubleRegister::NumAllocatableRegisters());
+    for (int i = 0; i < DoubleRegister::NumAllocatableRegisters(); ++i) {
       double_register_name_table_[i] =
           DoubleRegister::AllocationIndexToString(i);
     }
@@ -46,7 +53,7 @@ class ArchDefaultRegisterConfiguration : public RegisterConfiguration {
 static base::LazyInstance<ArchDefaultRegisterConfiguration>::type
     kDefaultRegisterConfiguration = LAZY_INSTANCE_INITIALIZER;
 
-}  // namepace
+}  // namespace
 
 
 const RegisterConfiguration* RegisterConfiguration::ArchDefault() {

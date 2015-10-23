@@ -40,12 +40,17 @@ WebInspector.ElementsTreeElement = function(node, elementCloseTag)
     TreeElement.call(this);
     this._node = node;
 
+    this._decorationsElement = createElementWithClass("div");
+    this.listItemElement.appendChild(this._decorationsElement);
+
     this._elementCloseTag = elementCloseTag;
 
     if (this._node.nodeType() == Node.ELEMENT_NODE && !elementCloseTag)
         this._canAddAttributes = true;
     this._searchQuery = null;
     this._expandedChildrenLimit = WebInspector.ElementsTreeElement.InitialChildrenLimit;
+    if (this._node.nodeType() === Node.ELEMENT_NODE && this._node.parentNode && this._node.parentNode.nodeType() === Node.DOCUMENT_NODE && !this._node.parentNode.parentNode)
+        this.setCollapsible(false);
 }
 
 WebInspector.ElementsTreeElement.InitialChildrenLimit = 500;
@@ -108,6 +113,29 @@ WebInspector.ElementsTreeElement.canShowInlineText = function(node)
     if (textChild.nodeValue().length < maxInlineTextChildLength)
         return true;
     return false;
+}
+
+/**
+ * @param {!WebInspector.ContextSubMenuItem} subMenu
+ * @param {!WebInspector.DOMNode} node
+ */
+WebInspector.ElementsTreeElement.populateForcedPseudoStateItems = function(subMenu, node)
+{
+    const pseudoClasses = ["active", "hover", "focus", "visited"];
+    var forcedPseudoState = WebInspector.CSSStyleModel.fromNode(node).pseudoState(node);
+    for (var i = 0; i < pseudoClasses.length; ++i) {
+        var pseudoClassForced = forcedPseudoState.indexOf(pseudoClasses[i]) >= 0;
+        subMenu.appendCheckboxItem(":" + pseudoClasses[i], setPseudoStateCallback.bind(null, pseudoClasses[i], !pseudoClassForced), pseudoClassForced, false);
+    }
+
+    /**
+     * @param {string} pseudoState
+     * @param {boolean} enabled
+     */
+    function setPseudoStateCallback(pseudoState, enabled)
+    {
+        WebInspector.CSSStyleModel.fromNode(node).forcePseudoState(node, pseudoState, enabled);
+    }
 }
 
 WebInspector.ElementsTreeElement.prototype = {
@@ -499,7 +527,7 @@ WebInspector.ElementsTreeElement.prototype = {
             contextMenu.appendItem(WebInspector.UIString.capitalize("Edit ^attribute"), this._startEditingAttribute.bind(this, attribute, event.target));
         contextMenu.appendSeparator();
         var pseudoSubMenu = contextMenu.appendSubMenuItem(WebInspector.UIString.capitalize("Force ^element ^state"));
-        this._populateForcedPseudoStateItems(pseudoSubMenu, treeElement.node());
+        WebInspector.ElementsTreeElement.populateForcedPseudoStateItems(pseudoSubMenu, treeElement.node());
         contextMenu.appendSeparator();
         this.populateNodeContextMenu(contextMenu);
         this.populateScrollIntoView(contextMenu);
@@ -512,29 +540,6 @@ WebInspector.ElementsTreeElement.prototype = {
     {
         contextMenu.appendSeparator();
         contextMenu.appendItem(WebInspector.UIString.capitalize("Scroll into ^view"), this._scrollIntoView.bind(this));
-    },
-
-    /**
-     * @param {!WebInspector.ContextSubMenuItem} subMenu
-     * @param {!WebInspector.DOMNode} node
-     */
-    _populateForcedPseudoStateItems: function(subMenu, node)
-    {
-        const pseudoClasses = ["active", "hover", "focus", "visited"];
-        var forcedPseudoState = node.getUserProperty(WebInspector.CSSStyleModel.PseudoStatePropertyName) || [];
-        for (var i = 0; i < pseudoClasses.length; ++i) {
-            var pseudoClassForced = forcedPseudoState.indexOf(pseudoClasses[i]) >= 0;
-            subMenu.appendCheckboxItem(":" + pseudoClasses[i], setPseudoStateCallback.bind(null, pseudoClasses[i], !pseudoClassForced), pseudoClassForced, false);
-        }
-
-        /**
-         * @param {string} pseudoState
-         * @param {boolean} enabled
-         */
-        function setPseudoStateCallback(pseudoState, enabled)
-        {
-            WebInspector.CSSStyleModel.fromNode(node).forcePseudoState(node, pseudoState, enabled);
-        }
     },
 
     populateTextContextMenu: function(contextMenu, textNode)
@@ -666,24 +671,16 @@ WebInspector.ElementsTreeElement.prototype = {
 
         var config = new WebInspector.InplaceEditor.Config(this._attributeEditingCommitted.bind(this), this._editingCancelled.bind(this), attributeName);
 
-        function handleKeyDownEvents(event)
+        /**
+         * @param {!Event} event
+         * @return {string}
+         */
+        function postKeyDownFinishHandler(event)
         {
-            var isMetaOrCtrl = WebInspector.isMac() ?
-                event.metaKey && !event.shiftKey && !event.ctrlKey && !event.altKey :
-                event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey;
-            if (isEnterKey(event) && (event.isMetaOrCtrlForTest || !config.multiline || isMetaOrCtrl))
-                return "commit";
-            else if (event.keyCode === WebInspector.KeyboardShortcut.Keys.Esc.code || event.keyIdentifier === "U+001B")
-                return "cancel";
-            else if (event.keyIdentifier === "U+0009") // Tab key
-                return "move-" + (event.shiftKey ? "backward" : "forward");
-            else {
-                WebInspector.handleElementValueModifications(event, attribute);
-                return "";
-            }
+            WebInspector.handleElementValueModifications(event, attribute);
+            return "";
         }
-
-        config.customFinishHandler = handleKeyDownEvents;
+        config.setPostKeydownFinishHandler(postKeyDownFinishHandler);
 
         this._editing = WebInspector.InplaceEditor.startEditing(attribute, config);
 
@@ -1069,7 +1066,8 @@ WebInspector.ElementsTreeElement.prototype = {
             highlightElement.className = "highlight";
             highlightElement.appendChild(nodeInfo);
             this.title = highlightElement;
-            this._updateDecorations();
+            this.updateDecorations();
+            this.listItemElement.insertBefore(this._decorationsElement, this.listItemElement.firstChild);
             delete this._highlightResult;
         }
 
@@ -1080,48 +1078,105 @@ WebInspector.ElementsTreeElement.prototype = {
         this._highlightSearchResults();
     },
 
-    /**
-     * @return {?Element}
-     */
-    _createDecoratorElement: function()
+    updateDecorations: function()
     {
+        if (this.isClosingTag())
+            return;
         var node = this._node;
-        var decoratorMessages = [];
-        var parentDecoratorMessages = [];
-        var decorators = this.treeOutline.nodeDecorators();
-        for (var i = 0; i < decorators.length; ++i) {
-            var decorator = decorators[i];
-            var message = decorator.decorate(node);
-            if (message) {
-                decoratorMessages.push(message);
-                continue;
+        if (node.nodeType() !== Node.ELEMENT_NODE)
+            return;
+
+        var extensions = runtime.extensions(WebInspector.DOMPresentationUtils.MarkerDecorator);
+        var markerToExtension = new Map();
+        for (var extension of extensions)
+            markerToExtension.set(extension.descriptor()["marker"], extension);
+
+        var promises = [];
+        var decorations = [];
+        var descendantDecorations = [];
+        node.traverseMarkers(visitor);
+
+        /**
+         * @param {!WebInspector.DOMNode} n
+         * @param {string} marker
+         */
+        function visitor(n, marker)
+        {
+            var extension = markerToExtension.get(marker);
+            if (!extension)
+                return;
+            promises.push(extension.instancePromise().then(collectDecoration.bind(null, n)));
+        }
+
+        /**
+         * @param {!WebInspector.DOMNode} n
+         * @param {!WebInspector.DOMPresentationUtils.MarkerDecorator} decorator
+         */
+        function collectDecoration(n, decorator)
+        {
+            var decoration = decorator.decorate(n);
+            if (!decoration)
+                return;
+            (n === node ? decorations : descendantDecorations).push(decoration);
+        }
+
+        Promise.all(promises).then(setTitle.bind(this));
+
+        /**
+         * @this {WebInspector.ElementsTreeElement}
+         */
+        function setTitle()
+        {
+            this._decorationsElement.removeChildren();
+            if (!decorations.length && !descendantDecorations.length)
+                return;
+
+            var colors = new Set();
+            var titles = createElement("div");
+
+            for (var decoration of decorations) {
+                var titleElement = titles.createChild("div");
+                titleElement.textContent = decoration.title;
+                colors.add(decoration.color);
+            }
+            if (this.expanded && !decorations.length)
+                return;
+
+            var descendantColors = new Set();
+            if (descendantDecorations.length) {
+                var element = titles.createChild("div");
+                element.textContent = WebInspector.UIString("Children:");
+                for (var decoration of descendantDecorations) {
+                    element = titles.createChild("div");
+                    element.style.marginLeft = "15px";
+                    element.textContent = decoration.title;
+                    descendantColors.add(decoration.color);
+                }
             }
 
-            if (this.expanded || this._elementCloseTag)
-                continue;
+            var offset = 0;
+            processColors.call(this, colors, "elements-gutter-decoration");
+            if (!this.expanded)
+                processColors.call(this, descendantColors, "elements-gutter-decoration elements-has-decorated-children");
+            WebInspector.Tooltip.install(this._decorationsElement, titles);
 
-            message = decorator.decorateAncestor(node);
-            if (message)
-                parentDecoratorMessages.push(message)
+            /**
+             * @param {!Set<string>} colors
+             * @param {string} className
+             * @this {WebInspector.ElementsTreeElement}
+             */
+            function processColors(colors, className)
+            {
+                for (var color of colors) {
+                    var child = this._decorationsElement.createChild("div", className);
+                    child.style.backgroundColor = color;
+                    child.style.borderColor = color;
+                    if (offset)
+                        child.style.marginLeft = offset + "px";
+                    offset += 3;
+                }
+            }
         }
-        if (!decoratorMessages.length && !parentDecoratorMessages.length)
-            return null;
-
-        var decoratorElement = createElement("div");
-        decoratorElement.classList.add("elements-gutter-decoration");
-        if (!decoratorMessages.length)
-            decoratorElement.classList.add("elements-has-decorated-children");
-        decoratorElement.title = decoratorMessages.concat(parentDecoratorMessages).join("\n");
-        return decoratorElement;
-    },
-
-    _updateDecorations: function()
-    {
-        if (this._decoratorElement)
-            this._decoratorElement.remove();
-        this._decoratorElement = this._createDecoratorElement();
-        if (this._decoratorElement && this.listItemElement)
-            this.listItemElement.insertBefore(this._decoratorElement, this.listItemElement.firstChild);
     },
 
     /**
@@ -1254,7 +1309,7 @@ WebInspector.ElementsTreeElement.prototype = {
             classes.push("close");
         var tagElement = parentElement.createChild("span", classes.join(" "));
         tagElement.createTextChild("<");
-        var tagNameElement = tagElement.createChild("span", isClosingTag ? "" : "webkit-html-tag-name");
+        var tagNameElement = tagElement.createChild("span", isClosingTag ? "webkit-html-close-tag-name" : "webkit-html-tag-name");
         tagNameElement.textContent = (isClosingTag ? "/" : "") + tagName;
         if (!isClosingTag) {
             if (node.hasAttributes()) {
@@ -1445,13 +1500,17 @@ WebInspector.ElementsTreeElement.prototype = {
 
     /**
      * @param {function(boolean)=} callback
+     * @param {boolean=} startEditing
      */
-    toggleEditAsHTML: function(callback)
+    toggleEditAsHTML: function(callback, startEditing)
     {
         if (this._editing && this._htmlEditElement && WebInspector.isBeingEdited(this._htmlEditElement)) {
             this._editing.commit();
             return;
         }
+
+        if (startEditing === false)
+            return;
 
         /**
          * @param {?Protocol.Error} error

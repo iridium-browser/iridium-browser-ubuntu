@@ -2,9 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/memory/scoped_vector.h"
 #include "components/update_client/update_response.h"
-#include "libxml/globals.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace update_client {
@@ -79,6 +77,18 @@ const char* kInvalidValidXmlMissingCodebase =
     "         <package namediff='extension_1_2_3_4.crx'/>"
     "       </packages>"
     "     </manifest>"
+    "   </updatecheck>"
+    " </app>"
+    "</response>";
+
+const char* kInvalidValidXmlMissingManifest =
+    "<?xml version='1.0' encoding='UTF-8'?>"
+    "<response protocol='3.0'>"
+    " <app appid='12345'>"
+    "   <updatecheck status='ok'>"
+    "     <urls>"
+    "       <url codebase='http://example.com/'/>"
+    "     </urls>"
     "   </updatecheck>"
     " </app>"
     "</response>";
@@ -236,6 +246,10 @@ TEST(ComponentUpdaterUpdateResponseTest, TestParser) {
   EXPECT_TRUE(parser.results().list.empty());
   EXPECT_FALSE(parser.errors().empty());
 
+  EXPECT_TRUE(parser.Parse(kInvalidValidXmlMissingManifest));
+  EXPECT_TRUE(parser.results().list.empty());
+  EXPECT_FALSE(parser.errors().empty());
+
   // Parse some valid XML, and check that all params came out as expected
   EXPECT_TRUE(parser.Parse(kValidXml));
   EXPECT_TRUE(parser.errors().empty());
@@ -254,7 +268,6 @@ TEST(ComponentUpdaterUpdateResponseTest, TestParser) {
   EXPECT_TRUE(parser.errors().empty());
   EXPECT_TRUE(parser.Parse(kSimilarTagnames));
   EXPECT_TRUE(parser.errors().empty());
-  xmlCleanupGlobals();
 
   // Parse xml with hash value
   EXPECT_TRUE(parser.Parse(valid_xml_with_hash));

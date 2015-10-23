@@ -59,7 +59,6 @@
           '<(PRODUCT_DIR)/ui_test.pak',
           'test/data/',
         ],
-        'read_only': 1,
       },
     }],
     ['OS=="linux" or OS=="win"', {
@@ -100,7 +99,6 @@
           '<(PRODUCT_DIR)/libEGL.dll',
           '<(PRODUCT_DIR)/libGLESv2.dll',
           '<(PRODUCT_DIR)/osmesa.dll',
-          '<(PRODUCT_DIR)/plugins/npapi_test_plugin.dll',
           '<(PRODUCT_DIR)/ppapi_tests.dll',
         ],
       },

@@ -6,9 +6,11 @@
     'includes': [ 'common_defines.gypi', ],
     'variables':
     {
-        'angle_path%': '<(DEPTH)',
+        'angle_path': '<(DEPTH)',
         'angle_build_winrt%': '0',
         'angle_build_winphone%': '0',
+        'angle_build_winrt_app_type_revision%': '8.1',
+        'angle_build_winrt_target_platform_ver%' : '',
         # angle_code is set to 1 for the core ANGLE targets defined in src/build_angle.gyp.
         # angle_code is set to 0 for test code, sample code, and third party code.
         # When angle_code is 1, we build with additional warning flags on Mac and Linux.
@@ -22,7 +24,6 @@
             '-Wextra',
             '-Wformat=2',
             '-Winit-self',
-            '-Wno-sign-compare',
             '-Wno-unused-function',
             '-Wno-unused-parameter',
             '-Wno-unknown-pragmas',
@@ -30,20 +31,7 @@
             '-Wpointer-arith',
             '-Wundef',
             '-Wwrite-strings',
-            '-Wno-reorder',
             '-Wno-format-nonliteral',
-            '-Wno-deprecated-register',
-        ],
-
-        'conditions':
-        [
-            ['OS=="linux"',
-            {
-                'use_x11%': 1,
-            },
-            {
-                'use_x11%': 0,
-            }],
         ],
     },
     'target_defaults':
@@ -66,6 +54,19 @@
                 },
             }],
         ],
+        'conditions':
+        [
+            ['angle_build_winrt==1',
+            {
+                'msvs_enable_winrt' : '1',
+                'msvs_application_type_revision' : '<(angle_build_winrt_app_type_revision)',
+                'msvs_target_platform_version' : '<(angle_build_winrt_target_platform_ver)',
+            }],
+            ['angle_build_winphone==1',
+            {
+                'msvs_enable_winphone' : '1',
+            }],
+        ],
         'configurations':
         {
             'Common_Base':
@@ -81,7 +82,13 @@
                 {
                     'VCCLCompilerTool':
                     {
-                        'AdditionalOptions': ['/MP'],
+                        # Control Flow Guard is a security feature in Windows
+                        # 8.1 and higher designed to prevent exploitation of
+                        # indirect calls in executables.
+                        # Control Flow Guard is enabled using the /d2guard4
+                        # compiler setting in combination with the /guard:cf
+                        # linker setting.
+                        'AdditionalOptions': ['/MP', '/d2guard4'],
                         'BufferSecurityCheck': 'true',
                         'DebugInformationFormat': '3',
                         'ExceptionHandling': '0',
@@ -92,6 +99,13 @@
                     },
                     'VCLinkerTool':
                     {
+                        # Control Flow Guard is a security feature in Windows
+                        # 8.1 and higher designed to prevent exploitation of
+                        # indirect calls in executables.
+                        # Control Flow Guard is enabled using the /d2guard4
+                        # compiler setting in combination with the /guard:cf
+                        # linker setting.
+                        'AdditionalOptions': ['/guard:cf'],
                         'FixedBaseAddress': '1',
                         'ImportLibrary': '$(OutDir)\\lib\\$(TargetName).lib',
                         'MapFileName': '$(OutDir)\\$(TargetName).map',
@@ -330,6 +344,9 @@
                 'cflags':
                 [
                     '-fPIC',
+                ],
+                'cflags_cc':
+                [
                     '-std=c++0x',
                 ],
             },

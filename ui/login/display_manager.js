@@ -50,9 +50,6 @@
 /** @const */ var ACCELERATOR_APP_LAUNCH_BAILOUT = 'app_launch_bailout';
 /** @const */ var ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG =
     'app_launch_network_config';
-/** @const */ var ACCELERATOR_NEW_OOBE = 'new_oobe';
-/** @const */ var ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN = 'toggle_webview_signin';
-/** @const */ var ACCELERATOR_TOGGLE_NEW_LOGIN_UI = 'toggle_new_login_ui';
 
 /* Signin UI state constants. Used to control header bar UI. */
 /** @const */ var SIGNIN_UI_STATE = {
@@ -64,7 +61,8 @@
   SAML_PASSWORD_CONFIRM: 5,
   CONSUMER_MANAGEMENT_ENROLLMENT: 6,
   PASSWORD_CHANGED: 7,
-  ENROLLMENT: 8
+  ENROLLMENT: 8,
+  ERROR: 9
 };
 
 /* Possible UI states of the error screen. */
@@ -107,7 +105,7 @@ cr.define('cr.ui.login', function() {
 
   /**
    * Groups of screens (screen IDs) that should have the same dimensions.
-   * @type Array.<Array.<string>>
+   * @type Array<Array<string>>
    * @const
    */
   var SCREEN_GROUPS = [[SCREEN_OOBE_NETWORK,
@@ -118,7 +116,7 @@ cr.define('cr.ui.login', function() {
   /**
    * Group of screens (screen IDs) where factory-reset screen invocation is
    * available.
-   * @type Array.<string>
+   * @type Array<string>
    * @const
    */
   var RESET_AVAILABLE_SCREEN_GROUP = [
@@ -143,7 +141,7 @@ cr.define('cr.ui.login', function() {
   /**
    * Group of screens (screen IDs) where enable debuggingscreen invocation is
    * available.
-   * @type Array.<string>
+   * @type Array<string>
    * @const
    */
   var ENABLE_DEBUGGING_AVAILABLE_SCREEN_GROUP = [
@@ -157,7 +155,7 @@ cr.define('cr.ui.login', function() {
   /**
    * Group of screens (screen IDs) that are not participating in
    * left-current-right animation.
-   * @type Array.<string>
+   * @type Array<string>
    * @const
    */
   var NOT_ANIMATED_SCREEN_GROUP = [
@@ -203,24 +201,6 @@ cr.define('cr.ui.login', function() {
      * @type {boolean}
      */
     forceKeyboardFlow_: false,
-
-    /**
-     * Whether virtual keyboard is shown.
-     * @type {boolean}
-     */
-    virtualKeyboardShown_: false,
-
-    /**
-     * Virtual keyboard width.
-     * @type {number}
-     */
-    virtualKeyboardWidth_: 0,
-
-    /**
-     * Virtual keyboard height.
-     * @type {number}
-     */
-    virtualKeyboardHeight_: 0,
 
     /**
      * Type of UI.
@@ -273,28 +253,6 @@ cr.define('cr.ui.login', function() {
 
     set headerHidden(hidden) {
       $('login-header-bar').hidden = hidden;
-    },
-
-    /**
-     * Virtual keyboard state (hidden/shown).
-     * @param {boolean} hidden Whether keyboard is shown.
-     */
-    get virtualKeyboardShown() {
-      return this.virtualKeyboardShown_;
-    },
-
-    set virtualKeyboardShown(shown) {
-      this.virtualKeyboardShown_ = shown;
-    },
-
-    /**
-     * Sets the current size of the virtual keyboard.
-     * @param {number} width keyboard width
-     * @param {number} height keyboard height
-     */
-    setVirtualKeyboardSize: function(width, height) {
-      this.virtualKeyboardWidth_ = width;
-      this.virtualKeyboardHeight_ = height;
     },
 
     /**
@@ -405,15 +363,6 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG) {
         if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
           chrome.send('networkConfigRequest');
-      } else if (name == ACCELERATOR_NEW_OOBE) {
-        chrome.send('switchToNewOobe');
-      } else if (name == ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN) {
-        if (currentStepId == SCREEN_GAIA_SIGNIN ||
-            currentStepId == SCREEN_OOBE_ENROLLMENT)
-          chrome.send('toggleWebviewSignin');
-      } else if (name == ACCELERATOR_TOGGLE_NEW_LOGIN_UI) {
-        if (currentStepId == SCREEN_OOBE_NETWORK)
-          chrome.send('toggleNewLoginUI');
       } else if (name == ACCELERATOR_TOGGLE_EASY_BOOTSTRAP) {
         if (currentStepId == SCREEN_GAIA_SIGNIN)
           chrome.send('toggleEasyBootstrap');
@@ -431,7 +380,7 @@ cr.define('cr.ui.login', function() {
 
     /**
      * Appends buttons to the button strip.
-     * @param {Array.<HTMLElement>} buttons Array with the buttons to append.
+     * @param {Array<HTMLElement>} buttons Array with the buttons to append.
      * @param {string} screenId Id of the screen that buttons belong to.
      */
     appendButtons_: function(buttons, screenId) {

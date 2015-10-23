@@ -64,8 +64,11 @@ class AndroidVideoCapturerJni : public webrtc::AndroidVideoCapturerDelegate {
   void OnCapturerStarted(bool success);
   void OnIncomingFrame(void* video_frame,
                        int length,
+                       int width,
+                       int height,
                        int rotation,
                        int64 time_stamp);
+  void OnOutputFormatRequest(int width, int height, int fps);
 protected:
   AndroidVideoCapturerJni(JNIEnv* jni, jobject j_video_capturer);
   ~AndroidVideoCapturerJni();
@@ -77,8 +80,11 @@ private:
   void OnCapturerStopped_w();
   void OnIncomingFrame_w(void* video_frame,
                          int length,
+                         int width,
+                         int height,
                          int rotation,
                          int64 time_stamp);
+  void OnOutputFormatRequest_w(int width, int height, int fps);
   void ReturnBuffer_w(int64 time_stamp);
 
   JNIEnv* jni();

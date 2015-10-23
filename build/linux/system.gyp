@@ -4,14 +4,6 @@
 
 {
   'variables': {
-    'conditions': [
-      ['sysroot!=""', {
-        'pkg-config': '<(chroot_cmd) ./pkg-config-wrapper "<(sysroot)" "<(target_arch)" "<(system_libdir)"',
-      }, {
-        'pkg-config': 'pkg-config',
-      }],
-    ],
-
     # If any of the linux_link_FOO below are set to 1, then the corresponding
     # target will be linked against the FOO library (either dynamically or
     # statically, depending on the pkg-config files), as opposed to loading the
@@ -532,7 +524,7 @@
         },
       ],
     }],
-    ['ozone_platform_dri==1 or ozone_platform_drm==1 or ozone_platform_gbm==1', {
+    ['ozone_platform_drm==1 or ozone_platform_gbm==1', {
       'targets': [
         {
           'target_name': 'libdrm',
@@ -543,6 +535,9 @@
             ],
           },
           'link_settings': {
+            'ldflags': [
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other libdrm)',
+            ],
             'libraries': [
               '<!@(<(pkg-config) --libs-only-l libdrm)',
             ],

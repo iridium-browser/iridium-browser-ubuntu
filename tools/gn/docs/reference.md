@@ -58,7 +58,7 @@
 
 
 ```
-## **--dotfile**: override the name of the ".gn" file.
+## **--dotfile**: Override the name of the ".gn" file.
 
 ```
   Normally GN loads the ".gn"file  from the source root for some basic
@@ -116,6 +116,41 @@
   gn gen //out/Default --root=/home/baracko/src
 
   gn desc //out/Default --root="C:\Users\BObama\My Documents\foo"
+
+
+```
+## **--runtime-deps-list-file**: Save runtime dependencies for targets in file.
+
+```
+  --runtime-deps-list-file=<filename>
+
+  Where <filename> is a text file consisting of the labels, one per
+  line, of the targets for which runtime dependencies are desired.
+
+  See "gn help runtime_deps" for a description of how runtime
+  dependencies are computed.
+
+```
+
+### **Runtime deps output file**
+
+```
+  For each target requested, GN will write a separate runtime dependency
+  file. The runtime dependency file will be in the output directory
+  alongside the output file of the target, with a ".runtime_deps"
+  extension. For example, if the target "//foo:bar" is listed in the
+  input file, and that target produces an output file "bar.so", GN
+  will create a file "bar.so.runtime_deps" in the build directory.
+
+  If a source set, action, copy, or group is listed, the runtime deps
+  file will correspond to the .stamp file corresponding to that target.
+  This is probably not useful; the use-case for this feature is
+  generally executable targets.
+
+  The runtime dependency file will list one file per line, with no
+  escaping. The files will be relative to the root_build_dir. The first
+  line of the file will be the main output file of the target itself
+  (in the above example, "bar.so").
 
 
 ```
@@ -347,6 +382,21 @@
       Shows the given values taken from the target and all configs
       applying. See "--blame" below.
 
+  runtime_deps
+      Compute all runtime deps for the given target. This is a
+      computed list and does not correspond to any GN variable, unlike
+      most other values here.
+
+      The output is a list of file names relative to the build
+      directory. See "gn help runtime_deps" for how this is computed.
+      This also works with "--blame" to see the source of the
+      dependency.
+
+```
+
+### **Shared flags**
+
+```
   --blame
       Used with any value specified by a config, this will name
       the config that specified the value. This doesn't currently work
@@ -563,6 +613,35 @@
 
 
 ```
+## **gn path <out_dir> <target_one> <target_two>**
+
+```
+  Finds paths of dependencies between two targets. Each unique path
+  will be printed in one group, and groups will be separate by newlines.
+  The two targets can appear in either order: paths will be found going
+  in either direction.
+
+  Each dependency will be annotated with its type. By default, only the
+  first path encountered will be printed, which is not necessarily the
+  shortest path.
+
+```
+
+### **Options**
+
+```
+  --all
+     Prints all paths found rather than just the first one.
+
+```
+
+### **Example**
+
+```
+  gn path out/Default //base //tools/gn
+
+
+```
 ## **gn refs <out_dir> (<label_pattern>|<label>|<file>|@<response_file>)* [--all]**
 ```
         [--all-toolchains] [--as=...] [--testonly=...] [--type=...]
@@ -581,9 +660,9 @@
      "gn help label_pattern" for details.
 
    - File name: The result will be which targets list the given file in
-     its "inputs", "sources", "public", or "data". Any input
-     that does not contain wildcards and does not match a target or a
-     config will be treated as a file.
+     its "inputs", "sources", "public", "data", or "outputs".
+     Any input that does not contain wildcards and does not match a
+     target or a config will be treated as a file.
 
    - Response file: If the input starts with an "@", it will be
      interpreted as a path to a file containing a list of labels or
@@ -688,7 +767,7 @@
       Display a reverse dependency tree to get to the given file. This
       will show how dependencies will reference that file.
 
-  gn refs out/Debug //base/macros.h //base/basictypes.h --all
+  gn refs out/Debug //base/macros.h //base/at_exit.h --all
       Display all unique targets with some dependency path to a target
       containing either of the given files as a source.
 
@@ -932,6 +1011,7 @@
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
          defines, include_dirs, ldflags, lib_dirs, libs
+         precompiled_header, precompiled_source
 
 ```
 
@@ -1130,6 +1210,7 @@
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
          defines, include_dirs, ldflags, lib_dirs, libs
+         precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
@@ -1841,6 +1922,7 @@
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
          defines, include_dirs, ldflags, lib_dirs, libs
+         precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
@@ -1881,6 +1963,7 @@
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
          defines, include_dirs, ldflags, lib_dirs, libs
+         precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
@@ -1904,6 +1987,7 @@
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
          defines, include_dirs, ldflags, lib_dirs, libs
+         precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
@@ -2213,6 +2297,20 @@
         Posix systems:
           output_prefix = "lib"
 
+    precompiled_header_type  [string]
+        Valid for: "cc", "cxx", "objc", "objcxx"
+
+        Type of precompiled headers. If undefined or the empty string,
+        precompiled headers will not be used for this tool. Otherwise
+        use "msvc" which is the only currently supported value.
+
+        For precompiled headers to be used for a given target, the
+        target (or a config applied to it) must also specify a
+        "precompiled_header" and, for "msvc"-style headers, a
+        "precompiled_source" value.
+
+        See "gn help precompiled_header" for more.
+
     restat  [boolean]
         Valid for: all tools (optional, defaults to false)
 
@@ -2253,6 +2351,7 @@
 ```
 
 ### **Expansions for tool variables**
+
 ```
   All paths are relative to the root build directory, which is the
   current directory for running all tools. These expansions are
@@ -3163,6 +3262,30 @@
 
 ```
 
+### **Controlling includes individually**
+
+```
+  If only certain includes are problematic, you can annotate them
+  individually rather than disabling header checking on an entire
+  target. Add the string "nogncheck" to the include line:
+
+    #include "foo/something_weird.h"  // nogncheck (bug 12345)
+
+  It is good form to include a reference to a bug (if the include is
+  improper, or some other comment expressing why the header checker
+  doesn't work for this particular case.
+
+  The most common reason to need "nogncheck" is conditional includes.
+  The header checker does not understand the preprocessor, so may flag
+  some includes as improper even if the dependencies and #defines are
+  always matched correctly:
+
+    #if defined(ENABLE_DOOM_MELON)
+    #include "doom_melon/beam_controller.h"  // nogncheck
+    #endif
+
+```
+
 ### **Example**
 
 ```
@@ -3252,17 +3375,29 @@
 ## **data**: Runtime data file dependencies.
 
 ```
-  Lists files required to run the given target. These are typically
-  data files.
+  Lists files or directories required to run the given target. These are
+  typically data files or directories of data files. The paths are
+  interpreted as being relative to the current build file. Since these
+  are runtime dependencies, they do not affect which targets are built
+  or when. To declare input files to a script, use "inputs".
 
   Appearing in the "data" section does not imply any special handling
   such as copying them to the output directory. This is just used for
-  declaring runtime dependencies. There currently isn't a good use for
-  these but it is envisioned that test data can be listed here for use
-  running automated tests.
+  declaring runtime dependencies. Runtime dependencies can be queried
+  using the "runtime_deps" category of "gn desc" or written during
+  build generation via "--runtime-deps-list-file".
 
-  See also "gn help inputs" and "gn help data_deps", both of
-  which actually affect the build in concrete ways.
+  GN doesn't require data files to exist at build-time. So actions that
+  produce files that are in turn runtime dependencies can list those
+  generated files both in the "outputs" list as well as the "data"
+  list.
+
+  By convention, directories are be listed with a trailing slash:
+    data = [ "test/data/" ]
+  However, no verification is done on these so GN doesn't enforce this.
+  The paths are just rebased and passed along when requested.
+
+  See "gn help runtime_deps" for how these are used.
 
 
 ```
@@ -3678,6 +3813,77 @@
   For copy targets, the outputs is the destination for the copied
   file(s). For actions, the outputs should be the list of files
   generated by the script.
+
+
+```
+## **precompiled_header**: [string] Header file to precompile.
+
+```
+  Precompiled headers will be used when a target specifies this
+  value, or a config applying to this target specifies this value.
+  In addition, the tool corresponding to the source files must also
+  specify precompiled headers (see "gn help tool"). The tool
+  will also specify what type of precompiled headers to use.
+
+  The precompiled header/source variables can be specified on a target
+  or a config, but must be the same for all configs applying to a given
+  target since a target can only have one precompiled header.
+
+```
+
+### **MSVC precompiled headers**
+
+```
+  When using MSVC-style precompiled headers, the "precompiled_header"
+  value is a string corresponding to the header. This is NOT a path
+  to a file that GN recognises, but rather the exact string that appears
+  in quotes after an #include line in source code. The compiler will
+  match this string against includes or forced includes (/FI).
+
+  MSVC also requires a source file to compile the header with. This must
+  be specified by the "precompiled_source" value. In contrast to the
+  header value, this IS a GN-style file name, and tells GN which source
+  file to compile to make the .pch file used for subsequent compiles.
+
+  If you use both C and C++ sources, the precompiled header and source
+  file will be compiled using both tools. You will want to make sure
+  to wrap C++ includes in __cplusplus #ifdefs so the file will compile
+  in C mode.
+
+  For example, if the toolchain specifies MSVC headers:
+
+    toolchain("vc_x64") {
+      ...
+      tool("cxx") {
+        precompiled_header_type = "msvc"
+        ...
+
+  You might make a config like this:
+
+    config("use_precompiled_headers") {
+      precompiled_header = "build/precompile.h"
+      precompiled_source = "//build/precompile.cc"
+
+      # Either your source files should #include "build/precompile.h"
+      # first, or you can do this to force-include the header.
+      cflags = [ "/FI$precompiled_header" ]
+    }
+
+  And then define a target that uses the config:
+
+    executable("doom_melon") {
+      configs += [ ":use_precompiled_headers" ]
+      ...
+
+
+
+```
+## **precompiled_source**: [file name] Source file to precompile.
+
+```
+  The source file that goes along with the precompiled_header when
+  using "msvc"-style precompiled headers. It will be implicitly added
+  to the sources of the target. See "gn help precompiled_header".
 
 
 ```
@@ -4291,6 +4497,50 @@
 
 
 ```
+## **Runtime dependencies**
+
+```
+  Runtime dependencies of a target are exposed via the "runtime_deps"
+  category of "gn desc" (see "gn help desc") or they can be written
+  at build generation time via "--runtime-deps-list-file"
+  (see "gn help --runtime-deps-list-file").
+
+  To a first approximation, the runtime dependencies of a target are
+  the set of "data" files, data directories, and the shared libraries
+  from all transitive dependencies. Executables and shared libraries are
+  considered runtime dependencies of themselves.
+
+```
+
+### **Details**
+
+```
+  Executable targets and those executable targets' transitive
+  dependencies are not considered unless that executable is listed in
+  "data_deps". Otherwise, GN assumes that the executable (and
+  everything it requires) is a build-time dependency only.
+
+  Action and copy targets that are listed as "data_deps" will have all
+  of their outputs and data files considered as runtime dependencies.
+  Action and copy targets that are "deps" or "public_deps" will have
+  only their data files considered as runtime dependencies. These
+  targets can list an output file in both the "outputs" and "data"
+  lists to force an output file as a runtime dependency in all cases.
+
+  The results of static_library or source_set targets are not considered
+  runtime dependencies since these are assumed to be intermediate
+  targets only. If you need to list a static library as a runtime
+  dependency, you can manually compute the .a/.lib file name for the
+  current platform and list it in the "data" list of a target
+  (possibly on the static library target itself).
+
+  When a tool produces more than one output, only the first output
+  is considered. For example, a shared library target may produce a
+  .dll and a .lib file on Windows. Only the .dll file will be considered
+  a runtime dependency.
+
+
+```
 ## **How Source Expansion Works**
 
 ```
@@ -4416,11 +4666,12 @@
 
 **  --args**: Specifies build arguments overrides.
 **  --color**: Force colored output.
-**  --dotfile**: override the name of the ".gn" file.
+**  --dotfile**: Override the name of the ".gn" file.
 **  --markdown**: write the output in the Markdown format.
 **  --nocolor**: Force non-colored output.
 **  -q**: Quiet mode. Don't print output on success.
 **  --root**: Explicitly specify source root.
+**  --runtime-deps-list-file**: Save runtime dependencies for targets in file.
 **  --time**: Outputs a summary of how long everything took.
 **  --tracelog**: Writes a Chrome-compatible trace log to the given file.
 **  -v**: Verbose logging.

@@ -14,11 +14,13 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
 #include "base/process/process_iterator.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
@@ -136,6 +138,7 @@ class ProcessSingletonTest : public InProcessBrowserTest {
   }
 
   void SetUp() override {
+    InProcessBrowserTest::SetUp();
     // Start the threads and create the starters.
     for (size_t i = 0; i < kNbThreads; ++i) {
       chrome_starter_threads_[i].reset(new base::Thread("ChromeStarter"));
@@ -214,13 +217,9 @@ class ProcessSingletonTest : public InProcessBrowserTest {
   base::ScopedTempDir temp_profile_dir_;
 };
 
-#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
-// http://crbug.com/58219
-#define MAYBE_StartupRaceCondition DISABLED_StartupRaceCondition
-#else
-#define MAYBE_StartupRaceCondition StartupRaceCondition
-#endif
-IN_PROC_BROWSER_TEST_F(ProcessSingletonTest, MAYBE_StartupRaceCondition) {
+// Disabled on all platforms after code rot due to http://crbug.com/513534.
+// Originally disabled on some platforms due to http://crbug.com/58219.
+IN_PROC_BROWSER_TEST_F(ProcessSingletonTest, DISABLED_StartupRaceCondition) {
   // We use this to stop the attempts loop on the first failure.
   bool failed = false;
   for (size_t attempt = 0; attempt < kNbAttempts && !failed; ++attempt) {
@@ -253,11 +252,10 @@ IN_PROC_BROWSER_TEST_F(ProcessSingletonTest, MAYBE_StartupRaceCondition) {
       ASSERT_NE(static_cast<base::MessageLoop*>(NULL),
                 chrome_starter_threads_[i]->message_loop());
 
-      chrome_starter_threads_[i]->message_loop()->PostTask(
-          FROM_HERE, base::Bind(&ChromeStarter::StartChrome,
-                                chrome_starters_[i].get(),
-                                &threads_waker_,
-                                first_run));
+      chrome_starter_threads_[i]->task_runner()->PostTask(
+          FROM_HERE,
+          base::Bind(&ChromeStarter::StartChrome, chrome_starters_[i].get(),
+                     &threads_waker_, first_run));
     }
 
     // Wait for all the starters to be ready.

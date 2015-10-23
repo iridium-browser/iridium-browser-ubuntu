@@ -13,8 +13,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
+#include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -24,8 +23,10 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/url_database.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/autocomplete_provider.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/search_engines/template_url.h"
 #include "content/public/browser/web_ui.h"
 #include "mojo/common/common_type_converters.h"
@@ -75,8 +76,6 @@ struct TypeConverter<AutocompleteMatchMojoPtr, AutocompleteMatch> {
     // represents description classification.  i.e., for each character, what
     // type of text it is.
     result->transition = input.transition;
-    result->is_history_what_you_typed_match =
-        input.is_history_what_you_typed_match;
     result->allowed_to_be_default_match = input.allowed_to_be_default_match;
     result->type = AutocompleteMatchType::ToString(input.type);
     if (input.associated_keyword.get() != NULL) {
@@ -109,8 +108,11 @@ struct TypeConverter<AutocompleteResultsForProviderMojoPtr,
 
 }  // namespace mojo
 
-OmniboxUIHandler::OmniboxUIHandler(Profile* profile)
-    : profile_(profile) {
+OmniboxUIHandler::OmniboxUIHandler(
+    Profile* profile,
+    mojo::InterfaceRequest<OmniboxUIHandlerMojo> request)
+    : profile_(profile),
+      binding_(this, request.Pass()) {
   ResetController();
 }
 
@@ -195,14 +197,13 @@ void OmniboxUIHandler::StartOmniboxQuery(const mojo::String& input_string,
       input_string.To<base::string16>(), cursor_position, std::string(), GURL(),
       static_cast<metrics::OmniboxEventProto::PageClassification>(
           page_classification),
-      prevent_inline_autocomplete, prefer_keyword, true, true,
+      prevent_inline_autocomplete, prefer_keyword, true, true, false,
       ChromeAutocompleteSchemeClassifier(profile_));
   controller_->Start(input_);
 }
 
 void OmniboxUIHandler::ResetController() {
-  controller_.reset(new AutocompleteController(profile_,
-          TemplateURLServiceFactory::GetForProfile(profile_),
-          this,
-          AutocompleteClassifier::kDefaultOmniboxProviders));
+  controller_.reset(new AutocompleteController(
+      make_scoped_ptr(new ChromeAutocompleteProviderClient(profile_)), this,
+      AutocompleteClassifier::kDefaultOmniboxProviders));
 }

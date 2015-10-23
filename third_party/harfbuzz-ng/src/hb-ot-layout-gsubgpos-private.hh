@@ -266,7 +266,8 @@ struct hb_add_coverage_context_t
 #define TRACE_APPLY(this) \
 	hb_auto_trace_t<HB_DEBUG_APPLY, bool> trace \
 	(&c->debug_depth, c->get_name (), this, HB_FUNC, \
-	 "idx %d codepoint %u", c->buffer->idx, c->buffer->cur().codepoint);
+	 "idx %d gid %u lookup %d", \
+	 c->buffer->idx, c->buffer->cur().codepoint, (int) c->lookup_index);
 
 struct hb_apply_context_t
 {
@@ -328,8 +329,7 @@ struct hb_apply_context_t
 
       if (unlikely (_hb_glyph_info_is_default_ignorable (&info) &&
 		    (ignore_zwnj || !_hb_glyph_info_is_zwnj (&info)) &&
-		    (ignore_zwj || !_hb_glyph_info_is_zwj (&info)) &&
-		    !_hb_glyph_info_ligated (&info)))
+		    (ignore_zwj || !_hb_glyph_info_is_zwj (&info))))
 	return SKIP_MAYBE;
 
       return SKIP_NO;
@@ -482,6 +482,7 @@ struct hb_apply_context_t
   const GDEF &gdef;
   bool has_glyph_classes;
   skipping_iterator_t iter_input, iter_context;
+  unsigned int lookup_index;
   unsigned int debug_depth;
 
 
@@ -500,12 +501,13 @@ struct hb_apply_context_t
 			has_glyph_classes (gdef.has_glyph_classes ()),
 			iter_input (),
 			iter_context (),
+			lookup_index ((unsigned int) -1),
 			debug_depth (0) {}
 
   inline void set_lookup_mask (hb_mask_t mask) { lookup_mask = mask; }
   inline void set_auto_zwj (bool auto_zwj_) { auto_zwj = auto_zwj_; }
   inline void set_recurse_func (recurse_func_t func) { recurse_func = func; }
-  inline void set_lookup (const Lookup &l) { set_lookup_props (l.get_props ()); }
+  inline void set_lookup_index (unsigned int lookup_index_) { lookup_index = lookup_index_; }
   inline void set_lookup_props (unsigned int lookup_props_)
   {
     lookup_props = lookup_props_;
@@ -516,39 +518,39 @@ struct hb_apply_context_t
   inline bool
   match_properties_mark (hb_codepoint_t  glyph,
 			 unsigned int    glyph_props,
-			 unsigned int    lookup_props) const
+			 unsigned int    match_props) const
   {
     /* If using mark filtering sets, the high short of
-     * lookup_props has the set index.
+     * match_props has the set index.
      */
-    if (lookup_props & LookupFlag::UseMarkFilteringSet)
-      return gdef.mark_set_covers (lookup_props >> 16, glyph);
+    if (match_props & LookupFlag::UseMarkFilteringSet)
+      return gdef.mark_set_covers (match_props >> 16, glyph);
 
-    /* The second byte of lookup_props has the meaning
+    /* The second byte of match_props has the meaning
      * "ignore marks of attachment type different than
      * the attachment type specified."
      */
-    if (lookup_props & LookupFlag::MarkAttachmentType)
-      return (lookup_props & LookupFlag::MarkAttachmentType) == (glyph_props & LookupFlag::MarkAttachmentType);
+    if (match_props & LookupFlag::MarkAttachmentType)
+      return (match_props & LookupFlag::MarkAttachmentType) == (glyph_props & LookupFlag::MarkAttachmentType);
 
     return true;
   }
 
   inline bool
   check_glyph_property (const hb_glyph_info_t *info,
-			unsigned int  lookup_props) const
+			unsigned int  match_props) const
   {
     hb_codepoint_t glyph = info->codepoint;
     unsigned int glyph_props = _hb_glyph_info_get_glyph_props (info);
 
     /* Not covered, if, for example, glyph class is ligature and
-     * lookup_props includes LookupFlags::IgnoreLigatures
+     * match_props includes LookupFlags::IgnoreLigatures
      */
-    if (glyph_props & lookup_props & LookupFlag::IgnoreFlags)
+    if (glyph_props & match_props & LookupFlag::IgnoreFlags)
       return false;
 
     if (unlikely (glyph_props & HB_OT_LAYOUT_GLYPH_PROPS_MARK))
-      return match_properties_mark (glyph, glyph_props, lookup_props);
+      return match_properties_mark (glyph, glyph_props, match_props);
 
     return true;
   }
@@ -720,7 +722,7 @@ static inline bool match_input (hb_apply_context_t *c,
 {
   TRACE_APPLY (NULL);
 
-  if (unlikely (count > MAX_CONTEXT_LENGTH)) TRACE_RETURN (false);
+  if (unlikely (count > MAX_CONTEXT_LENGTH)) return TRACE_RETURN (false);
 
   hb_buffer_t *buffer = c->buffer;
 
@@ -2165,7 +2167,7 @@ struct ExtensionFormat1
   {
     TRACE_DISPATCH (this, format);
     if (unlikely (!c->may_dispatch (this, this))) TRACE_RETURN (c->default_return_value ());
-    return get_subtable<typename T::LookupSubTable> ().dispatch (c, get_type ());
+    return TRACE_RETURN (get_subtable<typename T::LookupSubTable> ().dispatch (c, get_type ()));
   }
 
   /* This is called from may_dispatch() above with hb_sanitize_context_t. */

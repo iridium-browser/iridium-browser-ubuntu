@@ -40,7 +40,12 @@ struct SameSizeAsStyleRareInheritedData : public RefCounted<SameSizeAsStyleRareI
     Color colors[5];
     void* ownPtrs[1];
     AtomicString atomicStrings[4];
+#if ENABLE(OILPAN)
+    void* refPtrs[1];
+    Persistent<void*> persistentHandles[2];
+#else
     void* refPtrs[3];
+#endif
     Length lengths[1];
     float secondFloat;
     unsigned m_bitfields[2];
@@ -51,7 +56,7 @@ struct SameSizeAsStyleRareInheritedData : public RefCounted<SameSizeAsStyleRareI
     TabSize tabSize;
 };
 
-static_assert(sizeof(StyleRareInheritedData) == sizeof(SameSizeAsStyleRareInheritedData), "StyleRareInheritedData should stay small");
+static_assert(sizeof(StyleRareInheritedData) <= sizeof(SameSizeAsStyleRareInheritedData), "StyleRareInheritedData should stay small");
 
 StyleRareInheritedData::StyleRareInheritedData()
     : listStyleImage(ComputedStyle::initialListStyleImage())
@@ -81,6 +86,7 @@ StyleRareInheritedData::StyleRareInheritedData()
     , m_textAlignLast(ComputedStyle::initialTextAlignLast())
     , m_textJustify(ComputedStyle::initialTextJustify())
     , m_textOrientation(TextOrientationVerticalRight)
+    , m_textCombine(ComputedStyle::initialTextCombine())
     , m_textIndentLine(ComputedStyle::initialTextIndentLine())
     , m_textIndentType(ComputedStyle::initialTextIndentLine())
     , m_lineBoxContain(ComputedStyle::initialLineBoxContain())
@@ -89,6 +95,7 @@ StyleRareInheritedData::StyleRareInheritedData()
     , m_rubyPosition(ComputedStyle::initialRubyPosition())
     , m_subtreeWillChangeContents(false)
     , m_selfOrAncestorHasDirAutoAttribute(false)
+    , m_respectImageOrientation(false)
     , hyphenationLimitBefore(-1)
     , hyphenationLimitAfter(-1)
     , hyphenationLimitLines(-1)
@@ -135,6 +142,7 @@ StyleRareInheritedData::StyleRareInheritedData(const StyleRareInheritedData& o)
     , m_textAlignLast(o.m_textAlignLast)
     , m_textJustify(o.m_textJustify)
     , m_textOrientation(o.m_textOrientation)
+    , m_textCombine(o.m_textCombine)
     , m_textIndentLine(o.m_textIndentLine)
     , m_textIndentType(o.m_textIndentType)
     , m_lineBoxContain(o.m_lineBoxContain)
@@ -143,6 +151,7 @@ StyleRareInheritedData::StyleRareInheritedData(const StyleRareInheritedData& o)
     , m_rubyPosition(o.m_rubyPosition)
     , m_subtreeWillChangeContents(o.m_subtreeWillChangeContents)
     , m_selfOrAncestorHasDirAutoAttribute(o.m_selfOrAncestorHasDirAutoAttribute)
+    , m_respectImageOrientation(o.m_respectImageOrientation)
     , hyphenationString(o.hyphenationString)
     , hyphenationLimitBefore(o.hyphenationLimitBefore)
     , hyphenationLimitAfter(o.hyphenationLimitAfter)
@@ -200,11 +209,13 @@ bool StyleRareInheritedData::operator==(const StyleRareInheritedData& o) const
         && m_textAlignLast == o.m_textAlignLast
         && m_textJustify == o.m_textJustify
         && m_textOrientation == o.m_textOrientation
+        && m_textCombine == o.m_textCombine
         && m_textIndentLine == o.m_textIndentLine
         && m_textIndentType == o.m_textIndentType
         && m_lineBoxContain == o.m_lineBoxContain
         && m_subtreeWillChangeContents == o.m_subtreeWillChangeContents
         && m_selfOrAncestorHasDirAutoAttribute == o.m_selfOrAncestorHasDirAutoAttribute
+        && m_respectImageOrientation == o.m_respectImageOrientation
         && hyphenationString == o.hyphenationString
         && locale == o.locale
         && textEmphasisCustomMark == o.textEmphasisCustomMark

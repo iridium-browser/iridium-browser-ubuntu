@@ -6,7 +6,9 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/browser/extension_registry.h"
@@ -29,11 +31,11 @@ const char kNtpBubbleAcknowledged[] = "ack_ntp_bubble";
 class NtpOverriddenBubbleDelegate
     : public extensions::ExtensionMessageBubbleController::Delegate {
  public:
-  NtpOverriddenBubbleDelegate(ExtensionService* service, Profile* profile);
+  explicit NtpOverriddenBubbleDelegate(Profile* profile);
   ~NtpOverriddenBubbleDelegate() override;
 
   // ExtensionMessageBubbleController::Delegate methods.
-  bool ShouldIncludeExtension(const std::string& extension_id) override;
+  bool ShouldIncludeExtension(const extensions::Extension* extension) override;
   void AcknowledgeExtension(
       const std::string& extension_id,
       extensions::ExtensionMessageBubbleController::BubbleAction user_action)
@@ -49,15 +51,12 @@ class NtpOverriddenBubbleDelegate
   base::string16 GetDismissButtonLabel() const override;
   bool ShouldShowExtensionList() const override;
   bool ShouldHighlightExtensions() const override;
-  void RestrictToSingleExtension(const std::string& extension_id) override;
+  bool ShouldLimitToEnabledExtensions() const override;
   void LogExtensionCount(size_t count) override;
   void LogAction(extensions::ExtensionMessageBubbleController::BubbleAction
                      action) override;
 
  private:
-  // Our extension service. Weak, not owned by us.
-  ExtensionService* service_;
-
   // The ID of the extension we are showing the bubble for.
   std::string extension_id_;
 
@@ -65,30 +64,29 @@ class NtpOverriddenBubbleDelegate
 };
 
 NtpOverriddenBubbleDelegate::NtpOverriddenBubbleDelegate(
-    ExtensionService* service,
     Profile* profile)
-    : extensions::ExtensionMessageBubbleController::Delegate(profile),
-      service_(service) {
+    : extensions::ExtensionMessageBubbleController::Delegate(profile) {
   set_acknowledged_flag_pref_name(kNtpBubbleAcknowledged);
 }
 
 NtpOverriddenBubbleDelegate::~NtpOverriddenBubbleDelegate() {}
 
 bool NtpOverriddenBubbleDelegate::ShouldIncludeExtension(
-    const std::string& extension_id) {
-  if (!extension_id_.empty() && extension_id_ != extension_id)
+    const extensions::Extension* extension) {
+  if (!extension_id_.empty() && extension_id_ != extension->id())
     return false;
 
-  using extensions::ExtensionRegistry;
-  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
-  const extensions::Extension* extension =
-      registry->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
-  if (!extension)
-    return false;  // The extension provided is no longer enabled.
+  GURL url(chrome::kChromeUINewTabURL);
+  if (!ExtensionWebUI::HandleChromeURLOverride(&url, profile()))
+    return false;  // No override for newtab found.
 
-  if (HasBubbleInfoBeenAcknowledged(extension_id))
+  if (extension->id() != url.host())
     return false;
 
+  if (HasBubbleInfoBeenAcknowledged(extension->id()))
+    return false;
+
+  extension_id_ = extension->id();
   return true;
 }
 
@@ -102,8 +100,8 @@ void NtpOverriddenBubbleDelegate::AcknowledgeExtension(
 void NtpOverriddenBubbleDelegate::PerformAction(
     const extensions::ExtensionIdList& list) {
   for (size_t i = 0; i < list.size(); ++i) {
-    service_->DisableExtension(list[i],
-                               extensions::Extension::DISABLE_USER_ACTION);
+    service()->DisableExtension(list[i],
+                                extensions::Extension::DISABLE_USER_ACTION);
   }
 }
 
@@ -149,9 +147,8 @@ bool NtpOverriddenBubbleDelegate::ShouldHighlightExtensions() const {
   return false;
 }
 
-void NtpOverriddenBubbleDelegate::RestrictToSingleExtension(
-    const std::string& extension_id) {
-  extension_id_ = extension_id;
+bool NtpOverriddenBubbleDelegate::ShouldLimitToEnabledExtensions() const {
+  return true;
 }
 
 void NtpOverriddenBubbleDelegate::LogExtensionCount(size_t count) {
@@ -172,24 +169,12 @@ namespace extensions {
 ////////////////////////////////////////////////////////////////////////////////
 // NtpOverriddenBubbleController
 
-NtpOverriddenBubbleController::NtpOverriddenBubbleController(Profile* profile)
+NtpOverriddenBubbleController::NtpOverriddenBubbleController(Browser* browser)
     : ExtensionMessageBubbleController(
-          new NtpOverriddenBubbleDelegate(
-              ExtensionSystem::Get(profile)->extension_service(),
-              profile),
-          profile),
-      profile_(profile) {}
+          new NtpOverriddenBubbleDelegate(browser->profile()),
+          browser) {}
 
 NtpOverriddenBubbleController::~NtpOverriddenBubbleController() {}
-
-bool NtpOverriddenBubbleController::ShouldShow(
-    const std::string& extension_id) {
-  if (!delegate()->ShouldIncludeExtension(extension_id))
-    return false;
-
-  delegate()->RestrictToSingleExtension(extension_id);
-  return true;
-}
 
 bool NtpOverriddenBubbleController::CloseOnDeactivate() {
   return true;

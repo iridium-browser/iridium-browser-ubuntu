@@ -4,13 +4,14 @@
 
 import subprocess
 
+from telemetry.internal.util import binary_manager
 from telemetry.core import platform
-from telemetry.util import support_binaries
+from telemetry.core import os_version
 
 def _PathForExecutable(executable_name):
   """Fetches the executable from cloud storage, and returns its path."""
   arch_name = platform.GetHostPlatform().GetArchName()
-  return support_binaries.FindPath(executable_name, arch_name, 'mac')
+  return binary_manager.FetchPath(executable_name, arch_name, 'mac')
 
 def IsKeychainLocked():
   """
@@ -45,7 +46,7 @@ def _IsKeychainConfiguredForBots(service_name, account_name):
   """
   # The executable requires OSX 10.7+ APIs.
   if (platform.GetHostPlatform().GetOSVersionName() <
-      platform.platform_backend.LION):
+      os_version.LION):
     return False
 
   path = _PathForExecutable('determine_if_keychain_entry_is_decryptable')

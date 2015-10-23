@@ -31,6 +31,7 @@
 #include "config.h"
 #include "web/WebFrameWidgetImpl.h"
 
+#include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/InputMethodController.h"
@@ -38,9 +39,9 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/Settings.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
-#include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "platform/KeyboardCodes.h"
@@ -52,7 +53,7 @@
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebPluginContainerImpl.h"
 #include "web/WebRemoteFrameImpl.h"
-#include "web/WebViewImpl.h"
+#include "web/WebViewFrameWidget.h"
 
 namespace blink {
 
@@ -64,10 +65,19 @@ WebFrameWidget* WebFrameWidget::create(WebWidgetClient* client, WebLocalFrame* l
     return WebFrameWidgetImpl::create(client, localRoot);
 }
 
+WebFrameWidget* WebFrameWidget::create(WebView* webView)
+{
+    return new WebViewFrameWidget(*toWebViewImpl(webView));
+}
+
 WebFrameWidgetImpl* WebFrameWidgetImpl::create(WebWidgetClient* client, WebLocalFrame* localRoot)
 {
     // Pass the WebFrameWidgetImpl's self-reference to the caller.
+#if ENABLE(OILPAN)
+    return new WebFrameWidgetImpl(client, localRoot); // SelfKeepAlive is set in constructor.
+#else
     return adoptRef(new WebFrameWidgetImpl(client, localRoot)).leakRef();
+#endif
 }
 
 // static
@@ -85,10 +95,11 @@ WebFrameWidgetImpl::WebFrameWidgetImpl(WebWidgetClient* client, WebLocalFrame* l
     , m_rootGraphicsLayer(nullptr)
     , m_isAcceleratedCompositingActive(false)
     , m_layerTreeViewClosed(false)
-    , m_webView(m_localRoot->viewImpl())
-    , m_page(m_webView->page())
     , m_suppressNextKeypressEvent(false)
     , m_ignoreInputEvents(false)
+#if ENABLE(OILPAN)
+    , m_selfKeepAlive(this)
+#endif
 {
     ASSERT(m_localRoot->frame()->isLocalRoot());
     initializeLayerTreeView();
@@ -100,6 +111,12 @@ WebFrameWidgetImpl::~WebFrameWidgetImpl()
 {
 }
 
+DEFINE_TRACE(WebFrameWidgetImpl)
+{
+    visitor->trace(m_localRoot);
+    visitor->trace(m_mouseCaptureNode);
+}
+
 // WebWidget ------------------------------------------------------------------
 
 void WebFrameWidgetImpl::close()
@@ -108,11 +125,21 @@ void WebFrameWidgetImpl::close()
     ASSERT(allInstances().contains(this));
     allInstances().remove(this);
 
+    m_localRoot->setFrameWidget(nullptr);
+    m_localRoot = nullptr;
     // Reset the delegate to prevent notifications being sent as we're being
     // deleted.
     m_client = nullptr;
 
+    m_layerTreeView = nullptr;
+    m_rootLayer = nullptr;
+    m_rootGraphicsLayer = nullptr;
+
+#if ENABLE(OILPAN)
+    m_selfKeepAlive.clear();
+#else
     deref(); // Balances ref() acquired in WebFrameWidget::create
+#endif
 }
 
 WebSize WebFrameWidgetImpl::size()
@@ -124,11 +151,6 @@ void WebFrameWidgetImpl::willStartLiveResize()
 {
     if (m_localRoot->frameView())
         m_localRoot->frameView()->willStartLiveResize();
-
-    LocalFrame* frame = m_localRoot->frame();
-    WebPluginContainerImpl* pluginContainer = WebLocalFrameImpl::pluginContainerFromFrame(frame);
-    if (pluginContainer)
-        pluginContainer->willStartLiveResize();
 }
 
 void WebFrameWidgetImpl::resize(const WebSize& newSize)
@@ -178,7 +200,12 @@ void WebFrameWidgetImpl::sendResizeEventAndRepaint()
 
 void WebFrameWidgetImpl::resizePinchViewport(const WebSize& newSize)
 {
-    // FIXME: Implement pinch viewport for out-of-process iframes.
+    // TODO(bokan): To Remove.
+}
+
+void WebFrameWidgetImpl::resizeVisualViewport(const WebSize& newSize)
+{
+    // FIXME: Implement visual viewport for out-of-process iframes.
 }
 
 void WebFrameWidgetImpl::updateMainFrameLayoutSize()
@@ -205,24 +232,9 @@ void WebFrameWidgetImpl::willEndLiveResize()
 {
     if (m_localRoot->frameView())
         m_localRoot->frameView()->willEndLiveResize();
-
-    LocalFrame* frame = m_localRoot->frame();
-    WebPluginContainerImpl* pluginContainer = WebLocalFrameImpl::pluginContainerFromFrame(frame);
-    if (pluginContainer)
-        pluginContainer->willEndLiveResize();
-}
-
-void WebFrameWidgetImpl::willEnterFullScreen()
-{
-    // FIXME: Implement full screen for out-of-process iframes.
 }
 
 void WebFrameWidgetImpl::didEnterFullScreen()
-{
-    // FIXME: Implement full screen for out-of-process iframes.
-}
-
-void WebFrameWidgetImpl::willExitFullScreen()
 {
     // FIXME: Implement full screen for out-of-process iframes.
 }
@@ -240,7 +252,7 @@ void WebFrameWidgetImpl::beginFrame(const WebBeginFrameArgs& frameTime)
     if (!validFrameTime.lastFrameTimeMonotonic)
         validFrameTime.lastFrameTimeMonotonic = monotonicallyIncreasingTime();
 
-    PageWidgetDelegate::animate(*m_page, validFrameTime.lastFrameTimeMonotonic, *m_localRoot->frame());
+    PageWidgetDelegate::animate(*page(), validFrameTime.lastFrameTimeMonotonic, *m_localRoot->frame());
 }
 
 void WebFrameWidgetImpl::layout()
@@ -249,7 +261,7 @@ void WebFrameWidgetImpl::layout()
     if (!m_localRoot)
         return;
 
-    PageWidgetDelegate::layout(*m_page, *m_localRoot->frame());
+    PageWidgetDelegate::layout(*page(), *m_localRoot->frame());
     updateLayerTreeBackgroundColor();
 }
 
@@ -274,7 +286,7 @@ void WebFrameWidgetImpl::updateLayerTreeBackgroundColor()
     if (!m_layerTreeView)
         return;
 
-    m_layerTreeView->setBackgroundColor(alphaChannel(m_webView->backgroundColorOverride()) ? m_webView->backgroundColorOverride() : m_webView->backgroundColor());
+    m_layerTreeView->setBackgroundColor(alphaChannel(view()->backgroundColorOverride()) ? view()->backgroundColorOverride() : view()->backgroundColor());
 }
 
 void WebFrameWidgetImpl::updateLayerTreeDeviceScaleFactor()
@@ -300,11 +312,6 @@ void WebFrameWidgetImpl::layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback* cal
 void WebFrameWidgetImpl::compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback* callback)
 {
     m_layerTreeView->compositeAndReadbackAsync(callback);
-}
-
-bool WebFrameWidgetImpl::isTrackingRepaints() const
-{
-    return m_localRoot->frameView()->isTrackingPaintInvalidations();
 }
 
 void WebFrameWidgetImpl::themeChanged()
@@ -427,7 +434,7 @@ bool WebFrameWidgetImpl::handleInputEvent(const WebInputEvent& inputEvent)
 
 void WebFrameWidgetImpl::setCursorVisibilityState(bool isVisible)
 {
-    m_page->setIsCursorVisible(isVisible);
+    page()->setIsCursorVisible(isVisible);
 }
 
 bool WebFrameWidgetImpl::hasTouchEventHandlersAt(const WebPoint& point)
@@ -439,7 +446,7 @@ bool WebFrameWidgetImpl::hasTouchEventHandlersAt(const WebPoint& point)
 void WebFrameWidgetImpl::scheduleAnimation()
 {
     if (m_layerTreeView) {
-        m_layerTreeView->setNeedsAnimate();
+        m_layerTreeView->setNeedsBeginFrame();
         return;
     }
     if (m_client)
@@ -447,7 +454,7 @@ void WebFrameWidgetImpl::scheduleAnimation()
 }
 
 void WebFrameWidgetImpl::applyViewportDeltas(
-    const WebFloatSize& pinchViewportDelta,
+    const WebFloatSize& visualViewportDelta,
     const WebFloatSize& mainFrameDelta,
     const WebFloatSize& elasticOverscrollDelta,
     float pageScaleDelta,
@@ -464,10 +471,10 @@ void WebFrameWidgetImpl::mouseCaptureLost()
 
 void WebFrameWidgetImpl::setFocus(bool enable)
 {
-    m_page->focusController().setFocused(enable);
+    page()->focusController().setFocused(enable);
     if (enable) {
-        m_page->focusController().setActive(true);
-        RefPtrWillBeRawPtr<Frame> focusedFrame = m_page->focusController().focusedFrame();
+        page()->focusController().setActive(true);
+        RefPtrWillBeRawPtr<Frame> focusedFrame = page()->focusController().focusedFrame();
         if (focusedFrame && focusedFrame->isLocalFrame()) {
             LocalFrame* localFrame = toLocalFrame(focusedFrame.get());
             Element* element = localFrame->document()->focusedElement();
@@ -482,7 +489,7 @@ void WebFrameWidgetImpl::setFocus(bool enable)
                     // contentseditable DIVs. So we set the selection explicitly
                     // instead. Note that this has the side effect of moving the
                     // caret back to the beginning of the text.
-                    Position position(element, 0, Position::PositionIsOffsetInAnchor);
+                    Position position(element, 0);
                     localFrame->selection().setSelection(VisibleSelection(position, SEL_DEFAULT_AFFINITY));
                 }
             }
@@ -536,7 +543,7 @@ WebColor WebFrameWidgetImpl::backgroundColor() const
     if (isTransparent())
         return Color::transparent;
     if (!m_localRoot->frameView())
-        return m_webView->backgroundColor();
+        return view()->backgroundColor();
     FrameView* view = m_localRoot->frameView();
     return view->documentBackgroundColor().rgb();
 }
@@ -555,23 +562,11 @@ bool WebFrameWidgetImpl::selectionBounds(WebRect& anchor, WebRect& focus) const
     if (selection.isCaret()) {
         anchor = focus = selection.absoluteCaretBounds();
     } else {
-        RefPtrWillBeRawPtr<Range> selectedRange = selection.toNormalizedRange();
-        if (!selectedRange)
+        const EphemeralRange selectedRange = selection.selection().toNormalizedEphemeralRange();
+        if (selectedRange.isNull())
             return false;
-
-        RefPtrWillBeRawPtr<Range> range(Range::create(selectedRange->startContainer()->document(),
-            selectedRange->startContainer(),
-            selectedRange->startOffset(),
-            selectedRange->startContainer(),
-            selectedRange->startOffset()));
-        anchor = localFrame->editor().firstRectForRange(range.get());
-
-        range = Range::create(selectedRange->endContainer()->document(),
-            selectedRange->endContainer(),
-            selectedRange->endOffset(),
-            selectedRange->endContainer(),
-            selectedRange->endOffset());
-        focus = localFrame->editor().firstRectForRange(range.get());
+        anchor = localFrame->editor().firstRectForRange(EphemeralRange(selectedRange.startPosition()));
+        focus = localFrame->editor().firstRectForRange(EphemeralRange(selectedRange.endPosition()));
     }
 
     // FIXME: This doesn't apply page scale. This should probably be contents to viewport. crbug.com/459293.
@@ -594,10 +589,10 @@ bool WebFrameWidgetImpl::selectionTextDirection(WebTextDirection& start, WebText
     if (!frame)
         return false;
     FrameSelection& selection = frame->selection();
-    if (!selection.toNormalizedRange())
+    if (selection.selection().toNormalizedEphemeralRange().isNull())
         return false;
-    start = toWebTextDirection(selection.start().primaryDirection());
-    end = toWebTextDirection(selection.end().primaryDirection());
+    start = toWebTextDirection(primaryDirectionOf(*selection.start().anchorNode()));
+    end = toWebTextDirection(primaryDirectionOf(*selection.end().anchorNode()));
     return true;
 }
 
@@ -886,35 +881,35 @@ bool WebFrameWidgetImpl::mapKeyCodeForScroll(
 {
     switch (keyCode) {
     case VKEY_LEFT:
-        *scrollDirection = ScrollLeft;
+        *scrollDirection = ScrollLeftIgnoringWritingMode;
         *scrollGranularity = ScrollByLine;
         break;
     case VKEY_RIGHT:
-        *scrollDirection = ScrollRight;
+        *scrollDirection = ScrollRightIgnoringWritingMode;
         *scrollGranularity = ScrollByLine;
         break;
     case VKEY_UP:
-        *scrollDirection = ScrollUp;
+        *scrollDirection = ScrollUpIgnoringWritingMode;
         *scrollGranularity = ScrollByLine;
         break;
     case VKEY_DOWN:
-        *scrollDirection = ScrollDown;
+        *scrollDirection = ScrollDownIgnoringWritingMode;
         *scrollGranularity = ScrollByLine;
         break;
     case VKEY_HOME:
-        *scrollDirection = ScrollUp;
+        *scrollDirection = ScrollUpIgnoringWritingMode;
         *scrollGranularity = ScrollByDocument;
         break;
     case VKEY_END:
-        *scrollDirection = ScrollDown;
+        *scrollDirection = ScrollDownIgnoringWritingMode;
         *scrollGranularity = ScrollByDocument;
         break;
     case VKEY_PRIOR: // page up
-        *scrollDirection = ScrollUp;
+        *scrollDirection = ScrollUpIgnoringWritingMode;
         *scrollGranularity = ScrollByPage;
         break;
     case VKEY_NEXT: // page down
-        *scrollDirection = ScrollDown;
+        *scrollDirection = ScrollDownIgnoringWritingMode;
         *scrollGranularity = ScrollByPage;
         break;
     default:
@@ -926,12 +921,12 @@ bool WebFrameWidgetImpl::mapKeyCodeForScroll(
 
 Frame* WebFrameWidgetImpl::focusedCoreFrame() const
 {
-    return m_page ? m_page->focusController().focusedOrMainFrame() : nullptr;
+    return page() ? page()->focusController().focusedOrMainFrame() : nullptr;
 }
 
 Element* WebFrameWidgetImpl::focusedElement() const
 {
-    Frame* frame = m_page->focusController().focusedFrame();
+    Frame* frame = page()->focusController().focusedFrame();
     if (!frame || !frame->isLocalFrame())
         return nullptr;
 
@@ -952,7 +947,7 @@ void WebFrameWidgetImpl::initializeLayerTreeView()
     if (WebDevToolsAgentImpl* devTools = m_localRoot->devToolsAgentImpl())
         devTools->layerTreeViewChanged(m_layerTreeView);
 
-    m_page->settings().setAcceleratedCompositingEnabled(m_layerTreeView);
+    page()->settings().setAcceleratedCompositingEnabled(m_layerTreeView);
 
     // FIXME: only unittests, click to play, Android priting, and printing (for headers and footers)
     // make this assert necessary. We should make them not hit this code and then delete allowsBrokenNullLayerTreeView.
@@ -1048,12 +1043,12 @@ void WebFrameWidgetImpl::detachCompositorAnimationTimeline(WebCompositorAnimatio
 
 void WebFrameWidgetImpl::setVisibilityState(WebPageVisibilityState visibilityState, bool isInitialState)
 {
-    if (!m_page)
+    if (!page())
         return;
 
     // FIXME: This is not correct, since Show and Hide messages for a frame's Widget do not necessarily
     // correspond to Page visibility, but is necessary until we properly sort out OOPIF visibility.
-    m_page->setVisibilityState(static_cast<PageVisibilityState>(visibilityState), isInitialState);
+    page()->setVisibilityState(static_cast<PageVisibilityState>(visibilityState), isInitialState);
 
     if (m_layerTreeView) {
         bool visible = visibilityState == WebPageVisibilityStateVisible;

@@ -11,11 +11,10 @@ import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.DeadObjectException;
 import android.os.IBinder;
-import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
-import android.util.Log;
 
 import org.chromium.base.CpuFeatures;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
@@ -64,13 +63,17 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
     private ChildServiceConnection mWaivedBinding = null;
     // Incremented on addStrongBinding(), decremented on removeStrongBinding().
     private int mStrongBindingCount = 0;
+    // Moderate binding will make the service priority equal to the priority of a visible process
+    // while the app is in the foreground. It will stay bound only while the app is in the
+    // foreground to protect a background process from the system out-of-memory killer.
+    private ChildServiceConnection mModerateBinding = null;
 
     // Linker-related parameters.
     private ChromiumLinkerParams mLinkerParams = null;
 
     private final boolean mAlwaysInForeground;
 
-    private static final String TAG = "ChildProcessConnection";
+    private static final String TAG = "cr.ChildProcessConnect";
 
     private static class ConnectionParams {
         final String[] mCommandLine;
@@ -181,7 +184,7 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
                 // Stash the status of the oom bindings, since stop() will release all bindings.
                 mWasOomProtected = isCurrentlyOomProtected();
                 mServiceDisconnected = true;
-                Log.w(TAG, "onServiceDisconnected (crash or killed by oom): pid=" + mPid);
+                Log.w(TAG, "onServiceDisconnected (crash or killed by oom): pid=%d", mPid);
                 stop();  // We don't want to auto-restart on crash. Let the browser do that.
                 mDeathCallback.onChildProcessDied(ChildProcessConnectionImpl.this);
                 // If we have a pending connection callback, we need to communicate the failure to
@@ -213,6 +216,7 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
                 Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
         mWaivedBinding = new ChildServiceConnection(
                 Context.BIND_AUTO_CREATE | Context.BIND_WAIVE_PRIORITY);
+        mModerateBinding = new ChildServiceConnection(Context.BIND_AUTO_CREATE);
     }
 
     @Override
@@ -298,6 +302,7 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
             mInitialBinding.unbind();
             mStrongBinding.unbind();
             mWaivedBinding.unbind();
+            mModerateBinding.unbind();
             mStrongBindingCount = 0;
             if (mService != null) {
                 mService = null;
@@ -319,42 +324,12 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
 
             Bundle bundle = new Bundle();
             bundle.putStringArray(EXTRA_COMMAND_LINE, mConnectionParams.mCommandLine);
-
-            FileDescriptorInfo[] fileInfos = mConnectionParams.mFilesToBeMapped;
-            ParcelFileDescriptor[] parcelFiles = new ParcelFileDescriptor[fileInfos.length];
-            for (int i = 0; i < fileInfos.length; i++) {
-                if (fileInfos[i].mFd == -1) {
-                    // If someone provided an invalid FD, they are doing something wrong.
-                    Log.e(TAG, "Invalid FD (id=" + fileInfos[i].mId + ") for process connection, "
-                            + "aborting connection.");
-                    return;
-                }
-                String idName = EXTRA_FILES_PREFIX + i + EXTRA_FILES_ID_SUFFIX;
-                String fdName = EXTRA_FILES_PREFIX + i + EXTRA_FILES_FD_SUFFIX;
-                if (fileInfos[i].mAutoClose) {
-                    // Adopt the FD, it will be closed when we close the ParcelFileDescriptor.
-                    parcelFiles[i] = ParcelFileDescriptor.adoptFd(fileInfos[i].mFd);
-                } else {
-                    try {
-                        parcelFiles[i] = ParcelFileDescriptor.fromFd(fileInfos[i].mFd);
-                    } catch (IOException e) {
-                        Log.e(TAG,
-                                "Invalid FD provided for process connection, aborting connection.",
-                                e);
-                        return;
-                    }
-
-                }
-                bundle.putParcelable(fdName, parcelFiles[i]);
-                bundle.putInt(idName, fileInfos[i].mId);
-            }
+            bundle.putParcelableArray(EXTRA_FILES, mConnectionParams.mFilesToBeMapped);
             // Add the CPU properties now.
             bundle.putInt(EXTRA_CPU_COUNT, CpuFeatures.getCount());
             bundle.putLong(EXTRA_CPU_FEATURES, CpuFeatures.getMask());
-
             bundle.putBundle(Linker.EXTRA_LINKER_SHARED_RELROS,
                              mConnectionParams.mSharedRelros);
-
             try {
                 mPid = mService.setupConnection(bundle, mConnectionParams.mCallback);
                 assert mPid != 0 : "Child service claims to be run by a process of pid=0.";
@@ -363,8 +338,8 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
             }
             // We proactively close the FDs rather than wait for GC & finalizer.
             try {
-                for (ParcelFileDescriptor parcelFile : parcelFiles) {
-                    if (parcelFile != null) parcelFile.close();
+                for (FileDescriptorInfo fileInfo : mConnectionParams.mFilesToBeMapped) {
+                    fileInfo.mFd.close();
                 }
             } catch (IOException ioe) {
                 Log.w(TAG, "Failed to close FD.", ioe);
@@ -429,6 +404,8 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
 
             mStrongBindingCount = 0;
             mStrongBinding.unbind();
+
+            mModerateBinding.unbind();
         }
     }
 
@@ -436,7 +413,7 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
     public void addStrongBinding() {
         synchronized (mLock) {
             if (mService == null) {
-                Log.w(TAG, "The connection is not bound for " + mPid);
+                Log.w(TAG, "The connection is not bound for %d", mPid);
                 return;
             }
             if (mStrongBindingCount == 0) {
@@ -450,7 +427,7 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
     public void removeStrongBinding() {
         synchronized (mLock) {
             if (mService == null) {
-                Log.w(TAG, "The connection is not bound for " + mPid);
+                Log.w(TAG, "The connection is not bound for %d", mPid);
                 return;
             }
             assert mStrongBindingCount > 0;
@@ -458,6 +435,35 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
             if (mStrongBindingCount == 0) {
                 mStrongBinding.unbind();
             }
+        }
+    }
+
+    @Override
+    public boolean isModerateBindingBound() {
+        synchronized (mLock) {
+            return mModerateBinding.isBound();
+        }
+    }
+
+    @Override
+    public void addModerateBinding() {
+        synchronized (mLock) {
+            if (mService == null) {
+                Log.w(TAG, "The connection is not bound for %d", mPid);
+                return;
+            }
+            mModerateBinding.bind(null);
+        }
+    }
+
+    @Override
+    public void removeModerateBinding() {
+        synchronized (mLock) {
+            if (mService == null) {
+                Log.w(TAG, "The connection is not bound for %d", mPid);
+                return;
+            }
+            mModerateBinding.unbind();
         }
     }
 

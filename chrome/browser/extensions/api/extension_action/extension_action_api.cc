@@ -5,12 +5,14 @@
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 
 #include "base/lazy_instance.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/active_script_controller.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -20,8 +22,8 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
-#include "chrome/common/render_messages.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_registry.h"
@@ -226,9 +228,9 @@ bool ExtensionActionAPI::ShowExtensionActionPopup(
     return browser->window()->GetLocationBar()->ShowPageActionPopup(
         extension, grant_active_tab_permissions);
   } else {
-    return ExtensionToolbarModel::Get(browser->profile())->
-        ShowExtensionActionPopup(
-            extension, browser, grant_active_tab_permissions);
+    return ToolbarActionsModel::Get(browser->profile())
+        ->ShowToolbarActionPopup(extension->id(), browser,
+                                 grant_active_tab_permissions);
   }
 }
 
@@ -297,12 +299,14 @@ ExtensionPrefs* ExtensionActionAPI::GetExtensionPrefs() {
 void ExtensionActionAPI::DispatchEventToExtension(
     content::BrowserContext* context,
     const std::string& extension_id,
+    events::HistogramValue histogram_value,
     const std::string& event_name,
     scoped_ptr<base::ListValue> event_args) {
   if (!EventRouter::Get(context))
     return;
 
-  scoped_ptr<Event> event(new Event(event_name, event_args.Pass()));
+  scoped_ptr<Event> event(
+      new Event(histogram_value, event_name, event_args.Pass()));
   event->restrict_to_browser_context = context;
   event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
   EventRouter::Get(context)
@@ -312,16 +316,20 @@ void ExtensionActionAPI::DispatchEventToExtension(
 void ExtensionActionAPI::ExtensionActionExecuted(
     const ExtensionAction& extension_action,
     WebContents* web_contents) {
+  events::HistogramValue histogram_value = events::UNKNOWN;
   const char* event_name = NULL;
   switch (extension_action.action_type()) {
     case ActionInfo::TYPE_BROWSER:
+      histogram_value = events::BROWSER_ACTION_ON_CLICKED;
       event_name = "browserAction.onClicked";
       break;
     case ActionInfo::TYPE_PAGE:
+      histogram_value = events::PAGE_ACTION_ON_CLICKED;
       event_name = "pageAction.onClicked";
       break;
     case ActionInfo::TYPE_SYSTEM_INDICATOR:
       // The System Indicator handles its own clicks.
+      NOTREACHED();
       break;
   }
 
@@ -331,11 +339,9 @@ void ExtensionActionAPI::ExtensionActionExecuted(
         ExtensionTabUtil::CreateTabValue(web_contents);
     args->Append(tab_value);
 
-    DispatchEventToExtension(
-        web_contents->GetBrowserContext(),
-        extension_action.extension_id(),
-        event_name,
-        args.Pass());
+    DispatchEventToExtension(web_contents->GetBrowserContext(),
+                             extension_action.extension_id(), histogram_value,
+                             event_name, args.Pass());
   }
 }
 
@@ -373,7 +379,8 @@ ExtensionActionFunction::~ExtensionActionFunction() {
 
 bool ExtensionActionFunction::RunSync() {
   ExtensionActionManager* manager = ExtensionActionManager::Get(GetProfile());
-  if (StartsWithASCII(name(), "systemIndicator.", false)) {
+  if (base::StartsWith(name(), "systemIndicator.",
+                       base::CompareCase::INSENSITIVE_ASCII)) {
     extension_action_ = manager->GetSystemIndicator(*extension());
   } else {
     extension_action_ = manager->GetBrowserAction(*extension());
@@ -644,7 +651,7 @@ bool BrowserActionOpenPopupFunction::RunAsync() {
   // Waiting is required so that the popup view can be retrieved by the custom
   // bindings for the response callback. It's also needed to keep this function
   // instance around until a notification is observed.
-  base::MessageLoopForUI::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&BrowserActionOpenPopupFunction::OpenPopupTimedOut, this),
       base::TimeDelta::FromSeconds(10));

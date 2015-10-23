@@ -15,7 +15,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
@@ -176,7 +175,8 @@ SafeBrowsingProtocolManager::~SafeBrowsingProtocolManager() {
 void SafeBrowsingProtocolManager::GetFullHash(
     const std::vector<SBPrefix>& prefixes,
     FullHashCallback callback,
-    bool is_download) {
+    bool is_download,
+    bool is_extended_reporting) {
   DCHECK(CalledOnValidThread());
   // If we are in GetHash backoff, we need to check if we're past the next
   // allowed time. If we are, we can proceed with the request. If not, we are
@@ -187,7 +187,7 @@ void SafeBrowsingProtocolManager::GetFullHash(
     callback.Run(full_hashes, base::TimeDelta());
     return;
   }
-  GURL gethash_url = GetHashUrl();
+  GURL gethash_url = GetHashUrl(is_extended_reporting);
   net::URLFetcher* fetcher =
       net::URLFetcher::Create(url_fetcher_id_++, gethash_url,
                               net::URLFetcher::POST, this).release();
@@ -603,7 +603,9 @@ void SafeBrowsingProtocolManager::IssueChunkRequest() {
 }
 
 void SafeBrowsingProtocolManager::OnGetChunksComplete(
-    const std::vector<SBListChunkRanges>& lists, bool database_error) {
+    const std::vector<SBListChunkRanges>& lists,
+    bool database_error,
+    bool is_extended_reporting) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(request_type_, UPDATE_REQUEST);
   DCHECK(update_list_data_.empty());
@@ -644,7 +646,7 @@ void SafeBrowsingProtocolManager::OnGetChunksComplete(
   // deletion of such databases.  http://crbug.com/120219
   UMA_HISTOGRAM_COUNTS("SB2.UpdateRequestSize", update_list_data_.size());
 
-  GURL update_url = UpdateUrl();
+  GURL update_url = UpdateUrl(is_extended_reporting);
   request_ = net::URLFetcher::Create(url_fetcher_id_++, update_url,
                                      net::URLFetcher::POST, this);
   request_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
@@ -723,9 +725,10 @@ void SafeBrowsingProtocolManager::UpdateFinished(bool success, bool back_off) {
   ScheduleNextUpdate(back_off);
 }
 
-GURL SafeBrowsingProtocolManager::UpdateUrl() const {
+GURL SafeBrowsingProtocolManager::UpdateUrl(bool is_extended_reporting) const {
   std::string url = SafeBrowsingProtocolManagerHelper::ComposeUrl(
-      url_prefix_, "downloads", client_name_, version_, additional_query_);
+      url_prefix_, "downloads", client_name_, version_, additional_query_,
+      is_extended_reporting);
   return GURL(url);
 }
 
@@ -740,19 +743,23 @@ GURL SafeBrowsingProtocolManager::BackupUpdateUrl(
   return GURL(url);
 }
 
-GURL SafeBrowsingProtocolManager::GetHashUrl() const {
+GURL SafeBrowsingProtocolManager::GetHashUrl(bool is_extended_reporting) const {
   std::string url = SafeBrowsingProtocolManagerHelper::ComposeUrl(
-      url_prefix_, "gethash", client_name_, version_, additional_query_);
+      url_prefix_, "gethash", client_name_, version_, additional_query_,
+      is_extended_reporting);
   return GURL(url);
 }
 
 GURL SafeBrowsingProtocolManager::NextChunkUrl(const std::string& url) const {
   DCHECK(CalledOnValidThread());
   std::string next_url;
-  if (!StartsWithASCII(url, "http://", false) &&
-      !StartsWithASCII(url, "https://", false)) {
+  if (!base::StartsWith(url, "http://",
+                        base::CompareCase::INSENSITIVE_ASCII) &&
+      !base::StartsWith(url, "https://",
+                        base::CompareCase::INSENSITIVE_ASCII)) {
     // Use https if we updated via https, otherwise http (useful for testing).
-    if (StartsWithASCII(url_prefix_, "https://", false))
+    if (base::StartsWith(url_prefix_, "https://",
+                         base::CompareCase::INSENSITIVE_ASCII))
       next_url.append("https://");
     else
       next_url.append("http://");

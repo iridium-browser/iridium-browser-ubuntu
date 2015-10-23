@@ -106,6 +106,7 @@ class LCodeGen;
   V(LoadFieldByIndex)                        \
   V(LoadFunctionPrototype)                   \
   V(LoadGlobalGeneric)                       \
+  V(LoadGlobalViaContext)                    \
   V(LoadKeyed)                               \
   V(LoadKeyedGeneric)                        \
   V(LoadNamedField)                          \
@@ -122,6 +123,7 @@ class LCodeGen;
   V(MathPowHalf)                             \
   V(MathRound)                               \
   V(MathSqrt)                                \
+  V(MaybeGrowElements)                       \
   V(ModByConstI)                             \
   V(ModByPowerOf2I)                          \
   V(ModI)                                    \
@@ -145,6 +147,7 @@ class LCodeGen;
   V(StoreCodeEntry)                          \
   V(StoreContextSlot)                        \
   V(StoreFrameContext)                       \
+  V(StoreGlobalViaContext)                   \
   V(StoreKeyed)                              \
   V(StoreKeyedGeneric)                       \
   V(StoreNamedField)                         \
@@ -155,7 +158,6 @@ class LCodeGen;
   V(StringCompareAndBranch)                  \
   V(SubI)                                    \
   V(TaggedToI)                               \
-  V(TailCallThroughMegamorphicCache)         \
   V(ThisFunction)                            \
   V(ToFastProperties)                        \
   V(TransitionElementsKind)                  \
@@ -482,26 +484,6 @@ class LCallStub final : public LTemplateInstruction<1, 1, 0> {
 
   DECLARE_CONCRETE_INSTRUCTION(CallStub, "call-stub")
   DECLARE_HYDROGEN_ACCESSOR(CallStub)
-};
-
-
-class LTailCallThroughMegamorphicCache final
-    : public LTemplateInstruction<0, 3, 0> {
- public:
-  LTailCallThroughMegamorphicCache(LOperand* context, LOperand* receiver,
-                                   LOperand* name) {
-    inputs_[0] = context;
-    inputs_[1] = receiver;
-    inputs_[2] = name;
-  }
-
-  LOperand* context() { return inputs_[0]; }
-  LOperand* receiver() { return inputs_[1]; }
-  LOperand* name() { return inputs_[2]; }
-
-  DECLARE_CONCRETE_INSTRUCTION(TailCallThroughMegamorphicCache,
-                               "tail-call-through-megamorphic-cache")
-  DECLARE_HYDROGEN_ACCESSOR(TailCallThroughMegamorphicCache)
 };
 
 
@@ -1202,6 +1184,8 @@ class LCmpT final : public LTemplateInstruction<1, 3, 0> {
   DECLARE_CONCRETE_INSTRUCTION(CmpT, "cmp-t")
   DECLARE_HYDROGEN_ACCESSOR(CompareGeneric)
 
+  Strength strength() { return hydrogen()->strength(); }
+
   LOperand* context() { return inputs_[0]; }
   Token::Value op() const { return hydrogen()->token(); }
 };
@@ -1567,7 +1551,7 @@ class LArithmeticT final : public LTemplateInstruction<1, 3, 0> {
 
   DECLARE_HYDROGEN_ACCESSOR(BinaryOperation)
 
-  LanguageMode language_mode() { return hydrogen()->language_mode(); }
+  Strength strength() { return hydrogen()->strength(); }
 
  private:
   Token::Value op_;
@@ -1665,14 +1649,8 @@ class LLoadKeyed final : public LTemplateInstruction<1, 2, 0> {
   ElementsKind elements_kind() const {
     return hydrogen()->elements_kind();
   }
-  bool is_external() const {
-    return hydrogen()->is_external();
-  }
   bool is_fixed_typed_array() const {
     return hydrogen()->is_fixed_typed_array();
-  }
-  bool is_typed_elements() const {
-    return is_external() || is_fixed_typed_array();
   }
 
   DECLARE_CONCRETE_INSTRUCTION(LoadKeyed, "load-keyed")
@@ -1693,12 +1671,8 @@ inline static bool ExternalArrayOpRequiresTemp(
   // an index cannot fold the scale operation into a load and need an extra
   // temp register to do the work.
   return key_representation.IsSmi() &&
-      (elements_kind == EXTERNAL_INT8_ELEMENTS ||
-       elements_kind == EXTERNAL_UINT8_ELEMENTS ||
-       elements_kind == EXTERNAL_UINT8_CLAMPED_ELEMENTS ||
-       elements_kind == UINT8_ELEMENTS ||
-       elements_kind == INT8_ELEMENTS ||
-       elements_kind == UINT8_CLAMPED_ELEMENTS);
+         (elements_kind == UINT8_ELEMENTS || elements_kind == INT8_ELEMENTS ||
+          elements_kind == UINT8_CLAMPED_ELEMENTS);
 }
 
 
@@ -1739,7 +1713,23 @@ class LLoadGlobalGeneric final : public LTemplateInstruction<1, 2, 1> {
   DECLARE_HYDROGEN_ACCESSOR(LoadGlobalGeneric)
 
   Handle<Object> name() const { return hydrogen()->name(); }
-  bool for_typeof() const { return hydrogen()->for_typeof(); }
+  TypeofMode typeof_mode() const { return hydrogen()->typeof_mode(); }
+};
+
+
+class LLoadGlobalViaContext final : public LTemplateInstruction<1, 1, 1> {
+ public:
+  explicit LLoadGlobalViaContext(LOperand* context) { inputs_[0] = context; }
+
+  DECLARE_CONCRETE_INSTRUCTION(LoadGlobalViaContext, "load-global-via-context")
+  DECLARE_HYDROGEN_ACCESSOR(LoadGlobalViaContext)
+
+  void PrintDataTo(StringStream* stream) override;
+
+  LOperand* context() { return inputs_[0]; }
+
+  int depth() const { return hydrogen()->depth(); }
+  int slot_index() const { return hydrogen()->slot_index(); }
 };
 
 
@@ -1887,14 +1877,22 @@ class LCallWithDescriptor final : public LTemplateResultInstruction<1> {
  public:
   LCallWithDescriptor(CallInterfaceDescriptor descriptor,
                       const ZoneList<LOperand*>& operands, Zone* zone)
-      : inputs_(descriptor.GetRegisterParameterCount() + 1, zone) {
-    DCHECK(descriptor.GetRegisterParameterCount() + 1 == operands.length());
+      : inputs_(descriptor.GetRegisterParameterCount() +
+                    kImplicitRegisterParameterCount,
+                zone) {
+    DCHECK(descriptor.GetRegisterParameterCount() +
+               kImplicitRegisterParameterCount ==
+           operands.length());
     inputs_.AddAll(operands, zone);
   }
 
   LOperand* target() const { return inputs_[0]; }
 
   DECLARE_HYDROGEN_ACCESSOR(CallWithDescriptor)
+
+  // The target and context are passed as implicit parameters that are not
+  // explicitly listed in the descriptor.
+  static const int kImplicitRegisterParameterCount = 2;
 
  private:
   DECLARE_CONCRETE_INSTRUCTION(CallWithDescriptor, "call-with-descriptor")
@@ -2197,23 +2195,50 @@ class LStoreNamedField final : public LTemplateInstruction<0, 2, 2> {
 };
 
 
-class LStoreNamedGeneric final : public LTemplateInstruction<0, 3, 0> {
+class LStoreNamedGeneric final : public LTemplateInstruction<0, 3, 2> {
  public:
-  LStoreNamedGeneric(LOperand* context, LOperand* object, LOperand* value) {
+  LStoreNamedGeneric(LOperand* context, LOperand* object, LOperand* value,
+                     LOperand* slot, LOperand* vector) {
     inputs_[0] = context;
     inputs_[1] = object;
     inputs_[2] = value;
+    temps_[0] = slot;
+    temps_[1] = vector;
   }
 
   LOperand* context() { return inputs_[0]; }
   LOperand* object() { return inputs_[1]; }
   LOperand* value() { return inputs_[2]; }
+  LOperand* temp_slot() { return temps_[0]; }
+  LOperand* temp_vector() { return temps_[1]; }
 
   DECLARE_CONCRETE_INSTRUCTION(StoreNamedGeneric, "store-named-generic")
   DECLARE_HYDROGEN_ACCESSOR(StoreNamedGeneric)
 
   void PrintDataTo(StringStream* stream) override;
   Handle<Object> name() const { return hydrogen()->name(); }
+  LanguageMode language_mode() { return hydrogen()->language_mode(); }
+};
+
+
+class LStoreGlobalViaContext final : public LTemplateInstruction<0, 2, 0> {
+ public:
+  LStoreGlobalViaContext(LOperand* context, LOperand* value) {
+    inputs_[0] = context;
+    inputs_[1] = value;
+  }
+
+  LOperand* context() { return inputs_[0]; }
+  LOperand* value() { return inputs_[1]; }
+
+  DECLARE_CONCRETE_INSTRUCTION(StoreGlobalViaContext,
+                               "store-global-via-context")
+  DECLARE_HYDROGEN_ACCESSOR(StoreGlobalViaContext)
+
+  void PrintDataTo(StringStream* stream) override;
+
+  int depth() { return hydrogen()->depth(); }
+  int slot_index() { return hydrogen()->slot_index(); }
   LanguageMode language_mode() { return hydrogen()->language_mode(); }
 };
 
@@ -2226,12 +2251,8 @@ class LStoreKeyed final : public LTemplateInstruction<0, 3, 0> {
     inputs_[2] = val;
   }
 
-  bool is_external() const { return hydrogen()->is_external(); }
   bool is_fixed_typed_array() const {
     return hydrogen()->is_fixed_typed_array();
-  }
-  bool is_typed_elements() const {
-    return is_external() || is_fixed_typed_array();
   }
   LOperand* elements() { return inputs_[0]; }
   LOperand* key() { return inputs_[1]; }
@@ -2249,22 +2270,24 @@ class LStoreKeyed final : public LTemplateInstruction<0, 3, 0> {
 };
 
 
-class LStoreKeyedGeneric final : public LTemplateInstruction<0, 4, 0> {
+class LStoreKeyedGeneric final : public LTemplateInstruction<0, 4, 2> {
  public:
-  LStoreKeyedGeneric(LOperand* context,
-                     LOperand* object,
-                     LOperand* key,
-                     LOperand* value) {
+  LStoreKeyedGeneric(LOperand* context, LOperand* object, LOperand* key,
+                     LOperand* value, LOperand* slot, LOperand* vector) {
     inputs_[0] = context;
     inputs_[1] = object;
     inputs_[2] = key;
     inputs_[3] = value;
+    temps_[0] = slot;
+    temps_[1] = vector;
   }
 
   LOperand* context() { return inputs_[0]; }
   LOperand* object() { return inputs_[1]; }
   LOperand* key() { return inputs_[2]; }
   LOperand* value() { return inputs_[3]; }
+  LOperand* temp_slot() { return temps_[0]; }
+  LOperand* temp_vector() { return temps_[1]; }
 
   DECLARE_CONCRETE_INSTRUCTION(StoreKeyedGeneric, "store-keyed-generic")
   DECLARE_HYDROGEN_ACCESSOR(StoreKeyedGeneric)
@@ -2320,6 +2343,28 @@ class LTrapAllocationMemento final : public LTemplateInstruction<0, 1, 1> {
 
   DECLARE_CONCRETE_INSTRUCTION(TrapAllocationMemento,
                                "trap-allocation-memento")
+};
+
+
+class LMaybeGrowElements final : public LTemplateInstruction<1, 5, 0> {
+ public:
+  LMaybeGrowElements(LOperand* context, LOperand* object, LOperand* elements,
+                     LOperand* key, LOperand* current_capacity) {
+    inputs_[0] = context;
+    inputs_[1] = object;
+    inputs_[2] = elements;
+    inputs_[3] = key;
+    inputs_[4] = current_capacity;
+  }
+
+  LOperand* context() { return inputs_[0]; }
+  LOperand* object() { return inputs_[1]; }
+  LOperand* elements() { return inputs_[2]; }
+  LOperand* key() { return inputs_[3]; }
+  LOperand* current_capacity() { return inputs_[4]; }
+
+  DECLARE_HYDROGEN_ACCESSOR(MaybeGrowElements)
+  DECLARE_CONCRETE_INSTRUCTION(MaybeGrowElements, "maybe-grow-elements")
 };
 
 

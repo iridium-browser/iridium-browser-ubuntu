@@ -10,6 +10,11 @@
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 
 @class BrowserWindowLayout;
+class PermissionBubbleManager;
+
+namespace content {
+class WebContents;
+}  // content.
 
 // Private methods for the |BrowserWindowController|. This category should
 // contain the private methods used by different parts of the BWC; private
@@ -162,7 +167,19 @@
 
 // Whether the instance should use a custom transition when animating into and
 // out of AppKit Fullscreen.
-- (BOOL)shouldUseCustomAppKitFullscreenTransition;
+- (BOOL)shouldUseCustomAppKitFullscreenTransition:(BOOL)enterFullScreen;
+
+- (content::WebContents*)webContents;
+- (PermissionBubbleManager*)permissionBubbleManager;
+
+#if defined(MAC_OS_X_VERSION_10_7) && \
+    MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_7
+// Redeclare some methods from NSWindowDelegate to suppress
+// -Wpartial-availability warnings.
+- (void)windowDidEnterFullScreen:(NSNotification*)notification;
+- (void)windowDidExitFullScreen:(NSNotification*)notification;
+- (void)windowWillExitFullScreen:(NSNotification*)notification;
+#endif
 
 @end  // @interface BrowserWindowController(Private)
 

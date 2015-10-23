@@ -13,6 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url.h"
 #include "libxml/parser.h"
 #include "libxml/xmlwriter.h"
@@ -63,13 +64,13 @@ bool IsValidEncodingString(const std::string& input_encoding) {
   if (input_encoding.empty())
     return false;
 
-  if (!IsAsciiAlpha(input_encoding[0]))
+  if (!base::IsAsciiAlpha(input_encoding[0]))
     return false;
 
   for (size_t i = 1, max = input_encoding.size(); i < max; ++i) {
     char c = input_encoding[i];
-    if (!IsAsciiAlpha(c) && !IsAsciiDigit(c) && c != '.' && c != '_' &&
-        c != '-') {
+    if (!base::IsAsciiAlpha(c) && !base::IsAsciiDigit(c) &&
+        c != '.' && c != '_' && c != '-') {
       return false;
     }
   }
@@ -315,7 +316,8 @@ TemplateURL* TemplateURLParsingContext::GetTemplateURL(
   // Generate a keyword for this search engine if a custom one was not present
   // in the imported data.
   if (!has_custom_keyword_)
-    data_.SetKeyword(TemplateURL::GenerateKeyword(search_url));
+    data_.SetKeyword(TemplateURL::GenerateKeyword(
+        search_url, search_terms_data.GetAcceptLanguages()));
 
   data_.show_in_default_list = show_in_default_list;
 
@@ -364,7 +366,7 @@ void TemplateURLParsingContext::ParseURL(const xmlChar** atts) {
     } else if (name == kURLTemplateAttribute) {
       template_url = XMLCharToString(value);
     } else if (name == kParamMethodAttribute) {
-      is_post = LowerCaseEqualsASCII(XMLCharToString(value), "post");
+      is_post = base::LowerCaseEqualsASCII(XMLCharToString(value), "post");
     }
   }
 

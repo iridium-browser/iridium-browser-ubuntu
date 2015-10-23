@@ -15,7 +15,6 @@ namespace net {
 class CertVerifier;
 class ChannelIDService;
 class CookieStore;
-class FraudulentCertificateReporter;
 class FtpTransactionFactory;
 class HostResolver;
 class HttpAuthHandlerFactory;
@@ -29,6 +28,7 @@ class SdchManager;
 class SSLConfigService;
 class TransportSecurityState;
 class URLRequestContext;
+class URLRequestBackoffManager;
 class URLRequestJobFactory;
 class URLRequestThrottlerManager;
 
@@ -49,8 +49,6 @@ class NET_EXPORT URLRequestContextStorage {
   void set_host_resolver(scoped_ptr<HostResolver> host_resolver);
   void set_cert_verifier(CertVerifier* cert_verifier);
   void set_channel_id_service(scoped_ptr<ChannelIDService> channel_id_service);
-  void set_fraudulent_certificate_reporter(
-      FraudulentCertificateReporter* fraudulent_certificate_reporter);
   void set_http_auth_handler_factory(
       HttpAuthHandlerFactory* http_auth_handler_factory);
   void set_proxy_service(ProxyService* proxy_service);
@@ -65,6 +63,7 @@ class NET_EXPORT URLRequestContextStorage {
       HttpTransactionFactory* http_transaction_factory);
   void set_job_factory(URLRequestJobFactory* job_factory);
   void set_throttler_manager(URLRequestThrottlerManager* throttler_manager);
+  void set_backoff_manager(URLRequestBackoffManager* backoff_manager);
   void set_http_user_agent_settings(
       HttpUserAgentSettings* http_user_agent_settings);
   void set_sdch_manager(scoped_ptr<SdchManager> sdch_manager);
@@ -81,7 +80,6 @@ class NET_EXPORT URLRequestContextStorage {
   scoped_ptr<CertVerifier> cert_verifier_;
   // The ChannelIDService must outlive the HttpTransactionFactory.
   scoped_ptr<ChannelIDService> channel_id_service_;
-  scoped_ptr<FraudulentCertificateReporter> fraudulent_certificate_reporter_;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
   scoped_ptr<ProxyService> proxy_service_;
   // TODO(willchan): Remove refcounting on these members.
@@ -95,6 +93,7 @@ class NET_EXPORT URLRequestContextStorage {
   scoped_ptr<HttpTransactionFactory> http_transaction_factory_;
   scoped_ptr<URLRequestJobFactory> job_factory_;
   scoped_ptr<URLRequestThrottlerManager> throttler_manager_;
+  scoped_ptr<URLRequestBackoffManager> backoff_manager_;
   scoped_ptr<SdchManager> sdch_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextStorage);

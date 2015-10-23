@@ -37,7 +37,7 @@ protected:
 
     void onDrawBackground(SkCanvas* canvas) override {
         SkPaint bgPaint;
-        bgPaint.setColor(0xFF70D0E0);
+        bgPaint.setColor(sk_tool_utils::color_to_565(0xFF70D0E0));
         canvas->drawPaint(bgPaint);
     }
 
@@ -181,10 +181,10 @@ private:
 
     void onOnceBeforeDraw() override {
         static const uint32_t kCheckData[] = {
-            SkPackARGB32(0xFF, 0x40, 0x40, 0x40),
-            SkPackARGB32(0xFF, 0xD0, 0xD0, 0xD0),
-            SkPackARGB32(0xFF, 0xD0, 0xD0, 0xD0),
-            SkPackARGB32(0xFF, 0x40, 0x40, 0x40)
+            SkPackARGB32(0xFF, 0x42, 0x41, 0x42),
+            SkPackARGB32(0xFF, 0xD6, 0xD3, 0xD6),
+            SkPackARGB32(0xFF, 0xD6, 0xD3, 0xD6),
+            SkPackARGB32(0xFF, 0x42, 0x41, 0x42)
         };
         SkBitmap bg;
         bg.allocN32Pixels(2, 2, true);

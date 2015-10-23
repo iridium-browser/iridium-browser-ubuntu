@@ -28,7 +28,6 @@
 #include "native_client/src/include/nacl/nacl_exception.h"
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/public/irt_core.h"
-#include "native_client/src/public/nonsfi/irt_exception_handling.h"
 #include "native_client/src/trusted/service_runtime/include/machine/_types.h"
 #include "native_client/src/trusted/service_runtime/include/sys/mman.h"
 #include "native_client/src/trusted/service_runtime/include/sys/stat.h"
@@ -41,6 +40,11 @@
 
 #if defined(__native_client__) && defined(__arm__)
 #include "native_client/src/nonsfi/irt/irt_icache.h"
+#endif
+
+#if defined(__native_client__)
+# include "native_client/src/nonsfi/linux/irt_signal_handling.h"
+# include "native_client/src/nonsfi/linux/linux_pthread_private.h"
 #endif
 
 /*
@@ -87,6 +91,16 @@ void _start(void *info);
 # define __thread /* nothing */
 #endif
 static __thread void *g_tls_value;
+
+/*
+ * TODO(smklein): Once these decls are added to unistd.h, remove these externs.
+ */
+extern int fchdir(int fd);
+extern int fchmod(int fd, mode_t mode);
+extern int fsync(int fd);
+extern int fdatasync(int fd);
+extern int ftruncate(int fd, off_t length);
+extern int utimes(const char *filename, const struct timeval *times);
 
 /*
  * The IRT functions in irt.h are declared as taking "struct timespec"
@@ -352,8 +366,36 @@ static void *start_thread(void *arg) {
   abort();
 }
 
+#if defined(__native_client__)
+static int thread_create_nonsfi(void (*start_func)(void), void *stack,
+                                void *thread_ptr, nacl_irt_tid_t *child_tid) {
+  struct thread_args *args = malloc(sizeof(struct thread_args));
+  if (args == NULL) {
+    return ENOMEM;
+  }
+  args->start_func = start_func;
+  args->thread_ptr = thread_ptr;
+  /* In Linux, it is possible to use the provided stack directly. */
+  int error = nacl_user_thread_create(start_thread, stack, args, child_tid);
+  if (error != 0)
+    free(args);
+  return error;
+}
+
+static void thread_exit_nonsfi(int32_t *stack_flag) {
+  nacl_user_thread_exit(stack_flag);
+}
+#endif
+
 static int thread_create(void (*start_func)(void), void *stack,
                          void *thread_ptr) {
+#if defined(__native_client__)
+  /*
+   * When available, use the nonsfi version that does allow the |stack| to be
+   * set in the new thread.
+   */
+  return thread_create_nonsfi(start_func, stack, thread_ptr, NULL);
+#else
   /*
    * For now, we ignore the stack that user code provides and just use
    * the stack that the host libpthread allocates.
@@ -379,11 +421,20 @@ static int thread_create(void (*start_func)(void), void *stack,
  cleanup:
   pthread_attr_destroy(&attr);
   return error;
+#endif
 }
 
 static void thread_exit(int32_t *stack_flag) {
+#if defined(__native_client__)
+  /*
+   * Since we used the nonsfi version of thread_create, we must also call the
+   * nonsfi version of thread_exit to correctly clean it up.
+   */
+  thread_exit_nonsfi(stack_flag);
+#else
   *stack_flag = 0;  /* Indicate that the user code's stack can be freed. */
   pthread_exit(NULL);
+#endif
 }
 
 static int thread_nice(const int nice) {
@@ -495,6 +546,30 @@ static int irt_chdir(const char *pathname) {
   return check_error(chdir(pathname));
 }
 
+static int irt_fchdir(int fd) {
+  return check_error(fchdir(fd));
+}
+
+static int irt_fchmod(int fd, mode_t mode) {
+  return check_error(fchmod(fd, mode));
+}
+
+static int irt_fsync(int fd) {
+  return check_error(fsync(fd));
+}
+
+static int irt_fdatasync(int fd) {
+  return check_error(fdatasync(fd));
+}
+
+static int irt_ftruncate(int fd, nacl_irt_off_t length) {
+  return check_error(ftruncate(fd, length));
+}
+
+static int irt_utimes(const char *filename, const struct timeval *times) {
+  return check_error(utimes(filename, times));
+}
+
 static int irt_getcwd(char *pathname, size_t len) {
   if (getcwd(pathname, len) == NULL)
     return errno;
@@ -562,6 +637,22 @@ const struct nacl_irt_basic nacl_irt_basic = {
 };
 
 DEFINE_STUB(getdents)
+const struct nacl_irt_dev_fdio_v0_2 nacl_irt_dev_fdio_v0_2 = {
+  irt_close,
+  irt_dup,
+  irt_dup2,
+  irt_read,
+  irt_write,
+  irt_seek,
+  irt_fstat,
+  USE_STUB(nacl_irt_dev_fdio_v0_2, getdents),
+  irt_fchdir,
+  irt_fchmod,
+  irt_fsync,
+  irt_fdatasync,
+  irt_ftruncate,
+};
+
 const struct nacl_irt_fdio nacl_irt_fdio = {
   irt_close,
   irt_dup,
@@ -590,6 +681,14 @@ const struct nacl_irt_thread nacl_irt_thread = {
   thread_nice,
 };
 
+#if defined(__native_client__)
+const struct nacl_irt_thread_v0_2 nacl_irt_thread_v0_2 = {
+  thread_create_nonsfi,
+  thread_exit_nonsfi,
+  thread_nice,
+};
+#endif
+
 #if defined(__linux__)
 const struct nacl_irt_futex nacl_irt_futex = {
   futex_wait_abs,
@@ -615,7 +714,6 @@ const struct nacl_irt_clock nacl_irt_clock = {
 };
 #endif
 
-DEFINE_STUB(utimes)
 const struct nacl_irt_dev_filename nacl_irt_dev_filename = {
   irt_open,
   irt_stat,
@@ -632,7 +730,7 @@ const struct nacl_irt_dev_filename nacl_irt_dev_filename = {
   irt_chmod,
   irt_access,
   irt_readlink,
-  USE_STUB(nacl_irt_dev_filename, utimes),
+  irt_utimes,
 };
 
 const struct nacl_irt_dev_getpid nacl_irt_dev_getpid = {
@@ -650,6 +748,11 @@ const struct nacl_irt_exception_handling nacl_irt_exception_handling = {
   nacl_exception_set_stack,
   nacl_exception_clear_flag,
 };
+
+const struct nacl_irt_async_signal_handling nacl_irt_async_signal_handling = {
+  nacl_async_signal_set_handler,
+  nacl_async_signal_send_async_signal,
+};
 #endif
 
 #if defined(__native_client__) && defined(__arm__)
@@ -658,24 +761,42 @@ const struct nacl_irt_icache nacl_irt_icache = {
 };
 #endif
 
+static int g_allow_dev_interfaces = 0;
+
+void nacl_irt_nonsfi_allow_dev_interfaces() {
+  g_allow_dev_interfaces = 1;
+}
+
+static int irt_dev_filter(void) {
+  return g_allow_dev_interfaces;
+}
+
 static const struct nacl_irt_interface irt_interfaces[] = {
   { NACL_IRT_BASIC_v0_1, &nacl_irt_basic, sizeof(nacl_irt_basic), NULL },
+  { NACL_IRT_DEV_FDIO_v0_2, &nacl_irt_dev_fdio_v0_2,
+    sizeof(nacl_irt_dev_fdio_v0_2), NULL },
   { NACL_IRT_FDIO_v0_1, &nacl_irt_fdio, sizeof(nacl_irt_fdio), NULL },
   { NACL_IRT_MEMORY_v0_3, &nacl_irt_memory, sizeof(nacl_irt_memory), NULL },
   { NACL_IRT_TLS_v0_1, &nacl_irt_tls, sizeof(nacl_irt_tls), NULL },
   { NACL_IRT_THREAD_v0_1, &nacl_irt_thread, sizeof(nacl_irt_thread), NULL },
+#if defined(__native_client__)
+  { NACL_IRT_THREAD_v0_2, &nacl_irt_thread_v0_2,
+    sizeof(nacl_irt_thread_v0_2), NULL },
+#endif
   { NACL_IRT_FUTEX_v0_1, &nacl_irt_futex, sizeof(nacl_irt_futex), NULL },
   { NACL_IRT_RANDOM_v0_1, &nacl_irt_random, sizeof(nacl_irt_random), NULL },
 #if defined(__linux__) || defined(__native_client__)
   { NACL_IRT_CLOCK_v0_1, &nacl_irt_clock, sizeof(nacl_irt_clock), NULL },
 #endif
   { NACL_IRT_DEV_FILENAME_v0_3, &nacl_irt_dev_filename,
-    sizeof(nacl_irt_dev_filename), NULL },
+    sizeof(nacl_irt_dev_filename), irt_dev_filter },
   { NACL_IRT_DEV_GETPID_v0_1, &nacl_irt_dev_getpid,
-    sizeof(nacl_irt_dev_getpid), NULL },
+    sizeof(nacl_irt_dev_getpid), irt_dev_filter },
 #if defined(__native_client__)
   { NACL_IRT_EXCEPTION_HANDLING_v0_1, &nacl_irt_exception_handling,
     sizeof(nacl_irt_exception_handling), NULL },
+  { NACL_IRT_ASYNC_SIGNAL_HANDLING_v0_1, &nacl_irt_async_signal_handling,
+    sizeof(nacl_irt_async_signal_handling), NULL },
 #endif
 #if defined(__native_client__) && defined(__arm__)
   { NACL_IRT_ICACHE_v0_1, &nacl_irt_icache, sizeof(nacl_irt_icache), NULL },
@@ -732,6 +853,7 @@ int nacl_irt_nonsfi_entry(int argc, char **argv, char **environ,
 
 #if defined(DEFINE_MAIN)
 int main(int argc, char **argv, char **environ) {
+  nacl_irt_nonsfi_allow_dev_interfaces();
   /*
    * On Linux, we rename _start() to _user_start() to avoid a clash
    * with the "_start" routine in the host toolchain.  On Mac OS X,

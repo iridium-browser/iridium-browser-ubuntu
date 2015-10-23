@@ -5,7 +5,6 @@
 #include "content/renderer/pepper/content_decryptor_delegate.h"
 
 #include "base/callback_helpers.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
@@ -190,11 +189,11 @@ PP_VideoCodecProfile MediaVideoCodecProfileToPpVideoCodecProfile(
 }
 
 PP_DecryptedFrameFormat MediaVideoFormatToPpDecryptedFrameFormat(
-    media::VideoFrame::Format format) {
+    media::VideoPixelFormat format) {
   switch (format) {
-    case media::VideoFrame::YV12:
+    case media::PIXEL_FORMAT_YV12:
       return PP_DECRYPTEDFRAMEFORMAT_YV12;
-    case media::VideoFrame::I420:
+    case media::PIXEL_FORMAT_I420:
       return PP_DECRYPTEDFRAMEFORMAT_I420;
     default:
       return PP_DECRYPTEDFRAMEFORMAT_UNKNOWN;
@@ -317,8 +316,8 @@ media::CdmKeyInformation::KeyStatus PpCdmKeyStatusToCdmKeyInformationKeyStatus(
       return media::CdmKeyInformation::INTERNAL_ERROR;
     case PP_CDMKEYSTATUS_EXPIRED:
       return media::CdmKeyInformation::EXPIRED;
-    case PP_CDMKEYSTATUS_OUTPUTNOTALLOWED:
-      return media::CdmKeyInformation::OUTPUT_NOT_ALLOWED;
+    case PP_CDMKEYSTATUS_OUTPUTRESTRICTED:
+      return media::CdmKeyInformation::OUTPUT_RESTRICTED;
     case PP_CDMKEYSTATUS_OUTPUTDOWNSCALED:
       return media::CdmKeyInformation::OUTPUT_DOWNSCALED;
     case PP_CDMKEYSTATUS_STATUSPENDING:
@@ -1033,24 +1032,22 @@ void ContentDecryptorDelegate::DeliverFrame(
 
   scoped_refptr<media::VideoFrame> decoded_frame =
       media::VideoFrame::WrapExternalYuvData(
-          media::VideoFrame::YV12,
-          frame_size,
-          gfx::Rect(frame_size),
-          natural_size_,
-          frame_info->strides[PP_DECRYPTEDFRAMEPLANES_Y],
+          media::PIXEL_FORMAT_YV12, frame_size, gfx::Rect(frame_size),
+          natural_size_, frame_info->strides[PP_DECRYPTEDFRAMEPLANES_Y],
           frame_info->strides[PP_DECRYPTEDFRAMEPLANES_U],
           frame_info->strides[PP_DECRYPTEDFRAMEPLANES_V],
           frame_data + frame_info->plane_offsets[PP_DECRYPTEDFRAMEPLANES_Y],
           frame_data + frame_info->plane_offsets[PP_DECRYPTEDFRAMEPLANES_U],
           frame_data + frame_info->plane_offsets[PP_DECRYPTEDFRAMEPLANES_V],
           base::TimeDelta::FromMicroseconds(
-              frame_info->tracking_info.timestamp),
-          media::BindToCurrentLoop(
-              base::Bind(&BufferNoLongerNeeded,
-                         ppb_buffer,
-                         base::Bind(&ContentDecryptorDelegate::FreeBuffer,
-                                    weak_this_,
-                                    frame_info->tracking_info.buffer_id))));
+              frame_info->tracking_info.timestamp));
+  decoded_frame->AddDestructionObserver(
+      media::BindToCurrentLoop(
+          base::Bind(&BufferNoLongerNeeded,
+                     ppb_buffer,
+                     base::Bind(&ContentDecryptorDelegate::FreeBuffer,
+                                weak_this_,
+                                frame_info->tracking_info.buffer_id))));
 
   video_decode_cb.Run(Decryptor::kSuccess, decoded_frame);
 }

@@ -15,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
+#include "content/browser/bad_message.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
@@ -30,14 +31,12 @@
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_resize_helper.h"
-#include "content/browser/transition_request_manager.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/frame_messages.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 #include "content/common/host_shared_bitmap_manager.h"
-#include "content/common/media/media_param_traits.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_context.h"
@@ -332,7 +331,8 @@ RenderMessageFilter::~RenderMessageFilter() {
       BrowserGpuMemoryBufferManager::current();
   if (gpu_memory_buffer_manager)
     gpu_memory_buffer_manager->ProcessRemoved(PeerHandle(), render_process_id_);
-  HostDiscardableSharedMemoryManager::current()->ProcessRemoved(PeerHandle());
+  HostDiscardableSharedMemoryManager::current()->ProcessRemoved(
+      render_process_id_);
 }
 
 void RenderMessageFilter::OnChannelClosing() {
@@ -435,8 +435,6 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RunWebAudioMediaCodec, OnWebAudioMediaCodec)
 #endif
-    IPC_MESSAGE_HANDLER(FrameHostMsg_AddNavigationTransitionData,
-                        OnAddNavigationTransitionData)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -445,6 +443,12 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
 
 void RenderMessageFilter::OnDestruct() const {
   BrowserThread::DeleteOnIOThread::Destruct(this);
+}
+
+void RenderMessageFilter::OverrideThreadForMessage(const IPC::Message& message,
+                                                   BrowserThread::ID* thread) {
+  if (message.type() == ViewHostMsg_MediaLogEvents::ID)
+    *thread = BrowserThread::UI;
 }
 
 base::TaskRunner* RenderMessageFilter::OverrideTaskRunnerForMessage(
@@ -472,17 +476,6 @@ void RenderMessageFilter::OnCreateWindow(
     int64* cloned_session_storage_namespace_id) {
   bool no_javascript_access;
 
-  // Merge the additional features into the WebWindowFeatures struct before we
-  // pass it on.
-  blink::WebVector<blink::WebString> additional_features(
-      params.additional_features.size());
-
-  for (size_t i = 0; i < params.additional_features.size(); ++i)
-    additional_features[i] = blink::WebString(params.additional_features[i]);
-
-  blink::WebWindowFeatures features = params.features;
-  features.additionalFeatures.swap(additional_features);
-
   bool can_create_window =
       GetContentClient()->browser()->CanCreateWindow(
           params.opener_url,
@@ -492,12 +485,13 @@ void RenderMessageFilter::OnCreateWindow(
           params.target_url,
           params.referrer,
           params.disposition,
-          features,
+          params.features,
           params.user_gesture,
           params.opener_suppressed,
           resource_context_,
           render_process_id_,
           params.opener_id,
+          params.opener_render_frame_id,
           &no_javascript_access);
 
   if (!can_create_window) {
@@ -561,8 +555,11 @@ void RenderMessageFilter::OnSetCookie(int render_frame_id,
                                       const std::string& cookie) {
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
-  if (!policy->CanAccessCookiesForOrigin(render_process_id_, url))
+  if (!policy->CanAccessDataForOrigin(render_process_id_, url)) {
+    bad_message::ReceivedBadMessage(this,
+                                    bad_message::RMF_SET_COOKIE_BAD_ORIGIN);
     return;
+  }
 
   net::CookieOptions options;
   if (GetContentClient()->browser()->AllowSetCookie(
@@ -581,8 +578,10 @@ void RenderMessageFilter::OnGetCookies(int render_frame_id,
                                        IPC::Message* reply_msg) {
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
-  if (!policy->CanAccessCookiesForOrigin(render_process_id_, url)) {
-    SendGetCookiesResponse(reply_msg, std::string());
+  if (!policy->CanAccessDataForOrigin(render_process_id_, url)) {
+    bad_message::ReceivedBadMessage(this,
+                                    bad_message::RMF_GET_COOKIES_BAD_ORIGIN);
+    delete reply_msg;
     return;
   }
 
@@ -923,8 +922,8 @@ void RenderMessageFilter::AllocateLockedDiscardableSharedMemoryOnFileThread(
     IPC::Message* reply_msg) {
   base::SharedMemoryHandle handle;
   HostDiscardableSharedMemoryManager::current()
-      ->AllocateLockedDiscardableSharedMemoryForChild(PeerHandle(), size, id,
-                                                      &handle);
+      ->AllocateLockedDiscardableSharedMemoryForChild(
+          PeerHandle(), render_process_id_, size, id, &handle);
   ChildProcessHostMsg_SyncAllocateLockedDiscardableSharedMemory::
       WriteReplyParams(reply_msg, handle);
   Send(reply_msg);
@@ -944,7 +943,7 @@ void RenderMessageFilter::OnAllocateLockedDiscardableSharedMemory(
 void RenderMessageFilter::DeletedDiscardableSharedMemoryOnFileThread(
     DiscardableSharedMemoryId id) {
   HostDiscardableSharedMemoryManager::current()
-      ->ChildDeletedDiscardableSharedMemory(id, PeerHandle());
+      ->ChildDeletedDiscardableSharedMemory(id, render_process_id_);
 }
 
 void RenderMessageFilter::OnDeletedDiscardableSharedMemory(
@@ -985,7 +984,8 @@ void RenderMessageFilter::OnCacheableMetadataAvailable(
   // in weburlloader_impl.cc).
   const net::RequestPriority kPriority = net::LOW;
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(data.size()));
-  memcpy(buf->data(), &data.front(), data.size());
+  if (!data.empty())
+    memcpy(buf->data(), &data.front(), data.size());
   cache->WriteMetadata(url, kPriority, expected_response_time, buf.get(),
                        data.size());
 }
@@ -1051,6 +1051,9 @@ void RenderMessageFilter::OnKeygenOnWorkerThread(
 
 void RenderMessageFilter::OnMediaLogEvents(
     const std::vector<media::MediaLogEvent>& events) {
+  // OnMediaLogEvents() is always dispatched to the UI thread for handling.
+  // See OverrideThreadForMessage().
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (media_internals_)
     media_internals_->OnMediaEvents(render_process_id_, events);
 }
@@ -1186,25 +1189,12 @@ void RenderMessageFilter::OnWebAudioMediaCodec(
 }
 #endif
 
-void RenderMessageFilter::OnAddNavigationTransitionData(
-    FrameHostMsg_AddNavigationTransitionData_Params params) {
-  if (params.elements.size() > TransitionRequestManager::kMaxNumOfElements)
-    return;
-  TransitionRequestManager::GetInstance()->AddPendingTransitionRequestData(
-      render_process_id_,
-      params.render_frame_id,
-      params.allowed_destination_host_pattern,
-      params.selector,
-      params.markup,
-      params.elements);
-}
-
-void RenderMessageFilter::OnAllocateGpuMemoryBuffer(
-    uint32 width,
-    uint32 height,
-    gfx::GpuMemoryBuffer::Format format,
-    gfx::GpuMemoryBuffer::Usage usage,
-    IPC::Message* reply) {
+void RenderMessageFilter::OnAllocateGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
+                                                    uint32 width,
+                                                    uint32 height,
+                                                    gfx::BufferFormat format,
+                                                    gfx::BufferUsage usage,
+                                                    IPC::Message* reply) {
   DCHECK(BrowserGpuMemoryBufferManager::current());
 
   base::CheckedNumeric<int> size = width;
@@ -1216,13 +1206,10 @@ void RenderMessageFilter::OnAllocateGpuMemoryBuffer(
 
   BrowserGpuMemoryBufferManager::current()
       ->AllocateGpuMemoryBufferForChildProcess(
-          gfx::Size(width, height),
-          format,
-          usage,
-          PeerHandle(),
+          id, gfx::Size(width, height), format, usage, PeerHandle(),
           render_process_id_,
-          base::Bind(
-              &RenderMessageFilter::GpuMemoryBufferAllocated, this, reply));
+          base::Bind(&RenderMessageFilter::GpuMemoryBufferAllocated, this,
+                     reply));
 }
 
 void RenderMessageFilter::GpuMemoryBufferAllocated(
