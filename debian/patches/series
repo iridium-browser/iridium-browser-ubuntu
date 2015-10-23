@@ -14,7 +14,7 @@ breakpad
 touch-v35
 flash-redirection
 #notifications-nicer  # also included in iridium-browser.diff
-disable-sse2
+#disable-sse2
 #gyp-icu-m32-test
 #mir-support
 #mir-ozone-module
