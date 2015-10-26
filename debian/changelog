@@ -1,3 +1,9 @@
+iridium-browser (46.0.2490.71-0iridium46.0rc1+3) precise; urgency=low
+
+  * Explicitly build "remoting_resources".
+
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 26 Oct 2015 11:09:19 +0100
+
 iridium-browser (46.0.2490.71-0iridium46.0rc1+2) precise; urgency=low
 
   * Don't disable SSE2 compiler flags on i386.
