@@ -227,6 +227,7 @@ BUILD_TARGETS := \
 	chrome \
 	chrome_sandbox \
 	chromedriver \
+	remoting_resources \
 	$(NULL)
 
 # Needed to preserve the suid and make the sandbox happy
