@@ -1,3 +1,11 @@
+iridium-browser (46.0.2490.80-0iridium46.0+1) precise; urgency=low
+
+  * WMClass is all lowercase now.
+  * Imported Upstream version 46.0.2490.80
+  * Updated iridium-browser patch to 46.0
+
+ -- Joachim Bauch <bauch@struktur.de>  Wed, 11 Nov 2015 09:51:22 +0100
+
 iridium-browser (46.0.2490.71-0iridium46.0rc1+3) precise; urgency=low
 
   * Explicitly build "remoting_resources".
