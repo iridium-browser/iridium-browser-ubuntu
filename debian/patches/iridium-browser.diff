@@ -65,8 +65,8 @@
  MAJOR=46
  MINOR=0
 -BUILD=2490
--PATCH=71
-+BUILD=0
+-PATCH=80
++BUILD=1
 +PATCH=0
 --- a/chrome/app/chrome_main.cc
 +++ b/chrome/app/chrome_main.cc
@@ -1930,7 +1930,7 @@
  }
  #endif  // defined(FULL_SAFE_BROWSING)
  
-@@ -419,9 +422,11 @@
+@@ -429,9 +432,11 @@
  
  void SafeBrowsingService::RegisterAllDelayedAnalysis() {
  #if defined(FULL_SAFE_BROWSING)
@@ -2215,6 +2215,24 @@
  #endif
            content::Referrer(),
            (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+--- a/chrome/browser/ui/toolbar/wrench_menu_model.cc
++++ b/chrome/browser/ui/toolbar/wrench_menu_model.cc
+@@ -931,6 +931,7 @@
+ 
+   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
+ #if !defined(OS_CHROMEOS)
++#if 0
+   if (!switches::IsNewAvatarMenu()) {
+     // No "Sign in to Chromium..." menu item on ChromeOS.
+     SigninManager* signin = SigninManagerFactory::GetForProfile(
+@@ -961,6 +962,7 @@
+     AddCheckItemWithStringId(IDC_TOGGLE_REQUEST_TABLET_SITE,
+                              IDS_TOGGLE_REQUEST_TABLET_SITE);
+ #endif
++#endif
+ 
+ #if defined(OS_WIN)
+   int command_id = IDC_WIN_DESKTOP_RESTART;
 --- a/chrome/browser/ui/views/outdated_upgrade_bubble_view.cc
 +++ b/chrome/browser/ui/views/outdated_upgrade_bubble_view.cc
 @@ -42,7 +42,7 @@
@@ -3562,6 +3580,37 @@
    int count_args = (is_new_avatar_menu ? 1 : 0) +
        (is_new_profile_management ? 1 : 0) +
        (is_consistent_identity ? 1 : 0) +
+--- a/components/translate/core/browser/translate_language_list.cc
++++ b/components/translate/core/browser/translate_language_list.cc
+@@ -126,10 +126,12 @@
+ // Constant URL string to fetch server supporting language list.
+ const char kLanguageListFetchPath[] = "translate_a/l?client=chrome";
+ 
++#if 0
+ // Used in kTranslateScriptURL to request supporting languages list including
+ // "alpha languages".
+ const char kAlphaLanguageQueryName[] = "alpha";
+ const char kAlphaLanguageQueryValue[] = "1";
++#endif
+ 
+ // Represent if the language list updater is disabled.
+ bool update_is_disabled = false;
+@@ -200,6 +202,7 @@
+ }
+ 
+ void TranslateLanguageList::RequestLanguageList() {
++#if 0
+   // If resource requests are not allowed, we'll get a callback when they are.
+   if (!resource_requests_allowed_) {
+     request_pending_ = true;
+@@ -229,6 +232,7 @@
+     if (!result)
+       NotifyEvent(__LINE__, "Request is omitted due to retry limit");
+   }
++#endif
+ }
+ 
+ void TranslateLanguageList::SetResourceRequestsAllowed(bool allowed) {
 --- a/components/translate/core/browser/translate_url_fetcher.cc
 +++ b/components/translate/core/browser/translate_url_fetcher.cc
 @@ -57,6 +57,7 @@
@@ -3793,7 +3842,7 @@
        WEBKIT_VERSION_MAJOR,
        WEBKIT_VERSION_MINOR);
 +  if (strncmp(product.c_str(), "Chrome/", 7) != 0)
-+	base::StringAppendF(&user_agent, " Chrome/46.0.2490.71");
++	base::StringAppendF(&user_agent, " Chrome/46.0.2490.80");
    return user_agent;
  }
  
