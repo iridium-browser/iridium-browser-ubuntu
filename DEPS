@@ -120,7 +120,7 @@ deps = {
   'src/third_party/opus/src':
     (Var("chromium_git")) + '/chromium/deps/opus.git@cae696156f1e60006e39821e79a1811ae1933c69',
   'src/third_party/pdfium':
-    'https://pdfium.googlesource.com/pdfium.git@8a825befde67b3a51f9dc203fb18f7bece7f03c7',
+    'https://pdfium.googlesource.com/pdfium.git@0300abca7af7ad627ad9b59bdb88c2fec0505b12',
   'src/third_party/py_trace_event/src':
     (Var("chromium_git")) + '/external/py_trace_event.git@dd463ea9e2c430de2b9e53dea57a77b4c3ac9b30',
   'src/third_party/pyftpdlib/src':
@@ -162,7 +162,7 @@ deps = {
   'src/tools/swarming_client':
     (Var("chromium_git")) + '/external/swarming.client.git@2866a22530cb65feae5d9f64c83636aed5391d06',
   'src/v8':
-    (Var("chromium_git")) + '/v8/v8.git@0eb6b9bf4c8ea133e65fd04a0ccbbee97da8e967'
+    (Var("chromium_git")) + '/v8/v8.git@3b00385a93215ce2a2af737fbea95309b40f08d9'
 }
 
 deps_os = {

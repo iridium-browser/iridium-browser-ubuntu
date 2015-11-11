@@ -10,6 +10,7 @@
 #include "../../../../third_party/lcms2-2.6/include/lcms2.h"
 #include "../../../../third_party/libopenjpeg20/openjpeg.h"
 #include "../../../include/fxcodec/fx_codec.h"
+#include "../../../include/fxcrt/fx_safe_types.h"
 #include "codec_int.h"
 
 static void fx_error_callback(const char* msg, void* client_data) {
@@ -255,29 +256,58 @@ static void sycc422_to_rgb(opj_image_t* img) {
   img->comps[1].dy = img->comps[0].dy;
   img->comps[2].dy = img->comps[0].dy;
 }
-static void sycc420_to_rgb(opj_image_t* img) {
-  int *d0, *d1, *d2, *r, *g, *b, *nr, *ng, *nb;
-  const int *y, *cb, *cr, *ny;
-  int maxw, maxh, max, offset, upb;
-  int i, j;
-  i = (int)img->comps[0].prec;
-  offset = 1 << (i - 1);
-  upb = (1 << i) - 1;
-  maxw = (int)img->comps[0].w;
-  maxh = (int)img->comps[0].h;
-  max = maxw * maxh;
-  y = img->comps[0].data;
-  cb = img->comps[1].data;
-  cr = img->comps[2].data;
-  d0 = r = FX_Alloc(int, (size_t)max);
-  d1 = g = FX_Alloc(int, (size_t)max);
-  d2 = b = FX_Alloc(int, (size_t)max);
-  for (i = 0; (OPJ_UINT32)i < (maxh & ~(OPJ_UINT32)1); i += 2) {
-    ny = y + maxw;
-    nr = r + maxw;
-    ng = g + maxw;
-    nb = b + maxw;
-    for (j = 0; (OPJ_UINT32)j < (maxw & ~(OPJ_UINT32)1); j += 2) {
+static bool sycc420_size_is_valid(OPJ_UINT32 y, OPJ_UINT32 cbcr) {
+  if (!y || !cbcr)
+    return false;
+
+  return (cbcr == y / 2) || ((y & 1) && (cbcr == y / 2 + 1));
+}
+static bool sycc420_must_extend_cbcr(OPJ_UINT32 y, OPJ_UINT32 cbcr) {
+  return (y & 1) && (cbcr == y / 2);
+}
+void sycc420_to_rgb(opj_image_t* img) {
+  OPJ_UINT32 prec = img->comps[0].prec;
+  if (!prec)
+    return;
+  OPJ_UINT32 offset = 1 << (prec - 1);
+  OPJ_UINT32 upb = (1 << prec) - 1;
+  OPJ_UINT32 yw = img->comps[0].w;
+  OPJ_UINT32 yh = img->comps[0].h;
+  OPJ_UINT32 cbw = img->comps[1].w;
+  OPJ_UINT32 cbh = img->comps[1].h;
+  OPJ_UINT32 crw = img->comps[2].w;
+  OPJ_UINT32 crh = img->comps[2].h;
+  if (cbw != crw || cbh != crh)
+    return;
+  if (!sycc420_size_is_valid(yw, cbw) || !sycc420_size_is_valid(yh, cbh))
+    return;
+  bool extw = sycc420_must_extend_cbcr(yw, cbw);
+  bool exth = sycc420_must_extend_cbcr(yh, cbh);
+  FX_SAFE_DWORD safeSize = yw;
+  safeSize *= yh;
+  if (!safeSize.IsValid())
+    return;
+  int* r = FX_Alloc(int, safeSize.ValueOrDie());
+  int* g = FX_Alloc(int, safeSize.ValueOrDie());
+  int* b = FX_Alloc(int, safeSize.ValueOrDie());
+  int* d0 = r;
+  int* d1 = g;
+  int* d2 = b;
+  const int* y = img->comps[0].data;
+  const int* cb = img->comps[1].data;
+  const int* cr = img->comps[2].data;
+  const int* ny = nullptr;
+  int* nr = nullptr;
+  int* ng = nullptr;
+  int* nb = nullptr;
+  OPJ_UINT32 i = 0;
+  OPJ_UINT32 j = 0;
+  for (i = 0; i < (yh & ~(OPJ_UINT32)1); i += 2) {
+    ny = y + yw;
+    nr = r + yw;
+    ng = g + yw;
+    nb = b + yw;
+    for (j = 0; j < (yw & ~(OPJ_UINT32)1); j += 2) {
       sycc_to_rgb(offset, upb, *y, *cb, *cr, r, g, b);
       ++y;
       ++r;
@@ -301,7 +331,11 @@ static void sycc420_to_rgb(opj_image_t* img) {
       ++cb;
       ++cr;
     }
-    if (j < maxw) {
+    if (j < yw) {
+      if (extw) {
+        --cb;
+        --cr;
+      }
       sycc_to_rgb(offset, upb, *y, *cb, *cr, r, g, b);
       ++y;
       ++r;
@@ -315,13 +349,17 @@ static void sycc420_to_rgb(opj_image_t* img) {
       ++cb;
       ++cr;
     }
-    y += maxw;
-    r += maxw;
-    g += maxw;
-    b += maxw;
+    y += yw;
+    r += yw;
+    g += yw;
+    b += yw;
   }
-  if (i < maxh) {
-    for (j = 0; (OPJ_UINT32)j < (maxw & ~(OPJ_UINT32)1); j += 2) {
+  if (i < yh) {
+    if (exth) {
+      cb -= cbw;
+      cr -= crw;
+    }
+    for (j = 0; j < (yw & ~(OPJ_UINT32)1); j += 2) {
       sycc_to_rgb(offset, upb, *y, *cb, *cr, r, g, b);
       ++y;
       ++r;
@@ -335,7 +373,11 @@ static void sycc420_to_rgb(opj_image_t* img) {
       ++cb;
       ++cr;
     }
-    if (j < maxw) {
+    if (j < yw) {
+      if (extw) {
+        --cb;
+        --cr;
+      }
       sycc_to_rgb(offset, upb, *y, *cb, *cr, r, g, b);
     }
   }
@@ -346,14 +388,14 @@ static void sycc420_to_rgb(opj_image_t* img) {
   img->comps[1].data = d1;
   FX_Free(img->comps[2].data);
   img->comps[2].data = d2;
-  img->comps[1].w = maxw;
-  img->comps[1].h = maxh;
-  img->comps[2].w = maxw;
-  img->comps[2].h = maxh;
-  img->comps[1].w = (OPJ_UINT32)maxw;
-  img->comps[1].h = (OPJ_UINT32)maxh;
-  img->comps[2].w = (OPJ_UINT32)maxw;
-  img->comps[2].h = (OPJ_UINT32)maxh;
+  img->comps[1].w = yw;
+  img->comps[1].h = yh;
+  img->comps[2].w = yw;
+  img->comps[2].h = yh;
+  img->comps[1].w = yw;
+  img->comps[1].h = yh;
+  img->comps[2].w = yw;
+  img->comps[2].h = yh;
   img->comps[1].dx = img->comps[0].dx;
   img->comps[2].dx = img->comps[0].dx;
   img->comps[1].dy = img->comps[0].dy;
@@ -613,7 +655,7 @@ void color_apply_conversion(opj_image_t* image) {
 }
 class CJPX_Decoder {
  public:
-  CJPX_Decoder();
+  explicit CJPX_Decoder(bool use_colorspace);
   ~CJPX_Decoder();
   FX_BOOL Init(const unsigned char* src_data, int src_size);
   void GetInfo(FX_DWORD& width,
@@ -629,10 +671,10 @@ class CJPX_Decoder {
   opj_image_t* image;
   opj_codec_t* l_codec;
   opj_stream_t* l_stream;
-  FX_BOOL m_useColorSpace;
+  const bool m_UseColorSpace;
 };
-CJPX_Decoder::CJPX_Decoder()
-    : image(NULL), l_codec(NULL), l_stream(NULL), m_useColorSpace(FALSE) {}
+CJPX_Decoder::CJPX_Decoder(bool use_colorspace)
+    : image(NULL), l_codec(NULL), l_stream(NULL), m_UseColorSpace(use_colorspace) {}
 CJPX_Decoder::~CJPX_Decoder() {
   if (l_codec) {
     opj_destroy_codec(l_codec);
@@ -682,6 +724,8 @@ FX_BOOL CJPX_Decoder::Init(const unsigned char* src_data, int src_size) {
     image = NULL;
     return FALSE;
   }
+  image->pdfium_use_colorspace = m_UseColorSpace;
+
   if (!parameters.nb_tile_to_decode) {
     if (!opj_set_decode_area(l_codec, image, parameters.DA_x0, parameters.DA_y0,
                              parameters.DA_x1, parameters.DA_y1)) {
@@ -822,8 +866,7 @@ CCodec_JpxModule::CCodec_JpxModule() {}
 void* CCodec_JpxModule::CreateDecoder(const uint8_t* src_buf,
                                       FX_DWORD src_size,
                                       FX_BOOL useColorSpace) {
-  CJPX_Decoder* pDecoder = new CJPX_Decoder;
-  pDecoder->m_useColorSpace = useColorSpace;
+  CJPX_Decoder* pDecoder = new CJPX_Decoder(useColorSpace);
   if (!pDecoder->Init(src_buf, src_size)) {
     delete pDecoder;
     return NULL;
