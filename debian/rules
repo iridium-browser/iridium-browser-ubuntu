@@ -296,8 +296,8 @@ override_dh_clean:
 	rm -rf $(SRC_DIR)/out $(FFMPEG_SRC_DIR)/yasm $(FFMPEG_SRC_DIR)/out $(FFMPEG_SRC_DIR)/*.mk
 	find $(SRC_DIR) \( -name \*.pyc -o -name \*.pyo -name \*.o \) -delete
 	find $(SRC_DIR) -regex '.*/\([^/]*\)/\1[^/]*\.\(Makefile\|\(target\|host\)\.mk\)' -delete
-	sed -i 's,/etc/$(DEBIAN_NAME)/policies,/etc/chromium/policies,' \
-		$(SRC_DIR)/chrome/common/chrome_paths.cc
+#	sed -i 's,/etc/$(DEBIAN_NAME)/policies,/etc/chromium/policies,' \
+#		$(SRC_DIR)/chrome/common/chrome_paths.cc
 	
 	dh_clean
 
