@@ -8,7 +8,7 @@ configuration-directory.patch
 arm.patch
 arm-neon.patch
 #ffmpeg-gyp-config.patch
-additional-search-engines.patch
+#additional-search-engines.patch
 3-chrome-xid.patch
 #5-desktop-integration-settings.patch
 6-passwordless-install-support.patch
@@ -18,7 +18,7 @@ additional-search-engines.patch
 touch-v35
 #display-scaling-default-value
 flash-redirection
-notifications-nicer
+#notifications-nicer
 #disable-sse2
 #gyp-icu-m32-test
 #mir-support
