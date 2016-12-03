@@ -8,7 +8,7 @@ configuration-directory.patch
 #arm.patch
 arm-neon.patch
 #ffmpeg-gyp-config.patch
-additional-search-engines.patch
+#additional-search-engines.patch
 #gsettings-display-scaling
 touch-v35
 notifications-nicer
