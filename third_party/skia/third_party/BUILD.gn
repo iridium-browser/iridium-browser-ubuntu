@@ -1,0 +1,22 @@
+# Copyright 2016 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+declare_args() {
+}
+
+config("system_freetype2") {
+  include_dirs = [ "/usr/include/freetype2" ]
+  libs = [ "freetype" ]
+}
+group("freetype2") {
+  public_configs = [ ":system_freetype2" ]
+}
+
+config("system_fontconfig") {
+  libs = [ "fontconfig" ]
+}
+group("fontconfig") {
+  public_configs = [ ":system_fontconfig" ]
+}
