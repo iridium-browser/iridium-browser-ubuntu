@@ -1,8 +1,8 @@
-Index: dev/chrome/browser/browser_resources.grd
+Index: iridium-ubuntu-build/chrome/browser/browser_resources.grd
 ===================================================================
---- dev.orig/chrome/browser/browser_resources.grd
-+++ dev/chrome/browser/browser_resources.grd
-@@ -336,6 +336,7 @@
+--- iridium-ubuntu-build.orig/chrome/browser/browser_resources.grd
++++ iridium-ubuntu-build/chrome/browser/browser_resources.grd
+@@ -337,6 +337,7 @@
        </if>
        <if expr="desktop_linux or (is_android and enable_plugins)">
          <include name="IDR_PLUGIN_DB_JSON" file="resources\plugin_metadata\plugins_linux.json" type="BINDATA" />
@@ -10,10 +10,10 @@ Index: dev/chrome/browser/browser_resources.grd
        </if>
        <if expr="is_android">
          <then>
-Index: dev/chrome/browser/plugins/plugin_finder.cc
+Index: iridium-ubuntu-build/chrome/browser/plugins/plugin_finder.cc
 ===================================================================
---- dev.orig/chrome/browser/plugins/plugin_finder.cc
-+++ dev/chrome/browser/plugins/plugin_finder.cc
+--- iridium-ubuntu-build.orig/chrome/browser/plugins/plugin_finder.cc
++++ iridium-ubuntu-build/chrome/browser/plugins/plugin_finder.cc
 @@ -153,44 +153,10 @@ void RecordBuiltInPluginListError(Plugin
                              static_cast<int>(PluginListError::NUM_VALUES));
  }
@@ -144,10 +144,10 @@ Index: dev/chrome/browser/plugins/plugin_finder.cc
        DCHECK(!identifier_plugin_[identifier]);
        identifier_plugin_[identifier] = CreatePluginMetadata(identifier, plugin);
  
-Index: dev/chrome/browser/plugins/plugin_finder.h
+Index: iridium-ubuntu-build/chrome/browser/plugins/plugin_finder.h
 ===================================================================
---- dev.orig/chrome/browser/plugins/plugin_finder.h
-+++ dev/chrome/browser/plugins/plugin_finder.h
+--- iridium-ubuntu-build.orig/chrome/browser/plugins/plugin_finder.h
++++ iridium-ubuntu-build/chrome/browser/plugins/plugin_finder.h
 @@ -78,6 +78,15 @@ class PluginFinder {
    // Returns NULL if the plugin list couldn't be parsed.
    static base::DictionaryValue* LoadBuiltInPluginList();
@@ -164,10 +164,10 @@ Index: dev/chrome/browser/plugins/plugin_finder.h
  #if defined(ENABLE_PLUGIN_INSTALLATION)
    std::map<std::string, PluginInstaller*> installers_;
  #endif
-Index: dev/chrome/browser/resources/plugin_metadata/plugins_ubuntu_linux.json
+Index: iridium-ubuntu-build/chrome/browser/resources/plugin_metadata/plugins_ubuntu_linux.json
 ===================================================================
 --- /dev/null
-+++ dev/chrome/browser/resources/plugin_metadata/plugins_ubuntu_linux.json
++++ iridium-ubuntu-build/chrome/browser/resources/plugin_metadata/plugins_ubuntu_linux.json
 @@ -0,0 +1,18 @@
 +{
 +  "libunity_npapi_plugin.so": {

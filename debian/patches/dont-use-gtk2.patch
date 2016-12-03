@@ -1,7 +1,7 @@
-Index: dev/chrome/test/BUILD.gn
+Index: iridium-ubuntu-build/chrome/test/BUILD.gn
 ===================================================================
---- dev.orig/chrome/test/BUILD.gn
-+++ dev/chrome/test/BUILD.gn
+--- iridium-ubuntu-build.orig/chrome/test/BUILD.gn
++++ iridium-ubuntu-build/chrome/test/BUILD.gn
 @@ -473,7 +473,11 @@ if (!is_android) {
            ]
            if (!use_ozone) {
@@ -15,10 +15,10 @@ Index: dev/chrome/test/BUILD.gn
            }
          }
        }
-Index: dev/remoting/test/BUILD.gn
+Index: iridium-ubuntu-build/remoting/test/BUILD.gn
 ===================================================================
---- dev.orig/remoting/test/BUILD.gn
-+++ dev/remoting/test/BUILD.gn
+--- iridium-ubuntu-build.orig/remoting/test/BUILD.gn
++++ iridium-ubuntu-build/remoting/test/BUILD.gn
 @@ -196,7 +196,11 @@ if (enable_remoting_host && !is_android
      ]
  
@@ -32,10 +32,10 @@ Index: dev/remoting/test/BUILD.gn
      }
    }
  }
-Index: dev/remoting/host/it2me/BUILD.gn
+Index: iridium-ubuntu-build/remoting/host/it2me/BUILD.gn
 ===================================================================
---- dev.orig/remoting/host/it2me/BUILD.gn
-+++ dev/remoting/host/it2me/BUILD.gn
+--- iridium-ubuntu-build.orig/remoting/host/it2me/BUILD.gn
++++ iridium-ubuntu-build/remoting/host/it2me/BUILD.gn
 @@ -182,7 +182,11 @@ if (!is_chromeos && !is_android && enabl
        }
  
@@ -49,10 +49,10 @@ Index: dev/remoting/host/it2me/BUILD.gn
        }
      }
    }
-Index: dev/remoting/host/BUILD.gn
+Index: iridium-ubuntu-build/remoting/host/BUILD.gn
 ===================================================================
---- dev.orig/remoting/host/BUILD.gn
-+++ dev/remoting/host/BUILD.gn
+--- iridium-ubuntu-build.orig/remoting/host/BUILD.gn
++++ iridium-ubuntu-build/remoting/host/BUILD.gn
 @@ -430,7 +430,11 @@ static_library("host") {
        "//build/config/linux:xrandr",
      ]
@@ -66,7 +66,7 @@ Index: dev/remoting/host/BUILD.gn
      }
    } else {
      sources -= [
-@@ -1216,7 +1220,11 @@ if (enable_me2me_host) {
+@@ -1215,7 +1219,11 @@ if (enable_me2me_host) {
      }
  
      if (is_desktop_linux) {
@@ -79,10 +79,10 @@ Index: dev/remoting/host/BUILD.gn
      }
      if ((is_linux && !is_chromeos) || is_mac) {
        libs = [ "pam" ]
-Index: dev/build/config/linux/gtk3/BUILD.gn
+Index: iridium-ubuntu-build/build/config/linux/gtk3/BUILD.gn
 ===================================================================
---- dev.orig/build/config/linux/gtk3/BUILD.gn
-+++ dev/build/config/linux/gtk3/BUILD.gn
+--- iridium-ubuntu-build.orig/build/config/linux/gtk3/BUILD.gn
++++ iridium-ubuntu-build/build/config/linux/gtk3/BUILD.gn
 @@ -30,6 +30,7 @@ group("gtk3") {
      "//remoting/host",
      "//remoting/host/it2me:remote_assistance_host",

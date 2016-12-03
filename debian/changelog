@@ -1,41 +1,35 @@
-chromium-browser (54.0.2840.8-0ubuntu1~ppa2~16.10.1) UNRELEASED; urgency=low
-
-  * Check for Android when using optional NEON in openmax_dl
-
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Sun, 11 Sep 2016 01:02:31 -0400
-
-chromium-browser (54.0.2840.8-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2840.8-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * New upstream version 54.0.2840.8
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 02 Sep 2016 14:19:24 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 02 Sep 2016 14:19:23 -0400
 
-chromium-browser (54.0.2837.0-0ubuntu1~ppa5~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2837.0-0ubuntu1~ppa5~16.04.1) xenial; urgency=low
 
   * Fix GN bootstrap (add one more missing file)
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 27 Aug 2016 12:35:25 -0400
 
-chromium-browser (54.0.2837.0-0ubuntu1~ppa4~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2837.0-0ubuntu1~ppa4~16.04.1) xenial; urgency=low
 
   * Fix GN bootstrap (again)
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 27 Aug 2016 12:04:03 -0400
 
-chromium-browser (54.0.2837.0-0ubuntu1~ppa3~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2837.0-0ubuntu1~ppa3~16.04.1) xenial; urgency=low
 
   * Fix GN build (again)
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 26 Aug 2016 18:26:49 -0400
 
-chromium-browser (54.0.2837.0-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2837.0-0ubuntu1~ppa2~16.04.1) xenial; urgency=low
 
   * Fix GN bootstrap.
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 26 Aug 2016 17:40:34 -0400
 
-chromium-browser (54.0.2837.0-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2837.0-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * Use optional NEON on arm.
   * New upstream version 54.0.2837.0
@@ -43,81 +37,81 @@ chromium-browser (54.0.2837.0-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 26 Aug 2016 16:32:16 -0400
 
-chromium-browser (54.0.2832.2-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2832.2-0ubuntu1~ppa2~16.04.1) xenial; urgency=low
 
   * Update patch for arm64 GN build.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 22 Aug 2016 18:16:42 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 22 Aug 2016 18:16:41 -0400
 
-chromium-browser (54.0.2832.2-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2832.2-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * Don't use -fno-auto-profile on older GCCs
   * Fix building with CUPS 2.2
   * New upstream version 54.0.2832.2
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 19 Aug 2016 22:10:43 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 19 Aug 2016 22:10:42 -0400
 
-chromium-browser (54.0.2824.0-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2824.0-0ubuntu1~ppa2~16.04.1) xenial; urgency=low
 
   * Fix gn build.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 13 Aug 2016 11:23:17 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 13 Aug 2016 11:23:16 -0400
 
-chromium-browser (54.0.2824.0-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2824.0-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * New upstream version 54.0.2824.0
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 13 Aug 2016 01:58:24 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 13 Aug 2016 01:58:23 -0400
 
-chromium-browser (54.0.2816.0-0ubuntu1~ppa4~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2816.0-0ubuntu1~ppa4~16.04.1) xenial; urgency=low
 
   * Fix gn build (try 3)
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Sun, 07 Aug 2016 15:05:05 -0400
 
-chromium-browser (54.0.2816.0-0ubuntu1~ppa3~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2816.0-0ubuntu1~ppa3~16.04.1) xenial; urgency=low
 
   * Fix gn build (again)
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 05 Aug 2016 18:25:42 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 05 Aug 2016 18:25:41 -0400
 
-chromium-browser (54.0.2816.0-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2816.0-0ubuntu1~ppa2~16.04.1) xenial; urgency=low
 
   * Fix gn build
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 05 Aug 2016 18:09:48 -0400
 
-chromium-browser (54.0.2816.0-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2816.0-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * New upstream version 54.0.2816.0
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 05 Aug 2016 14:30:17 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 05 Aug 2016 14:30:16 -0400
 
-chromium-browser (54.0.2810.2-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (54.0.2810.2-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * New upstream version 54.0.2810.2
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 29 Jul 2016 11:30:44 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 29 Jul 2016 11:30:43 -0400
 
-chromium-browser (53.0.2785.8-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2785.8-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * New upstream version 53.0.2785.8
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 09 Jul 2016 23:51:04 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Sat, 09 Jul 2016 23:51:02 -0400
 
-chromium-browser (53.0.2783.2-0ubuntu1~ppa4~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2783.2-0ubuntu1~ppa4~16.04.1) xenial; urgency=low
 
   * Fix paths in VAAPI patch for GYP builds. (Github issue #2)
   * Revert to using GTK2 due to library conflicts with system protobuf.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 01 Jul 2016 22:28:55 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 01 Jul 2016 22:28:53 -0400
 
-chromium-browser (53.0.2783.2-0ubuntu1~ppa3~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2783.2-0ubuntu1~ppa3~16.04.1) xenial; urgency=low
 
   * Add use_gtk3 flag to ffmpeg builds as well (even though ffmpeg
     doesn't need gtk3).
@@ -125,66 +119,66 @@ chromium-browser (53.0.2783.2-0ubuntu1~ppa3~16.10.1) yakkety; urgency=low
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 01 Jul 2016 12:47:03 -0400
 
-chromium-browser (53.0.2783.2-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2783.2-0ubuntu1~ppa2~16.04.1) xenial; urgency=low
 
   * Add missing comma to content/content_common.gypi. (Github issue #2)
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Thu, 30 Jun 2016 21:25:34 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Thu, 30 Jun 2016 21:25:32 -0400
 
-chromium-browser (53.0.2783.2-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2783.2-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * Update visibility info for GTK 3 patch.
   * Update GYP support in VAAPI patch. (Github issue #2)
   * New upstream version 53.0.2783.2
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Thu, 30 Jun 2016 20:53:51 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Thu, 30 Jun 2016 20:53:49 -0400
 
-chromium-browser (53.0.2774.3-0ubuntu1~ppa6~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2774.3-0ubuntu1~ppa6~16.04.1) xenial; urgency=low
 
   * Update patch (again) to import GTK 3 instead of GTK 2.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 22:44:27 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 22:44:25 -0400
 
-chromium-browser (53.0.2774.3-0ubuntu1~ppa5~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2774.3-0ubuntu1~ppa5~16.04.1) xenial; urgency=low
 
   * Update patch to import GTK 3 instead of GTK 2.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 19:48:06 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 19:48:05 -0400
 
-chromium-browser (53.0.2774.3-0ubuntu1~ppa4~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2774.3-0ubuntu1~ppa4~16.04.1) xenial; urgency=low
 
   * Add patch to import GTK 3 instead of GTK 2.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 19:12:36 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 19:12:34 -0400
 
-chromium-browser (53.0.2774.3-0ubuntu1~ppa3~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2774.3-0ubuntu1~ppa3~16.04.1) xenial; urgency=low
 
   * Switch to GTK 3.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 11:03:32 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Mon, 27 Jun 2016 11:03:31 -0400
 
-chromium-browser (53.0.2774.3-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2774.3-0ubuntu1~ppa2~16.04.1) xenial; urgency=low
 
   * Fix gn build, as clang arm64 has been added to the list of supported
     toolchains.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 24 Jun 2016 21:40:18 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 24 Jun 2016 21:40:16 -0400
 
-chromium-browser (53.0.2774.3-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2774.3-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * New upstream version 53.0.2774.3
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 24 Jun 2016 14:45:58 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 24 Jun 2016 14:45:56 -0400
 
-chromium-browser (53.0.2767.4-0ubuntu1~ppa3~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2767.4-0ubuntu1~ppa3~16.04.1) xenial; urgency=low
 
   * Update tar command to work with tar 1.29.
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Fri, 17 Jun 2016 16:42:17 -0400
 
-chromium-browser (53.0.2767.4-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2767.4-0ubuntu1~ppa2~16.04.1) xenial; urgency=low
 
   * Fix building libpng on armhf without NEON support.
   * Remove native-client dependency until it gets built again.
@@ -193,13 +187,13 @@ chromium-browser (53.0.2767.4-0ubuntu1~ppa2~16.10.1) yakkety; urgency=low
 
  -- Saikrishna Arcot <saiarcot895@gmail.com>  Thu, 16 Jun 2016 14:41:56 -0400
 
-chromium-browser (53.0.2767.4-0ubuntu1~ppa1~16.10.1) yakkety; urgency=low
+chromium-browser (53.0.2767.4-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * Remove references to Precise and GYP from debian/rules.
   * New upstream version 53.0.2767.4
   * Updated patches.
 
- -- Saikrishna Arcot <saiarcot895@gmail.com>  Wed, 15 Jun 2016 20:43:58 -0400
+ -- Saikrishna Arcot <saiarcot895@gmail.com>  Wed, 15 Jun 2016 20:43:56 -0400
 
 chromium-browser (53.0.2763.0-0ubuntu1~ppa4~16.04.1) xenial; urgency=low
 
