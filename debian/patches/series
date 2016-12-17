@@ -65,3 +65,4 @@ gn-fix-for-optional-neon.patch
 setopaque.patch
 iridium-manpage.patch
 iridium-fix-browserwindowtitleformat.patch
+iridium-welcomepage.patch
