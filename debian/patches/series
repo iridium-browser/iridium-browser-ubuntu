@@ -54,13 +54,10 @@ trusty-change-compiler.patch
 #wayland-0017-switch-to-stdint.patch
 ### END Wayland patches ###
 gn-fix-for-optional-neon.patch
-<<<<<<< 3a538c39e41d7562255ccbac87d6a2f9d899e6f1
 gn-nacl-use-gcc-toolchain.patch
 nacl-dont-use-icf.patch
 #linux45-madvfree
 dont-assume-neon-exists.patch
-=======
-setopaque.patch
 iridium-manpage.patch
 iridium-fix-browserwindowtitleformat.patch
->>>>>>> Iridium: Rename everything to Iridium
+iridium-welcomepage.patch
