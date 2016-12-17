@@ -53,29 +53,20 @@ Package: iridium-browser
 Architecture: armhf arm64 i386 amd64
 Pre-Depends: dpkg (>= 1.15.6)
 Depends: ${shlibs:Depends}, ${misc:Depends},
-	xdg-utils,
-	iridium-codecs-ffmpeg-extra (= ${binary:Version}) | iridium-codecs-ffmpeg (= ${binary:Version})
-Recommends: iridium-browser-l10n, libva2 | libva1, libva-x11-2 | libva-x11-1, libva-wayland2 | libva-wayland1
+	xdg-utils
+Replaces: iridium-browser-ffmpeg-extra (<< 54.0-0ubuntu1~iridium1~),
+    iridium-codecs-ffmpeg (<< 54.0-0ubuntu1~iridium1~),
+    iridium-browser-l10n (<< 54.0-0ubuntu1~iridium1~)
+Breaks: iridium-browser-ffmpeg-extra (<< 54.0-0ubuntu1~iridium1~),
+    iridium-codecs-ffmpeg (<< 54.0-0ubuntu1~iridium1~),
+    iridium-browser-l10n (<< 54.0-0ubuntu1~iridium1~)
+Recommends: libva2 | libva1, libva-x11-2 | libva-x11-1, libva-wayland2 | libva-wayland1
 Provides: www-browser
 Description: Iridium browser
  Iridium is an open-source browser project that aims to build a safer, faster,
  and more stable way for all Internet users to experience the web.
  .
  This package contains the Iridium browser
-
-Package: iridium-browser-l10n
-Architecture: all
-Pre-Depends: dpkg (>= 1.15.6)
-Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (= ${binary:Version})
-Description: iridium-browser language packages
- Iridium an open-source browser project that aims to build a safer, faster,
- and more stable way for all Internet users to experience the web.
- .
- This package contains language packages for 55 languages:
- am, ar, bg, bn, ca, ca@valencia, cs, da, de, el, en-GB, es, es-419, et, eu,
- fa, fi, fil, fr, gl, gu, he, hi, hr, hu, id, it, ja, kn, ko, lt, lv, ml, mr,
- nb, nl, pl, pt-BR, pt-PT, ro, ru, sk, sl, sr, sv, sw, ta, te, th, tr, ug, uk,
- vi, zh-CN, zh-TW
 
 Package: iridium-chromedriver
 Architecture: armhf arm64 i386 amd64
@@ -88,31 +79,3 @@ Description: ChromeDriver
  This package contains ChromeDriver, a standalone server which implements
  WebDriver's wire protocol.
 
-Package: iridium-codecs-ffmpeg
-Architecture: armhf arm64 i386 amd64
-Pre-Depends: dpkg (>= 1.15.6)
-Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (= ${binary:Version})
-Conflicts: iridium-codecs-ffmpeg-extra
-Replaces: iridium-codecs-ffmpeg-extra
-Description: Free ffmpeg codecs for the Iridium Browser
- Iridium is an open-source browser project that aims to build a safer, faster,
- and more stable way for all Internet users to experience the web.
- .
- This package contains the multi-threaded ffmpeg codecs needed for the HTML5
- <audio> and <video> tags. Only the free ogg, vorbis and theora codecs are
- included. See iridium-codecs-ffmpeg-extra for additional codecs
-
-Package: iridium-codecs-ffmpeg-extra
-Architecture: armhf arm64 i386 amd64
-Pre-Depends: dpkg (>= 1.15.6)
-Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (= ${binary:Version})
-Conflicts: iridium-codecs-ffmpeg
-Replaces: iridium-codecs-ffmpeg
-Description: Extra ffmpeg codecs for the Iridium Browser
- Iridium is an open-source browser project that aims to build a safer, faster,
- and more stable way for all Internet users to experience the web.
- .
- This package contains the multi-threaded ffmpeg codecs needed for the HTML5
- <audio> and <video> tags. In addition to the patent-free ogg, vorbis and theora codecs,
- aac/ac3/mpeg4audio/h264/mov/mp3 are also included.
- See iridium-codecs-ffmpeg if you prefer only the patent-free codecs
