@@ -415,7 +415,6 @@ BUILT_UNUSED_MATCH += ^usr/lib/iridium-browser/xdg-\(mime\|settings\)$$
 INDEP_MATCH = ^usr/lib/iridium-browser/.\*\(?\!\<pseudo-\)locales/.\*.pak$$
 
 PACKAGED_NOT_FROM_TREE_MATCH  = ^usr/share/applications/iridium-browser.desktop$$
-PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/apport/package-hooks/iridium-browser.py$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/iridium-browser/README.source$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/iridium-browser/TODO.Debian$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/iridium-browser/copyright.problems.gz$$
