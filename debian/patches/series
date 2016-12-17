@@ -47,3 +47,4 @@ specify-gcc-standard.patch
 fix-wayland-build.patch
 iridium-manpage.patch
 iridium-fix-browserwindowtitleformat.patch
+iridium-welcomepage.patch
