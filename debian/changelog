@@ -1,3 +1,9 @@
+iridium-browser (54.0-0ubuntu1~iridium4) trusty; urgency=medium
+
+  * Iridium 54.0
+
+ -- Iridium Linux Team <iridium-linux@iridiumbrowser.de>  Thu, 22 Dec 2016 10:31:42 +0100
+
 chromium-browser (54.0.2840.8-0ubuntu1~ppa1~16.04.1) xenial; urgency=low
 
   * New upstream version 54.0.2840.8
