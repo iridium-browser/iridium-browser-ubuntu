@@ -5,4 +5,4 @@ embedded-library
 
 # Small, vetted binary that's needed to drop capabilities from the
 # network-facing code paths.
-setuid-binary usr/lib/chromium-browser/chrome-sandbox 4755 root/root
+setuid-binary usr/lib/iridium-browser/chrome-sandbox 4755 root/root
