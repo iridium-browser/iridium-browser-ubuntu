@@ -12,7 +12,7 @@ Index: dev/chrome/common/chrome_paths.cc
      FILE_PATH_LITERAL("latest-component-updated-flash");
 +
 +const base::FilePath::CharType kFilepathSinglePrefExtensionsNew[] =
-+    FILE_PATH_LITERAL("/usr/share/chromium-browser/extensions");
++    FILE_PATH_LITERAL("/usr/share/iridium-browser/extensions");
  #endif  // defined(OS_LINUX)
  
  #if defined(OS_CHROMEOS)
@@ -21,7 +21,7 @@ Index: dev/chrome/common/chrome_paths.cc
  #else
        cur = base::FilePath(FILE_PATH_LITERAL("/etc/chromium/policies"));
 +      if (!base::PathExists(cur)) {
-+        cur = base::FilePath(FILE_PATH_LITERAL("/etc/chromium-browser/policies"));
++        cur = base::FilePath(FILE_PATH_LITERAL("/etc/iridium-browser/policies"));
 +      }
  #endif
        break;
@@ -43,7 +43,7 @@ Index: dev/chrome/common/chrome_paths.cc
            "/etc/chromium/native-messaging-hosts"));
 +      if (!base::PathExists(cur))
 +        cur = base::FilePath(FILE_PATH_LITERAL(
-+            "/etc/chromium-browser/native-messaging-hosts"));
++            "/etc/iridium-browser/native-messaging-hosts"));
 +
  #endif
  #endif  // !defined(OS_MACOSX)
