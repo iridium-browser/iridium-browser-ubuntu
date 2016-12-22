@@ -138,8 +138,8 @@ subst_files = \
 	debian/$(DEBIAN_NAME).sh \
 	$(NULL)
 
-DEB_DH_SHLIBDEPS_ARGS_chromium-codecs-ffmpeg := -ldebian/chromium-codecs-ffmpeg/$(LIB_DIR)
-DEB_DH_SHLIBDEPS_ARGS_chromium-codecs-ffmpeg-extra := -ldebian/chromium-codecs-ffmpeg-extra/$(LIB_DIR)
+DEB_DH_SHLIBDEPS_ARGS_chromium-codecs-ffmpeg := -ldebian/iridium-codecs-ffmpeg/$(LIB_DIR)
+DEB_DH_SHLIBDEPS_ARGS_chromium-codecs-ffmpeg-extra := -ldebian/iridium-codecs-ffmpeg-extra/$(LIB_DIR)
 
 # enable compile-time dependency on gnome-keyring
 # TODO: do this?
@@ -184,8 +184,8 @@ build:
 	dh $@ --sourcedirectory=$(SRC_DIR) --builddirectory=$(SRC_DIR)/out/$(BUILD_TYPE)
 
 # BZR build-deb rule
-get-packaged-orig-source: URL=https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$(ORIG_VERSION).tar.xz
-get-packaged-orig-source: SUMURL=https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$(ORIG_VERSION).tar.xz.hashes
+get-packaged-orig-source: URL=https://downloads.iridiumbrowser.de/source/iridium-browser-$(ORIG_VERSION).tar.xz
+get-packaged-orig-source: SUMURL=https://downloads.iridiumbrowser.de/source/iridium-browser-$(ORIG_VERSION).tar.xz.hashes
 get-packaged-orig-source: DEST_FILENAME=iridium-browser_$(ORIG_VERSION).orig.tar.xz
 get-packaged-orig-source:
 	@set -eux
@@ -223,14 +223,10 @@ override_dh_builddeb:
 	dh_builddeb -- -Zxz
 
 override_dh_shlibdeps:
-<<<<<<< 87d283459d0625a0ffdd623ffccf46dfa70577e0
-	dh_shlibdeps -l$(CURDIR)/debian/chromium-browser/usr/lib/chromium-browser/ 2>&1 | grep -v "dpkg-shlibdeps: warning: can't extract name and version from library name" || true
-=======
-	dh_shlibdeps -l$(CURDIR)/debian/iridium-browser/usr/lib/iridium-browser/ |grep -v "dpkg-shlibdeps: warning: can't extract name and version from library name" || true
->>>>>>> Iridium: Rename everything to Iridium
+	dh_shlibdeps -l$(CURDIR)/debian/iridium-browser/usr/lib/iridium-browser/ 2>&1 | grep -v "dpkg-shlibdeps: warning: can't extract name and version from library name" || true
 
 override_dh_install-arch: TRASH := .deps gen obj obj.host obj.target \*.lock build.\* .landmines mksnapshot\* protoc pyproto re2c resources yasm \*.TOC product_logo_\*png gen\* lib/\* lib libvpx_obj_int_extract .ninja\* chrome-wrapper \*.breakpad.\* java_mojo dump_syms browser_test_resources ar_sample_test_driver unittests app_streaming/dev locales remoting_locales v8_build_config.json v8_context_snapshot_generator args.gn gn \*.ninja angledata brotli character_data_generator \*.pak.info flatc \*.service libVkLayer_\* libwidevinecdm\*
-override_dh_install-arch: debian/chromium-browser.sh
+override_dh_install-arch: debian/iridium-browser.sh
 	@set -eux
 	# Two stages: Install out of source tree. Copy to packaging.
 	mkdir -p debian/tmp/$(LIB_DIR)
@@ -243,95 +239,57 @@ override_dh_install-arch: debian/chromium-browser.sh
 	cp -a $(SRC_DIR)/chrome/app/theme/chromium/product_logo_48.png debian/$(DEBIAN_NAME)/usr/share/pixmaps/$(DEBIAN_NAME).png
 	for size in 22 24 48 64 128 256 ; do \
 		if test -f "chrome/app/theme/chromium/product_logo_$$size.png"; then \
-			dh_installdirs --package=chromium-browser usr/share/icons/hicolor/$${size}x$${size}/apps ; \
+			dh_installdirs --package=iridium-browser usr/share/icons/hicolor/$${size}x$${size}/apps ; \
 			cp -a chrome/app/theme/chromium/product_logo_$$size.png  \
-				debian/chromium-browser/usr/share/icons/hicolor/$${size}x$${size}/apps/chromium-browser.png ; \
+				debian/iridium-browser/usr/share/icons/hicolor/$${size}x$${size}/apps/iridium-browser.png ; \
 		else \
 			echo "There is no size $${size} icon. We expected one."; \
 		fi; \
 	done
 	mkdir -p debian/$(DEBIAN_NAME)/usr/share/icons/hicolor/scalable/apps
-<<<<<<< 87d283459d0625a0ffdd623ffccf46dfa70577e0
-	cp -a debian/chromium-browser.svg debian/$(DEBIAN_NAME)/usr/share/icons/hicolor/scalable/apps
-	
-	##### Copy installed to package ####
-	(cd debian/tmp/$(LIB_DIR); tar cf - --exclude=chromedriver .;) | (cd debian/chromium-browser/$(LIB_DIR); tar xvf -;)
-=======
 	cp -a debian/iridium-browser.svg debian/$(DEBIAN_NAME)/usr/share/icons/hicolor/scalable/apps
-
+	
 	##### Copy installed to package ####
 	(cd debian/tmp/$(LIB_DIR); tar cf - --exclude=chromedriver .;) | (cd debian/iridium-browser/$(LIB_DIR); tar xvf -;)
-#	# prev missed "libs"
-#	(cd debian/tmp/$(LIB_DIR)/libs; tar cf - .;) | (cd debian/iridium-browser/$(LIB_DIR)/libs/; tar xvf -;)
-	
-ifeq (1,$(COMPONENT_SHARED_LIB_BUILD))
-#	# Set the directory for looking up component libraries.
-#	find debian/*/$(LIB_DIR)/libs             -type f -name \*.so             -execdir chrpath --replace "\$$ORIGIN" {} \;
-#	find debian/*/$(LIB_DIR)      -maxdepth 1 -type f -name \*.so             -execdir chrpath --replace "\$$ORIGIN/libs" {} \;
-#	find debian/*/$(LIB_DIR)      -maxdepth 1 -type f             -executable -execdir chrpath --replace "\$$ORIGIN/libs" {} \;
-endif
-	
-	# Launcher script
-	cp -a debian/$(DEBIAN_NAME).sh debian/$(DEBIAN_NAME)/usr/bin/$(DEBIAN_NAME)
-	chmod 755 debian/$(DEBIAN_NAME)/usr/bin/$(DEBIAN_NAME)
->>>>>>> Iridium: Rename everything to Iridium
 	
 	# Preferences
-	install -T -m 644 debian/chromium-browser.default debian/chromium-browser/etc/chromium-browser/default
+	install -T -m 644 debian/iridium-browser.default debian/iridium-browser/etc/iridium-browser/default
 	
 	# Rename the binary from chrome to $(DEBIAN_NAME), this is required
 	# as chromium dereferences all symlinks before starting its children
 	# making the Gnome System Monitor confused with icons
-	mv debian/chromium-browser/$(LIB_DIR)/chrome debian/chromium-browser/$(LIB_DIR)/chromium-browser
+	mv debian/iridium-browser/$(LIB_DIR)/chrome debian/iridium-browser/$(LIB_DIR)/iridium-browser
 	
 	# Launcher script
-	install -T -m 755 debian/chromium-browser.sh debian/chromium-browser/usr/bin/chromium-browser
+	install -T -m 755 debian/iridium-browser.sh debian/iridium-browser/usr/bin/iridium-browser
 	
-<<<<<<< 87d283459d0625a0ffdd623ffccf46dfa70577e0
 	# Generate the manpage and install it
-	mkdir -p debian/chromium-browser/usr/share/man/man1
-	sed \
-	  -e "s:/@@PACKAGE@@:/chromium:g" \
-	  -e "s:@@PACKAGE@@:chromium-browser:g" \
-	  -e "s:@@MENUNAME@@:Chromium:g" \
-	  chrome/app/resources/manpage.1.in \
-	  > debian/chromium-browser/usr/share/man/man1/chromium-browser.1
-	gzip -9n debian/chromium-browser/usr/share/man/man1/chromium-browser.1
-	
-	dh_installdirs --package=chromium-codecs-ffmpeg usr/lib/chromium-browser
-	cp $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-std/libffmpeg.so debian/chromium-codecs-ffmpeg/usr/lib/chromium-browser/
-	
-	dh_installdirs --package=chromium-codecs-ffmpeg-extra usr/lib/chromium-browser
-	cp $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-extra/libffmpeg.so debian/chromium-codecs-ffmpeg-extra/usr/lib/chromium-browser/
-=======
-	# Manpage is for wrong program name, and it's in a weird place.  Use and destroy.
 	mkdir -p debian/iridium-browser/usr/share/man/man1
-	mv debian/iridium-browser/$(LIB_DIR)/chrome.1 debian/iridium-browser/usr/share/man/man1/$(DEBIAN_NAME).1
-	gzip -9 debian/iridium-browser/usr/share/man/man1/iridium-browser.1
+	sed \
+	  -e "s:/@@PACKAGE@@:/iridium:g" \
+	  -e "s:@@PACKAGE@@:iridium-browser:g" \
+	  -e "s:@@MENUNAME@@:Iridium:g" \
+	  chrome/app/resources/manpage.1.in \
+	  > debian/iridium-browser/usr/share/man/man1/iridium-browser.1
+	gzip -9n debian/iridium-browser/usr/share/man/man1/iridium-browser.1
 	
-	# Locales: only keep en-US in the main deb
-	# Discard everything except en-US
-	find debian/iridium-browser/$(LIB_DIR)/locales -type f \! -name en-US.pak -print -delete
->>>>>>> Iridium: Rename everything to Iridium
+	dh_installdirs --package=iridium-codecs-ffmpeg usr/lib/iridium-browser
+	cp $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-std/libffmpeg.so debian/iridium-codecs-ffmpeg/usr/lib/iridium-browser/
+	
+	dh_installdirs --package=iridium-codecs-ffmpeg-extra usr/lib/iridium-browser
+	cp $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-extra/libffmpeg.so debian/iridium-codecs-ffmpeg-extra/usr/lib/iridium-browser/
 	
 	dh_install -a
 
 override_dh_install-indep:
 	@set -eux
 	dh_install -i
-<<<<<<< 87d283459d0625a0ffdd623ffccf46dfa70577e0
-	(cd $(SRC_DIR)/out/$(BUILD_TYPE) && tar -cf - $$(find *locales -type f ! -name en-US.pak) --dereference;) | (cd debian/chromium-browser-l10n/$(LIB_DIR) && tar xvf -;)
-	install --directory debian/chromium-browser/etc/chromium-browser/customizations
-	install --owner=root --mode=0644 --no-target-directory debian/chromium-browser-customization-example debian/chromium-browser/etc/chromium-browser/customizations/00-example
+	(cd $(SRC_DIR)/out/$(BUILD_TYPE) && tar -cf - $$(find *locales -type f ! -name en-US.pak) --dereference;) | (cd debian/iridium-browser-l10n/$(LIB_DIR) && tar xvf -;)
+	install --directory debian/iridium-browser/etc/iridium-browser/customizations
+	install --owner=root --mode=0644 --no-target-directory debian/iridium-browser-customization-example debian/iridium-browser/etc/iridium-browser/customizations/00-example
 
 override_dh_auto_test:
 	# No tests to run
-=======
-	install --directory debian/iridium-browser/etc/iridium-browser/customizations
-	install --owner=root --mode=0644 --no-target-directory debian/iridium-browser-customization-example debian/iridium-browser/etc/iridium-browser/customizations/00-example
-	install --owner=root --mode=0644 --no-target-directory debian/iridium-browser-customization-flash-staleness debian/iridium-browser/etc/iridium-browser/customizations/09-flash-staleness-check
-	find debian/iridium-browser-l10n/$(LIB_DIR)/locales -name en-US.pak -print -delete
->>>>>>> Iridium: Rename everything to Iridium
 
 override_dh_clean:
 	@set -eux
@@ -361,42 +319,6 @@ debian/iridium-browser.sh: debian/iridium-browser.sh.in
 	    -e 's/@UPSTREAM_VERSION@/$(DEBIAN_UPSTREAM_VERSION)/g' \
 	    $< > $@
 
-<<<<<<< 87d283459d0625a0ffdd623ffccf46dfa70577e0
-=======
-configure: configure-stamp
-configure-stamp: debian/iridium-browser.sh build-stamp-gn
-	@set -eux
-	if [ -d chromium-$(DEBIAN_UPSTREAM_VERSION) ]; then \
-		mv chromium-$(DEBIAN_UPSTREAM_VERSION)/* . ; \
-		rm -r chromium-$(DEBIAN_UPSTREAM_VERSION); \
-	fi
-	
-	# Add symlink to Native Client toolchain
-	ln -s /usr/lib/$(DEB_HOST_MULTIARCH)/native-client/ native_client/toolchain
-	
-	$(SRC_DIR)/gn gen $(SRC_DIR)/out/$(BUILD_TYPE) --args='$(GN_DEFINES) $(BROWSER_GN_DEFINES)'
-	
-	touch $@
-
-build-stamp: configure-stamp
-	@set -eux
-	$(NINJA) $(BUILD_ARGS) $(BUILD_TARGETS)
-	touch $@
-
-configure-stamp-ffmpeg-%: GYP_DEFINES += $(FFMPEG_MT_$(subst std,STD,$(subst extra,EXTRA,$*))_GYP_DEFINES) $(FFMPEG_MT_GYP_DEFINES)
-configure-stamp-ffmpeg-%: build-stamp-gn
-	@set -eux
-	$(SRC_DIR)/gn gen $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-$* --args='$(FFMPEG_MT_$(subst std,STD,$(subst extra,EXTRA,$*))_GN_DEFINES) $(FFMPEG_MT_GN_DEFINES)'
-	touch $@
-
-build-stamp-ffmpeg-%: configure-stamp-ffmpeg-%
-	@set -eux
-	$(NINJA) -v -C $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-$* third_party/ffmpeg
-	mkdir -p debian/tmp-$*/$(LIB_DIR)
-	cp $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-$*/libffmpeg.so $(CURDIR)/debian/tmp-$*/$(LIB_DIR)
-	touch $@
-
->>>>>>> Iridium: Rename everything to Iridium
 # These are (leading-slash-less) files that are created by upstream builder,
 # but intentionally not packaged.  The should match very specifically so we
 # know they only match things we should ignore. No false negatives, plz.
@@ -405,11 +327,11 @@ build-stamp-ffmpeg-%: configure-stamp-ffmpeg-%
 # used later to join expressions in alternation; a dot should suffice.
 # Useful: https://code.google.com/p/chromium/codesearch#search/q=package:chromium
 ## webkit tests
-#BUILT_UNUSED_MATCH  = ^usr/lib/chromium-browser/AHEM____.TTF$$
-#BUILT_UNUSED_MATCH += ^usr/lib/chromium-browser/fonts.conf$$
-#BUILT_UNUSED_MATCH += ^usr/lib/chromium-browser/libTestNetscapePlugIn.so$$
-#BUILT_UNUSED_MATCH += ^usr/lib/chromium-browser/plugins/libTestNetscapePlugIn.so$$
-#BUILT_UNUSED_MATCH += ^usr/lib/chromium-browser/ImageDiff$$
+#BUILT_UNUSED_MATCH  = ^usr/lib/iridium-browser/AHEM____.TTF$$
+#BUILT_UNUSED_MATCH += ^usr/lib/iridium-browser/fonts.conf$$
+#BUILT_UNUSED_MATCH += ^usr/lib/iridium-browser/libTestNetscapePlugIn.so$$
+#BUILT_UNUSED_MATCH += ^usr/lib/iridium-browser/plugins/libTestNetscapePlugIn.so$$
+#BUILT_UNUSED_MATCH += ^usr/lib/iridium-browser/ImageDiff$$
 ## xdg-utils install dep
 
 BUILT_UNUSED_MATCH += ^usr/lib/iridium-browser/xdg-\(mime\|settings\)$$
@@ -417,6 +339,7 @@ BUILT_UNUSED_MATCH += ^usr/lib/iridium-browser/xdg-\(mime\|settings\)$$
 INDEP_MATCH = ^usr/lib/iridium-browser/.\*\(?\!\<pseudo-\)locales/.\*.pak$$
 
 PACKAGED_NOT_FROM_TREE_MATCH  = ^usr/share/applications/iridium-browser.desktop$$
+PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/apport/package-hooks/iridium-browser.py$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/iridium-browser/README.source$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/iridium-browser/TODO.Debian$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/iridium-browser/copyright.problems.gz$$
