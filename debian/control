@@ -1,9 +1,9 @@
-Source: chromium-browser
+Source: iridium-browser
 Section: web
 Priority: optional
-Maintainer: Saikrishna Arcot <saiarcot895@gmail.com>
+Maintainer: Iridium Linux Team <iridium-linux@iridiumbrowser.de>
 XSBC-Original-Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
-Homepage: http://code.google.com/chromium/
+Homepage: https://iridiumbrowser.de/
 Build-Depends: debhelper (>= 9),
 		dh-buildinfo,
 		pkg-config,
@@ -49,35 +49,26 @@ Build-Depends: debhelper (>= 9),
 		default-jre-headless
 Standards-Version: 3.9.5
 
-Package: chromium-browser
+Package: iridium-browser
 Architecture: armhf arm64 i386 amd64
 Pre-Depends: dpkg (>= 1.15.6)
 Depends: ${shlibs:Depends}, ${misc:Depends},
 	xdg-utils,
-	chromium-codecs-ffmpeg-extra (= ${binary:Version}) | chromium-codecs-ffmpeg (= ${binary:Version})
-Recommends: chromium-browser-l10n, libva2 | libva1, libva-x11-2 | libva-x11-1, libva-wayland2 | libva-wayland1
-Suggests: webaccounts-chromium-extension,
-	unity-chromium-extension,
-	chromiumflashplugin
-Provides: www-browser, chromium-browser-inspector
-Replaces: chromium-browser-inspector
-Conflicts: chromium-browser-inspector
-Description: Chromium browser
- Chromium is an open-source browser project that aims to build a safer, faster,
+	iridium-codecs-ffmpeg-extra (= ${binary:Version}) | iridium-codecs-ffmpeg (= ${binary:Version})
+Recommends: iridium-browser-l10n, libva2 | libva1, libva-x11-2 | libva-x11-1, libva-wayland2 | libva-wayland1
+Provides: www-browser
+Description: Iridium browser
+ Iridium is an open-source browser project that aims to build a safer, faster,
  and more stable way for all Internet users to experience the web.
  .
- Chromium serves as a base for Google Chrome, which is Chromium rebranded (name
- and logo) with very few additions such as usage tracking and an auto-updater
- system.
- .
- This package contains the Chromium browser
+ This package contains the Iridium browser
 
-Package: chromium-browser-l10n
+Package: iridium-browser-l10n
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6)
-Depends: ${shlibs:Depends}, ${misc:Depends}, chromium-browser (= ${binary:Version})
-Description: chromium-browser language packages
- Chromium is an open-source browser project that aims to build a safer, faster,
+Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (= ${binary:Version})
+Description: iridium-browser language packages
+ Iridium an open-source browser project that aims to build a safer, faster,
  and more stable way for all Internet users to experience the web.
  .
  This package contains language packages for 55 languages:
@@ -86,42 +77,42 @@ Description: chromium-browser language packages
  nb, nl, pl, pt-BR, pt-PT, ro, ru, sk, sl, sr, sv, sw, ta, te, th, tr, ug, uk,
  vi, zh-CN, zh-TW
 
-Package: chromium-chromedriver
+Package: iridium-chromedriver
 Architecture: armhf arm64 i386 amd64
 Pre-Depends: dpkg (>= 1.15.6)
-Depends: ${shlibs:Depends}, ${misc:Depends}, chromium-browser (= ${binary:Version})
+Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (= ${binary:Version})
 Description: ChromeDriver
- Chromium is an open-source browser project that aims to build a safer, faster,
+ Iridium is an open-source browser project that aims to build a safer, faster,
  and more stable way for all Internet users to experience the web.
  .
  This package contains ChromeDriver, a standalone server which implements
  WebDriver's wire protocol.
 
-Package: chromium-codecs-ffmpeg
+Package: iridium-codecs-ffmpeg
 Architecture: armhf arm64 i386 amd64
 Pre-Depends: dpkg (>= 1.15.6)
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Conflicts: chromium-codecs-ffmpeg-extra
-Replaces: chromium-codecs-ffmpeg-extra
-Description: Free ffmpeg codecs for the Chromium Browser
- Chromium is an open-source browser project that aims to build a safer, faster,
+Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (= ${binary:Version})
+Conflicts: iridium-codecs-ffmpeg-extra
+Replaces: iridium-codecs-ffmpeg-extra
+Description: Free ffmpeg codecs for the Iridium Browser
+ Iridium is an open-source browser project that aims to build a safer, faster,
  and more stable way for all Internet users to experience the web.
  .
  This package contains the multi-threaded ffmpeg codecs needed for the HTML5
  <audio> and <video> tags. Only the free ogg, vorbis and theora codecs are
- included. See chromium-codecs-ffmpeg-extra for additional codecs
+ included. See iridium-codecs-ffmpeg-extra for additional codecs
 
-Package: chromium-codecs-ffmpeg-extra
+Package: iridium-codecs-ffmpeg-extra
 Architecture: armhf arm64 i386 amd64
 Pre-Depends: dpkg (>= 1.15.6)
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Conflicts: chromium-codecs-ffmpeg
-Replaces: chromium-codecs-ffmpeg
-Description: Extra ffmpeg codecs for the Chromium Browser
- Chromium is an open-source browser project that aims to build a safer, faster,
+Depends: ${shlibs:Depends}, ${misc:Depends}, iridium-browser (= ${binary:Version})
+Conflicts: iridium-codecs-ffmpeg
+Replaces: iridium-codecs-ffmpeg
+Description: Extra ffmpeg codecs for the Iridium Browser
+ Iridium is an open-source browser project that aims to build a safer, faster,
  and more stable way for all Internet users to experience the web.
  .
  This package contains the multi-threaded ffmpeg codecs needed for the HTML5
  <audio> and <video> tags. In addition to the patent-free ogg, vorbis and theora codecs,
  aac/ac3/mpeg4audio/h264/mov/mp3 are also included.
- See chromium-codecs-ffmpeg if you prefer only the patent-free codecs
+ See iridium-codecs-ffmpeg if you prefer only the patent-free codecs

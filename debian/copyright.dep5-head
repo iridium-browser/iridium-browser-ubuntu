@@ -1,7 +1,7 @@
 Format-Specification: http://svn.debian.org/wsvn/dep/web/deps/dep5.mdwn?op=file&rev=135
-Name: Chromium Browser
-Maintainer: Chromium Ubuntu Team <chromium@lists.ubuntu.com>
-Source: http://src.chromium.org/viewvc/chrome/
+Name: Iridium Browser
+Maintainer: Iridium Linux Team <iridium-linux@iridiumbrowser.de>
+Source: https://git.iridiumbrowser.de/cgit.cgi/iridium-browser/
 
 Files: debian/*
 Copyright: 2009, Fabien Tassin <fta@ubuntu.com>

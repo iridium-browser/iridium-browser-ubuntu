@@ -3,10 +3,10 @@
 <default-apps>
   <web-browsers>
     <web-browser>
-      <name>Chromium</name>
-      <executable>chromium-browser</executable>
-      <command>chromium-browser %s</command>
-      <icon-name>chromium-browser</icon-name>
+      <name>Iridium</name>
+      <executable>iridium-browser</executable>
+      <command>iridium-browser %s</command>
+      <icon-name>iridium-browser</icon-name>
       <run-in-terminal>false</run-in-terminal>
       <netscape-remote>false</netscape-remote>
       <!--

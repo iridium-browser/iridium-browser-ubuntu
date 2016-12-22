@@ -1,0 +1,9 @@
+usr/bin
+etc/iridium-browser
+etc/iridium-browser/customizations
+usr/share/pixmaps
+usr/share/icons/hicolor/scalable/apps
+usr/share/iridium-browser
+usr/lib/iridium-browser/plugins
+etc/iridium-browser/policies/managed
+etc/iridium-browser/policies/recommended
