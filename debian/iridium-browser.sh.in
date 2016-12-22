@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Chromium launcher
+# Iridium launcher
 
 # Authors:
+#  Simon Eisenmann <simon@longsleep.org>
 #  Chad Miller <chad.miller@canonical.com>
 #  Fabien Tassin <fta@sofaraway.org>
 # License: GPLv2 or later
@@ -50,12 +51,12 @@ if grep -E -w ^flags\\s\*:.\*sse /proc/cpuinfo >/dev/null; then
 fi
 export CPU_FEATURES_TESTED=1
 
-readonly APPNAME=chromium-browser
-LIBDIR=/usr/lib/chromium-browser
+readonly APPNAME=iridium-browser
+LIBDIR=/usr/lib/iridium-browser
 GDB=/usr/bin/gdb
 readonly BUILD_DIST="@BUILD_DIST@"
 readonly UPSTREAM_VERSION="@UPSTREAM_VERSION@"
-if test -x "${LIBDIR}/${UPSTREAM_VERSION}"/chromium-browser; then
+if test -x "${LIBDIR}/${UPSTREAM_VERSION}"/iridium-browser; then
 	LIBDIR="${LIBDIR}/${UPSTREAM_VERSION}"
 fi
 readonly LIBDIR
@@ -69,8 +70,8 @@ usage () {
   echo "        --no-touch-pinch        Disable pinch gestures."
   echo
   echo " Other supported options are:"
-  MANWIDTH=80 man chromium-browser | sed -e '1,/OPTIONS/d; /ENVIRONMENT/,$d'
-  echo " See 'man chromium-browser' for more details"
+  MANWIDTH=80 man iridium-browser | sed -e '1,/OPTIONS/d; /ENVIRONMENT/,$d'
+  echo " See 'man iridium-browser' for more details"
 }
 
 # Work around crbug.com/415681
@@ -86,16 +87,16 @@ if test -d /etc/$APPNAME/customizations; then
 		. "$f"
 	done < <(run-parts --list -- /etc/$APPNAME/customizations)
 fi
-test -f ~/.chromium-browser.init && . ~/.chromium-browser.init
+test -f ~/.iridium-browser.init && . ~/.iridium-browser.init
 
-# Prefer user defined CHROMIUM_USER_FLAGS (fron env) over system
+# Prefer user defined IRIDIUM_USER_FLAGS (fron env) over system
 # default CHROMIUM_FLAGS (from /etc/$APPNAME/default)
-if test -n "$CHROMIUM_USER_FLAGS"; then
-	echo "WARNING: \$CHROMIUM_USER_FLAGS is deprecated. Instead, update CHROMIUM_FLAGS in ~/.chromium-browser.init or place configuration for all sers in /etc/$APPNAME/customizations/ ."
-	echo "WARNING: Ignoring system flags because \$CHROMIUM_USER_FLAGS is set."
+if test -n "$IRIDIUM_USER_FLAGS"; then
+	echo "WARNING: \$IRIDIUM_USER_FLAGS is deprecated. Instead, update CHROMIUM_FLAGS in ~/.iridium-browser.init or place configuration for all sers in /etc/$APPNAME/customizations/ ."
+	echo "WARNING: Ignoring system flags because \$IRIDIUM_USER_FLAGS is set."
 	echo "CHROMIUM_FLAGS=${CHROMIUM_FLAGS}"
-	echo "CHROMIUM_USER_FLAGS=${CHROMIUM_USER_FLAGS}"
-	CHROMIUM_FLAGS=${CHROMIUM_USER_FLAGS}
+	echo "IRIDIUM_USER_FLAGS=${IRIDIUM_USER_FLAGS}"
+	CHROMIUM_FLAGS=${IRIDIUM_USER_FLAGS}
 fi
 
 # FFmpeg needs to know where its libs are located
@@ -187,7 +188,7 @@ if [ $want_debug -eq 1 ] ; then
   echo "#     LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
   echo "#                PATH=$PATH"
   echo "#            GTK_PATH=$GTK_PATH"
-  echo "# CHROMIUM_USER_FLAGS=$CHROMIUM_USER_FLAGS"
+  echo "# IRIDIUM_USER_FLAGS=$IRIDIUM_USER_FLAGS"
   echo "#      CHROMIUM_FLAGS=$CHROMIUM_FLAGS"
   echo "$GDB $LIBDIR/$APPNAME -x $tmpfile"
   $GDB "$LIBDIR/$APPNAME" -x $tmpfile
