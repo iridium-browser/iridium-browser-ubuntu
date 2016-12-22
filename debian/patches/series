@@ -1,7 +1,8 @@
 #gyp-make-generator-reenabled
+iridium-elf-productname.patch
 title-bar-default-system.patch-v35
 #third-party-cookies-off-by-default.patch
-search-credit.patch
+#search-credit.patch
 chromium_useragent.patch
 chromedriver_revision.patch
 configuration-directory.patch
@@ -12,7 +13,7 @@ arm-neon.patch
 3-chrome-xid.patch
 #5-desktop-integration-settings.patch
 6-passwordless-install-support.patch
-7-npapi-permission-not-defaults-to-unauthorized.patch
+#7-npapi-permission-not-defaults-to-unauthorized.patch
 #breakpad
 #gsettings-display-scaling
 touch-v35
@@ -25,7 +26,7 @@ flash-redirection
 #mir-ozone-module
 enable_vaapi_on_linux.diff
 fix_building_widevinecdm_with_chromium.patch
-widevine-other-locations
+#widevine-other-locations
 specify-max-resolution.patch
 nacl-loosen-fd-check.patch
 tcmalloc-add-support-for-arm64.patch
@@ -53,7 +54,13 @@ trusty-change-compiler.patch
 #wayland-0017-switch-to-stdint.patch
 ### END Wayland patches ###
 gn-fix-for-optional-neon.patch
+<<<<<<< 3a538c39e41d7562255ccbac87d6a2f9d899e6f1
 gn-nacl-use-gcc-toolchain.patch
 nacl-dont-use-icf.patch
 #linux45-madvfree
 dont-assume-neon-exists.patch
+=======
+setopaque.patch
+iridium-manpage.patch
+iridium-fix-browserwindowtitleformat.patch
+>>>>>>> Iridium: Rename everything to Iridium

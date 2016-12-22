@@ -1,0 +1,15 @@
+Index: iridium-ubuntu-build/chrome/BUILD.gn
+===================================================================
+--- iridium-ubuntu-build.orig/chrome/BUILD.gn
++++ iridium-ubuntu-build/chrome/BUILD.gn
+@@ -1678,8 +1678,8 @@ if (is_linux) {
+       filename = "google-chrome"
+       confdir = "google-chrome"
+     } else {
+-      name = "Chromium"
+-      filename = "chromium-browser"
++      name = "Iridium"
++      filename = "iridium-browser"
+       confdir = "chromium"
+     }
+ 
