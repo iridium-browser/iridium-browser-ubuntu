@@ -1,7 +1,8 @@
 #gyp-make-generator-reenabled
+iridium-elf-productname.patch
 title-bar-default-system.patch-v35
 #third-party-cookies-off-by-default.patch
-search-credit.patch
+#search-credit.patch
 chromium_useragent.patch
 configuration-directory.patch
 #arm.patch
@@ -15,7 +16,7 @@ notifications-nicer
 #gyp-icu-m32-test
 #enable_vaapi_on_linux.diff
 enable_vaapi_on_linux_2.diff
-widevine-other-locations
+#widevine-other-locations
 #widevine-revision.patch
 nacl-loosen-fd-check.patch
 #tcmalloc-add-support-for-arm64.patch
@@ -41,3 +42,6 @@ widevine-allow-on-linux.patch
 set-rpath-on-chromium-executables.patch
 #ozone-wayland-support.patch
 #fix-gn-bootstrap.patch
+fix-crashpad-build.patch
+iridium-manpage.patch
+iridium-fix-browserwindowtitleformat.patch
