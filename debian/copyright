@@ -1,7 +1,7 @@
 Format-Specification: http://svn.debian.org/wsvn/dep/web/deps/dep5.mdwn?op=file&rev=135
-Name: Chromium Browser
-Maintainer: Chromium Ubuntu Team <chromium@lists.ubuntu.com>
-Source: http://src.chromium.org/viewvc/chrome/
+Name: Iridium Browser
+Maintainer: Iridium Linux Team <iridium-linux@iridiumbrowser.de>
+Source: https://git.iridiumbrowser.de/cgit.cgi/iridium-browser/
 
 Files: debian/*
 Copyright: 2009, Fabien Tassin <fta@ubuntu.com>
@@ -1324,7 +1324,10 @@ Copyright: Copyright (c) 2013 The Chromium Authors. All rights reserved. Use of 
 License: global BSD-style Chromium
 
 Files: src/build/{gyp_chromium.py}
-Copyright: Copyright 2012 The Chromium Authors. All rights reserved. Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.:
+Copyright: Copyright 2012 The Chromium Authors. All rights reserved.
+ Use of this source code is governed by a BSD-style license that can be
+ found in the LICENSE file.
+:
 License: global BSD-style Chromium
 
 Files: src/build/{intsafe_workaround.h}
