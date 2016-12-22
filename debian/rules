@@ -170,7 +170,7 @@ endif
 
 # Do this for every architecture. More than 4GB of memory is too much to expect
 # of builders.
-COMPONENT_SHARED_LIB_BUILD := 1
+COMPONENT_SHARED_LIB_BUILD := 0
 
 ifeq (1,$(COMPONENT_SHARED_LIB_BUILD))
 BROWSER_GN_DEFINES += is_component_build=true
@@ -298,7 +298,8 @@ override_dh_auto_configure:
 	# Don't configure here. We configure and build many times in 'build'.
 
 # There are three things to build. Standard, ffmpeg simple, and ffmpeg full.
-override_dh_auto_build: build-stamp-gn build-stamp build-stamp-ffmpeg-std build-stamp-ffmpeg-extra
+#override_dh_auto_build: build-stamp-gn build-stamp build-stamp-ffmpeg-std build-stamp-ffmpeg-extra
+override_dh_auto_build: build-stamp-gn build-stamp 
 
 override_dh_fixperms:
 	dh_fixperms --exclude $(DEB_FIXPERMS_EXCLUDE)
@@ -319,7 +320,7 @@ override_dh_install-arch: build-stamp build-stamp-ffmpeg-std build-stamp-ffmpeg-
 	# Two stages: Install out of source tree. Copy to packaging.
 	mkdir -p debian/tmp/$(LIB_DIR)
 	(cd $(SRC_DIR)/out/$(BUILD_TYPE) && tar -cf - $(foreach excl,$(TRASH),--exclude=$(excl) ) .;) | (cd debian/tmp/$(LIB_DIR) && tar -xvf -;)
-	rm debian/tmp/$(LIB_DIR)/libffmpeg.so
+#	rm debian/tmp/$(LIB_DIR)/libffmpeg.so
 ifeq (1,$(COMPONENT_SHARED_LIB_BUILD))
 #	mkdir -p debian/tmp/$(LIB_DIR)/libs
 #	cp $(SRC_DIR)/out/$(BUILD_TYPE)/*.so debian/tmp/$(LIB_DIR)/libs/
