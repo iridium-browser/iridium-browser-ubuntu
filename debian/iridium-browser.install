@@ -1,3 +1,2 @@
 debian/iridium-browser.desktop usr/share/applications
 debian/iridium-browser.xml usr/share/gnome-control-center/default-apps
-debian/tmp-extra/usr/lib/iridium-browser/libffmpeg.so usr/lib/iridium-browser
