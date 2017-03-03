@@ -1,3 +1,9 @@
+iridium-browser (54.0-0ubuntu2~iridium0) trusty; urgency=medium
+
+  * Disable CT for problematic roots
+
+ -- Iridium Linux Team <iridium-linux@iridiumbrowser.de>  Fri, 03 Mar 2017 09:43:33 +0100
+
 iridium-browser (54.0-0ubuntu1~iridium4) trusty; urgency=medium
 
   * Iridium 54.0
