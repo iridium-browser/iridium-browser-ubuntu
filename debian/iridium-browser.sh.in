@@ -176,6 +176,10 @@ if [ $want_touch_pinch -eq 1 ] ; then
   CHROMIUM_FLAGS="$CHROMIUM_FLAGS --enable-pinch"
 fi
 
+# Add workaround for https://github.com/iridium-browser/tracker/issues/124
+# TODO(longsleep): Remove once Iridium is based on Chromium 55 or later.
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --force-fieldtrials=*EnforceCTForProblematicRoots/Disabled/"
+
 if [ $want_debug -eq 1 ] ; then
   if [ ! -x $GDB ] ; then
     echo "Sorry, can't find usable $GDB. Please install it."
