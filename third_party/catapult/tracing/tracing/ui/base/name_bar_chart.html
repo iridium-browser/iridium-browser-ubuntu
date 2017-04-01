@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/base/raf.html">
+<link rel="import" href="/tracing/ui/base/bar_chart.html">
+<link rel="import" href="/tracing/ui/base/d3.html">
+
+<script>
+'use strict';
+
+tr.exportTo('tr.ui.b', function() {
+  var NameBarChart = tr.ui.b.define('name-bar-chart', tr.ui.b.BarChart);
+
+  var Y_AXIS_PADDING = 2;
+
+  NameBarChart.prototype = {
+    __proto__: tr.ui.b.BarChart.prototype,
+
+    getDataPointAtChartPoint_(chartPoint) {
+      return {
+        x: tr.ui.b.BarChart.prototype.getDataPointAtChartPoint_.call(
+            this, chartPoint).x,
+        y: parseInt(Math.floor(
+            (this.graphHeight - chartPoint.y) / this.barHeight))
+      };
+    },
+
+    getXForDatum_(datum, index) {
+      return index;
+    },
+
+    get yAxisWidth() {
+      if (this.data.length === 0) return 0;
+      return Y_AXIS_PADDING + tr.b.Statistics.max(
+          this.data_, d => tr.ui.b.getSVGTextSize(this, d.x).width);
+    },
+
+    get defaultGraphHeight() {
+      return (3 + this.textHeightPx_) * this.data.length;
+    },
+
+    updateYAxis_(yAxis) {
+      tr.b.requestAnimationFrame(() => {
+        yAxis.selectAll('*').remove();
+        var nameTexts = yAxis.selectAll('text').data(this.data_);
+        nameTexts
+          .enter()
+          .append('text')
+          .attr('x', d => -(
+              tr.ui.b.getSVGTextSize(this, d.x).width + Y_AXIS_PADDING))
+          .attr('y', (d, index) => this.verticalScale_(index))
+          .text(d => d.x);
+        nameTexts.exit().remove();
+
+        var previousTop = undefined;
+        for (var text of nameTexts[0]) {
+          var bbox = text.getBBox();
+          if ((previousTop === undefined) ||
+              (previousTop > (bbox.y + bbox.height))) {
+            previousTop = bbox.y;
+          } else {
+            text.style.opacity = 0;
+          }
+        }
+      });
+    }
+  };
+
+  return {
+    NameBarChart,
+  };
+});
+</script>

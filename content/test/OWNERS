@@ -1,0 +1,14 @@
+phajdan.jr@chromium.org
+sky@chromium.org
+
+# For WebRTC files.
+tommi@chromium.org
+
+# Anyone can add rules to include new test files.
+per-file BUILD.gn=*
+
+# Make the mojom security presubmit happy with the following lines, despite also
+# allowing wildcard ownership for any test mojom here.
+per-file *.mojom=set noparent
+per-file *.mojom=file://ipc/SECURITY_OWNERS
+per-file *.mojom=*

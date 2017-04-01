@@ -1,0 +1,36 @@
+// Copyright 2016 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+module blink.mojom;
+
+import "cc/ipc/compositor_frame.mojom";
+import "cc/ipc/frame_sink_id.mojom";
+import "cc/ipc/mojo_compositor_frame_sink.mojom";
+import "cc/ipc/surface_id.mojom";
+import "cc/ipc/surface_info.mojom";
+import "cc/ipc/surface_sequence.mojom";
+
+interface OffscreenCanvasSurface {
+  Require(cc.mojom.SurfaceId surface_id, cc.mojom.SurfaceSequence sequence);
+  Satisfy(cc.mojom.SurfaceSequence sequence);
+};
+
+interface OffscreenCanvasSurfaceClient {
+  // TODO(fsamuel, xlai): Replace this with DisplayCompositorClient
+  OnSurfaceCreated(cc.mojom.SurfaceInfo surface_info);
+};
+
+interface OffscreenCanvasSurfaceFactory {
+  CreateOffscreenCanvasSurface(cc.mojom.FrameSinkId frame_sink_id,
+                               OffscreenCanvasSurfaceClient client,
+                               OffscreenCanvasSurface& service);
+};
+
+interface OffscreenCanvasCompositorFrameSinkProvider {
+  // TODO(fsamuel, xlai): Replace this with DisplayCompositor
+  CreateCompositorFrameSink(cc.mojom.FrameSinkId frame_sink_id,
+                            cc.mojom.MojoCompositorFrameSinkClient client,
+                            cc.mojom.MojoCompositorFrameSink& sink);
+};
+

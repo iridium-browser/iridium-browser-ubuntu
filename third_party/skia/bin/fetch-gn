@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+
+# Copyright 2016 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import os
+import shutil
+import stat
+import sys
+import urllib2
+
+def gn_path():
+  if 'linux' in sys.platform:
+    return 'buildtools/linux64/gn'
+  if 'darwin' in sys.platform:
+    return 'buildtools/mac/gn'
+  return 'buildtools/win/gn.exe'
+
+sha1 = open(gn_path() + '.sha1').read()
+
+with open(gn_path(), 'wb') as f:
+    f.write(urllib2.urlopen('https://chromium-gn.storage-download.googleapis.com/' + sha1).read())
+
+os.chmod(gn_path(), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+                    stat.S_IRGRP                | stat.S_IXGRP |
+                    stat.S_IROTH                | stat.S_IXOTH )
+shutil.copy(gn_path(), 'bin');
