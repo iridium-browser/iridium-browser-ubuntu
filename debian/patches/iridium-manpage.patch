@@ -2,7 +2,7 @@ Index: iridium-ubuntu-build/chrome/BUILD.gn
 ===================================================================
 --- iridium-ubuntu-build.orig/chrome/BUILD.gn
 +++ iridium-ubuntu-build/chrome/BUILD.gn
-@@ -1678,8 +1678,8 @@ if (is_linux) {
+@@ -1531,8 +1531,8 @@ if (is_linux) {
        filename = "google-chrome"
        confdir = "google-chrome"
      } else {
