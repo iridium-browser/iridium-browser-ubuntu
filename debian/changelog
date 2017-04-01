@@ -1,3 +1,9 @@
+iridium-browser (57.0-0ubuntu1~iridium1) trusty; urgency=medium
+
+  * Iridium 57.0
+
+ -- Iriidium Linux Team <iridium-linux@iridiumbrowser.de>  Sat, 01 Apr 2017 21:36:29 +0200
+
 chromium-browser (57.0.2979.0-0ubuntu1~ppa1~17.04.1) zesty; urgency=low
 
   * Switch back to standard dependencies.
