@@ -2,7 +2,7 @@ Index: iridium-ubuntu-build/chrome/app/resources/locale_settings.grd
 ===================================================================
 --- iridium-ubuntu-build.orig/chrome/app/resources/locale_settings.grd
 +++ iridium-ubuntu-build/chrome/app/resources/locale_settings.grd
-@@ -214,7 +214,7 @@
+@@ -204,7 +204,7 @@
  
        <!-- The URL for the the Welcome to Chrome page shown on first run. -->
        <message name="IDS_WELCOME_PAGE_URL" translateable="false">
@@ -15,7 +15,7 @@ Index: iridium-ubuntu-build/chrome/browser/first_run/first_run.cc
 ===================================================================
 --- iridium-ubuntu-build.orig/chrome/browser/first_run/first_run.cc
 +++ iridium-ubuntu-build/chrome/browser/first_run/first_run.cc
-@@ -692,6 +692,7 @@ void SetShouldShowWelcomePage() {
+@@ -708,6 +708,7 @@ void SetShouldShowWelcomePage() {
  }
  
  bool ShouldShowWelcomePage() {
